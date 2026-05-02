@@ -29,8 +29,8 @@ def fetch_historical_backfill(fyers_symbol):
     file_path = os.path.join(CACHE_DIR, f"{fyers_symbol.replace(':', '_')}.csv")
 
     # 🛑 Define our exact target window
-    target_start = datetime(2016, 5, 28)
-    target_end = datetime(2021, 5, 27)
+    target_start = datetime(2007, 5, 28)
+    target_end = datetime(2016, 5, 27)
 
     df_existing = None
 

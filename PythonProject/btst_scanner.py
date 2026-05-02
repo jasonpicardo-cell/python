@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 from fyers_apiv3 import fyersModel
 
-from scanner import fetch_live_fyers_symbols
-from utils import get_property
+
+from utils import get_property, fetch_live_fyers_symbols
 
 client_id = get_property("fyers_client_id")
 try:
