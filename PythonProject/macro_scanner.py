@@ -8,6 +8,8 @@ import threading
 # Import your working authentication
 from utils import get_fyers_session, fetch_live_fyers_symbols
 
+# 🛑 IMPORTANT NOTE 🛑
+# RUN only after 4 pm or before 7 am
 # ==========================================
 # 1. SETUP PATHS & LIMITS
 # ==========================================
