@@ -5,7 +5,7 @@ from utils import get_property
 
 
 # Ignore SSL errors on Mac
-ssl._create_default_https_context = ssl._create_unverified_context
+#ssl._create_default_https_context = ssl._create_unverified_context
 
 
 def fetch_live_dhan_ids():

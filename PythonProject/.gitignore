@@ -1,5 +1,13 @@
+.DS_Store
+.idea
+.venv
 config.properties
 nifty750_signals.html
 nifty_dashboard.html
 other_stocks_signals.html
 others_dashboard.html
+CLAUDE.md
+README.md
+fyers_token.txt
+fyersApi.log
+fyersRequests.log
