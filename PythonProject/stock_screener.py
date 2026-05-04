@@ -139,6 +139,20 @@ def atr(df, period=14):
     return tr.rolling(period).mean()
 
 
+def macd_indicator(close, fast=5, slow=35, signal=5):
+    """
+    MACD crossover indicator.
+    Fast EMA=5, Slow EMA=35, Signal EMA=5 (all on close).
+    Returns (macd_line, signal_line, histogram) as Series.
+    """
+    ema_fast   = close.ewm(span=fast,   adjust=False).mean()
+    ema_slow   = close.ewm(span=slow,   adjust=False).mean()
+    macd_line  = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram  = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
 # ─────────────────────────────────────────────
 # ZONE DETECTION
 # ─────────────────────────────────────────────
@@ -264,6 +278,9 @@ def analyse(df):
     df["rsi"]     = rsi(df["Close"], RSI_PERIOD)
     df["atr"]     = atr(df)
 
+    # ── MACD (Fast=5, Slow=35, Signal=5) ─────
+    df["macd_line"], df["macd_signal"], df["macd_hist"] = macd_indicator(df["Close"])
+
     last      = df.iloc[-1]
     cmp       = last["Close"]
     vol_now   = last["Volume"]
@@ -275,6 +292,48 @@ def analyse(df):
     sma50_v   = last["sma50"]
     sma200_v  = last["sma200"]
     atr_v     = last["atr"]
+
+    # ── MACD crossover detection ──────────────
+    ml_now  = df["macd_line"].iloc[-1]
+    ml_prev = df["macd_line"].iloc[-2]
+    ms_now  = df["macd_signal"].iloc[-1]
+    ms_prev = df["macd_signal"].iloc[-2]
+    mh_now  = df["macd_hist"].iloc[-1]
+
+    macd_signal_type = "NONE"
+    # Buy: MACD crosses above Signal AND MACD line is below 0
+    if ml_prev <= ms_prev and ml_now > ms_now and ml_now < 0:
+        macd_signal_type = "BUY"
+    # Sell: Signal crosses above MACD AND MACD line is above 0
+    elif ms_prev <= ml_prev and ms_now > ml_now and ml_now > 0:
+        macd_signal_type = "SELL"
+
+    # ── Weekly MACD (Fast=5, Slow=35, Signal=5 on weekly close) ──
+    try:
+        weekly_close = (
+            df.set_index("Datetime")["Close"]
+            .resample("W").last()
+            .dropna()
+        )
+        if len(weekly_close) >= 40:
+            wml, wms, wmh = macd_indicator(weekly_close)
+            wml_now  = wml.iloc[-1];  wml_prev = wml.iloc[-2]
+            wms_now  = wms.iloc[-1];  wms_prev = wms.iloc[-2]
+            wmh_now  = wmh.iloc[-1]
+            weekly_macd_type = "NONE"
+            if wml_prev <= wms_prev and wml_now > wms_now and wml_now < 0:
+                weekly_macd_type = "BUY"
+            elif wms_prev <= wml_prev and wms_now > wml_now and wml_now > 0:
+                weekly_macd_type = "SELL"
+            weekly_ml = round(wml_now, 4)
+            weekly_ms = round(wms_now, 4)
+            weekly_mh = round(wmh_now, 4)
+        else:
+            weekly_macd_type = "NONE"
+            weekly_ml = weekly_ms = weekly_mh = 0.0
+    except Exception:
+        weekly_macd_type = "NONE"
+        weekly_ml = weekly_ms = weekly_mh = 0.0
 
     # ── Trend Structure ───────────────────────
     above_20  = cmp > sma20_v  if not np.isnan(sma20_v)  else False
@@ -469,6 +528,14 @@ def analyse(df):
         "reasons":       reasons,
         "breakout":      breakout,
         "last_date":     str(df.iloc[-1]["Datetime"].date()),
+        "macd_line":          round(ml_now,  4),
+        "macd_signal":        round(ms_now,  4),
+        "macd_hist":          round(mh_now,  4),
+        "macd_type":          macd_signal_type,
+        "weekly_macd_line":   weekly_ml,
+        "weekly_macd_signal": weekly_ms,
+        "weekly_macd_hist":   weekly_mh,
+        "weekly_macd_type":   weekly_macd_type,
     }
 
 
@@ -506,6 +573,39 @@ def score_bar(score):
     )
 
 
+def _macd_cell(r):
+    def _section(label, mt, ml, ms, mh):
+        hist_col   = "#00c853" if mh >= 0 else "#f85149"
+        hist_arrow = "▲" if mh >= 0 else "▼"
+        if mt == "BUY":
+            badge = f'<span class="sig-badge" style="background:#00875a;margin-top:3px;display:inline-block">📈 {label} BUY</span>'
+        elif mt == "SELL":
+            badge = f'<span class="sig-badge" style="background:#b71c1c;margin-top:3px;display:inline-block">📉 {label} SELL</span>'
+        else:
+            badge = '<span style="color:#444;font-size:10px">—</span>'
+        return (
+            f'<div style="margin-bottom:6px;padding-bottom:5px;border-bottom:1px solid #30363d">'
+            f'<span style="color:#58a6ff;font-size:10px;font-weight:700">{label}</span><br>'
+            f'<span style="color:#8b949e">L:</span> <b>{ml:+.4f}</b> '
+            f'<span style="color:#8b949e">S:</span> <b>{ms:+.4f}</b><br>'
+            f'<span style="color:{hist_col}">{hist_arrow} {abs(mh):.4f}</span><br>'
+            f'{badge}</div>'
+        )
+
+    daily_html  = _section("Daily",  r.get("macd_type","NONE"),
+                           r.get("macd_line",0), r.get("macd_signal",0), r.get("macd_hist",0))
+    weekly_html = _section("Weekly", r.get("weekly_macd_type","NONE"),
+                           r.get("weekly_macd_line",0), r.get("weekly_macd_signal",0), r.get("weekly_macd_hist",0))
+
+    # numeric sort key: daily+weekly signals encoded as int
+    dv = 0 if r.get("macd_type","NONE") == "NONE" else (1 if r.get("macd_type") == "BUY" else -1)
+    wv = 0 if r.get("weekly_macd_type","NONE") == "NONE" else (1 if r.get("weekly_macd_type") == "BUY" else -1)
+    return (
+        f'<td data-val="{dv+wv}" style="white-space:nowrap;font-size:11px;min-width:160px">'
+        f'{daily_html}{weekly_html}</td>'
+    )
+
+
 def build_html(rows, title, subtitle, generated_at):
     signal_order = ["BREAKOUT","STRONG BUY","BUY","WATCH","NEUTRAL","CAUTION","NEAR SUPPLY","SELL"]
     rows = sorted(rows, key=lambda r: (signal_order.index(r["signal"]) if r["signal"] in signal_order else 99, -r["score"]))
@@ -515,11 +615,18 @@ def build_html(rows, title, subtitle, generated_at):
     for r in rows:
         counts[r["signal"]] = counts.get(r["signal"], 0) + 1
 
-    summary_html = ""
+    # "All" pill (always first, starts active)
+    total = len(rows)
+    summary_html  = f'<div class="pill active-pill" id="pill-all" style="border-color:#58a6ff;color:#58a6ff" onclick="setFilter(\'all\',this)">All <b>{total}</b></div>'
     for sig in signal_order:
         if sig in counts:
             em, col, _ = SIGNAL_META.get(sig, ("", "#888", "#eee"))
-            summary_html += f'<div class="pill" style="border-color:{col};color:{col}">{em} {sig} <b>{counts[sig]}</b></div>'
+            summary_html += (
+                f'<div class="pill" id="pill-{sig.replace(" ","-")}" '
+                f'style="border-color:{col};color:{col}" '
+                f'onclick="setFilter(\'{sig}\',this)">'
+                f'{em} {sig} <b>{counts[sig]}</b></div>'
+            )
 
     # Table rows
     tbody = ""
@@ -538,7 +645,7 @@ def build_html(rows, title, subtitle, generated_at):
                 sma_html += f'<span style="color:{c};margin-right:4px">{label}</span>'
 
         tbody += f"""
-<tr style="background:{bg}">
+<tr style="background:{bg}" data-macd-daily="{r.get('macd_type','NONE')}" data-macd-weekly="{r.get('weekly_macd_type','NONE')}">
   <td class="sticky-col stock-name" data-val="{r['name']}"><a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A{extract_display_name(r['name'])}">{extract_display_name(r['name'])}</a></td>
   <td data-val="{r['cmp']}" style="font-weight:700">₹{r['cmp']:,.2f}</td>
   <td data-val="{signal_order.index(s)}" style="white-space:nowrap">
@@ -558,6 +665,7 @@ def build_html(rows, title, subtitle, generated_at):
   <td data-val="{r.get('accum_bars') or 0}">{sma_html}<br><small>Acc:{r.get('accum_bars',0)} Dis:{r.get('distrib_bars',0)}</small></td>
   <td class="reasons" data-val="{len(r.get('reasons',[]))}">{rsn or '—'}</td>
   <td data-val="{r.get('last_date','')}" style="font-size:11px;color:#666">{r.get('last_date','')}</td>
+  {_macd_cell(r)}
 </tr>"""
 
     html = f"""<!DOCTYPE html>
@@ -583,11 +691,13 @@ def build_html(rows, title, subtitle, generated_at):
     --radius:   8px;
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html {{ overflow-x: auto; }}
   body {{
     font-family: 'IBM Plex Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
+    min-width: 1280px;
     padding: 24px;
   }}
 
@@ -616,6 +726,12 @@ def build_html(rows, title, subtitle, generated_at):
     border: 1.5px solid; border-radius: 20px;
     padding: 5px 12px; font-size: 12px; font-weight: 600;
     font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer; transition: all .2s; user-select: none;
+  }}
+  .pill:hover {{ opacity: .8; transform: translateY(-1px); }}
+  .active-pill {{
+    box-shadow: 0 0 0 2px currentColor;
+    background: rgba(88,166,255,.12);
   }}
 
   /* ── Controls ── */
@@ -640,6 +756,55 @@ def build_html(rows, title, subtitle, generated_at):
     border-color: var(--accent); color: var(--accent);
     background: rgba(88,166,255,.08);
   }}
+  .export-btn {{
+    background: var(--surface2); border: 1px solid var(--green);
+    color: var(--green); border-radius: var(--radius);
+    padding: 7px 14px; font-size: 12px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; transition: all .2s;
+  }}
+  .export-btn:hover {{ background: rgba(63,185,80,.12); }}
+  .macd-buy-btn {{
+    background: var(--surface); border: 1.5px solid #00c853;
+    color: #00c853; border-radius: var(--radius);
+    padding: 7px 14px; font-size: 12px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; transition: all .2s;
+  }}
+  .macd-buy-btn:hover, .macd-buy-btn.active {{
+    background: rgba(0,200,83,.12); box-shadow: 0 0 0 1.5px #00c853;
+  }}
+  .macd-sell-btn {{
+    background: var(--surface); border: 1.5px solid #f85149;
+    color: #f85149; border-radius: var(--radius);
+    padding: 7px 14px; font-size: 12px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; transition: all .2s;
+  }}
+  .macd-sell-btn:hover, .macd-sell-btn.active {{
+    background: rgba(248,81,73,.12); box-shadow: 0 0 0 1.5px #f85149;
+  }}
+  .macd-wbuy-btn {{
+    background: var(--surface); border: 1.5px solid #69db7c;
+    color: #69db7c; border-radius: var(--radius);
+    padding: 7px 14px; font-size: 12px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; transition: all .2s;
+  }}
+  .macd-wbuy-btn:hover, .macd-wbuy-btn.active {{
+    background: rgba(105,219,124,.12); box-shadow: 0 0 0 1.5px #69db7c;
+  }}
+  .macd-wsell-btn {{
+    background: var(--surface); border: 1.5px solid #ff8787;
+    color: #ff8787; border-radius: var(--radius);
+    padding: 7px 14px; font-size: 12px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; transition: all .2s;
+  }}
+  .macd-wsell-btn:hover, .macd-wsell-btn.active {{
+    background: rgba(255,135,135,.12); box-shadow: 0 0 0 1.5px #ff8787;
+  }}
+  .btn-group-label {{
+    font-size: 10px; color: var(--muted); font-family: 'IBM Plex Mono', monospace;
+    text-transform: uppercase; letter-spacing: .6px; align-self: center;
+    padding: 0 4px 0 8px; border-left: 1px solid var(--border);
+  }}
+  .btn-group-label:first-child {{ border-left: none; padding-left: 0; }}
 
   /* ── Table wrapper ── */
   .table-wrap {{
@@ -743,12 +908,13 @@ def build_html(rows, title, subtitle, generated_at):
 
 <div class="controls">
   <input class="search-box" id="search" placeholder="🔍 Search stock…" oninput="filterRows()">
-  <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
-  <button class="filter-btn" onclick="setFilter('BREAKOUT',this)">🚀 Breakout</button>
-  <button class="filter-btn" onclick="setFilter('STRONG BUY',this)">🟢 Strong Buy</button>
-  <button class="filter-btn" onclick="setFilter('BUY',this)">🟩 Buy</button>
-  <button class="filter-btn" onclick="setFilter('WATCH',this)">👁 Watch</button>
-  <button class="filter-btn" onclick="setFilter('SELL',this)">🔴 Sell</button>
+  <button class="export-btn" onclick="exportNames()">📋 Export Stock Names</button>
+  <span class="btn-group-label">Daily MACD</span>
+  <button class="macd-buy-btn"   id="macdDailyBuyBtn"  onclick="setMacdFilter('DAILY_BUY',this)">📈 Daily MACD Buy</button>
+  <button class="macd-sell-btn"  id="macdDailySellBtn" onclick="setMacdFilter('DAILY_SELL',this)">📉 Daily MACD Sell</button>
+  <span class="btn-group-label">Weekly MACD</span>
+  <button class="macd-wbuy-btn"  id="macdWeeklyBuyBtn"  onclick="setMacdFilter('WEEKLY_BUY',this)">📈 Weekly MACD Buy</button>
+  <button class="macd-wsell-btn" id="macdWeeklySellBtn" onclick="setMacdFilter('WEEKLY_SELL',this)">📉 Weekly MACD Sell</button>
 </div>
 
 <div class="table-wrap">
@@ -769,6 +935,7 @@ def build_html(rows, title, subtitle, generated_at):
   <th onclick="sortTable(11)">SMA / Pattern</th>
   <th onclick="sortTable(12)">Reasons</th>
   <th onclick="sortTable(13)">Last Data</th>
+  <th onclick="sortTable(14)">MACD Daily + Weekly (5/35/5)</th>
 </tr>
 </thead>
 <tbody id="tableBody">
@@ -785,40 +952,82 @@ def build_html(rows, title, subtitle, generated_at):
 
 <script>
 let activeFilter = 'all';
+let activeMacd   = 'all';   // 'all' | 'DAILY_BUY' | 'DAILY_SELL' | 'WEEKLY_BUY' | 'WEEKLY_SELL'
 let sortCol = -1, sortDir = 1;
 
 function filterRows() {{
   const q = document.getElementById('search').value.toLowerCase();
   const rows = document.querySelectorAll('#tableBody tr');
   rows.forEach(r => {{
-    const name   = r.cells[0].textContent.toLowerCase();
-    const signal = r.cells[2].textContent.toLowerCase();
+    const name        = r.cells[0].textContent.toLowerCase();
+    const signal      = r.cells[2].textContent.toLowerCase();
+    const macdDaily   = (r.dataset.macdDaily  || '').toUpperCase();
+    const macdWeekly  = (r.dataset.macdWeekly || '').toUpperCase();
     const matchQ = name.includes(q);
     const matchF = activeFilter === 'all' || signal.includes(activeFilter.toLowerCase());
-    r.style.display = (matchQ && matchF) ? '' : 'none';
+    let matchMacd = true;
+    if      (activeMacd === 'DAILY_BUY')   matchMacd = macdDaily  === 'BUY';
+    else if (activeMacd === 'DAILY_SELL')  matchMacd = macdDaily  === 'SELL';
+    else if (activeMacd === 'WEEKLY_BUY')  matchMacd = macdWeekly === 'BUY';
+    else if (activeMacd === 'WEEKLY_SELL') matchMacd = macdWeekly === 'SELL';
+    r.style.display = (matchQ && matchF && matchMacd) ? '' : 'none';
   }});
 }}
 
-function setFilter(f, btn) {{
+function setFilter(f, el) {{
   activeFilter = f;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active-pill'));
+  el.classList.add('active-pill');
+  activeMacd = 'all';
+  document.querySelectorAll('.macd-buy-btn,.macd-sell-btn,.macd-wbuy-btn,.macd-wsell-btn')
+          .forEach(b => b.classList.remove('active'));
   filterRows();
+}}
+
+function setMacdFilter(type, btn) {{
+  if (activeMacd === type) {{
+    activeMacd = 'all';
+    btn.classList.remove('active');
+  }} else {{
+    activeMacd = type;
+    document.querySelectorAll('.macd-buy-btn,.macd-sell-btn,.macd-wbuy-btn,.macd-wsell-btn')
+            .forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }}
+  activeFilter = 'all';
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active-pill'));
+  document.getElementById('pill-all').classList.add('active-pill');
+  filterRows();
+}}
+
+function exportNames() {{
+  const rows = document.querySelectorAll('#tableBody tr');
+  const names = [];
+  rows.forEach(r => {{
+    if (r.style.display !== 'none') {{
+      const txt = r.cells[0].textContent.trim();
+      if (txt) names.push(txt);
+    }}
+  }});
+  const csv = names.join(',');
+  navigator.clipboard.writeText(csv).then(() => {{
+    const btn = document.querySelector('.export-btn');
+    const orig = btn.textContent;
+    btn.textContent = '✅ Copied ' + names.length + ' stocks!';
+    setTimeout(() => btn.textContent = orig, 2500);
+  }}).catch(() => {{ prompt('Copy the stock names below:', csv); }});
 }}
 
 function sortTable(col) {{
   const tbody = document.getElementById('tableBody');
   const rows  = Array.from(tbody.querySelectorAll('tr'));
   const ths   = document.querySelectorAll('thead th');
-
   if (sortCol === col) sortDir *= -1;
   else {{ sortCol = col; sortDir = 1; }}
-
   ths.forEach((th, i) => {{
     th.classList.remove('sort-asc','sort-desc');
     if (i === col) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
   }});
-
   rows.sort((a, b) => {{
     const av = a.cells[col]?.dataset.val ?? a.cells[col]?.textContent ?? '';
     const bv = b.cells[col]?.dataset.val ?? b.cells[col]?.textContent ?? '';
@@ -826,7 +1035,6 @@ function sortTable(col) {{
     if (!isNaN(an) && !isNaN(bn)) return (an - bn) * sortDir;
     return av.localeCompare(bv) * sortDir;
   }});
-
   rows.forEach(r => tbody.appendChild(r));
 }}
 </script>
