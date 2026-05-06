@@ -7,7 +7,11 @@ import threading
 
 # Import your working authentication
 from utils import get_fyers_session, fetch_live_fyers_symbols
-
+#------------
+# Use this to fetch 5 yr data
+#    target_start = datetime(2007, 5, 28)
+#    target_end = datetime(2016, 5, 27)
+#--------------
 # ==========================================
 # 1. SETUP PATHS & LIMITS
 # ==========================================
