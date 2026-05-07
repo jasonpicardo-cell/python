@@ -16,8 +16,8 @@ from utils import get_fyers_session, fetch_live_fyers_symbols
 # 1. SETUP PATHS & LIMITS
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "data_cache")
-BLACKLIST_FILE = os.path.join(BASE_DIR, "blacklist.txt")
+CACHE_DIR = os.path.join(BASE_DIR, "../data_cache")
+BLACKLIST_FILE = os.path.join(BASE_DIR, "../blacklist.txt")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 MAX_CONCURRENT_STOCKS = 2

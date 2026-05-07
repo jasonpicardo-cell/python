@@ -1,0 +1,336 @@
+//@version=5
+indicator("Institutional Trading Suite", shorttitle="ITS", overlay=true, max_boxes_count=20, max_lines_count=20, max_labels_count=25)
+
+// ════════════════════════════════════════════════════════
+// INPUTS
+// ════════════════════════════════════════════════════════
+
+g1 = "EMA Cloud"
+i_ema_on = input.bool(true,  "Show EMA Cloud",  group=g1)
+i_ema_f  = input.int(10,     "Fast Length",     group=g1, minval=1, inline="ema")
+i_ema_s  = input.int(30,     "Slow Length",     group=g1, minval=1, inline="ema")
+i_ema_fc = input.color(color.new(#2196F3, 0),   "Fast Color", group=g1, inline="ec")
+i_ema_sc = input.color(color.new(#FF9800, 0),   "Slow Color", group=g1, inline="ec")
+
+g2 = "VWAP + Bands"
+i_vwap_on = input.bool(true,  "Show VWAP",   group=g2)
+i_vwap_m1 = input.float(1.0, "Band 1 Mult", group=g2, step=0.5, inline="vm")
+i_vwap_m2 = input.float(2.0, "Band 2 Mult", group=g2, step=0.5, inline="vm")
+
+g3 = "SuperTrend"
+i_st_on  = input.bool(true,  "Show SuperTrend", group=g3)
+i_st_atr = input.int(10,     "ATR Period",      group=g3, minval=1, inline="st")
+i_st_fac = input.float(3.0,  "Factor",          group=g3, step=0.5, inline="st")
+
+g4 = "Fair Value Gaps"
+i_fvg_on  = input.bool(true, "Show FVGs",         group=g4)
+i_fvg_max = input.int(3,     "Max per direction", group=g4, minval=1, maxval=5)
+
+g5 = "Order Blocks"
+i_ob_on  = input.bool(true, "Show Order Blocks",  group=g5)
+i_ob_len = input.int(5,     "Sensitivity (bars)", group=g5, minval=2, maxval=20)
+i_ob_max = input.int(2,     "Max per direction",  group=g5, minval=1, maxval=5)
+
+g6 = "Market Structure (BOS/CHoCH)"
+i_bos_on  = input.bool(true, "Show BOS/CHoCH", group=g6)
+i_bos_len = input.int(10,    "Swing Length",   group=g6, minval=2, maxval=50)
+
+g7 = "Fibonacci"
+i_fib_on = input.bool(true, "Show Fibonacci", group=g7)
+
+g8 = "Liquidity (SSL/BSL)"
+i_liq_on  = input.bool(true, "Show SSL/BSL", group=g8)
+i_liq_len = input.int(14,    "Period",        group=g8, minval=3)
+
+g9 = "Bollinger Bands"
+i_bb_on   = input.bool(false, "Show Bollinger Bands", group=g9)
+i_bb_len  = input.int(20,     "Length",               group=g9, minval=1)
+i_bb_mult = input.float(2.0,  "Multiplier",           group=g9, step=0.25)
+
+g10 = "Info Panel"
+i_pan_on = input.bool(true, "Show Info Panel", group=g10)
+
+
+// ════════════════════════════════════════════════════════
+// 1. EMA CLOUD
+// ════════════════════════════════════════════════════════
+ema_fast = ta.ema(close, i_ema_f)
+ema_slow = ta.ema(close, i_ema_s)
+bull_ema = ema_fast >= ema_slow
+
+ep1 = plot(i_ema_on ? ema_fast : na, "Fast EMA", color=i_ema_fc, linewidth=2)
+ep2 = plot(i_ema_on ? ema_slow : na, "Slow EMA", color=i_ema_sc, linewidth=2)
+fill(ep1, ep2, color=i_ema_on ? (bull_ema ? color.new(color.green, 87) : color.new(color.red, 87)) : na, title="EMA Cloud")
+
+
+// ════════════════════════════════════════════════════════
+// 2. VWAP + BANDS  (resets daily)
+// ════════════════════════════════════════════════════════
+var float _pv  = 0.0
+var float _pv2 = 0.0
+var float _vol = 0.0
+
+if timeframe.change("D")
+    _pv  := 0.0
+    _pv2 := 0.0
+    _vol := 0.0
+
+_vol += volume
+_pv  += hlc3 * volume
+_pv2 += hlc3 * hlc3 * volume
+
+vwap_v  = _pv / _vol
+vwap_sd = math.sqrt(math.max(_pv2 / _vol - vwap_v * vwap_v, 0.0))
+vu1 = vwap_v + i_vwap_m1 * vwap_sd
+vl1 = vwap_v - i_vwap_m1 * vwap_sd
+vu2 = vwap_v + i_vwap_m2 * vwap_sd
+vl2 = vwap_v - i_vwap_m2 * vwap_sd
+
+vwap_col = close >= vwap_v ? color.new(#2196F3, 0) : color.new(#FF5722, 0)
+plot(i_vwap_on ? vwap_v : na, "VWAP", color=vwap_col, linewidth=2)
+vp1 = plot(i_vwap_on ? vu1 : na, "VWAP +1 StdDev", color=color.new(#4CAF50, 15), linewidth=1)
+vp2 = plot(i_vwap_on ? vl1 : na, "VWAP -1 StdDev", color=color.new(#F44336, 15), linewidth=1)
+fill(vp1, vp2, color=i_vwap_on ? color.new(#2196F3, 94) : na, title="VWAP Band Fill")
+plot(i_vwap_on ? vu2 : na, "VWAP +2 StdDev", color=color.new(#4CAF50, 45), linewidth=1, style=plot.style_linebr)
+plot(i_vwap_on ? vl2 : na, "VWAP -2 StdDev", color=color.new(#F44336, 45), linewidth=1, style=plot.style_linebr)
+
+
+// ════════════════════════════════════════════════════════
+// 3. SUPERTREND
+// ════════════════════════════════════════════════════════
+_atr  = ta.atr(i_st_atr)
+_up_r = hl2 + i_st_fac * _atr
+_dn_r = hl2 - i_st_fac * _atr
+
+var float st_up = na
+var float st_dn = na
+var int   st_tr = 1
+
+st_up := na(st_up[1]) ? _up_r : close[1] > st_up[1] ? math.max(_up_r, st_up[1]) : _up_r
+st_dn := na(st_dn[1]) ? _dn_r : close[1] < st_dn[1] ? math.min(_dn_r, st_dn[1]) : _dn_r
+st_tr := na(st_tr[1]) ? 1 : st_tr[1] == 1 and close < st_dn[1] ? -1 : st_tr[1] == -1 and close > st_up[1] ? 1 : st_tr[1]
+
+st_line = st_tr == 1 ? st_dn : st_up
+st_col  = st_tr == 1 ? color.new(color.lime, 0) : color.new(color.red, 0)
+
+plot(i_st_on ? st_line : na, "SuperTrend", color=st_col, linewidth=2, style=plot.style_linebr)
+plotshape(i_st_on and st_tr == 1  and st_tr[1] == -1, "ST Buy",  shape.triangleup,   location.belowbar, color=color.new(color.lime, 0), size=size.small)
+plotshape(i_st_on and st_tr == -1 and st_tr[1] == 1,  "ST Sell", shape.triangledown, location.abovebar, color=color.new(color.red,  0), size=size.small)
+
+
+// ════════════════════════════════════════════════════════
+// 4. FAIR VALUE GAPS — array managed, auto-mitigated
+//    Bull FVG box top = low, bottom = high[2]
+//    Bear FVG box top = low[2], bottom = high
+//    Deleted when price closes back inside the gap
+// ════════════════════════════════════════════════════════
+bull_fvg = low > high[2]
+bear_fvg = high < low[2]
+
+var box[] bull_fvg_arr = array.new_box(0)
+var box[] bear_fvg_arr = array.new_box(0)
+
+if i_fvg_on
+    if array.size(bull_fvg_arr) > 0
+        for i = array.size(bull_fvg_arr) - 1 to 0
+            b = array.get(bull_fvg_arr, i)
+            if close < box.get_top(b)
+                box.delete(b)
+                array.remove(bull_fvg_arr, i)
+    if array.size(bear_fvg_arr) > 0
+        for i = array.size(bear_fvg_arr) - 1 to 0
+            b = array.get(bear_fvg_arr, i)
+            if close > box.get_bottom(b)
+                box.delete(b)
+                array.remove(bear_fvg_arr, i)
+    if bull_fvg
+        if array.size(bull_fvg_arr) >= i_fvg_max
+            box.delete(array.shift(bull_fvg_arr))
+        array.push(bull_fvg_arr, box.new(bar_index - 2, low, bar_index, high[2], extend=extend.right, bgcolor=color.new(#00E676, 80), border_color=color.new(#00E676, 30), border_width=1))
+    if bear_fvg
+        if array.size(bear_fvg_arr) >= i_fvg_max
+            box.delete(array.shift(bear_fvg_arr))
+        array.push(bear_fvg_arr, box.new(bar_index - 2, low[2], bar_index, high, extend=extend.right, bgcolor=color.new(#FF1744, 80), border_color=color.new(#FF1744, 30), border_width=1))
+
+
+// ════════════════════════════════════════════════════════
+// 5. ORDER BLOCKS — array managed, auto-mitigated
+//    Bullish OB : bearish candle before bull impulse
+//    Bearish OB : bullish candle before bear impulse
+//    Deleted when price closes beyond the block
+// ════════════════════════════════════════════════════════
+bull_impulse = close > ta.highest(close, i_ob_len)[1]
+bear_impulse = close < ta.lowest(close,  i_ob_len)[1]
+
+var box[] bull_ob_arr = array.new_box(0)
+var box[] bear_ob_arr = array.new_box(0)
+
+if i_ob_on
+    if array.size(bull_ob_arr) > 0
+        for i = array.size(bull_ob_arr) - 1 to 0
+            b = array.get(bull_ob_arr, i)
+            if close < box.get_bottom(b)
+                box.delete(b)
+                array.remove(bull_ob_arr, i)
+    if array.size(bear_ob_arr) > 0
+        for i = array.size(bear_ob_arr) - 1 to 0
+            b = array.get(bear_ob_arr, i)
+            if close > box.get_top(b)
+                box.delete(b)
+                array.remove(bear_ob_arr, i)
+    if bull_impulse and close[1] < open[1]
+        if array.size(bull_ob_arr) >= i_ob_max
+            box.delete(array.shift(bull_ob_arr))
+        _hi = math.max(open[1], close[1])
+        _lo = math.min(open[1], close[1])
+        array.push(bull_ob_arr, box.new(bar_index - 1, _hi, bar_index, _lo, extend=extend.right, bgcolor=color.new(#00E676, 85), border_color=color.new(#00E676, 30), border_width=1))
+    if bear_impulse and close[1] > open[1]
+        if array.size(bear_ob_arr) >= i_ob_max
+            box.delete(array.shift(bear_ob_arr))
+        _hi = math.max(open[1], close[1])
+        _lo = math.min(open[1], close[1])
+        array.push(bear_ob_arr, box.new(bar_index - 1, _hi, bar_index, _lo, extend=extend.right, bgcolor=color.new(#FF1744, 85), border_color=color.new(#FF1744, 30), border_width=1))
+
+
+// ════════════════════════════════════════════════════════
+// 6. MARKET STRUCTURE — BOS / CHoCH  (max 4 labels)
+// ════════════════════════════════════════════════════════
+ph = ta.pivothigh(high, i_bos_len, i_bos_len)
+pl = ta.pivotlow(low,   i_bos_len, i_bos_len)
+
+var float last_ph = na
+var float last_pl = na
+var bool  ph_used = false
+var bool  pl_used = false
+var int   mkt_str = 0
+
+if not na(ph)
+    last_ph := ph
+    ph_used := false
+if not na(pl)
+    last_pl := pl
+    pl_used := false
+
+bos_up = i_bos_on and not na(last_ph) and not ph_used and close > last_ph
+bos_dn = i_bos_on and not na(last_pl) and not pl_used and close < last_pl
+
+if bos_up
+    ph_used := true
+if bos_dn
+    pl_used := true
+
+choch_up = bos_up and mkt_str == -1
+choch_dn = bos_dn and mkt_str ==  1
+mkt_str  := bos_up ? 1 : bos_dn ? -1 : mkt_str
+
+var label[] bos_arr = array.new_label(0)
+
+if i_bos_on
+    if choch_up
+        array.push(bos_arr, label.new(bar_index, low,  "CHoCH", style=label.style_label_up,   color=color.new(#4CAF50, 5), textcolor=color.white, size=size.small))
+    else if bos_up
+        array.push(bos_arr, label.new(bar_index, low,  "BOS",   style=label.style_label_up,   color=color.new(#1565C0, 5), textcolor=color.white, size=size.small))
+    if choch_dn
+        array.push(bos_arr, label.new(bar_index, high, "CHoCH", style=label.style_label_down, color=color.new(#EF5350, 5), textcolor=color.white, size=size.small))
+    else if bos_dn
+        array.push(bos_arr, label.new(bar_index, high, "BOS",   style=label.style_label_down, color=color.new(#B71C1C, 5), textcolor=color.white, size=size.small))
+    while array.size(bos_arr) > 4
+        label.delete(array.shift(bos_arr))
+
+
+// ════════════════════════════════════════════════════════
+// 7. FIBONACCI — anchored to last swing, lines on last bar
+//    Redrawn only when barstate.islast (no full-chart clutter)
+//    Uses confirmed pivot high/low from structure section
+// ════════════════════════════════════════════════════════
+var line[]  fib_lines = array.new_line(0)
+var label[] fib_lbls  = array.new_label(0)
+
+if i_fib_on and barstate.islast
+    for l in fib_lines
+        line.delete(l)
+    array.clear(fib_lines)
+    for lb in fib_lbls
+        label.delete(lb)
+    array.clear(fib_lbls)
+
+    _fh = not na(last_ph) ? last_ph : ta.highest(high, 50)
+    _fl = not na(last_pl) ? last_pl : ta.lowest(low,  50)
+    _fr = _fh - _fl
+
+    if _fr > 0
+        _left  = bar_index - i_bos_len * 3
+        _right = bar_index + 10
+        for i = 0 to 6
+            _pct  = i == 0 ? 0.0 : i == 1 ? 0.236 : i == 2 ? 0.382 : i == 3 ? 0.5 : i == 4 ? 0.618 : i == 5 ? 0.786 : 1.0
+            _name = i == 0 ? "0%" : i == 1 ? "23.6%" : i == 2 ? "38.2%" : i == 3 ? "50%" : i == 4 ? "61.8%" : i == 5 ? "78.6%" : "100%"
+            _lvl  = _fh - _pct * _fr
+            _lw   = i == 4 ? 2 : 1
+            _col  = (i == 0 or i == 6) ? color.new(#90A4AE, 30) : i == 4 ? color.new(#FF6D00, 0) : color.new(#FFB300, 0)
+            array.push(fib_lines, line.new(_left, _lvl, _right, _lvl, color=_col, width=_lw, style=line.style_dashed))
+            array.push(fib_lbls,  label.new(_right, _lvl, _name, style=label.style_label_left, color=color.new(color.black, 100), textcolor=_col, size=size.tiny))
+
+
+// ════════════════════════════════════════════════════════
+// 8. LIQUIDITY — SSL / BSL  (rolling highs/lows only)
+// ════════════════════════════════════════════════════════
+bsl = ta.highest(high, i_liq_len)
+ssl = ta.lowest(low,   i_liq_len)
+plot(i_liq_on ? bsl : na, "BSL", color=color.new(#00BCD4, 15), linewidth=1, style=plot.style_stepline_diamond)
+plot(i_liq_on ? ssl : na, "SSL", color=color.new(#FF9800, 15), linewidth=1, style=plot.style_stepline_diamond)
+
+
+// ════════════════════════════════════════════════════════
+// 9. BOLLINGER BANDS  (off by default)
+// ════════════════════════════════════════════════════════
+bb_mid = ta.sma(close, i_bb_len)
+bb_std = ta.stdev(close, i_bb_len)
+bb_up  = bb_mid + i_bb_mult * bb_std
+bb_dn  = bb_mid - i_bb_mult * bb_std
+bbp1 = plot(i_bb_on ? bb_up  : na, "BB Upper", color=color.new(#9C27B0, 35), linewidth=1)
+bbp2 = plot(i_bb_on ? bb_dn  : na, "BB Lower", color=color.new(#9C27B0, 35), linewidth=1)
+plot(i_bb_on ? bb_mid : na, "BB Mid", color=color.new(#9C27B0, 60), linewidth=1)
+fill(bbp1, bbp2, color=i_bb_on ? color.new(#9C27B0, 93) : na, title="BB Fill")
+
+
+// ════════════════════════════════════════════════════════
+// 10. INFO PANEL
+// ════════════════════════════════════════════════════════
+rsi_v   = ta.rsi(close, 14)
+atr_pct = (_atr / close) * 100
+
+rsi_col = rsi_v >= 70 ? color.red   : rsi_v <= 30 ? color.lime : color.yellow
+str_lbl = mkt_str ==  1 ? "BULLISH" : mkt_str == -1 ? "BEARISH" : "NEUTRAL"
+str_col = mkt_str ==  1 ? color.lime : mkt_str == -1 ? color.red : color.gray
+ema_lbl = bull_ema  ? "BULL" : "BEAR"
+ema_col = bull_ema  ? color.lime : color.red
+st_lbl  = st_tr == 1 ? "BULL" : "BEAR"
+st_col2 = st_tr == 1 ? color.lime : color.red
+vw_lbl  = close >= vwap_v ? "ABOVE" : "BELOW"
+vw_col  = close >= vwap_v ? color.new(#2196F3, 0) : color.new(#FF5722, 0)
+fvg_lbl = bull_fvg ? "Bullish" : bear_fvg ? "Bearish" : "None"
+fvg_col = bull_fvg ? color.lime : bear_fvg ? color.red : color.gray
+f618_val = not na(last_ph) and not na(last_pl) ? str.tostring(math.round(last_ph - 0.618 * (last_ph - last_pl), 2)) : "N/A"
+
+var table pnl = table.new(position.top_right, 2, 9, bgcolor=color.new(#0d1117, 5), border_width=1, border_color=color.new(#37474F, 40))
+
+if i_pan_on and barstate.islast
+    hdr = color.new(#1a237e, 20)
+    table.cell(pnl, 0, 0, "SIGNAL",     bgcolor=hdr, text_color=color.new(#90CAF9, 0), text_size=size.small)
+    table.cell(pnl, 1, 0, "STATUS",     bgcolor=hdr, text_color=color.new(#90CAF9, 0), text_size=size.small)
+    table.cell(pnl, 0, 1, "Structure",  text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 1, str_lbl,      text_color=str_col,     text_size=size.small)
+    table.cell(pnl, 0, 2, "EMA Cloud",  text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 2, ema_lbl,      text_color=ema_col,     text_size=size.small)
+    table.cell(pnl, 0, 3, "SuperTrend", text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 3, st_lbl,       text_color=st_col2,     text_size=size.small)
+    table.cell(pnl, 0, 4, "VWAP",       text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 4, vw_lbl,       text_color=vw_col,      text_size=size.small)
+    table.cell(pnl, 0, 5, "RSI (14)",   text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 5, str.tostring(math.round(rsi_v, 1)), text_color=rsi_col, text_size=size.small)
+    table.cell(pnl, 0, 6, "ATR %",      text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 6, str.tostring(math.round(atr_pct, 2)) + "%", text_color=color.yellow, text_size=size.small)
+    table.cell(pnl, 0, 7, "FVG",        text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 7, fvg_lbl,      text_color=fvg_col,     text_size=size.small)
+    table.cell(pnl, 0, 8, "Fib 61.8%",  text_color=color.white, text_size=size.small)
+    table.cell(pnl, 1, 8, f618_val,      text_color=color.new(#FF6D00, 0), text_size=size.small)

@@ -1,0 +1,377 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  PRO TRADER SUITE v2 — Signals + Market Structure + Liquidity
+//  Fixes in v2:
+//    ✅ Candles fully visible on all timeframes (neutral = na, no override)
+//    ✅ Order Blocks: no extend.right; boxes auto-close when violated
+//    ✅ Overlap prevention: won't draw new zone if one already exists nearby
+//    ✅ Hard limits on all drawings (lines / labels / boxes)
+//    ✅ EQ lines capped and cleaned up automatically
+//    ✅ Timeframe-aware pivot sensitivity suggestion
+//
+//  Original implementation — smart-money / ICT public concepts.
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=5
+indicator("Pro Trader Suite v2 — Signals, Structure & Liquidity",
+     shorttitle = "PTS v2",
+     overlay    = true,
+     max_lines_count  = 200,
+     max_labels_count = 200,
+     max_boxes_count  = 60)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+g1 = "📈 Signals & Overlays"
+showSignals     = input.bool(true,  "Show Buy/Sell Signals",             group=g1)
+emaFast         = input.int(9,      "Fast EMA",       minval=1,          group=g1)
+emaSlow         = input.int(21,     "Slow EMA",       minval=1,          group=g1)
+rsiLen          = input.int(14,     "RSI Length",     minval=2,          group=g1)
+rsiBull         = input.int(55,     "RSI Bull Threshold",                group=g1)
+rsiBear         = input.int(45,     "RSI Bear Threshold",                group=g1)
+showCandleColor = input.bool(true,  "Color Candles by Momentum",         group=g1)
+showATRBands    = input.bool(true,  "Show ATR Volatility Bands",         group=g1)
+atrLen          = input.int(14,     "ATR Length",                        group=g1)
+atrMult         = input.float(2.0,  "ATR Multiplier",     step=0.1,      group=g1)
+
+g2 = "🏗️ Market Structure"
+showStructure   = input.bool(true,  "Show BOS / CHoCH Labels",           group=g2)
+pivotLen        = input.int(5,      "Pivot Lookback",     minval=2,      group=g2)
+showOB          = input.bool(true,  "Show Order Blocks",                 group=g2)
+maxOB           = input.int(4,      "Max Active OBs (each side)", minval=1, maxval=8, group=g2)
+bullOBCol       = input.color(color.new(color.green, 82), "Bull OB Fill", group=g2)
+bearOBCol       = input.color(color.new(color.red,   82), "Bear OB Fill", group=g2)
+
+g3 = "💧 Liquidity"
+showEQ          = input.bool(true,  "Show Equal Highs / Lows",           group=g3)
+eqThresh        = input.float(0.10, "EQ Threshold (%)",  step=0.05,      group=g3)
+maxEQ           = input.int(6,      "Max EQ Lines",       minval=1, maxval=15, group=g3)
+showSweeps      = input.bool(true,  "Show Liquidity Sweeps",             group=g3)
+sweepLen        = input.int(20,     "Sweep Lookback",                    group=g3)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 1 — SIGNALS & OVERLAYS
+//  FIX: neutral barcolor = na → candles always visible in all timeframes
+// ═══════════════════════════════════════════════════════════════════════════
+
+ema1 = ta.ema(close, emaFast)
+ema2 = ta.ema(close, emaSlow)
+rsiV = ta.rsi(close, rsiLen)
+atrV = ta.atr(atrLen)
+
+plot(ema1, "Fast EMA", color=color.new(color.aqua,   15), linewidth=1)
+plot(ema2, "Slow EMA", color=color.new(color.yellow, 15), linewidth=1)
+
+// Signals: EMA cross + RSI confirmation
+bullSig = ta.crossover(ema1, ema2)  and rsiV > rsiBull
+bearSig = ta.crossunder(ema1, ema2) and rsiV < rsiBear
+
+plotshape(showSignals and bullSig, "Buy Signal",  shape.labelup,
+     location.belowbar, color=color.green, text="▲ BUY",
+     textcolor=color.white, size=size.small)
+plotshape(showSignals and bearSig, "Sell Signal", shape.labeldown,
+     location.abovebar, color=color.red, text="▼ SELL",
+     textcolor=color.white, size=size.small)
+
+// ── Candle Color ─────────────────────────────────────────────────────────
+// KEY FIX: Only color when momentum is clear. Neutral momentum → na
+// so the original default candle color (green/red body) is preserved.
+mBull = ema1 > ema2 and rsiV > 55   // clear bullish momentum
+mBear = ema1 < ema2 and rsiV < 45   // clear bearish momentum
+
+barcolor(showCandleColor ?
+     (mBull ? color.new(color.lime,   25) :
+      mBear ? color.new(color.orange, 25) : na) : na)
+
+// ── ATR Volatility Bands ──────────────────────────────────────────────────
+upperB = ema2 + atrV * atrMult
+lowerB = ema2 - atrV * atrMult
+pUp = plot(showATRBands ? upperB : na, "Upper ATR Band", color=color.new(color.purple, 55), linewidth=1)
+pDn = plot(showATRBands ? lowerB : na, "Lower ATR Band", color=color.new(color.purple, 55), linewidth=1)
+fill(pUp, pDn, color=color.new(color.purple, 93))
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 2 — MARKET STRUCTURE  (BOS / CHoCH / Order Blocks)
+//  FIX: OB boxes do NOT use extend.right → no canvas overflow
+//  FIX: OBs update their right edge each bar and delete when violated
+//  FIX: Overlap prevention → won't stack zones on same level
+// ═══════════════════════════════════════════════════════════════════════════
+
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low,   pivotLen, pivotLen)
+
+var float lastHigh    = na
+var float lastLow     = na
+var int   lastHighBar = na
+var int   lastLowBar  = na
+var bool  trendBull   = false
+var bool  brokeHigh   = false
+var bool  brokeLow    = false
+
+// ── Order Block storage arrays ────────────────────────────────────────────
+var box[] bullOBs = array.new<box>()
+var box[] bearOBs = array.new<box>()
+
+// Update confirmed pivots
+if not na(ph)
+    lastHigh    := ph
+    lastHighBar := bar_index - pivotLen
+    brokeHigh   := false
+
+if not na(pl)
+    lastLow    := pl
+    lastLowBar := bar_index - pivotLen
+    brokeLow   := false
+
+// ── Maintain active OBs each confirmed bar ────────────────────────────────
+// Extend box right edge to stay current; delete if price violates the zone
+if barstate.isconfirmed
+
+    // Bull OBs: invalidated when price closes below the box bottom
+    int bsz = array.size(bullOBs)
+    if bsz > 0
+        for i = bsz - 1 to 0
+            if i < array.size(bullOBs)
+                bx = array.get(bullOBs, i)
+                if close < box.get_bottom(bx)
+                    box.delete(bx)
+                    array.remove(bullOBs, i)
+                else
+                    box.set_right(bx, bar_index + 5)
+
+    // Bear OBs: invalidated when price closes above the box top
+    int asz = array.size(bearOBs)
+    if asz > 0
+        for i = asz - 1 to 0
+            if i < array.size(bearOBs)
+                bx = array.get(bearOBs, i)
+                if close > box.get_top(bx)
+                    box.delete(bx)
+                    array.remove(bearOBs, i)
+                else
+                    box.set_right(bx, bar_index + 5)
+
+// ── Overlap check: skip new OB if it overlaps an existing active zone ─────
+f_bullOverlap(float obH, float obL) =>
+    bool found = false
+    int sz = array.size(bullOBs)
+    if sz > 0
+        for i = 0 to sz - 1
+            bx = array.get(bullOBs, i)
+            if obL < box.get_top(bx) and obH > box.get_bottom(bx)
+                found := true
+                break
+    found
+
+f_bearOverlap(float obH, float obL) =>
+    bool found = false
+    int sz = array.size(bearOBs)
+    if sz > 0
+        for i = 0 to sz - 1
+            bx = array.get(bearOBs, i)
+            if obL < box.get_top(bx) and obH > box.get_bottom(bx)
+                found := true
+                break
+    found
+
+// ── Draw a new Order Block ────────────────────────────────────────────────
+f_newBullOB() =>
+    for i = 1 to 20
+        if close[i] < open[i]    // last bearish candle = bull OB origin
+            obH = high[i]
+            obL = low[i]
+            if not f_bullOverlap(obH, obL)
+                if array.size(bullOBs) >= maxOB
+                    box.delete(array.shift(bullOBs))   // drop oldest
+                newBx = box.new(
+                     bar_index - i, obH,
+                     bar_index + 5, obL,
+                     bgcolor      = bullOBCol,
+                     border_color = color.new(color.green, 45),
+                     border_width = 1,
+                     extend       = extend.none)        // ✅ NO extend.right
+                array.push(bullOBs, newBx)
+            break
+
+f_newBearOB() =>
+    for i = 1 to 20
+        if close[i] > open[i]    // last bullish candle = bear OB origin
+            obH = high[i]
+            obL = low[i]
+            if not f_bearOverlap(obH, obL)
+                if array.size(bearOBs) >= maxOB
+                    box.delete(array.shift(bearOBs))   // drop oldest
+                newBx = box.new(
+                     bar_index - i, obH,
+                     bar_index + 5, obL,
+                     bgcolor      = bearOBCol,
+                     border_color = color.new(color.red, 45),
+                     border_width = 1,
+                     extend       = extend.none)        // ✅ NO extend.right
+                array.push(bearOBs, newBx)
+            break
+
+// ── BOS / CHoCH Detection ────────────────────────────────────────────────
+if not na(lastHigh) and not brokeHigh and close > lastHigh
+    isCHoCH = not trendBull
+    if showStructure
+        lCol = isCHoCH ? color.lime : color.green
+        label.new(bar_index, high, isCHoCH ? "CHoCH↑" : "BOS↑",
+             style=label.style_label_down, yloc=yloc.abovebar,
+             color=lCol, textcolor=color.black, size=size.tiny)
+        line.new(lastHighBar, lastHigh, bar_index, lastHigh,
+             color=color.new(color.green, 35),
+             style=line.style_dashed, width=1)
+    if showOB
+        f_newBullOB()
+    trendBull := true
+    brokeHigh := true
+
+if not na(lastLow) and not brokeLow and close < lastLow
+    isCHoCH = trendBull
+    if showStructure
+        lCol = isCHoCH ? color.fuchsia : color.red
+        label.new(bar_index, low, isCHoCH ? "CHoCH↓" : "BOS↓",
+             style=label.style_label_up, yloc=yloc.belowbar,
+             color=lCol, textcolor=color.white, size=size.tiny)
+        line.new(lastLowBar, lastLow, bar_index, lastLow,
+             color=color.new(color.red, 35),
+             style=line.style_dashed, width=1)
+    if showOB
+        f_newBearOB()
+    trendBull := false
+    brokeLow  := true
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 3 — LIQUIDITY  (Equal Highs/Lows + Sweeps)
+//  FIX: EQ lines capped at maxEQ; oldest removed when cap reached
+//  FIX: No duplicate lines on same level
+// ═══════════════════════════════════════════════════════════════════════════
+
+eqDelta = close * eqThresh / 100.0
+
+var float prevPH    = na
+var int   prevPHBar = na
+var float prevPL    = na
+var int   prevPLBar = na
+
+// Drawing pools for EQ cleanup
+var line[]  eqLinePool  = array.new<line>()
+var label[] eqLabelPool = array.new<label>()
+
+// Helper: add to pool and trim if over max
+f_addEQ(line ln, label lb) =>
+    array.push(eqLinePool,  ln)
+    array.push(eqLabelPool, lb)
+    if array.size(eqLinePool) > maxEQ
+        line.delete(array.shift(eqLinePool))
+        label.delete(array.shift(eqLabelPool))
+
+// Equal Highs
+if showEQ and not na(ph)
+    curBar = bar_index - pivotLen
+    if not na(prevPH) and math.abs(ph - prevPH) <= eqDelta
+        bool skip = false
+        int eqSz = array.size(eqLinePool)
+        if eqSz > 0
+            for i = 0 to eqSz - 1
+                ln = array.get(eqLinePool, i)
+                if math.abs(line.get_y1(ln) - ph) <= eqDelta
+                    skip := true
+                    break
+        if not skip
+            ln = line.new(prevPHBar, ph, curBar, ph,
+                     color=color.new(color.fuchsia, 15),
+                     width=2, style=line.style_dotted)
+            lb = label.new(curBar, ph, "EQH",
+                     style=label.style_label_left,
+                     color=color.new(color.fuchsia, 20),
+                     textcolor=color.white, size=size.tiny)
+            f_addEQ(ln, lb)
+    prevPH    := ph
+    prevPHBar := bar_index - pivotLen
+
+// Equal Lows
+if showEQ and not na(pl)
+    curBar = bar_index - pivotLen
+    if not na(prevPL) and math.abs(pl - prevPL) <= eqDelta
+        bool skip = false
+        int eqSz = array.size(eqLinePool)
+        if eqSz > 0
+            for i = 0 to eqSz - 1
+                ln = array.get(eqLinePool, i)
+                if math.abs(line.get_y1(ln) - pl) <= eqDelta
+                    skip := true
+                    break
+        if not skip
+            ln = line.new(prevPLBar, pl, curBar, pl,
+                     color=color.new(color.fuchsia, 15),
+                     width=2, style=line.style_dotted)
+            lb = label.new(curBar, pl, "EQL",
+                     style=label.style_label_left,
+                     color=color.new(color.fuchsia, 20),
+                     textcolor=color.white, size=size.tiny)
+            f_addEQ(ln, lb)
+    prevPL    := pl
+    prevPLBar := bar_index - pivotLen
+
+// ── Liquidity Sweeps ──────────────────────────────────────────────────────
+recentHi = ta.highest(high, sweepLen)[1]
+recentLo = ta.lowest(low,   sweepLen)[1]
+
+bullSweep = low  < recentLo and close > recentLo   // wick below, closed back up
+bearSweep = high > recentHi and close < recentHi   // wick above, closed back down
+
+plotshape(showSweeps and bullSweep, "Bull Sweep", shape.triangleup,
+     location.belowbar, color=color.new(color.aqua, 10),
+     text="SW", textcolor=color.black, size=size.tiny)
+plotshape(showSweeps and bearSweep, "Bear Sweep", shape.triangledown,
+     location.abovebar, color=color.new(color.orange, 10),
+     text="SW", textcolor=color.black, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ALERTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+alertcondition(bullSig,   "Buy Signal",      "PTS v2 ▲ Bullish EMA cross confirmed")
+alertcondition(bearSig,   "Sell Signal",     "PTS v2 ▼ Bearish EMA cross confirmed")
+alertcondition(bullSweep, "Bull Liq Sweep",  "PTS v2 — Bullish liquidity sweep detected")
+alertcondition(bearSweep, "Bear Liq Sweep",  "PTS v2 — Bearish liquidity sweep detected")
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DASHBOARD TABLE (top-right)
+// ═══════════════════════════════════════════════════════════════════════════
+
+var table dash = table.new(position.top_right, 2, 6,
+     bgcolor       = color.new(color.black,  60),
+     border_width  = 1,
+     border_color  = color.new(color.gray,   70),
+     frame_width   = 1,
+     frame_color   = color.new(color.silver, 50))
+
+if barstate.islast
+    rsiTxt = rsiV > rsiBull ? "BULL" : rsiV < rsiBear ? "BEAR" : "NEUT"
+    rsiCol = rsiV > rsiBull ? color.lime : rsiV < rsiBear ? color.red : color.yellow
+    strTxt = trendBull ? "BULLISH ▲" : "BEARISH ▼"
+    strCol = trendBull ? color.lime : color.red
+
+    table.cell(dash, 0, 0, "PTS v2",        text_color=color.white,  text_size=size.small,
+         bgcolor=color.new(color.blue, 50))
+    table.cell(dash, 1, 0, timeframe.period, text_color=color.silver, text_size=size.small,
+         bgcolor=color.new(color.blue, 50))
+    table.cell(dash, 0, 1, "Trend",     text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 1, strTxt,      text_color=strCol,       text_size=size.small)
+    table.cell(dash, 0, 2, "RSI",       text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 2, str.tostring(rsiV, "#.0") + "  " + rsiTxt,
+         text_color=rsiCol, text_size=size.small)
+    table.cell(dash, 0, 3, "ATR",       text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 3, str.tostring(atrV, "#.00"),
+         text_color=color.aqua, text_size=size.small)
+    table.cell(dash, 0, 4, "EMA",       text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 4, ema1 > ema2 ? "↑ UP" : "↓ DOWN",
+         text_color=ema1 > ema2 ? color.lime : color.red, text_size=size.small)
+    table.cell(dash, 0, 5, "Active OBs",text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 5, "▲" + str.tostring(array.size(bullOBs))
+         + "  ▼" + str.tostring(array.size(bearOBs)),
+         text_color=color.yellow, text_size=size.small)

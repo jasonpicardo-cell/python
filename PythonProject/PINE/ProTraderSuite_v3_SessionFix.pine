@@ -1,0 +1,823 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  PRO TRADER SUITE v3 — Session-Aware Edition
+//
+//  SESSION FIX — works correctly across:
+//    ✅ Crypto  / 24h     — continuous UTC day boundaries
+//    ✅ Equity  / NSE     — 09:15–15:30 IST, Mon–Fri, no overnight gap
+//    ✅ Futures / Brent   — 01:00–23:00 UTC, Mon–Fri (ICE approx.)
+//    ✅ Custom            — user-defined session string + timezone
+//
+//  Session engine provides:
+//    • inTrading         — true only when inside configured session
+//    • isNewSess         — fires on FIRST bar of each new session
+//    • Session-tracked PD OHLC (ps_O / ps_H / ps_L / ps_C)
+//    • currSessOpen      — current session's opening price
+//    • sessAvgRange      — percentile of session ranges (not daily gaps)
+//
+//  All modules consume session-engine values → correct behaviour on all TFs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+//@version=5
+indicator("Pro Trader Suite v3 — Session-Aware",
+     shorttitle       = "PTS v3",
+     overlay          = true,
+     max_lines_count  = 500,
+     max_labels_count = 500,
+     max_boxes_count  = 150)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INPUTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+g1 = "📈 Signals & Overlays"
+showSignals     = input.bool(true,  "Show Buy/Sell Signals",              group=g1)
+emaFast         = input.int(9,      "Fast EMA",          minval=1,        group=g1)
+emaSlow         = input.int(21,     "Slow EMA",          minval=1,        group=g1)
+rsiLen          = input.int(14,     "RSI Length",        minval=2,        group=g1)
+rsiBull         = input.int(55,     "RSI Bull Threshold",                 group=g1)
+rsiBear         = input.int(45,     "RSI Bear Threshold",                 group=g1)
+showCandleColor = input.bool(true,  "Color Candles by Momentum",          group=g1)
+showATRBands    = input.bool(true,  "Show ATR Volatility Bands",          group=g1)
+atrLen          = input.int(14,     "ATR Length",                         group=g1)
+atrMult         = input.float(2.0,  "ATR Multiplier",    step=0.1,        group=g1)
+
+g2 = "🏗️ Market Structure"
+showStructure   = input.bool(true,  "Show BOS / CHoCH Labels",            group=g2)
+pivotLen        = input.int(5,      "Pivot Lookback",    minval=2,        group=g2)
+showOB          = input.bool(true,  "Show Order Blocks",                  group=g2)
+maxOB           = input.int(4,      "Max Active OBs (each side)", minval=1, maxval=8, group=g2)
+bullOBCol       = input.color(color.new(color.green, 82), "Bull OB Fill", group=g2)
+bearOBCol       = input.color(color.new(color.red,   82), "Bear OB Fill", group=g2)
+
+g3 = "💧 Liquidity"
+showEQ          = input.bool(true,  "Show Equal Highs / Lows",            group=g3)
+eqThresh        = input.float(0.10, "EQ Threshold (%)",  step=0.05,       group=g3)
+maxEQ           = input.int(6,      "Max EQ Lines",      minval=1, maxval=15, group=g3)
+showSweeps      = input.bool(true,  "Show Liquidity Sweeps",              group=g3)
+sweepLen        = input.int(20,     "Sweep Lookback",                     group=g3)
+
+g4 = "📐 Premium / Discount Fibs"
+showPDFibs      = input.bool(true,  "Show Premium / Discount Fibs",       group=g4)
+fibSwingLen     = input.int(50,     "Swing Lookback (bars)", minval=10,   group=g4)
+fibExtend       = input.bool(true,  "Extend Fib Lines Right",             group=g4)
+fibPremCol      = input.color(color.new(color.red,   88), "Premium Zone Fill",  group=g4)
+fibDiscCol      = input.color(color.new(color.green, 88), "Discount Zone Fill", group=g4)
+
+g5 = "🎯 Zone Engine"
+showZones       = input.bool(true,  "Show Zone Engine",                   group=g5)
+zoneLookback    = input.int(20,     "Lookback Sessions", minval=5, maxval=200, group=g5)
+zonePercentile  = input.int(70,     "Percentile",  minval=10, maxval=100, group=g5)
+zone1Val        = input.float(0.382,"Zone 1 — Inner (0.382)", step=0.001, group=g5)
+zone2Val        = input.float(0.618,"Zone 2 — Mid   (0.618)", step=0.001, group=g5)
+zone3Val        = input.float(1.0,  "Zone 3 — Outer (1.000)", step=0.001, group=g5)
+zoneAnchorType  = input.string("Prev Session Close", "Zone Anchor",
+     options=["Prev Session Close", "Current Session Open"],              group=g5)
+zoneCol1        = input.color(color.new(color.green,  78), "Zone 1 Color", group=g5)
+zoneCol2        = input.color(color.new(color.yellow, 78), "Zone 2 Color", group=g5)
+zoneCol3        = input.color(color.new(color.red,    78), "Zone 3 Color", group=g5)
+
+g6 = "📅 Previous Session OHLC"
+showPDOHLC      = input.bool(true,  "Show Prev Session OHLC",             group=g6)
+pdHighCol       = input.color(color.new(color.red,    15), "PSH Color",   group=g6)
+pdLowCol        = input.color(color.new(color.green,  15), "PSL Color",   group=g6)
+pdOpenCol       = input.color(color.new(color.orange, 15), "PSO Color",   group=g6)
+pdCloseCol      = input.color(color.new(color.aqua,   15), "PSC Color",   group=g6)
+pdLineWidth     = input.int(1,      "Line Width", minval=1, maxval=4,      group=g6)
+pdLineStyleInp  = input.string("Dashed", "Line Style",
+     options=["Solid","Dashed","Dotted"],                                  group=g6)
+
+// ── Session Configuration ────────────────────────────────────────────────
+// This is the key group that makes the indicator session-aware.
+// Choose your market type; for Custom, fill in the string + timezone below.
+// Session string format:  HHMM-HHMM:days   (1=Sun 2=Mon … 7=Sat)
+// ─────────────────────────────────────────────────────────────────────────
+g7 = "⏰ Market Session"
+mktType = input.string("Crypto / 24h", "Market Type",
+     options=["Crypto / 24h", "Equity — NSE", "Futures — Brent ICE", "Custom"],
+     tooltip="Sets session boundaries for Zone Engine, PD OHLC, and daily-range calc.",
+     group=g7)
+custSessStr = input.string("0930-1600:23456",
+     "Custom Session  (HHMM-HHMM:days)",
+     tooltip="days: 1=Sun 2=Mon 3=Tue 4=Wed 5=Thu 6=Fri 7=Sat\n" +
+             "Example: NSE → 0915-1530:23456 | London Eq → 0800-1630:23456",
+     group=g7)
+custTZ = input.string("America/New_York",
+     "Custom Timezone  (TZ database name)",
+     tooltip="Asia/Kolkata | America/New_York | Europe/London | Etc/UTC | America/Chicago",
+     group=g7)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SESSION ENGINE
+//  Single source of truth for all session-dependent calculations.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── Resolve session string and timezone per market type ───────────────────
+//    Crypto 24h  → no session filter needed; day boundary = UTC midnight
+//    Equity NSE  → 09:15–15:30 IST, Mon–Fri
+//    Brent ICE   → 01:00–23:00 UTC, Mon–Fri (daily ~1 h maintenance gap excluded)
+//    Custom      → user-supplied string + timezone
+
+bool   is24h     = mktType == "Crypto / 24h"
+
+string sessStr = switch mktType
+    "Equity — NSE"        => "0915-1530:23456"
+    "Futures — Brent ICE" => "0100-2300:23456"
+    "Custom"              => custSessStr
+    => ""                 // 24h — not used
+
+string sessTZ = switch mktType
+    "Equity — NSE"        => "Asia/Kolkata"
+    "Futures — Brent ICE" => "Etc/UTC"
+    "Custom"              => custTZ
+    => "Etc/UTC"          // 24h — not used
+
+// ── In-session detection ──────────────────────────────────────────────────
+// inTrading:
+//   24h   → always true
+//   Other → true only for bars that fall within the configured session window
+//           On daily/weekly charts, every bar IS within its session, so true always.
+//
+bool inTrading = is24h ? true :
+     timeframe.isintraday ? not na(time(timeframe.period, sessStr, sessTZ)) : true
+
+// ── New-session trigger ───────────────────────────────────────────────────
+// isNewSess fires on the FIRST bar of every new trading session:
+//   24h         → UTC midnight boundary  (ta.change on "D" time)
+//   Intraday    → transition: previous bar NOT in session, current bar IN session
+//   Daily/above → every bar is a new "session" for PD OHLC purposes
+//
+bool isNewSess = is24h ? ta.change(time("D")) != 0 :
+     timeframe.isintraday ? (inTrading and not inTrading[1]) :
+     ta.change(time("D")) != 0
+
+// ── Session OHLC accumulators ─────────────────────────────────────────────
+//    s_O/H/L/C   → current LIVE session
+//    ps_O/H/L/C  → previous COMPLETED session  (used by Modules 5 & 6)
+//
+var float s_O  = na
+var float s_H  = na
+var float s_L  = na
+var float s_C  = na
+var float ps_O = na
+var float ps_H = na
+var float ps_L = na
+var float ps_C = na
+
+if isNewSess
+    // Snapshot outgoing session → previous session
+    if not na(s_O)
+        ps_O := s_O
+        ps_H := s_H
+        ps_L := s_L
+        ps_C := s_C         // s_C = last bar of the completed session ✓
+    // Initialise new session
+    s_O := open
+    s_H := high
+    s_L := low
+    s_C := close
+else if inTrading
+    if na(s_O)
+        s_O := open         // safety: capture open even if isNewSess was missed
+    s_H := math.max(nz(s_H, high), high)
+    s_L := math.min(nz(s_L, low), low)
+    s_C := close
+
+// ── Current session open (Zone Engine anchor) ─────────────────────────────
+// Updated ONCE per session — on the very first bar inside the new session.
+// For NSE: captures the 09:15 bar open.
+// For Brent: captures the 01:00 bar open.
+// For Crypto: captures the UTC-midnight open.
+var float currSessOpen = na
+if isNewSess
+    currSessOpen := open
+
+// ── Session-range percentile array ───────────────────────────────────────
+// Each completed session pushes its high-low range into the array.
+// The Nth-percentile of this array = "average range" for the Zone Engine.
+// This is session-aware: overnight gaps and maintenance breaks are EXCLUDED.
+var float[] sessRangeArr = array.new<float>()
+
+if isNewSess and not na(ps_H) and not na(ps_L)
+    float rng = ps_H - ps_L
+    if rng > 0
+        array.push(sessRangeArr, rng)
+        if array.size(sessRangeArr) > zoneLookback
+            array.shift(sessRangeArr)
+
+// Percentile function over float array
+f_pct(float[] arr, int pct) =>
+    float result = na
+    int sz = array.size(arr)
+    if sz >= 3
+        float[] srt = array.copy(arr)
+        array.sort(srt, order.ascending)
+        int idx = math.max(0, math.min(math.round(sz * pct / 100.0) - 1, sz - 1))
+        result := array.get(srt, idx)
+    result
+
+float sessAvgRange = f_pct(sessRangeArr, zonePercentile)
+
+// Fallback: while session array is building, use TradingView daily percentile
+// (request.security "D" respects exchange session hours, so it's also accurate)
+float rsAvgRange = request.security(syminfo.tickerid, "D",
+     ta.percentile_nearest_rank(high - low, zoneLookback, zonePercentile)[1],
+     lookahead=barmerge.lookahead_on)
+
+// Final avg range: prefer session-tracked once 3+ sessions accumulate
+float zoneAvgRange = (array.size(sessRangeArr) >= 3) ? sessAvgRange : rsAvgRange
+
+// ── Unified Previous-Session OHLC ─────────────────────────────────────────
+// ps_O/H/L/C from session tracking = correct for all three market types.
+// Fallback to request.security for the very first session when ps_* are still na.
+float rs_pdH = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_on)
+float rs_pdL = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_on)
+float rs_pdO = request.security(syminfo.tickerid, "D", open[1],  lookahead=barmerge.lookahead_on)
+float rs_pdC = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_on)
+
+float pdH = not na(ps_H) ? ps_H : rs_pdH
+float pdL = not na(ps_L) ? ps_L : rs_pdL
+float pdO = not na(ps_O) ? ps_O : rs_pdO
+float pdC = not na(ps_C) ? ps_C : rs_pdC
+
+// Zone anchor price
+float zAnchor = zoneAnchorType == "Current Session Open" ?
+     nz(currSessOpen, pdO) : pdC
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 1 — SIGNALS & OVERLAYS
+// ═══════════════════════════════════════════════════════════════════════════
+
+ema1 = ta.ema(close, emaFast)
+ema2 = ta.ema(close, emaSlow)
+rsiV = ta.rsi(close, rsiLen)
+atrV = ta.atr(atrLen)
+
+plot(ema1, "Fast EMA", color=color.new(color.aqua,   15), linewidth=1)
+plot(ema2, "Slow EMA", color=color.new(color.yellow, 15), linewidth=1)
+
+bullSig = ta.crossover(ema1, ema2)  and rsiV > rsiBull
+bearSig = ta.crossunder(ema1, ema2) and rsiV < rsiBear
+
+plotshape(showSignals and bullSig, "Buy Signal",  shape.labelup,
+     location.belowbar, color=color.green, text="▲ BUY",
+     textcolor=color.white, size=size.small)
+plotshape(showSignals and bearSig, "Sell Signal", shape.labeldown,
+     location.abovebar, color=color.red,   text="▼ SELL",
+     textcolor=color.white, size=size.small)
+
+mBull = ema1 > ema2 and rsiV > 55
+mBear = ema1 < ema2 and rsiV < 45
+barcolor(showCandleColor ?
+     (mBull ? color.new(color.lime,   25) :
+      mBear ? color.new(color.orange, 25) : na) : na)
+
+upperB = ema2 + atrV * atrMult
+lowerB = ema2 - atrV * atrMult
+pUp = plot(showATRBands ? upperB : na, "Upper ATR Band",
+     color=color.new(color.purple, 55), linewidth=1)
+pDn = plot(showATRBands ? lowerB : na, "Lower ATR Band",
+     color=color.new(color.purple, 55), linewidth=1)
+fill(pUp, pDn, color=color.new(color.purple, 93))
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 2 — MARKET STRUCTURE  (Enhanced BOS / CHoCH + Order Blocks)
+// ═══════════════════════════════════════════════════════════════════════════
+
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow (low,  pivotLen, pivotLen)
+
+// BOS / CHoCH logic:
+//   BOS↑  : close breaks lastHH while already in bullish structure → continuation
+//   CHoCH↑: close breaks lastHH while in bearish structure         → reversal
+//   BOS↓  : close breaks lastLL while already in bearish structure → continuation
+//   CHoCH↓: close breaks lastLL while in bullish structure         → reversal
+
+var float lastHH    = na
+var float lastLL    = na
+var int   lastHHBar = na
+var int   lastLLBar = na
+var bool  trendBull = false
+var bool  brokeHigh = false
+var bool  brokeLow  = false
+
+if not na(ph)
+    lastHH    := ph
+    lastHHBar := bar_index - pivotLen
+    brokeHigh := false
+
+if not na(pl)
+    lastLL    := pl
+    lastLLBar := bar_index - pivotLen
+    brokeLow  := false
+
+// ── Order Block arrays ────────────────────────────────────────────────────
+var box[] bullOBs = array.new<box>()
+var box[] bearOBs = array.new<box>()
+
+// Maintain OBs on every confirmed bar
+if barstate.isconfirmed
+    int bsz = array.size(bullOBs)
+    if bsz > 0
+        for i = bsz - 1 to 0
+            if i < array.size(bullOBs)
+                bx = array.get(bullOBs, i)
+                if close < box.get_bottom(bx)
+                    box.delete(bx)
+                    array.remove(bullOBs, i)
+                else
+                    box.set_right(bx, bar_index + 5)
+    int asz = array.size(bearOBs)
+    if asz > 0
+        for i = asz - 1 to 0
+            if i < array.size(bearOBs)
+                bx = array.get(bearOBs, i)
+                if close > box.get_top(bx)
+                    box.delete(bx)
+                    array.remove(bearOBs, i)
+                else
+                    box.set_right(bx, bar_index + 5)
+
+f_bullOverlap(float h, float l) =>
+    bool found = false
+    int sz = array.size(bullOBs)
+    if sz > 0
+        for i = 0 to sz - 1
+            bx = array.get(bullOBs, i)
+            if l < box.get_top(bx) and h > box.get_bottom(bx)
+                found := true
+                break
+    found
+
+f_bearOverlap(float h, float l) =>
+    bool found = false
+    int sz = array.size(bearOBs)
+    if sz > 0
+        for i = 0 to sz - 1
+            bx = array.get(bearOBs, i)
+            if l < box.get_top(bx) and h > box.get_bottom(bx)
+                found := true
+                break
+    found
+
+f_newBullOB() =>
+    for i = 1 to 20
+        if close[i] < open[i]
+            obH = high[i]
+            obL = low[i]
+            if not f_bullOverlap(obH, obL)
+                if array.size(bullOBs) >= maxOB
+                    box.delete(array.shift(bullOBs))
+                array.push(bullOBs, box.new(
+                     bar_index - i, obH, bar_index + 5, obL,
+                     bgcolor=bullOBCol,
+                     border_color=color.new(color.green, 45),
+                     border_width=1, extend=extend.none))
+            break
+
+f_newBearOB() =>
+    for i = 1 to 20
+        if close[i] > open[i]
+            obH = high[i]
+            obL = low[i]
+            if not f_bearOverlap(obH, obL)
+                if array.size(bearOBs) >= maxOB
+                    box.delete(array.shift(bearOBs))
+                array.push(bearOBs, box.new(
+                     bar_index - i, obH, bar_index + 5, obL,
+                     bgcolor=bearOBCol,
+                     border_color=color.new(color.red, 45),
+                     border_width=1, extend=extend.none))
+            break
+
+if not na(lastHH) and not brokeHigh and close > lastHH
+    isCHoCH  = not trendBull
+    bosLabel = isCHoCH ? "CHoCH↑" : "BOS↑"
+    lCol     = isCHoCH ? color.lime : color.green
+    if showStructure
+        label.new(bar_index, high, bosLabel,
+             style=label.style_label_down, yloc=yloc.abovebar,
+             color=lCol, textcolor=color.black, size=size.tiny)
+        line.new(lastHHBar, lastHH, bar_index, lastHH,
+             color=color.new(color.green, 35), style=line.style_dashed, width=1)
+    if showOB
+        f_newBullOB()
+    trendBull := true
+    brokeHigh := true
+
+if not na(lastLL) and not brokeLow and close < lastLL
+    isCHoCH  = trendBull
+    bosLabel = isCHoCH ? "CHoCH↓" : "BOS↓"
+    lCol     = isCHoCH ? color.fuchsia : color.red
+    if showStructure
+        label.new(bar_index, low, bosLabel,
+             style=label.style_label_up, yloc=yloc.belowbar,
+             color=lCol, textcolor=color.white, size=size.tiny)
+        line.new(lastLLBar, lastLL, bar_index, lastLL,
+             color=color.new(color.red, 35), style=line.style_dashed, width=1)
+    if showOB
+        f_newBearOB()
+    trendBull := false
+    brokeLow  := true
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 3 — LIQUIDITY  (Equal Highs / Lows + Sweeps)
+// ═══════════════════════════════════════════════════════════════════════════
+
+eqDelta = close * eqThresh / 100.0
+
+var float prevPH    = na
+var int   prevPHBar = na
+var float prevPL    = na
+var int   prevPLBar = na
+var line[]  eqLinePool  = array.new<line>()
+var label[] eqLabelPool = array.new<label>()
+
+f_addEQ(line ln, label lb) =>
+    array.push(eqLinePool, ln)
+    array.push(eqLabelPool, lb)
+    if array.size(eqLinePool) > maxEQ
+        line.delete(array.shift(eqLinePool))
+        label.delete(array.shift(eqLabelPool))
+
+if showEQ and not na(ph)
+    cBar = bar_index - pivotLen
+    if not na(prevPH) and math.abs(ph - prevPH) <= eqDelta
+        bool skipEQ = false
+        int  eSz    = array.size(eqLinePool)
+        if eSz > 0
+            for i = 0 to eSz - 1
+                if math.abs(line.get_y1(array.get(eqLinePool, i)) - ph) <= eqDelta
+                    skipEQ := true
+                    break
+        if not skipEQ
+            f_addEQ(
+                 line.new(prevPHBar, ph, cBar, ph,
+                      color=color.new(color.fuchsia, 15), width=2, style=line.style_dotted),
+                 label.new(cBar, ph, "EQH",
+                      style=label.style_label_left,
+                      color=color.new(color.fuchsia, 20), textcolor=color.white, size=size.tiny))
+    prevPH    := ph
+    prevPHBar := bar_index - pivotLen
+
+if showEQ and not na(pl)
+    cBar = bar_index - pivotLen
+    if not na(prevPL) and math.abs(pl - prevPL) <= eqDelta
+        bool skipEQ = false
+        int  eSz    = array.size(eqLinePool)
+        if eSz > 0
+            for i = 0 to eSz - 1
+                if math.abs(line.get_y1(array.get(eqLinePool, i)) - pl) <= eqDelta
+                    skipEQ := true
+                    break
+        if not skipEQ
+            f_addEQ(
+                 line.new(prevPLBar, pl, cBar, pl,
+                      color=color.new(color.fuchsia, 15), width=2, style=line.style_dotted),
+                 label.new(cBar, pl, "EQL",
+                      style=label.style_label_left,
+                      color=color.new(color.fuchsia, 20), textcolor=color.white, size=size.tiny))
+    prevPL    := pl
+    prevPLBar := bar_index - pivotLen
+
+recentHi  = ta.highest(high, sweepLen)[1]
+recentLo  = ta.lowest(low,   sweepLen)[1]
+bullSweep = low  < recentLo and close > recentLo
+bearSweep = high > recentHi and close < recentHi
+
+plotshape(showSweeps and bullSweep, "Bull Sweep", shape.triangleup,
+     location.belowbar, color=color.new(color.aqua, 10),
+     text="SW", textcolor=color.black, size=size.tiny)
+plotshape(showSweeps and bearSweep, "Bear Sweep", shape.triangledown,
+     location.abovebar, color=color.new(color.orange, 10),
+     text="SW", textcolor=color.black, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 4 — PREMIUM / DISCOUNT FIBONACCI GRID
+// ═══════════════════════════════════════════════════════════════════════════
+
+swingH   = ta.highest(high, fibSwingLen)
+swingL   = ta.lowest(low,   fibSwingLen)
+fibRange = swingH - swingL
+
+fLvl0   = swingL
+fLvl236 = swingL + fibRange * 0.236
+fLvl382 = swingL + fibRange * 0.382
+fLvl500 = swingL + fibRange * 0.500
+fLvl618 = swingL + fibRange * 0.618
+fLvl786 = swingL + fibRange * 0.786
+fLvl1   = swingH
+
+var box   fibPremBox = na
+var box   fibDiscBox = na
+var line  fibL1  = na
+var line  fibL786 = na
+var line  fibL618 = na
+var line  fibL500 = na
+var line  fibL382 = na
+var line  fibL236 = na
+var line  fibL0  = na
+var label fibLb1  = na
+var label fibLb786 = na
+var label fibLb618 = na
+var label fibLb500 = na
+var label fibLb382 = na
+var label fibLb236 = na
+var label fibLb0  = na
+
+if showPDFibs and barstate.islast
+    box.delete(fibPremBox)
+    box.delete(fibDiscBox)
+    line.delete(fibL1)
+    line.delete(fibL786)
+    line.delete(fibL618)
+    line.delete(fibL500)
+    line.delete(fibL382)
+    line.delete(fibL236)
+    line.delete(fibL0)
+    label.delete(fibLb1)
+    label.delete(fibLb786)
+    label.delete(fibLb618)
+    label.delete(fibLb500)
+    label.delete(fibLb382)
+    label.delete(fibLb236)
+    label.delete(fibLb0)
+
+    // Fixed bar offset replaces extend.right — preserves zoom sync
+    startBar = bar_index - fibSwingLen
+    endBar   = fibExtend ? bar_index + 100 : bar_index
+
+    fibPremBox := box.new(startBar, fLvl1,   endBar, fLvl500,
+         bgcolor=fibPremCol, border_color=color.new(color.red,   80),
+         border_width=0, extend=extend.none)
+    fibDiscBox := box.new(startBar, fLvl500, endBar, fLvl0,
+         bgcolor=fibDiscCol, border_color=color.new(color.green, 80),
+         border_width=0, extend=extend.none)
+
+    fibL1   := line.new(startBar, fLvl1,   endBar, fLvl1,
+         color=color.new(color.red,     15), width=1, style=line.style_solid,  extend=extend.none)
+    fibL786 := line.new(startBar, fLvl786, endBar, fLvl786,
+         color=color.new(color.red,     45), width=1, style=line.style_dashed, extend=extend.none)
+    fibL618 := line.new(startBar, fLvl618, endBar, fLvl618,
+         color=color.new(color.orange,  25), width=1, style=line.style_dashed, extend=extend.none)
+    fibL500 := line.new(startBar, fLvl500, endBar, fLvl500,
+         color=color.new(color.yellow,  15), width=2, style=line.style_solid,  extend=extend.none)
+    fibL382 := line.new(startBar, fLvl382, endBar, fLvl382,
+         color=color.new(color.lime,    25), width=1, style=line.style_dashed, extend=extend.none)
+    fibL236 := line.new(startBar, fLvl236, endBar, fLvl236,
+         color=color.new(color.green,   45), width=1, style=line.style_dashed, extend=extend.none)
+    fibL0   := line.new(startBar, fLvl0,   endBar, fLvl0,
+         color=color.new(color.green,   15), width=1, style=line.style_solid,  extend=extend.none)
+
+    fibLb1   := label.new(bar_index, fLvl1,   "1.000  Premium High",
+         style=label.style_label_left, color=color.new(color.red,    60),
+         textcolor=color.white, size=size.tiny)
+    fibLb786 := label.new(bar_index, fLvl786, "0.786",
+         style=label.style_label_left, color=color.new(color.red,    72),
+         textcolor=color.white, size=size.tiny)
+    fibLb618 := label.new(bar_index, fLvl618, "0.618  Optimal Short",
+         style=label.style_label_left, color=color.new(color.orange, 60),
+         textcolor=color.white, size=size.tiny)
+    fibLb500 := label.new(bar_index, fLvl500, "0.500  ─ EQ ─",
+         style=label.style_label_left, color=color.new(color.yellow, 50),
+         textcolor=color.black, size=size.tiny)
+    fibLb382 := label.new(bar_index, fLvl382, "0.382  Optimal Long",
+         style=label.style_label_left, color=color.new(color.lime,   60),
+         textcolor=color.black, size=size.tiny)
+    fibLb236 := label.new(bar_index, fLvl236, "0.236",
+         style=label.style_label_left, color=color.new(color.green,  72),
+         textcolor=color.white, size=size.tiny)
+    fibLb0   := label.new(bar_index, fLvl0,   "0.000  Discount Low",
+         style=label.style_label_left, color=color.new(color.green,  60),
+         textcolor=color.white, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 5 — ZONE ENGINE  (Session-Aware Average Range Method)
+//
+//  avgRange  = Nth-percentile of completed SESSION ranges
+//              → excludes overnight gaps (Brent maint. break, NSE non-trading)
+//  zAnchor   = Prev Session Close  OR  Current Session Open
+//              → both sourced from session engine (not raw UTC day boundaries)
+// ═══════════════════════════════════════════════════════════════════════════
+
+zU1 = zAnchor + zoneAvgRange * zone1Val
+zU2 = zAnchor + zoneAvgRange * zone2Val
+zU3 = zAnchor + zoneAvgRange * zone3Val
+zD1 = zAnchor - zoneAvgRange * zone1Val
+zD2 = zAnchor - zoneAvgRange * zone2Val
+zD3 = zAnchor - zoneAvgRange * zone3Val
+
+var box   zBxU1 = na
+var box   zBxU2 = na
+var box   zBxU3 = na
+var box   zBxD1 = na
+var box   zBxD2 = na
+var box   zBxD3 = na
+var line  zAnchLine = na
+var label zAnchLbl  = na
+var label zLblU1 = na
+var label zLblU2 = na
+var label zLblU3 = na
+var label zLblD1 = na
+var label zLblD2 = na
+var label zLblD3 = na
+
+if showZones and barstate.islast and not na(zoneAvgRange)
+    box.delete(zBxU1)
+    box.delete(zBxU2)
+    box.delete(zBxU3)
+    box.delete(zBxD1)
+    box.delete(zBxD2)
+    box.delete(zBxD3)
+    line.delete(zAnchLine)
+    label.delete(zAnchLbl)
+    label.delete(zLblU1)
+    label.delete(zLblU2)
+    label.delete(zLblU3)
+    label.delete(zLblD1)
+    label.delete(zLblD2)
+    label.delete(zLblD3)
+
+    // Fixed bar offset instead of extend.right — keeps chart/indicator zoom locked
+    zS  = bar_index - 1
+    zE  = bar_index + 100
+
+    zAnchLine := line.new(zS, zAnchor, zE, zAnchor,
+         color=color.new(color.white, 35), width=1, style=line.style_dotted,
+         extend=extend.none)
+    zAnchLbl  := label.new(zE, zAnchor,
+         "Anchor  " + str.tostring(zAnchor, "#.##"),
+         style=label.style_label_left,
+         color=color.new(color.white, 65), textcolor=color.white, size=size.tiny)
+
+    // Upper zones — Resistance
+    zBxU1 := box.new(zS, zU1, zE, zAnchor,
+         bgcolor=zoneCol1, border_color=color.new(color.green,  45),
+         border_width=1, extend=extend.none)
+    zBxU2 := box.new(zS, zU2, zE, zU1,
+         bgcolor=zoneCol2, border_color=color.new(color.yellow, 45),
+         border_width=1, extend=extend.none)
+    zBxU3 := box.new(zS, zU3, zE, zU2,
+         bgcolor=zoneCol3, border_color=color.new(color.red,    45),
+         border_width=1, extend=extend.none)
+
+    zLblU1 := label.new(zE, zU1,
+         "R1 (" + str.tostring(zone1Val,"#.###") + "×)  " + str.tostring(zU1,"#.##"),
+         style=label.style_label_left, color=color.new(color.green,  62),
+         textcolor=color.white, size=size.tiny)
+    zLblU2 := label.new(zE, zU2,
+         "R2 (" + str.tostring(zone2Val,"#.###") + "×)  " + str.tostring(zU2,"#.##"),
+         style=label.style_label_left, color=color.new(color.yellow, 62),
+         textcolor=color.white, size=size.tiny)
+    zLblU3 := label.new(zE, zU3,
+         "R3 (" + str.tostring(zone3Val,"#.###") + "×)  " + str.tostring(zU3,"#.##"),
+         style=label.style_label_left, color=color.new(color.red,    62),
+         textcolor=color.white, size=size.tiny)
+
+    // Lower zones — Support
+    zBxD1 := box.new(zS, zAnchor, zE, zD1,
+         bgcolor=zoneCol1, border_color=color.new(color.green,  45),
+         border_width=1, extend=extend.none)
+    zBxD2 := box.new(zS, zD1,     zE, zD2,
+         bgcolor=zoneCol2, border_color=color.new(color.yellow, 45),
+         border_width=1, extend=extend.none)
+    zBxD3 := box.new(zS, zD2,     zE, zD3,
+         bgcolor=zoneCol3, border_color=color.new(color.red,    45),
+         border_width=1, extend=extend.none)
+
+    zLblD1 := label.new(zE, zD1,
+         "S1 (" + str.tostring(zone1Val,"#.###") + "×)  " + str.tostring(zD1,"#.##"),
+         style=label.style_label_left, color=color.new(color.green,  62),
+         textcolor=color.white, size=size.tiny)
+    zLblD2 := label.new(zE, zD2,
+         "S2 (" + str.tostring(zone2Val,"#.###") + "×)  " + str.tostring(zD2,"#.##"),
+         style=label.style_label_left, color=color.new(color.yellow, 62),
+         textcolor=color.white, size=size.tiny)
+    zLblD3 := label.new(zE, zD3,
+         "S3 (" + str.tostring(zone3Val,"#.###") + "×)  " + str.tostring(zD3,"#.##"),
+         style=label.style_label_left, color=color.new(color.red,    62),
+         textcolor=color.white, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODULE 6 — PREVIOUS SESSION OHLC
+//
+//  Draws four lines (+100 bar offset) from the current bar.
+//  Values come from session engine:
+//    Crypto  → previous UTC day (session engine uses ta.change("D"))
+//    NSE     → previous 09:15–15:30 session (no overnight gap included)
+//    Brent   → previous 01:00–23:00 session
+// ═══════════════════════════════════════════════════════════════════════════
+
+pdLStyle = pdLineStyleInp == "Dashed" ? line.style_dashed :
+           pdLineStyleInp == "Dotted" ? line.style_dotted :
+           line.style_solid
+
+var line  pdlH  = na
+var line  pdlL = na
+var line  pdlO  = na
+var line  pdlC = na
+var label pdlbH = na
+var label pdlbL = na
+var label pdlbO = na
+var label pdlbC = na
+
+if showPDOHLC and barstate.islast and not na(pdH)
+    line.delete(pdlH)
+    line.delete(pdlL)
+    line.delete(pdlO)
+    line.delete(pdlC)
+    label.delete(pdlbH)
+    label.delete(pdlbL)
+    label.delete(pdlbO)
+    label.delete(pdlbC)
+
+    // Fixed offset instead of extend.right — zoom stays locked to chart
+    pdE = bar_index + 100
+
+    pdlH := line.new(bar_index - 1, pdH, pdE, pdH,
+         color=pdHighCol,  width=pdLineWidth, style=pdLStyle, extend=extend.none)
+    pdlL := line.new(bar_index - 1, pdL, pdE, pdL,
+         color=pdLowCol,   width=pdLineWidth, style=pdLStyle, extend=extend.none)
+    pdlO := line.new(bar_index - 1, pdO, pdE, pdO,
+         color=pdOpenCol,  width=pdLineWidth, style=pdLStyle, extend=extend.none)
+    pdlC := line.new(bar_index - 1, pdC, pdE, pdC,
+         color=pdCloseCol, width=pdLineWidth, style=pdLStyle, extend=extend.none)
+
+    pdlbH := label.new(pdE, pdH, "PSH  " + str.tostring(pdH, "#.##"),
+         style=label.style_label_left,
+         color=color.new(color.red,    62), textcolor=color.white, size=size.tiny)
+    pdlbL := label.new(pdE, pdL, "PSL  " + str.tostring(pdL, "#.##"),
+         style=label.style_label_left,
+         color=color.new(color.green,  62), textcolor=color.white, size=size.tiny)
+    pdlbO := label.new(pdE, pdO, "PSO  " + str.tostring(pdO, "#.##"),
+         style=label.style_label_left,
+         color=color.new(color.orange, 62), textcolor=color.white, size=size.tiny)
+    pdlbC := label.new(pdE, pdC, "PSC  " + str.tostring(pdC, "#.##"),
+         style=label.style_label_left,
+         color=color.new(color.aqua,   62), textcolor=color.white, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ALERTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+alertcondition(bullSig,                              "Buy Signal",       "PTS v3 ▲ Bullish EMA cross")
+alertcondition(bearSig,                              "Sell Signal",      "PTS v3 ▼ Bearish EMA cross")
+alertcondition(bullSweep,                            "Bull Liq Sweep",   "PTS v3 — Bullish liquidity sweep")
+alertcondition(bearSweep,                            "Bear Liq Sweep",   "PTS v3 — Bearish liquidity sweep")
+alertcondition(close > lastHH and not brokeHigh,     "Bullish BOS/CHoCH","PTS v3 — Bullish structure break")
+alertcondition(close < lastLL and not brokeLow,      "Bearish BOS/CHoCH","PTS v3 — Bearish structure break")
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DASHBOARD TABLE
+// ═══════════════════════════════════════════════════════════════════════════
+
+var table dash = table.new(position.top_right, 2, 12,
+     bgcolor=color.new(color.black, 60), border_width=1,
+     border_color=color.new(color.gray, 70),
+     frame_width=1, frame_color=color.new(color.silver, 50))
+
+if barstate.islast
+    rsiTxt = rsiV > rsiBull ? "BULL" : rsiV < rsiBear ? "BEAR" : "NEUT"
+    rsiCol = rsiV > rsiBull ? color.lime : rsiV < rsiBear ? color.red : color.yellow
+    strTxt = trendBull ? "BULLISH ▲" : "BEARISH ▼"
+    strCol = trendBull ? color.lime : color.red
+    sessTxt = is24h ? "24h" :
+              mktType == "Equity — NSE" ? "NSE" :
+              mktType == "Futures — Brent ICE" ? "BRENT" : "CUSTOM"
+
+    table.cell(dash, 0, 0,  "PTS v3  " + sessTxt, text_color=color.white, text_size=size.small,
+         bgcolor=color.new(color.blue, 50))
+    table.cell(dash, 1, 0,  timeframe.period, text_color=color.silver, text_size=size.small,
+         bgcolor=color.new(color.blue, 50))
+    table.cell(dash, 0, 1,  "Trend",      text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 1,  strTxt,       text_color=strCol,       text_size=size.small)
+    table.cell(dash, 0, 2,  "RSI",        text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 2,  str.tostring(rsiV, "#.0") + "  " + rsiTxt,
+         text_color=rsiCol, text_size=size.small)
+    table.cell(dash, 0, 3,  "ATR",        text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 3,  str.tostring(atrV, "#.00"),
+         text_color=color.aqua, text_size=size.small)
+    table.cell(dash, 0, 4,  "EMA",        text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 4,  ema1 > ema2 ? "↑ UP" : "↓ DOWN",
+         text_color=ema1 > ema2 ? color.lime : color.red, text_size=size.small)
+    table.cell(dash, 0, 5,  "Active OBs", text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 5,  "▲" + str.tostring(array.size(bullOBs)) +
+         "  ▼" + str.tostring(array.size(bearOBs)),
+         text_color=color.yellow, text_size=size.small)
+    table.cell(dash, 0, 6,  "EQ Level",   text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 6,  str.tostring(fLvl500, "#.##"),
+         text_color=color.yellow, text_size=size.small)
+    table.cell(dash, 0, 7,  "PSH / PSL",  text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 7,  str.tostring(pdH, "#.##") + " / " + str.tostring(pdL, "#.##"),
+         text_color=color.orange, text_size=size.small)
+    table.cell(dash, 0, 8,  "PSO / PSC",  text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 8,  str.tostring(pdO, "#.##") + " / " + str.tostring(pdC, "#.##"),
+         text_color=color.aqua, text_size=size.small)
+    table.cell(dash, 0, 9,  "Sess Range", text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 9,  na(zoneAvgRange) ? "Building…" : str.tostring(zoneAvgRange, "#.##"),
+         text_color=color.aqua, text_size=size.small)
+    table.cell(dash, 0, 10, "Anchor",     text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 10, str.tostring(zAnchor, "#.##"),
+         text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 11, "Sess Open",  text_color=color.silver, text_size=size.small)
+    table.cell(dash, 1, 11, na(currSessOpen) ? "—" : str.tostring(currSessOpen, "#.##"),
+         text_color=color.lime, text_size=size.small)
