@@ -1,0 +1,1411 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+//  APEX EDGE PRO v2  🎯  •  Complete Intraday Confluence Suite
+//  ─────────────────────────────────────────────────────────────────────────────
+//  Major upgrade integrating all roadmap features:
+//
+//   ZONE & PIVOT
+//     • Triple-band volatility zones (Z1/Z2/Z3) with 5 averaging methods
+//     • Premium/Discount session context + POC
+//     • Previous Day OHLC reference levels
+//     • Central Pivot Range (CPR) — narrow/wide detection + R1/R2/R3, S1/S2/S3
+//     • Developing CPR forecast for next session
+//     • Session VWAP + standard deviation bands
+//     • Opening Range engine + breakout markers
+//     • Strike price ladder (options-friendly)
+//
+//   TREND & MOMENTUM
+//     • Configurable EMA Cloud (default 10/30)
+//     • HTF EMA-cross trend bias
+//
+//   SMART MONEY CONCEPTS (SMC) + ICT
+//     • Order Blocks (bullish + bearish) with mitigation tracking
+//     • Fair Value Gaps with fill detection                    [enhanced]
+//     • Inversion FVG (iFVG) detection                         [NEW]
+//     • Higher-Timeframe FVG visualization                     [NEW]
+//     • Buy/Sell Side Liquidity (BSL/SSL) with sweep detection
+//     • Break of Structure (BOS) markers
+//     • Premium/Discount Fibonacci retracement (0.5/0.618/0.705/0.786) [NEW]
+//     • Killzone time blocks (IN markets + global ICT)         [NEW]
+//
+//   VOLUME & DIVERGENCE
+//     • Cumulative Volume Delta (CVD) approximation             [NEW]
+//     • CVD Divergence detection at zones                       [NEW]
+//
+//   FILTERS & SIGNAL ENGINE
+//     • Time-of-Day filters (open/close/custom blocks)          [NEW]
+//     • Optional killzone-restricted signals                    [NEW]
+//     • Multi-factor confluence engine
+//     • Auto SL/TP with configurable R:R
+//     • Webhook JSON alert payloads (dynamic)                   [NEW]
+//
+//   Optimized for dark theme  •  Default linewidth = 2 throughout
+// ═══════════════════════════════════════════════════════════════════════════════
+
+//@version=6
+indicator("Apex Edge Pro v2 🎯",
+     shorttitle       = "ApexEdge v2",
+     overlay          = true,
+     max_lines_count  = 500,
+     max_labels_count = 500,
+     max_boxes_count  = 500)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  INPUTS — organized into 18 groups
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var string G_ZONE = "① Zone Engine"
+var string G_EMA  = "② EMA Cloud"
+var string G_CPR  = "③ CPR"
+var string G_VWAP = "④ Session VWAP"
+var string G_OR   = "⑤ Opening Range"
+var string G_STK  = "⑥ Strike Prices"
+var string G_HTF  = "⑦ HTF Trend"
+var string G_OB   = "⑧ Order Blocks (SMC)"
+var string G_FVG  = "⑨ Fair Value Gaps (ICT)"
+var string G_HFV  = "⑩ HTF Fair Value Gaps"
+var string G_LIQ  = "⑪ Liquidity Levels"
+var string G_MS   = "⑫ Market Structure"
+var string G_FIB  = "⑬ Premium/Discount Fibs"
+var string G_KZ   = "⑭ Killzones (ICT)"
+var string G_TOD  = "⑮ Time-of-Day Filter"
+var string G_CVD  = "⑯ Cumulative Volume Delta"
+var string G_CDL  = "⑰ Candle Quality"
+var string G_SIG  = "⑱ Confluence Signals"
+var string G_WEB  = "⑲ Webhook Alerts"
+var string G_DSP  = "⑳ Display"
+var string G_COL  = "㉑ Colors (Dark Theme)"
+
+// ① Zone Engine
+range_method = input.string("SMA", "Avg Range Method", options=["SMA", "EMA", "Median", "Percentile", "ATR"], group=G_ZONE)
+lookback     = input.int   (20,   "Lookback (Days)", minval=5, maxval=200, group=G_ZONE)
+percentile   = input.float (75.0, "Percentile (if Percentile mode)", minval=10, maxval=99, step=5, group=G_ZONE)
+mult_z1      = input.float (0.382,"Zone 1 (Inner)",  minval=0.1, step=0.05, group=G_ZONE)
+mult_z2      = input.float (0.618,"Zone 2 (Mid)",    minval=0.1, step=0.05, group=G_ZONE)
+mult_z3      = input.float (1.000,"Zone 3 (Outer)",  minval=0.1, step=0.05, group=G_ZONE)
+show_pd_ohlc = input.bool  (true, "Show Previous Day OHLC", group=G_ZONE)
+
+// ② EMA Cloud
+use_ema       = input.bool(true, "Enable EMA Cloud", group=G_EMA)
+ema_fast_len  = input.int (10,   "Fast EMA", minval=2, maxval=200, group=G_EMA)
+ema_slow_len  = input.int (30,   "Slow EMA", minval=2, maxval=400, group=G_EMA)
+show_ema_lines= input.bool(true, "Show EMA Lines", group=G_EMA)
+
+// ③ CPR
+use_cpr      = input.bool(true, "Enable CPR", group=G_CPR)
+show_cpr_sr  = input.bool(true, "Show R1/R2/R3 + S1/S2/S3", group=G_CPR)
+show_dev_cpr = input.bool(true, "Show Developing CPR (next session)", group=G_CPR)
+
+// ④ Session VWAP
+use_vwap      = input.bool(true,  "Enable VWAP", group=G_VWAP)
+vwap_dev_mult = input.float(1.0,  "Std-Dev Multiplier", minval=0.5, step=0.5, group=G_VWAP)
+show_vwap_bd  = input.bool(true,  "Show VWAP Bands", group=G_VWAP)
+
+// ⑤ Opening Range
+use_or       = input.bool(true, "Enable OR", group=G_OR)
+or_minutes   = input.int (15,   "OR Duration (min)", minval=5, maxval=120, step=5, group=G_OR)
+show_or_bo   = input.bool(true, "Show OR Breakout Markers", group=G_OR)
+
+// ⑥ Strike Prices
+use_strikes  = input.bool (false, "Enable Strike Ladder", group=G_STK)
+strike_step  = input.float(50.0,  "Strike Interval", minval=0.5, step=0.5, group=G_STK,
+     tooltip="50 for Nifty, 100 for BankNifty.")
+strike_count = input.int  (3,     "Strikes Above & Below", minval=1, maxval=10, group=G_STK)
+
+// ⑦ HTF Trend
+use_htf      = input.bool   (true,   "Enable HTF Trend", group=G_HTF)
+htf_tf       = input.timeframe("60", "HTF Timeframe", group=G_HTF)
+htf_ema_fast = input.int    (21,     "HTF Fast EMA", minval=5, group=G_HTF)
+htf_ema_slow = input.int    (50,     "HTF Slow EMA", minval=10, group=G_HTF)
+
+// ⑧ Order Blocks
+use_ob      = input.bool(true, "Enable Order Blocks", group=G_OB)
+ob_lookback = input.int (5,    "Pivot Strength", minval=2, maxval=20, group=G_OB)
+ob_count    = input.int (3,    "Max OBs per side", minval=1, maxval=10, group=G_OB)
+ob_extend   = input.int (50,   "OB Box Extension", minval=10, group=G_OB)
+
+// ⑨ Fair Value Gaps (LTF)
+use_fvg     = input.bool (true,  "Enable LTF FVGs", group=G_FVG)
+fvg_min_atr = input.float(0.25,  "Min FVG Size (× ATR)", minval=0.0, step=0.05, group=G_FVG)
+fvg_count   = input.int  (5,     "Max FVGs per side", minval=1, maxval=15, group=G_FVG)
+use_ifvg    = input.bool (true,  "Enable Inversion FVG (iFVG)", group=G_FVG,
+     tooltip="When a bullish FVG is filled, it inverts and acts as resistance (and vice versa).")
+
+// ⑩ HTF Fair Value Gaps
+use_htf_fvg   = input.bool(true,  "Enable HTF FVGs", group=G_HFV)
+htf_fvg_tf    = input.timeframe("60", "HTF FVG Timeframe", group=G_HFV)
+htf_fvg_count = input.int (3,     "Max HTF FVGs displayed", minval=1, maxval=10, group=G_HFV)
+
+// ⑪ Liquidity Levels
+use_liq       = input.bool (true, "Enable Liquidity Levels", group=G_LIQ)
+liq_lookback  = input.int  (5,    "Pivot Strength", minval=2, maxval=20, group=G_LIQ)
+liq_tolerance = input.float(0.05, "Equal H/L Tolerance %", minval=0.01, step=0.01, group=G_LIQ)
+
+// ⑫ Market Structure
+use_ms      = input.bool(true, "Enable BOS Detection", group=G_MS)
+ms_lookback = input.int (5,    "MS Pivot Strength", minval=2, maxval=20, group=G_MS)
+
+// ⑬ Premium/Discount Fibs
+use_fib      = input.bool(true, "Enable P/D Fibonacci", group=G_FIB,
+     tooltip="Fib retracement between session High and Low. 0.5 = equilibrium, 0.705 = OTE (Optimal Trade Entry).")
+show_fib_50  = input.bool(true, "0.5  (Equilibrium)",  group=G_FIB)
+show_fib_618 = input.bool(true, "0.618",               group=G_FIB)
+show_fib_705 = input.bool(true, "0.705 (OTE)",         group=G_FIB)
+show_fib_786 = input.bool(true, "0.786",               group=G_FIB)
+
+// ⑭ Killzones
+use_kz        = input.bool(true,         "Enable Killzone Highlighting", group=G_KZ)
+kz_tz         = input.string("Asia/Kolkata", "Killzone Timezone",
+     options=["Asia/Kolkata","America/New_York","Europe/London","UTC"], group=G_KZ)
+kz_in_open    = input.session("0915-0945", "IN Opening Drive",   group=G_KZ)
+kz_in_lunch   = input.session("1230-1330", "IN Lunch (avoid)",   group=G_KZ)
+kz_in_power   = input.session("1430-1530", "IN Power Hour",      group=G_KZ)
+kz_london     = input.session("1230-1530", "London Open KZ",     group=G_KZ)
+kz_ny_am      = input.session("1730-2030", "New York AM KZ",     group=G_KZ)
+kz_signals_only_in_kz = input.bool(false, "Restrict signals to active killzones", group=G_KZ)
+
+// ⑮ Time-of-Day Filter
+use_tod         = input.bool   (false,        "Enable TOD Filter", group=G_TOD)
+tod_block_1     = input.session("0915-0920", "Block: Open Volatility", group=G_TOD)
+tod_block_2     = input.session("1230-1330", "Block: Lunch",          group=G_TOD)
+tod_block_3     = input.session("1515-1530", "Block: Close Volatility", group=G_TOD)
+
+// ⑯ CVD
+use_cvd       = input.bool(true, "Enable CVD Divergence", group=G_CVD)
+cvd_lookback  = input.int (20,   "Divergence Lookback", minval=5, maxval=100, group=G_CVD)
+cvd_only_at_zone = input.bool(true, "Only flag divergence near zones", group=G_CVD)
+
+// ⑰ Candle Quality
+use_cdl_qty  = input.bool (true, "Enable Candle Quality Filter", group=G_CDL)
+max_atr_mult = input.float(2.5,  "Max Range (× ATR)", minval=0.5, step=0.1, group=G_CDL)
+min_body_pct = input.float(35.0, "Min Body % of Range", minval=5.0, step=5.0, group=G_CDL)
+hammer_ratio = input.float(2.0,  "Hammer Wick/Body Ratio", minval=1.0, step=0.5, group=G_CDL)
+
+// ⑱ Confluence Signals
+use_signals   = input.bool (true,  "Enable Signals", group=G_SIG)
+require_htf   = input.bool (true,  "Require HTF Trend", group=G_SIG)
+require_ema   = input.bool (true,  "Require EMA Cloud Alignment", group=G_SIG)
+require_vol   = input.bool (true,  "Require Above-Avg Volume", group=G_SIG)
+require_cvd   = input.bool (false, "Require CVD Divergence (strict)", group=G_SIG)
+volume_mult   = input.float(1.20,  "Volume Multiplier", minval=1.0, step=0.05, group=G_SIG)
+proximity_atr = input.float(0.30,  "Zone Proximity (× ATR)", minval=0.1, step=0.05, group=G_SIG)
+detect_sweep  = input.bool (true,  "Detect Liquidity Sweeps", group=G_SIG)
+auto_sltp     = input.bool (true,  "Show Auto SL/TP", group=G_SIG)
+rr_target     = input.float(2.0,   "Risk-Reward Target", minval=1.0, step=0.5, group=G_SIG)
+
+// ⑲ Webhook
+use_webhook  = input.bool  (false, "Enable Webhook JSON Alerts (dynamic)", group=G_WEB,
+     tooltip="Use the Anthropic 'alert()' function to push dynamic JSON payloads to webhooks (e.g., n8n, Make, custom servers).")
+strategy_id  = input.string("ApexEdgeProV2", "Strategy ID", group=G_WEB)
+
+// ⑳ Display
+show_zones    = input.bool(true,  "Show Zone Lines", group=G_DSP)
+show_fills    = input.bool(true,  "Show Zone Fills", group=G_DSP)
+show_bg       = input.bool(true,  "Premium/Discount BG", group=G_DSP)
+show_labels   = input.bool(true,  "Show Zone Labels", group=G_DSP)
+show_dash     = input.bool(true,  "Show Dashboard", group=G_DSP)
+dash_pos      = input.string("top_right", "Dashboard Position",
+     options=["top_right","top_left","bottom_right","bottom_left","middle_right"], group=G_DSP)
+
+// ㉑ Colors (DARK THEME)
+col_z3_r  = input.color(#FF1744, "Z3 Resistance",  group=G_COL)
+col_z2_r  = input.color(#FF5252, "Z2 Resistance",  group=G_COL)
+col_z1_r  = input.color(#FF8A80, "Z1 Resistance",  group=G_COL)
+col_poc   = input.color(#FFB74D, "POC",            group=G_COL)
+col_z1_s  = input.color(#A5D6A7, "Z1 Support",     group=G_COL)
+col_z2_s  = input.color(#69F0AE, "Z2 Support",     group=G_COL)
+col_z3_s  = input.color(#00E676, "Z3 Support",     group=G_COL)
+col_ema_f = input.color(#FFEB3B, "EMA Fast",       group=G_COL)
+col_ema_s = input.color(#FF9800, "EMA Slow",       group=G_COL)
+col_vwap  = input.color(#BA68C8, "VWAP",           group=G_COL)
+col_or    = input.color(#26C6DA, "Opening Range",  group=G_COL)
+col_pd    = input.color(#64B5F6, "Prev Day OHLC",  group=G_COL)
+col_stk   = input.color(#B0BEC5, "Strikes",        group=G_COL)
+col_cpr   = input.color(#FFD54F, "CPR Pivot",      group=G_COL)
+col_cpr_r = input.color(#EF5350, "CPR R",          group=G_COL)
+col_cpr_s = input.color(#66BB6A, "CPR S",          group=G_COL)
+col_ob_b  = input.color(color.new(#00E676, 70), "Bull OB",  group=G_COL)
+col_ob_s  = input.color(color.new(#FF5252, 70), "Bear OB",  group=G_COL)
+col_fvg_b = input.color(color.new(#4CAF50, 75), "Bull FVG", group=G_COL)
+col_fvg_s = input.color(color.new(#F44336, 75), "Bear FVG", group=G_COL)
+col_ifvg  = input.color(color.new(#9C27B0, 75), "iFVG",     group=G_COL)
+col_htfvg_b = input.color(color.new(#00BCD4, 80), "HTF Bull FVG", group=G_COL)
+col_htfvg_s = input.color(color.new(#E91E63, 80), "HTF Bear FVG", group=G_COL)
+col_bsl   = input.color(#FF80AB, "BSL", group=G_COL)
+col_ssl   = input.color(#80D8FF, "SSL", group=G_COL)
+col_fib_50  = input.color(#90A4AE, "Fib 0.5",   group=G_COL)
+col_fib_618 = input.color(#FFD54F, "Fib 0.618", group=G_COL)
+col_fib_705 = input.color(#FF8A65, "Fib 0.705", group=G_COL)
+col_fib_786 = input.color(#CE93D8, "Fib 0.786", group=G_COL)
+col_kz_open  = input.color(color.new(#FFEB3B, 92), "KZ: IN Open",   group=G_COL)
+col_kz_lunch = input.color(color.new(#9E9E9E, 92), "KZ: IN Lunch",  group=G_COL)
+col_kz_power = input.color(color.new(#FF6B6B, 92), "KZ: IN Power",  group=G_COL)
+col_kz_lon   = input.color(color.new(#42A5F5, 92), "KZ: London",    group=G_COL)
+col_kz_ny    = input.color(color.new(#AB47BC, 92), "KZ: NY AM",     group=G_COL)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+f_percentile(src, len, pct) =>
+    arr = array.new<float>()
+    for i = 0 to len - 1
+        array.push(arr, nz(src[i]))
+    array.percentile_linear_interpolation(arr, pct)
+
+f_strike_round(price, step) =>
+    math.round(price / step) * step
+
+f_hline(_y, _col, _w, _st) =>
+    line.new(bar_index, _y, bar_index + 1, _y,
+         extend = extend.right, color = _col, width = _w, style = _st)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SESSION DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+is_new_day = ta.change(time("D")) != 0
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TIMEFRAME CLASSIFICATION
+//  ─────────────────────────────────────────────────────────────────────────────
+//  Intraday  <= 240 min  → full feature set (zones, VWAP, OR, killzones…)
+//  Daily / HTF >= 1D     → swing S/R mode (no session tools, weekly/monthly pivots)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+tf_secs     = timeframe.in_seconds()
+is_intraday = tf_secs < 86400      // < 1 day  → intraday (1m–240m)
+is_htf      = tf_secs >= 86400     // daily, weekly, monthly, etc.
+
+is_new_week  = ta.change(time("W")) != 0
+is_new_month = ta.change(time("M")) != 0
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  DAILY DATA + ZONE CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+daily_range = high - low
+
+sma_range = ta.sma   (daily_range, lookback)
+ema_range = ta.ema   (daily_range, lookback)
+med_range = ta.median(daily_range, lookback)
+pct_range = f_percentile(daily_range, lookback, percentile)
+atr_range = ta.atr   (lookback)
+
+selected_range = switch range_method
+    "SMA"        => sma_range
+    "EMA"        => ema_range
+    "Median"     => med_range
+    "Percentile" => pct_range
+    "ATR"        => atr_range
+    => sma_range
+
+avg_range = request.security(syminfo.tickerid, "D", selected_range[1], lookahead=barmerge.lookahead_on)
+
+[pd_o, pd_h, pd_l, pd_c] = request.security(syminfo.tickerid, "D",
+     [open[1], high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+
+var float z3_r = na, var float z2_r = na, var float z1_r = na
+var float poc  = na
+var float z1_s = na, var float z2_s = na, var float z3_s = na
+
+if is_new_day
+    poc  := open
+    z1_r := open + avg_range * mult_z1
+    z2_r := open + avg_range * mult_z2
+    z3_r := open + avg_range * mult_z3
+    z1_s := open - avg_range * mult_z1
+    z2_s := open - avg_range * mult_z2
+    z3_s := open - avg_range * mult_z3
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  HTF S/R ENGINE (Daily / Weekly / Monthly charts)
+//  ─────────────────────────────────────────────────────────────────────────────
+//  Replaces intraday session zones on higher timeframes with:
+//    • Swing pivot high / low levels (drawn as fixed horizontal lines per pivot)
+//    • Previous Week OHLC reference
+//    • Previous Month OHLC reference
+//    • Weekly CPR pivot
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Previous Week OHLC (always available regardless of chart TF)
+[pw_o, pw_h, pw_l, pw_c] = request.security(syminfo.tickerid, "W",
+     [open[1], high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+
+// Previous Month OHLC
+[pm_o, pm_h, pm_l, pm_c] = request.security(syminfo.tickerid, "M",
+     [open[1], high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+
+// Weekly CPR
+w_cpr_pp = (pw_h + pw_l + pw_c) / 3
+w_cpr_bc = (pw_h + pw_l) / 2
+w_cpr_tc = (w_cpr_pp - w_cpr_bc) + w_cpr_pp
+w_cpr_r1 = (2 * w_cpr_pp) - pw_l
+w_cpr_s1 = (2 * w_cpr_pp) - pw_h
+w_cpr_r2 = w_cpr_pp + (pw_h - pw_l)
+w_cpr_s2 = w_cpr_pp - (pw_h - pw_l)
+
+// Monthly CPR
+m_cpr_pp = (pm_h + pm_l + pm_c) / 3
+m_cpr_bc = (pm_h + pm_l) / 2
+m_cpr_tc = (m_cpr_pp - m_cpr_bc) + m_cpr_pp
+
+// Swing pivot S/R (only drawn on HTF, uses larger pivot lookback)
+// On daily chart: captures multi-week swing highs / lows
+// On weekly chart: captures multi-month swing highs / lows
+// is_daily_tf needed for htf_pivot_len calculation above
+is_daily_tf  = tf_secs == 86400
+htf_pivot_len = is_daily_tf ? 5 : 3
+htf_ph = ta.pivothigh(high, htf_pivot_len, htf_pivot_len)
+htf_pl = ta.pivotlow (low,  htf_pivot_len, htf_pivot_len)
+
+// HTF static line arrays
+var line[] htf_res_lines = array.new<line>()
+var line[] htf_sup_lines = array.new<line>()
+var label[] htf_res_labels = array.new<label>()
+var label[] htf_sup_labels = array.new<label>()
+
+// Swing S/R drawn as bounded horizontal lines (NOT extend.right) to avoid
+// the "trend-following" look — each level is drawn only at the swing bar
+// and extends right a fixed number of bars.
+htf_sr_extend = 100   // how many bars to the right each swing level extends
+
+if is_htf and not na(htf_ph)
+    ln = line.new(bar_index - htf_pivot_len, htf_ph,
+                  bar_index - htf_pivot_len + htf_sr_extend, htf_ph,
+                  color = color.new(#FF5252, 20), width = 2,
+                  style = line.style_solid)
+    lbl = label.new(bar_index - htf_pivot_len + htf_sr_extend, htf_ph,
+                    str.tostring(htf_ph, format.mintick),
+                    color = color.new(#FF5252, 60), textcolor = #FF8A80,
+                    style = label.style_label_left, size = size.tiny)
+    array.push(htf_res_lines, ln)
+    array.push(htf_res_labels, lbl)
+    // Keep only the most recent N swing resistance levels
+    while array.size(htf_res_lines) > 8
+        line.delete(array.shift(htf_res_lines))
+        label.delete(array.shift(htf_res_labels))
+
+if is_htf and not na(htf_pl)
+    ln = line.new(bar_index - htf_pivot_len, htf_pl,
+                  bar_index - htf_pivot_len + htf_sr_extend, htf_pl,
+                  color = color.new(#69F0AE, 20), width = 2,
+                  style = line.style_solid)
+    lbl = label.new(bar_index - htf_pivot_len + htf_sr_extend, htf_pl,
+                    str.tostring(htf_pl, format.mintick),
+                    color = color.new(#69F0AE, 60), textcolor = #A5D6A7,
+                    style = label.style_label_left, size = size.tiny)
+    array.push(htf_sup_lines, ln)
+    array.push(htf_sup_labels, lbl)
+    while array.size(htf_sup_lines) > 8
+        line.delete(array.shift(htf_sup_lines))
+        label.delete(array.shift(htf_sup_labels))
+
+// HTF static reference lines — Week / Month pivots (updated once per period)
+var line ln_w_pp = na, var line ln_w_tc = na, var line ln_w_bc = na
+var line ln_w_r1 = na, var line ln_w_s1 = na
+var line ln_w_r2 = na, var line ln_w_s2 = na
+var line ln_m_pp = na, var line ln_m_tc = na, var line ln_m_bc = na
+var line ln_pw_h = na, var line ln_pw_l = na, var line ln_pw_c = na
+var line ln_pm_h = na, var line ln_pm_l = na, var line ln_pm_c = na
+
+if is_htf and is_new_week
+    line.delete(ln_w_pp), line.delete(ln_w_tc), line.delete(ln_w_bc)
+    line.delete(ln_w_r1), line.delete(ln_w_s1)
+    line.delete(ln_w_r2), line.delete(ln_w_s2)
+    line.delete(ln_pw_h), line.delete(ln_pw_l), line.delete(ln_pw_c)
+    ln_w_pp := f_hline(w_cpr_pp, col_cpr,                  2, line.style_solid)
+    ln_w_tc := f_hline(w_cpr_tc, color.new(col_cpr, 30),   2, line.style_dashed)
+    ln_w_bc := f_hline(w_cpr_bc, color.new(col_cpr, 30),   2, line.style_dashed)
+    ln_w_r1 := f_hline(w_cpr_r1, col_cpr_r,                2, line.style_dotted)
+    ln_w_s1 := f_hline(w_cpr_s1, col_cpr_s,                2, line.style_dotted)
+    ln_w_r2 := f_hline(w_cpr_r2, color.new(col_cpr_r, 30), 2, line.style_dotted)
+    ln_w_s2 := f_hline(w_cpr_s2, color.new(col_cpr_s, 30), 2, line.style_dotted)
+    ln_pw_h := f_hline(pw_h, col_pd,                2, line.style_dotted)
+    ln_pw_l := f_hline(pw_l, col_pd,                2, line.style_dotted)
+    ln_pw_c := f_hline(pw_c, color.new(col_pd, 40), 2, line.style_dotted)
+
+if is_htf and is_new_month
+    line.delete(ln_m_pp), line.delete(ln_m_tc), line.delete(ln_m_bc)
+    line.delete(ln_pm_h), line.delete(ln_pm_l), line.delete(ln_pm_c)
+    ln_m_pp := f_hline(m_cpr_pp, color.new(col_cpr, 0),   2, line.style_solid)
+    ln_m_tc := f_hline(m_cpr_tc, color.new(col_cpr, 40),  2, line.style_dashed)
+    ln_m_bc := f_hline(m_cpr_bc, color.new(col_cpr, 40),  2, line.style_dashed)
+    ln_pm_h := f_hline(pm_h, color.new(#CE93D8, 0),  2, line.style_dotted)
+    ln_pm_l := f_hline(pm_l, color.new(#CE93D8, 0),  2, line.style_dotted)
+    ln_pm_c := f_hline(pm_c, color.new(#CE93D8, 40), 2, line.style_dotted)
+
+// (is_daily_tf defined above in HTF S/R engine block)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  EMA CLOUD
+// ═══════════════════════════════════════════════════════════════════════════════
+
+ema_fast = ta.ema(close, ema_fast_len)
+ema_slow = ta.ema(close, ema_slow_len)
+ema_bull = ema_fast > ema_slow
+ema_bear = ema_fast < ema_slow
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CPR
+// ═══════════════════════════════════════════════════════════════════════════════
+
+cpr_pp = (pd_h + pd_l + pd_c) / 3
+cpr_bc = (pd_h + pd_l) / 2
+cpr_tc = (cpr_pp - cpr_bc) + cpr_pp
+cpr_r1 = (2 * cpr_pp) - pd_l
+cpr_s1 = (2 * cpr_pp) - pd_h
+cpr_r2 = cpr_pp + (pd_h - pd_l)
+cpr_s2 = cpr_pp - (pd_h - pd_l)
+cpr_r3 = pd_h + 2 * (cpr_pp - pd_l)
+cpr_s3 = pd_l - 2 * (pd_h - cpr_pp)
+
+cpr_width_pct = pd_c > 0 ? math.abs(cpr_tc - cpr_bc) / pd_c * 100 : 0
+narrow_cpr    = cpr_width_pct < 0.5
+
+dev_pp = (high + low + close) / 3
+dev_bc = (high + low) / 2
+dev_tc = (dev_pp - dev_bc) + dev_pp
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SESSION VWAP + DEV BANDS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var float vwap_sum_pv  = 0.0
+var float vwap_sum_v   = 0.0
+var float vwap_sum_p2v = 0.0
+
+if is_new_day
+    vwap_sum_pv  := 0.0
+    vwap_sum_v   := 0.0
+    vwap_sum_p2v := 0.0
+
+typical = (high + low + close) / 3
+vwap_sum_pv  += typical * volume
+vwap_sum_v   += volume
+vwap_sum_p2v += typical * typical * volume
+
+session_vwap = vwap_sum_v > 0 ? vwap_sum_pv / vwap_sum_v : na
+vwap_var     = vwap_sum_v > 0 ? (vwap_sum_p2v / vwap_sum_v) - math.pow(session_vwap, 2) : 0
+vwap_std     = math.sqrt(math.max(vwap_var, 0))
+vwap_upper   = session_vwap + vwap_std * vwap_dev_mult
+vwap_lower   = session_vwap - vwap_std * vwap_dev_mult
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  OPENING RANGE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var float or_high   = na
+var float or_low    = na
+var bool  or_locked = false
+var int   or_end_t  = na
+
+if is_new_day
+    or_high   := high
+    or_low    := low
+    or_locked := false
+    or_end_t  := time + or_minutes * 60 * 1000
+
+in_or_window = time < or_end_t
+
+if in_or_window and not or_locked
+    or_high := math.max(or_high, high)
+    or_low  := math.min(or_low,  low)
+else if not or_locked
+    or_locked := true
+
+or_breakout_up = use_or and or_locked and ta.crossover (close, or_high)
+or_breakout_dn = use_or and or_locked and ta.crossunder(close, or_low)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  STRIKE PRICES (lines, not plots)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var line[] strike_lines = array.new<line>()
+
+if use_strikes and is_new_day
+    for ln in strike_lines
+        line.delete(ln)
+    array.clear(strike_lines)
+    base = f_strike_round(open, strike_step)
+    for i = -strike_count to strike_count
+        lvl = base + i * strike_step
+        ln  = line.new(bar_index, lvl, bar_index + 1, lvl,
+             extend = extend.right, color = col_stk,
+             style = line.style_dotted, width = 2)
+        array.push(strike_lines, ln)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  HTF TREND
+// ═══════════════════════════════════════════════════════════════════════════════
+
+[htf_fast, htf_slow] = request.security(syminfo.tickerid, htf_tf,
+     [ta.ema(close, htf_ema_fast), ta.ema(close, htf_ema_slow)],
+     lookahead = barmerge.lookahead_off)
+
+htf_bull = use_htf ? htf_fast > htf_slow : true
+htf_bear = use_htf ? htf_fast < htf_slow : true
+htf_bias = use_htf ? (htf_bull ? "BULL ↑" : htf_bear ? "BEAR ↓" : "FLAT") : "OFF"
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TIME-OF-DAY FILTER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+in_block_1 = use_tod and not na(time(timeframe.period, tod_block_1, kz_tz))
+in_block_2 = use_tod and not na(time(timeframe.period, tod_block_2, kz_tz))
+in_block_3 = use_tod and not na(time(timeframe.period, tod_block_3, kz_tz))
+
+tod_blocked = in_block_1 or in_block_2 or in_block_3
+tod_ok      = not tod_blocked
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  KILLZONES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+kz_in_open_active   = use_kz and not na(time(timeframe.period, kz_in_open,  kz_tz))
+kz_in_lunch_active  = use_kz and not na(time(timeframe.period, kz_in_lunch, kz_tz))
+kz_in_power_active  = use_kz and not na(time(timeframe.period, kz_in_power, kz_tz))
+kz_lon_active       = use_kz and not na(time(timeframe.period, kz_london,   kz_tz))
+kz_ny_active        = use_kz and not na(time(timeframe.period, kz_ny_am,    kz_tz))
+
+any_kz_active = kz_in_open_active or kz_in_power_active or kz_lon_active or kz_ny_active
+// Lunch is excluded from "active" since it's typically avoided
+
+kz_color = kz_in_open_active  ? col_kz_open  :
+           kz_in_power_active ? col_kz_power :
+           kz_lon_active      ? col_kz_lon   :
+           kz_ny_active       ? col_kz_ny    :
+           kz_in_lunch_active ? col_kz_lunch : na
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PREMIUM/DISCOUNT FIBONACCI (between session H/L)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var float sess_high = na
+var float sess_low  = na
+
+if is_new_day
+    sess_high := high
+    sess_low  := low
+else
+    sess_high := math.max(nz(sess_high, high), high)
+    sess_low  := math.min(nz(sess_low,  low),  low)
+
+sess_range = sess_high - sess_low
+fib_50  = sess_low + sess_range * 0.500
+fib_618 = sess_low + sess_range * 0.618
+fib_705 = sess_low + sess_range * 0.705
+fib_786 = sess_low + sess_range * 0.786
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  HTF FAIR VALUE GAPS
+//   Fetch HTF current and 2-bar-ago candle data; detect gap when current low > old high
+// ═══════════════════════════════════════════════════════════════════════════════
+
+[htf_fvg_h2, htf_fvg_l2, htf_fvg_h0, htf_fvg_l0, htf_fvg_isconf] = request.security(
+     syminfo.tickerid, htf_fvg_tf,
+     [high[2], low[2], high, low, barstate.isconfirmed],
+     lookahead = barmerge.lookahead_off)
+
+// Detect HTF FVG only on the bar where HTF candle just closed
+var int htf_last_bartime = 0
+htf_new_bar = ta.change(time(htf_fvg_tf)) != 0
+
+atr14 = ta.atr(14)
+
+htf_bull_fvg_cond = use_htf_fvg and htf_new_bar and htf_fvg_l0 > htf_fvg_h2 and (htf_fvg_l0 - htf_fvg_h2) > atr14 * 0.5
+htf_bear_fvg_cond = use_htf_fvg and htf_new_bar and htf_fvg_h0 < htf_fvg_l2 and (htf_fvg_l2 - htf_fvg_h0) > atr14 * 0.5
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CUMULATIVE VOLUME DELTA
+//   Approximation: positive volume on bullish bars, negative on bearish.
+//   Reset per session for clarity.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+bar_delta = close > open ? volume : close < open ? -volume : 0.0
+
+var float cvd = 0.0
+if is_new_day
+    cvd := 0.0
+cvd += bar_delta
+
+// Divergence detection: compare close trend vs CVD trend over lookback
+price_lo_lb = ta.lowest (close, cvd_lookback)
+price_hi_lb = ta.highest(close, cvd_lookback)
+cvd_lo_lb   = ta.lowest (cvd,   cvd_lookback)
+cvd_hi_lb   = ta.highest(cvd,   cvd_lookback)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  MARKET STRUCTURE (BOS detection)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+ph = ta.pivothigh(high, ms_lookback, ms_lookback)
+pl = ta.pivotlow (low,  ms_lookback, ms_lookback)
+
+var float last_ph = na
+var float last_pl = na
+
+if not na(ph)
+    last_ph := ph
+if not na(pl)
+    last_pl := pl
+
+bos_bull = use_ms and not na(last_ph) and ta.crossover (close, last_ph)
+bos_bear = use_ms and not na(last_pl) and ta.crossunder(close, last_pl)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ORDER BLOCKS (SMC)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type OrderBlock
+    box   bx
+    float top
+    float btm
+    int   bi
+    bool  mitigated
+
+var array<OrderBlock> bull_obs = array.new<OrderBlock>()
+var array<OrderBlock> bear_obs = array.new<OrderBlock>()
+
+f_create_ob(_top, _btm, _bi, _isBull) =>
+    bx = box.new(left=_bi, top=_top, right=_bi + ob_extend, bottom=_btm,
+         border_color = _isBull ? color.new(#00E676, 30) : color.new(#FF5252, 30),
+         border_width = 1,
+         bgcolor      = _isBull ? col_ob_b : col_ob_s)
+    OrderBlock.new(bx, _top, _btm, _bi, false)
+
+if use_ob and bos_bull
+    var int found_bi_ob = na
+    found_bi_ob := na
+    for i = 1 to 30
+        if close[i] < open[i] and na(found_bi_ob)
+            found_bi_ob := bar_index - i
+            ob = f_create_ob(high[i], low[i], bar_index - i, true)
+            array.push(bull_obs, ob)
+            while array.size(bull_obs) > ob_count
+                old = array.shift(bull_obs)
+                box.delete(old.bx)
+            break
+
+if use_ob and bos_bear
+    var int found_bi_ob2 = na
+    found_bi_ob2 := na
+    for i = 1 to 30
+        if close[i] > open[i] and na(found_bi_ob2)
+            found_bi_ob2 := bar_index - i
+            ob = f_create_ob(high[i], low[i], bar_index - i, false)
+            array.push(bear_obs, ob)
+            while array.size(bear_obs) > ob_count
+                old = array.shift(bear_obs)
+                box.delete(old.bx)
+            break
+
+// OB Mitigation
+if array.size(bull_obs) > 0
+    for i = array.size(bull_obs) - 1 to 0
+        ob = array.get(bull_obs, i)
+        if not ob.mitigated and close < ob.btm
+            box.set_bgcolor(ob.bx, color.new(color.gray, 80))
+            ob.mitigated := true
+        else if not ob.mitigated
+            box.set_right(ob.bx, bar_index + ob_extend)
+
+if array.size(bear_obs) > 0
+    for i = array.size(bear_obs) - 1 to 0
+        ob = array.get(bear_obs, i)
+        if not ob.mitigated and close > ob.top
+            box.set_bgcolor(ob.bx, color.new(color.gray, 80))
+            ob.mitigated := true
+        else if not ob.mitigated
+            box.set_right(ob.bx, bar_index + ob_extend)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FAIR VALUE GAPS (LTF) + INVERSION FVG (iFVG)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+type FVG
+    box   bx
+    float top
+    float btm
+    int   bi
+    bool  filled
+    bool  inverted
+    bool  isBull
+
+var array<FVG> bull_fvgs = array.new<FVG>()
+var array<FVG> bear_fvgs = array.new<FVG>()
+
+bull_fvg_cond = use_fvg and low > high[2] and (low - high[2]) >= atr14 * fvg_min_atr
+bear_fvg_cond = use_fvg and high < low[2] and (low[2] - high) >= atr14 * fvg_min_atr
+
+if bull_fvg_cond
+    bx = box.new(left=bar_index - 2, top=low, right=bar_index + ob_extend, bottom=high[2],
+         border_color = color.new(#4CAF50, 50), border_width = 1, bgcolor = col_fvg_b)
+    array.push(bull_fvgs, FVG.new(bx, low, high[2], bar_index - 2, false, false, true))
+    while array.size(bull_fvgs) > fvg_count
+        old = array.shift(bull_fvgs)
+        box.delete(old.bx)
+
+if bear_fvg_cond
+    bx = box.new(left=bar_index - 2, top=low[2], right=bar_index + ob_extend, bottom=high,
+         border_color = color.new(#F44336, 50), border_width = 1, bgcolor = col_fvg_s)
+    array.push(bear_fvgs, FVG.new(bx, low[2], high, bar_index - 2, false, false, false))
+    while array.size(bear_fvgs) > fvg_count
+        old = array.shift(bear_fvgs)
+        box.delete(old.bx)
+
+// FVG Fill / Inversion logic
+//   When a bullish FVG is filled (price closes below its bottom), it INVERTS
+//   to act as resistance going forward (and vice versa for bearish).
+if array.size(bull_fvgs) > 0
+    for i = array.size(bull_fvgs) - 1 to 0
+        fvg = array.get(bull_fvgs, i)
+        if not fvg.filled and close < fvg.btm
+            fvg.filled := true
+            if use_ifvg
+                fvg.inverted := true
+                box.set_bgcolor(fvg.bx, col_ifvg)
+                box.set_border_color(fvg.bx, color.new(#9C27B0, 40))
+            else
+                box.set_bgcolor(fvg.bx, color.new(color.gray, 85))
+        else if not fvg.filled
+            box.set_right(fvg.bx, bar_index + ob_extend)
+        else if fvg.inverted
+            box.set_right(fvg.bx, bar_index + ob_extend)
+
+if array.size(bear_fvgs) > 0
+    for i = array.size(bear_fvgs) - 1 to 0
+        fvg = array.get(bear_fvgs, i)
+        if not fvg.filled and close > fvg.top
+            fvg.filled := true
+            if use_ifvg
+                fvg.inverted := true
+                box.set_bgcolor(fvg.bx, col_ifvg)
+                box.set_border_color(fvg.bx, color.new(#9C27B0, 40))
+            else
+                box.set_bgcolor(fvg.bx, color.new(color.gray, 85))
+        else if not fvg.filled
+            box.set_right(fvg.bx, bar_index + ob_extend)
+        else if fvg.inverted
+            box.set_right(fvg.bx, bar_index + ob_extend)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  HTF FVG STORAGE (uses same FVG type)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var array<FVG> htf_bull_fvgs = array.new<FVG>()
+var array<FVG> htf_bear_fvgs = array.new<FVG>()
+
+if htf_bull_fvg_cond
+    bx = box.new(left=bar_index, top=htf_fvg_l0, right=bar_index + ob_extend * 2, bottom=htf_fvg_h2,
+         border_color = color.new(#00BCD4, 30), border_width = 2,
+         bgcolor = col_htfvg_b)
+    array.push(htf_bull_fvgs, FVG.new(bx, htf_fvg_l0, htf_fvg_h2, bar_index, false, false, true))
+    while array.size(htf_bull_fvgs) > htf_fvg_count
+        old = array.shift(htf_bull_fvgs)
+        box.delete(old.bx)
+
+if htf_bear_fvg_cond
+    bx = box.new(left=bar_index, top=htf_fvg_l2, right=bar_index + ob_extend * 2, bottom=htf_fvg_h0,
+         border_color = color.new(#E91E63, 30), border_width = 2,
+         bgcolor = col_htfvg_s)
+    array.push(htf_bear_fvgs, FVG.new(bx, htf_fvg_l2, htf_fvg_h0, bar_index, false, false, false))
+    while array.size(htf_bear_fvgs) > htf_fvg_count
+        old = array.shift(htf_bear_fvgs)
+        box.delete(old.bx)
+
+// HTF FVG mitigation (same logic as LTF)
+if array.size(htf_bull_fvgs) > 0
+    for i = array.size(htf_bull_fvgs) - 1 to 0
+        fvg = array.get(htf_bull_fvgs, i)
+        if not fvg.filled and close < fvg.btm
+            fvg.filled := true
+            box.set_bgcolor(fvg.bx, color.new(color.gray, 88))
+        else if not fvg.filled
+            box.set_right(fvg.bx, bar_index + ob_extend * 2)
+
+if array.size(htf_bear_fvgs) > 0
+    for i = array.size(htf_bear_fvgs) - 1 to 0
+        fvg = array.get(htf_bear_fvgs, i)
+        if not fvg.filled and close > fvg.top
+            fvg.filled := true
+            box.set_bgcolor(fvg.bx, color.new(color.gray, 88))
+        else if not fvg.filled
+            box.set_right(fvg.bx, bar_index + ob_extend * 2)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LIQUIDITY LEVELS (BSL/SSL)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+liq_ph = ta.pivothigh(high, liq_lookback, liq_lookback)
+liq_pl = ta.pivotlow (low,  liq_lookback, liq_lookback)
+
+var float prev_liq_ph = na
+var float prev_liq_pl = na
+var int   prev_liq_ph_bi = na
+var int   prev_liq_pl_bi = na
+
+var line[]  bsl_lines = array.new<line>()
+var line[]  ssl_lines = array.new<line>()
+var label[] liq_labels = array.new<label>()
+
+if use_liq and not na(liq_ph)
+    if not na(prev_liq_ph)
+        diff_pct = math.abs(liq_ph - prev_liq_ph) / prev_liq_ph * 100
+        if diff_pct < liq_tolerance
+            avg_lvl = (liq_ph + prev_liq_ph) / 2
+            ln = line.new(prev_liq_ph_bi, avg_lvl, bar_index - liq_lookback, avg_lvl,
+                 color = col_bsl, width = 2, style = line.style_dashed,
+                 extend = extend.right)
+            array.push(bsl_lines, ln)
+            lbl = label.new(bar_index - liq_lookback, avg_lvl, " BSL ",
+                 color = color.new(col_bsl, 40), textcolor = color.white,
+                 style = label.style_label_left, size = size.tiny)
+            array.push(liq_labels, lbl)
+            while array.size(bsl_lines) > 5
+                line.delete(array.shift(bsl_lines))
+                if array.size(liq_labels) > 0
+                    label.delete(array.shift(liq_labels))
+    prev_liq_ph    := liq_ph
+    prev_liq_ph_bi := bar_index - liq_lookback
+
+if use_liq and not na(liq_pl)
+    if not na(prev_liq_pl)
+        diff_pct = math.abs(liq_pl - prev_liq_pl) / prev_liq_pl * 100
+        if diff_pct < liq_tolerance
+            avg_lvl = (liq_pl + prev_liq_pl) / 2
+            ln = line.new(prev_liq_pl_bi, avg_lvl, bar_index - liq_lookback, avg_lvl,
+                 color = col_ssl, width = 2, style = line.style_dashed,
+                 extend = extend.right)
+            array.push(ssl_lines, ln)
+            lbl = label.new(bar_index - liq_lookback, avg_lvl, " SSL ",
+                 color = color.new(col_ssl, 40), textcolor = color.white,
+                 style = label.style_label_left, size = size.tiny)
+            array.push(liq_labels, lbl)
+            while array.size(ssl_lines) > 5
+                line.delete(array.shift(ssl_lines))
+    prev_liq_pl    := liq_pl
+    prev_liq_pl_bi := bar_index - liq_lookback
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CANDLE ANALYSIS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+candle_range = high - low
+body         = math.abs(close - open)
+body_pct     = candle_range > 0 ? (body / candle_range) * 100 : 0
+upper_wick   = high - math.max(open, close)
+lower_wick   = math.min(open, close) - low
+is_bullish   = close > open
+is_bearish   = close < open
+
+quality_ok = not use_cdl_qty or (candle_range <= atr14 * max_atr_mult and body_pct >= min_body_pct)
+
+is_hammer = body > 0 and lower_wick / body >= hammer_ratio and upper_wick / body < 0.5
+is_star   = body > 0 and upper_wick / body >= hammer_ratio and lower_wick / body < 0.5
+
+vol_avg = ta.sma(volume, 20)
+vol_ok  = not require_vol or volume >= vol_avg * volume_mult
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ZONE PROXIMITY & SWEEP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+prox = atr14 * proximity_atr
+
+near_z1_s = math.abs(low  - z1_s) < prox or (low <= z1_s and close > z1_s)
+near_z2_s = math.abs(low  - z2_s) < prox or (low <= z2_s and close > z2_s)
+near_z3_s = math.abs(low  - z3_s) < prox or (low <= z3_s and close > z3_s)
+near_z1_r = math.abs(high - z1_r) < prox or (high >= z1_r and close < z1_r)
+near_z2_r = math.abs(high - z2_r) < prox or (high >= z2_r and close < z2_r)
+near_z3_r = math.abs(high - z3_r) < prox or (high >= z3_r and close < z3_r)
+
+near_any_support    = near_z1_s or near_z2_s or near_z3_s
+near_any_resistance = near_z1_r or near_z2_r or near_z3_r
+
+sweep_z3s_bull = detect_sweep and low  < z3_s and close > z3_s and is_bullish
+sweep_z2s_bull = detect_sweep and low  < z2_s and close > z2_s and is_bullish
+sweep_z3r_bear = detect_sweep and high > z3_r and close < z3_r and is_bearish
+sweep_z2r_bear = detect_sweep and high > z2_r and close < z2_r and is_bearish
+
+any_bull_sweep = sweep_z3s_bull or sweep_z2s_bull
+any_bear_sweep = sweep_z3r_bear or sweep_z2r_bear
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CVD DIVERGENCE
+//    Bullish: price made new low BUT CVD did NOT (CVD held higher) → buyers absorbing
+//    Bearish: price made new high BUT CVD did NOT → sellers absorbing
+// ═══════════════════════════════════════════════════════════════════════════════
+
+cvd_bull_div_raw = use_cvd and close == price_lo_lb and cvd > cvd_lo_lb
+cvd_bear_div_raw = use_cvd and close == price_hi_lb and cvd < cvd_hi_lb
+
+cvd_bull_div = cvd_bull_div_raw and (not cvd_only_at_zone or near_any_support)
+cvd_bear_div = cvd_bear_div_raw and (not cvd_only_at_zone or near_any_resistance)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CONFLUENCE SIGNALS  (now layered with ALL filters)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+htf_long_ok  = not require_htf or htf_bull
+htf_short_ok = not require_htf or htf_bear
+ema_long_ok  = not (use_ema and require_ema) or ema_bull
+ema_short_ok = not (use_ema and require_ema) or ema_bear
+cvd_long_ok  = not require_cvd or cvd_bull_div
+cvd_short_ok = not require_cvd or cvd_bear_div
+kz_ok        = not kz_signals_only_in_kz or any_kz_active
+
+long_signal = use_signals and tod_ok and kz_ok and
+     near_any_support and (is_hammer or any_bull_sweep) and
+     htf_long_ok and ema_long_ok and vol_ok and quality_ok and cvd_long_ok
+
+short_signal = use_signals and tod_ok and kz_ok and
+     near_any_resistance and (is_star or any_bear_sweep) and
+     htf_short_ok and ema_short_ok and vol_ok and quality_ok and cvd_short_ok
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AUTO SL/TP
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var float long_entry  = na, var float long_sl  = na, var float long_tp  = na
+var float short_entry = na, var float short_sl = na, var float short_tp = na
+
+if long_signal and auto_sltp
+    long_entry := close
+    long_sl    := math.min(low, near_z3_s ? z3_s : near_z2_s ? z2_s : z1_s) - atr14 * 0.2
+    long_tp    := long_entry + (long_entry - long_sl) * rr_target
+
+if short_signal and auto_sltp
+    short_entry := close
+    short_sl    := math.max(high, near_z3_r ? z3_r : near_z2_r ? z2_r : z1_r) + atr14 * 0.2
+    short_tp    := short_entry - (short_sl - short_entry) * rr_target
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  STATIC SESSION LINES — PD OHLC, CPR, OR, Premium/Discount Fibs
+// ═══════════════════════════════════════════════════════════════════════════════
+
+var line ln_pd_h   = na, var line ln_pd_l   = na, var line ln_pd_c   = na
+var line ln_cpr_pp = na, var line ln_cpr_tc = na, var line ln_cpr_bc = na
+var line ln_cpr_r1 = na, var line ln_cpr_r2 = na, var line ln_cpr_r3 = na
+var line ln_cpr_s1 = na, var line ln_cpr_s2 = na, var line ln_cpr_s3 = na
+var line ln_dev_pp = na
+var line ln_or_h   = na, var line ln_or_l   = na
+var line ln_fib50  = na, var line ln_fib618 = na, var line ln_fib705 = na, var line ln_fib786 = na
+
+if is_intraday and is_new_day
+    line.delete(ln_pd_h),   line.delete(ln_pd_l),   line.delete(ln_pd_c)
+    line.delete(ln_cpr_pp), line.delete(ln_cpr_tc), line.delete(ln_cpr_bc)
+    line.delete(ln_cpr_r1), line.delete(ln_cpr_r2), line.delete(ln_cpr_r3)
+    line.delete(ln_cpr_s1), line.delete(ln_cpr_s2), line.delete(ln_cpr_s3)
+    line.delete(ln_dev_pp), line.delete(ln_or_h),   line.delete(ln_or_l)
+    line.delete(ln_fib50),  line.delete(ln_fib618), line.delete(ln_fib705), line.delete(ln_fib786)
+
+    if show_pd_ohlc
+        ln_pd_h := f_hline(pd_h, col_pd, 2, line.style_dotted)
+        ln_pd_l := f_hline(pd_l, col_pd, 2, line.style_dotted)
+        ln_pd_c := f_hline(pd_c, color.new(col_pd, 30), 2, line.style_dotted)
+
+    if use_cpr
+        ln_cpr_pp := f_hline(cpr_pp, col_cpr, 2, line.style_solid)
+        ln_cpr_tc := f_hline(cpr_tc, col_cpr, 2, line.style_dashed)
+        ln_cpr_bc := f_hline(cpr_bc, col_cpr, 2, line.style_dashed)
+
+    if use_cpr and show_cpr_sr
+        ln_cpr_r1 := f_hline(cpr_r1, col_cpr_r, 2, line.style_dotted)
+        ln_cpr_r2 := f_hline(cpr_r2, col_cpr_r, 2, line.style_dotted)
+        ln_cpr_r3 := f_hline(cpr_r3, col_cpr_r, 2, line.style_dotted)
+        ln_cpr_s1 := f_hline(cpr_s1, col_cpr_s, 2, line.style_dotted)
+        ln_cpr_s2 := f_hline(cpr_s2, col_cpr_s, 2, line.style_dotted)
+        ln_cpr_s3 := f_hline(cpr_s3, col_cpr_s, 2, line.style_dotted)
+
+    if use_or
+        ln_or_h := f_hline(or_high, col_or, 2, line.style_solid)
+        ln_or_l := f_hline(or_low,  col_or, 2, line.style_solid)
+
+    if use_fib
+        if show_fib_50
+            ln_fib50 := f_hline(fib_50, col_fib_50, 2, line.style_dashed)
+        if show_fib_618
+            ln_fib618 := f_hline(fib_618, col_fib_618, 2, line.style_dashed)
+        if show_fib_705
+            ln_fib705 := f_hline(fib_705, col_fib_705, 2, line.style_dashed)
+        if show_fib_786
+            ln_fib786 := f_hline(fib_786, col_fib_786, 2, line.style_dashed)
+
+// Update OR lines during OR window (intraday only)
+if is_intraday and use_or and in_or_window and not na(ln_or_h)
+    line.set_y1(ln_or_h, or_high), line.set_y2(ln_or_h, or_high)
+    line.set_y1(ln_or_l, or_low),  line.set_y2(ln_or_l, or_low)
+
+// Update Fib lines as session range expands (intraday only)
+if is_intraday and use_fib
+    if show_fib_50  and not na(ln_fib50)
+        line.set_y1(ln_fib50, fib_50),   line.set_y2(ln_fib50, fib_50)
+    if show_fib_618 and not na(ln_fib618)
+        line.set_y1(ln_fib618, fib_618), line.set_y2(ln_fib618, fib_618)
+    if show_fib_705 and not na(ln_fib705)
+        line.set_y1(ln_fib705, fib_705), line.set_y2(ln_fib705, fib_705)
+    if show_fib_786 and not na(ln_fib786)
+        line.set_y1(ln_fib786, fib_786), line.set_y2(ln_fib786, fib_786)
+
+// Developing CPR — intraday only
+if is_intraday and use_cpr and show_dev_cpr
+    if na(ln_dev_pp) or is_new_day
+        line.delete(ln_dev_pp)
+        ln_dev_pp := f_hline(dev_pp, color.new(col_cpr, 50), 2, line.style_dashed)
+    else
+        line.set_y1(ln_dev_pp, dev_pp), line.set_y2(ln_dev_pp, dev_pp)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  VISUAL RENDERING — plots, fills, bgcolors, plotshapes
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// — Backgrounds: intraday = Premium/Discount BG + Killzone; HTF = plain
+in_premium  = not na(poc) and close > poc
+in_discount = not na(poc) and close < poc
+bg_pd_color = is_intraday and show_bg ? (in_premium ? color.new(#FF1744, 95) : in_discount ? color.new(#00E676, 95) : na) : na
+bgcolor(bg_pd_color, title="Premium/Discount BG")
+bgcolor(is_intraday and use_kz ? kz_color : na, title="Killzone BG")
+
+// — Zone Lines (intraday only — on HTF these would follow every candle as trend lines)
+p_z3r = plot(is_intraday and show_zones ? z3_r : na, "Z3 Resistance", color=col_z3_r, linewidth=2)
+p_z2r = plot(is_intraday and show_zones ? z2_r : na, "Z2 Resistance", color=col_z2_r, linewidth=2)
+p_z1r = plot(is_intraday and show_zones ? z1_r : na, "Z1 Resistance", color=col_z1_r, linewidth=2)
+p_poc = plot(is_intraday and show_zones ? poc  : na, "POC",           color=col_poc,  linewidth=2)
+p_z1s = plot(is_intraday and show_zones ? z1_s : na, "Z1 Support",    color=col_z1_s, linewidth=2)
+p_z2s = plot(is_intraday and show_zones ? z2_s : na, "Z2 Support",    color=col_z2_s, linewidth=2)
+p_z3s = plot(is_intraday and show_zones ? z3_s : na, "Z3 Support",    color=col_z3_s, linewidth=2)
+
+fill(p_z2r, p_z3r, color=is_intraday and show_fills ? color.new(col_z3_r, 88) : na, title="Outer R Fill")
+fill(p_z1r, p_z2r, color=is_intraday and show_fills ? color.new(col_z2_r, 90) : na, title="Mid R Fill")
+fill(p_z1s, p_z2s, color=is_intraday and show_fills ? color.new(col_z2_s, 90) : na, title="Mid S Fill")
+fill(p_z2s, p_z3s, color=is_intraday and show_fills ? color.new(col_z3_s, 88) : na, title="Outer S Fill")
+
+// — EMA Cloud
+p_ema_f = plot(use_ema and show_ema_lines ? ema_fast : na, "Fast EMA", color=col_ema_f, linewidth=2)
+p_ema_s = plot(use_ema and show_ema_lines ? ema_slow : na, "Slow EMA", color=col_ema_s, linewidth=2)
+fill(p_ema_f, p_ema_s,
+     color = use_ema ? (ema_bull ? color.new(#00E676, 80) : color.new(#FF5252, 80)) : na,
+     title = "EMA Cloud Fill")
+
+// — VWAP (intraday only — session-anchored, meaningless on daily/weekly)
+plot(is_intraday and use_vwap ? session_vwap : na, "VWAP", color=col_vwap, linewidth=2)
+p_vu = plot(is_intraday and use_vwap and show_vwap_bd ? vwap_upper : na, "VWAP Upper", color=color.new(col_vwap, 50), linewidth=2)
+p_vl = plot(is_intraday and use_vwap and show_vwap_bd ? vwap_lower : na, "VWAP Lower", color=color.new(col_vwap, 50), linewidth=2)
+fill(p_vu, p_vl, color=is_intraday and use_vwap and show_vwap_bd ? color.new(col_vwap, 92) : na, title="VWAP Band Fill")
+
+// — Marker shapes (OR markers only on intraday; signals/BOS/sweeps work on any TF)
+plotshape(is_intraday and or_breakout_up and show_or_bo, title="OR Break Up",   style=shape.labelup,   location=location.belowbar, color=col_or, textcolor=color.white, text="OR↑", size=size.small)
+plotshape(is_intraday and or_breakout_dn and show_or_bo, title="OR Break Down", style=shape.labeldown, location=location.abovebar, color=col_or, textcolor=color.white, text="OR↓", size=size.small)
+plotshape(long_signal,  title="LONG",  style=shape.labelup,   location=location.belowbar, color=color.new(#00E676, 0), textcolor=color.black, text="L", size=size.normal)
+plotshape(short_signal, title="SHORT", style=shape.labeldown, location=location.abovebar, color=color.new(#FF1744, 0), textcolor=color.white, text="S", size=size.normal)
+plotshape(any_bull_sweep, title="Bull Sweep", style=shape.diamond, location=location.belowbar, color=color.new(#80D8FF, 0), size=size.tiny)
+plotshape(any_bear_sweep, title="Bear Sweep", style=shape.diamond, location=location.abovebar, color=color.new(#FF80AB, 0), size=size.tiny)
+plotshape(bos_bull and use_ms, title="Bull BOS", style=shape.triangleup,   location=location.belowbar, color=color.new(#00E676, 30), size=size.tiny, text="BOS")
+plotshape(bos_bear and use_ms, title="Bear BOS", style=shape.triangledown, location=location.abovebar, color=color.new(#FF1744, 30), size=size.tiny, text="BOS")
+plotshape(cvd_bull_div, title="CVD Bull Div", style=shape.circle, location=location.belowbar, color=color.new(#00BCD4, 0), size=size.small, text="CVD▲", textcolor=color.white)
+plotshape(cvd_bear_div, title="CVD Bear Div", style=shape.circle, location=location.abovebar, color=color.new(#E91E63, 0), size=size.small, text="CVD▼", textcolor=color.white)
+
+// — Auto SL/TP lines
+var line ln_le = na, var line ln_ls = na, var line ln_lt = na
+var line ln_se = na, var line ln_ss = na, var line ln_st = na
+
+if long_signal and auto_sltp
+    line.delete(ln_le), line.delete(ln_ls), line.delete(ln_lt)
+    ln_le := line.new(bar_index, long_entry, bar_index + 30, long_entry, color=color.new(#FFEB3B, 0), style=line.style_dashed, width=2)
+    ln_ls := line.new(bar_index, long_sl,    bar_index + 30, long_sl,    color=color.new(#FF1744, 0), style=line.style_dashed, width=2)
+    ln_lt := line.new(bar_index, long_tp,    bar_index + 30, long_tp,    color=color.new(#00E676, 0), style=line.style_dashed, width=2)
+    label.new(bar_index + 30, long_entry, "Entry " + str.tostring(long_entry, format.mintick), color=color.new(#FFEB3B, 30), style=label.style_label_left, textcolor=color.black, size=size.tiny)
+    label.new(bar_index + 30, long_sl,    "SL    " + str.tostring(long_sl,    format.mintick), color=color.new(#FF1744, 30), style=label.style_label_left, textcolor=color.white, size=size.tiny)
+    label.new(bar_index + 30, long_tp,    "TP    " + str.tostring(long_tp,    format.mintick), color=color.new(#00E676, 30), style=label.style_label_left, textcolor=color.black, size=size.tiny)
+
+if short_signal and auto_sltp
+    line.delete(ln_se), line.delete(ln_ss), line.delete(ln_st)
+    ln_se := line.new(bar_index, short_entry, bar_index + 30, short_entry, color=color.new(#FFEB3B, 0), style=line.style_dashed, width=2)
+    ln_ss := line.new(bar_index, short_sl,    bar_index + 30, short_sl,    color=color.new(#FF1744, 0), style=line.style_dashed, width=2)
+    ln_st := line.new(bar_index, short_tp,    bar_index + 30, short_tp,    color=color.new(#00E676, 0), style=line.style_dashed, width=2)
+    label.new(bar_index + 30, short_entry, "Entry " + str.tostring(short_entry, format.mintick), color=color.new(#FFEB3B, 30), style=label.style_label_left, textcolor=color.black, size=size.tiny)
+    label.new(bar_index + 30, short_sl,    "SL    " + str.tostring(short_sl,    format.mintick), color=color.new(#FF1744, 30), style=label.style_label_left, textcolor=color.white, size=size.tiny)
+    label.new(bar_index + 30, short_tp,    "TP    " + str.tostring(short_tp,    format.mintick), color=color.new(#00E676, 30), style=label.style_label_left, textcolor=color.black, size=size.tiny)
+
+// — Zone Labels (once per session — intraday only)
+if is_intraday and show_labels and is_new_day and not na(z3_r)
+    _x = bar_index + 5
+    label.new(_x, z3_r, "Z3 R " + str.tostring(z3_r, format.mintick), color=color.new(col_z3_r, 70), textcolor=col_z3_r, style=label.style_label_left, size=size.small)
+    label.new(_x, z2_r, "Z2 R " + str.tostring(z2_r, format.mintick), color=color.new(col_z2_r, 70), textcolor=col_z2_r, style=label.style_label_left, size=size.small)
+    label.new(_x, z1_r, "Z1 R " + str.tostring(z1_r, format.mintick), color=color.new(col_z1_r, 70), textcolor=col_z1_r, style=label.style_label_left, size=size.small)
+    label.new(_x, poc,  "POC  " + str.tostring(poc,  format.mintick), color=color.new(col_poc,  70), textcolor=col_poc,  style=label.style_label_left, size=size.small)
+    label.new(_x, z1_s, "Z1 S " + str.tostring(z1_s, format.mintick), color=color.new(col_z1_s, 70), textcolor=col_z1_s, style=label.style_label_left, size=size.small)
+    label.new(_x, z2_s, "Z2 S " + str.tostring(z2_s, format.mintick), color=color.new(col_z2_s, 70), textcolor=col_z2_s, style=label.style_label_left, size=size.small)
+    label.new(_x, z3_s, "Z3 S " + str.tostring(z3_s, format.mintick), color=color.new(col_z3_s, 70), textcolor=col_z3_s, style=label.style_label_left, size=size.small)
+
+// — HTF Reference Labels (weekly / monthly pivots — shown once per new period)
+if is_htf and show_labels
+    if is_new_week
+        _x = bar_index + 2
+        label.new(_x, w_cpr_pp, "W-PP "  + str.tostring(w_cpr_pp, format.mintick), color=color.new(col_cpr, 60),   textcolor=col_cpr,   style=label.style_label_left, size=size.tiny)
+        label.new(_x, w_cpr_r1, "W-R1 "  + str.tostring(w_cpr_r1, format.mintick), color=color.new(col_cpr_r, 60), textcolor=col_cpr_r, style=label.style_label_left, size=size.tiny)
+        label.new(_x, w_cpr_s1, "W-S1 "  + str.tostring(w_cpr_s1, format.mintick), color=color.new(col_cpr_s, 60), textcolor=col_cpr_s, style=label.style_label_left, size=size.tiny)
+        label.new(_x, pw_h,     "PW-H "  + str.tostring(pw_h,     format.mintick), color=color.new(col_pd, 60),    textcolor=col_pd,    style=label.style_label_left, size=size.tiny)
+        label.new(_x, pw_l,     "PW-L "  + str.tostring(pw_l,     format.mintick), color=color.new(col_pd, 60),    textcolor=col_pd,    style=label.style_label_left, size=size.tiny)
+    if is_new_month
+        _x = bar_index + 2
+        label.new(_x, m_cpr_pp, "M-PP "  + str.tostring(m_cpr_pp, format.mintick), color=color.new(col_cpr, 40),      textcolor=color.new(col_cpr, 0),   style=label.style_label_left, size=size.small)
+        label.new(_x, pm_h,     "PM-H "  + str.tostring(pm_h,     format.mintick), color=color.new(#CE93D8, 60),       textcolor=color.new(#CE93D8, 0),   style=label.style_label_left, size=size.small)
+        label.new(_x, pm_l,     "PM-L "  + str.tostring(pm_l,     format.mintick), color=color.new(#CE93D8, 60),       textcolor=color.new(#CE93D8, 0),   style=label.style_label_left, size=size.small)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  DASHBOARD (16 rows, dark-theme tuned)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+dash_position = switch dash_pos
+    "top_right"     => position.top_right
+    "top_left"      => position.top_left
+    "bottom_right"  => position.bottom_right
+    "bottom_left"   => position.bottom_left
+    "middle_right"  => position.middle_right
+    => position.top_right
+
+var table dash = table.new(dash_position, 3, 16,
+     border_color = color.new(#37474F, 30), border_width = 1,
+     frame_color  = color.new(#37474F, 10), frame_width  = 1)
+
+f_cell(_t, _col, _row, _txt, _bg, _tc) =>
+    table.cell(_t, _col, _row, _txt, text_color=_tc, bgcolor=_bg, text_size=size.small)
+
+if show_dash and barstate.islast and not na(poc)
+    bg_dim = color.new(#263238, 30)
+    txt_lt = color.new(#ECEFF1, 0)
+
+    // Bias
+    bias_txt = close > poc ? "PREMIUM ▲" : close < poc ? "DISCOUNT ▼" : "AT POC ●"
+    bias_bg  = close > poc ? color.new(#FF1744, 30) : close < poc ? color.new(#00E676, 30) : bg_dim
+
+    // EMA / HTF
+    ema_str  = ema_bull ? "BULL ↑" : ema_bear ? "BEAR ↓" : "FLAT"
+    ema_bg   = ema_bull ? color.new(#00E676, 30) : ema_bear ? color.new(#FF1744, 30) : bg_dim
+    htf_bg   = htf_bull ? color.new(#00E676, 30) : htf_bear ? color.new(#FF1744, 30) : bg_dim
+
+    // CPR
+    cpr_str = narrow_cpr ? "NARROW (Trend)" : "WIDE (Range)"
+    cpr_bg  = narrow_cpr ? color.new(#FFEB3B, 30) : bg_dim
+
+    // OR
+    or_status = not use_or ? "OFF" : not or_locked ? "FORMING" : close > or_high ? "BROKEN ↑" : close < or_low ? "BROKEN ↓" : "INSIDE"
+    or_bg     = not use_or ? bg_dim : close > or_high ? color.new(#00E676, 30) : close < or_low ? color.new(#FF1744, 30) : bg_dim
+
+    // Killzone
+    kz_str = kz_in_open_active  ? "IN OPEN ⚡"   :
+             kz_in_power_active ? "IN POWER ⚡"  :
+             kz_lon_active      ? "LONDON 🌍"   :
+             kz_ny_active       ? "NY AM 🇺🇸"   :
+             kz_in_lunch_active ? "IN LUNCH 🍴"  : "—"
+    kz_bg = any_kz_active ? color.new(#FFEB3B, 40) : kz_in_lunch_active ? color.new(#9E9E9E, 40) : bg_dim
+
+    // Volume
+    vol_pct  = vol_avg > 0 ? str.tostring(math.round((volume / vol_avg) * 100)) + "%" : "—"
+
+    // CVD
+    cvd_str = str.tostring(math.round(cvd / 1000)) + "K"
+    cvd_bg  = cvd > 0 ? color.new(#00E676, 50) : color.new(#FF1744, 50)
+    cvd_div_str = cvd_bull_div ? "BULL DIV" : cvd_bear_div ? "BEAR DIV" : "—"
+    cvd_div_bg  = cvd_bull_div ? color.new(#00BCD4, 30) : cvd_bear_div ? color.new(#E91E63, 30) : bg_dim
+
+    // Distance from POC
+    dist_pct = poc > 0 ? str.tostring(math.round((math.abs(close - poc) / poc) * 10000) / 100) + "%" : "—"
+
+    // Nearest zone
+    nearest_zone = "POC"
+    nearest_dist = math.abs(close - poc)
+    if math.abs(close - z1_r) < nearest_dist
+        nearest_dist := math.abs(close - z1_r), nearest_zone := "Z1 R"
+    if math.abs(close - z2_r) < nearest_dist
+        nearest_dist := math.abs(close - z2_r), nearest_zone := "Z2 R"
+    if math.abs(close - z3_r) < nearest_dist
+        nearest_dist := math.abs(close - z3_r), nearest_zone := "Z3 R"
+    if math.abs(close - z1_s) < nearest_dist
+        nearest_dist := math.abs(close - z1_s), nearest_zone := "Z1 S"
+    if math.abs(close - z2_s) < nearest_dist
+        nearest_dist := math.abs(close - z2_s), nearest_zone := "Z2 S"
+    if math.abs(close - z3_s) < nearest_dist
+        nearest_dist := math.abs(close - z3_s), nearest_zone := "Z3 S"
+
+    // Last structure
+    last_struct = bos_bull ? "BOS ▲" : bos_bear ? "BOS ▼" : "—"
+    last_struct_bg = bos_bull ? color.new(#00E676, 30) : bos_bear ? color.new(#FF1744, 30) : bg_dim
+
+    // TOD status
+    tod_str = use_tod ? (tod_blocked ? "BLOCKED ⛔" : "OK ✓") : "OFF"
+    tod_bg  = use_tod and tod_blocked ? color.new(#FF1744, 30) : use_tod ? color.new(#00E676, 30) : bg_dim
+
+    // Live signal
+    last_sig = long_signal ? "LONG  ▲" : short_signal ? "SHORT ▼" : "—"
+    last_bg  = long_signal ? color.new(#00E676, 20) : short_signal ? color.new(#FF1744, 20) : bg_dim
+
+    // Header
+    tf_mode_str = is_intraday ? timeframe.period + "m INTRADAY" : is_daily_tf ? "DAILY" : "HTF " + timeframe.period
+    f_cell(dash, 0, 0, "🎯 APEX EDGE PRO v2  [" + tf_mode_str + "]", color.new(#0D47A1, 10), color.white)
+    table.merge_cells(dash, 0, 0, 2, 0)
+
+    // ── ROWS COMMON TO ALL TIMEFRAMES ───────────────────────────────────────
+    f_cell(dash, 0, 2,  "EMA Cloud",     bg_dim, txt_lt)
+    f_cell(dash, 1, 2,  ema_str,          ema_bg, color.white)
+    f_cell(dash, 2, 2,  str.tostring(ema_fast_len) + "/" + str.tostring(ema_slow_len), bg_dim, txt_lt)
+
+    f_cell(dash, 0, 3,  "HTF Trend",     bg_dim, txt_lt)
+    f_cell(dash, 1, 3,  htf_bias,         htf_bg, color.white)
+    f_cell(dash, 2, 3,  htf_tf,           bg_dim, txt_lt)
+
+    f_cell(dash, 0, 11, "Bull OB / FVG", bg_dim, txt_lt)
+    f_cell(dash, 1, 11, str.tostring(array.size(bull_obs)) + " OB",  color.new(#00E676, 50), color.white)
+    f_cell(dash, 2, 11, str.tostring(array.size(bull_fvgs)) + " FVG", color.new(#00E676, 60), color.white)
+
+    f_cell(dash, 0, 12, "Bear OB / FVG", bg_dim, txt_lt)
+    f_cell(dash, 1, 12, str.tostring(array.size(bear_obs)) + " OB",  color.new(#FF1744, 50), color.white)
+    f_cell(dash, 2, 12, str.tostring(array.size(bear_fvgs)) + " FVG", color.new(#FF1744, 60), color.white)
+
+    f_cell(dash, 0, 13, "HTF FVGs",      bg_dim, txt_lt)
+    f_cell(dash, 1, 13, str.tostring(array.size(htf_bull_fvgs)) + " ▲", color.new(#00BCD4, 50), color.white)
+    f_cell(dash, 2, 13, str.tostring(array.size(htf_bear_fvgs)) + " ▼", color.new(#E91E63, 50), color.white)
+
+    f_cell(dash, 0, 14, "Liquidity",     bg_dim, txt_lt)
+    f_cell(dash, 1, 14, str.tostring(array.size(bsl_lines)) + " BSL", color.new(col_bsl, 50), color.white)
+    f_cell(dash, 2, 14, str.tostring(array.size(ssl_lines)) + " SSL", color.new(col_ssl, 50), color.white)
+
+    f_cell(dash, 0, 15, "Live Signal",   bg_dim, txt_lt)
+    f_cell(dash, 1, 15, last_sig,         last_bg, color.white)
+    f_cell(dash, 2, 15, last_struct,      last_struct_bg, color.white)
+
+    // ── INTRADAY-SPECIFIC ROWS ───────────────────────────────────────────────
+    if is_intraday
+        f_cell(dash, 0, 1,  "Bias",         bg_dim, txt_lt)
+        f_cell(dash, 1, 1,  bias_txt,        bias_bg, color.white)
+        f_cell(dash, 2, 1,  dist_pct,        bg_dim, txt_lt)
+
+        f_cell(dash, 0, 4,  "CPR",          bg_dim, txt_lt)
+        f_cell(dash, 1, 4,  cpr_str,         cpr_bg, color.white)
+        f_cell(dash, 2, 4,  str.tostring(math.round(cpr_width_pct * 100) / 100) + "%", bg_dim, txt_lt)
+
+        f_cell(dash, 0, 5,  "Killzone",     bg_dim, txt_lt)
+        f_cell(dash, 1, 5,  kz_str,          kz_bg, color.white)
+        f_cell(dash, 2, 5,  kz_tz,           bg_dim, txt_lt)
+
+        f_cell(dash, 0, 6,  "TOD Filter",   bg_dim, txt_lt)
+        f_cell(dash, 1, 6,  tod_str,         tod_bg, color.white)
+        f_cell(dash, 2, 6,  use_tod ? "ON" : "OFF", bg_dim, txt_lt)
+
+        f_cell(dash, 0, 7,  "Nearest Zone", bg_dim, txt_lt)
+        f_cell(dash, 1, 7,  nearest_zone,    color.new(#1A237E, 30), color.white)
+        f_cell(dash, 2, 7,  str.tostring(nearest_dist, format.mintick), bg_dim, txt_lt)
+
+        f_cell(dash, 0, 8,  "Opening Range", bg_dim, txt_lt)
+        f_cell(dash, 1, 8,  or_status,       or_bg, color.white)
+        f_cell(dash, 2, 8,  str.tostring(or_minutes) + "m", bg_dim, txt_lt)
+
+        f_cell(dash, 0, 9,  "Volume",       bg_dim, txt_lt)
+        f_cell(dash, 1, 9,  vol_pct,         volume >= vol_avg * volume_mult ? color.new(#00E676, 30) : bg_dim, color.white)
+        f_cell(dash, 2, 9,  "vs 20-bar",    bg_dim, txt_lt)
+
+        f_cell(dash, 0, 10, "CVD (sess)",   bg_dim, txt_lt)
+        f_cell(dash, 1, 10, cvd_str,         cvd_bg, color.white)
+        f_cell(dash, 2, 10, cvd_div_str,     cvd_div_bg, color.white)
+
+    // ── HTF-SPECIFIC ROWS (Daily / Weekly / Monthly) ─────────────────────────
+    else
+        w_bias_str = close > w_cpr_pp ? "ABOVE W-PP ▲" : "BELOW W-PP ▼"
+        w_bias_bg  = close > w_cpr_pp ? color.new(#00E676, 30) : color.new(#FF1744, 30)
+
+        m_bias_str = close > m_cpr_pp ? "ABOVE M-PP ▲" : "BELOW M-PP ▼"
+        m_bias_bg  = close > m_cpr_pp ? color.new(#00E676, 30) : color.new(#FF1744, 30)
+
+        f_cell(dash, 0, 1,  "Weekly Bias",  bg_dim, txt_lt)
+        f_cell(dash, 1, 1,  w_bias_str,      w_bias_bg, color.white)
+        f_cell(dash, 2, 1,  str.tostring(w_cpr_pp, format.mintick), bg_dim, txt_lt)
+
+        f_cell(dash, 0, 4,  "Monthly Bias", bg_dim, txt_lt)
+        f_cell(dash, 1, 4,  m_bias_str,      m_bias_bg, color.white)
+        f_cell(dash, 2, 4,  str.tostring(m_cpr_pp, format.mintick), bg_dim, txt_lt)
+
+        f_cell(dash, 0, 5,  "PW H/L",       bg_dim, txt_lt)
+        f_cell(dash, 1, 5,  str.tostring(pw_h, format.mintick), color.new(#FF5252, 40), color.white)
+        f_cell(dash, 2, 5,  str.tostring(pw_l, format.mintick), color.new(#69F0AE, 40), color.white)
+
+        f_cell(dash, 0, 6,  "PM H/L",       bg_dim, txt_lt)
+        f_cell(dash, 1, 6,  str.tostring(pm_h, format.mintick), color.new(#CE93D8, 40), color.white)
+        f_cell(dash, 2, 6,  str.tostring(pm_l, format.mintick), color.new(#CE93D8, 40), color.white)
+
+        f_cell(dash, 0, 7,  "W CPR R1/S1",  bg_dim, txt_lt)
+        f_cell(dash, 1, 7,  str.tostring(w_cpr_r1, format.mintick), color.new(col_cpr_r, 40), color.white)
+        f_cell(dash, 2, 7,  str.tostring(w_cpr_s1, format.mintick), color.new(col_cpr_s, 40), color.white)
+
+        f_cell(dash, 0, 8,  "Swing R lvls",  bg_dim, txt_lt)
+        f_cell(dash, 1, 8,  str.tostring(array.size(htf_res_lines)) + " levels", color.new(#FF5252, 40), color.white)
+        f_cell(dash, 2, 8,  "Pivot " + str.tostring(htf_pivot_len), bg_dim, txt_lt)
+
+        f_cell(dash, 0, 9,  "Swing S lvls",  bg_dim, txt_lt)
+        f_cell(dash, 1, 9,  str.tostring(array.size(htf_sup_lines)) + " levels", color.new(#69F0AE, 40), color.white)
+        f_cell(dash, 2, 9,  "Pivot " + str.tostring(htf_pivot_len), bg_dim, txt_lt)
+
+        f_cell(dash, 0, 10, "Volume",        bg_dim, txt_lt)
+        f_cell(dash, 1, 10, vol_pct,          volume >= vol_avg * volume_mult ? color.new(#00E676, 30) : bg_dim, color.white)
+        f_cell(dash, 2, 10, "vs 20-bar",      bg_dim, txt_lt)
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ALERTS — alertcondition (static) + alert() (dynamic webhook JSON)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(long_signal,         "Apex: LONG Confluence",     "🎯 LONG — confluence aligned")
+alertcondition(short_signal,        "Apex: SHORT Confluence",    "🎯 SHORT — confluence aligned")
+alertcondition(any_bull_sweep,      "Apex: Bullish Sweep",       "🎯 Bullish liquidity sweep")
+alertcondition(any_bear_sweep,      "Apex: Bearish Sweep",       "🎯 Bearish liquidity sweep")
+alertcondition(bos_bull,            "Apex: Bullish BOS",         "🎯 Bullish Break of Structure")
+alertcondition(bos_bear,            "Apex: Bearish BOS",         "🎯 Bearish Break of Structure")
+alertcondition(bull_fvg_cond,       "Apex: Bullish FVG",         "🎯 Bullish Fair Value Gap")
+alertcondition(bear_fvg_cond,       "Apex: Bearish FVG",         "🎯 Bearish Fair Value Gap")
+alertcondition(htf_bull_fvg_cond,   "Apex: HTF Bull FVG",        "🎯 HTF Bullish Fair Value Gap")
+alertcondition(htf_bear_fvg_cond,   "Apex: HTF Bear FVG",        "🎯 HTF Bearish Fair Value Gap")
+alertcondition(cvd_bull_div,        "Apex: CVD Bull Divergence", "🎯 CVD Bullish Divergence at zone")
+alertcondition(cvd_bear_div,        "Apex: CVD Bear Divergence", "🎯 CVD Bearish Divergence at zone")
+alertcondition(or_breakout_up,      "Apex: OR Up",               "🎯 OR broken upward")
+alertcondition(or_breakout_dn,      "Apex: OR Down",             "🎯 OR broken downward")
+alertcondition(ta.cross(close, poc),"Apex: POC Cross",           "🎯 POC bias shift")
+alertcondition(is_new_day,          "Apex: New Session",         "🎯 New session — zones reset")
+
+// — Webhook dynamic JSON payloads (use alert() for variable interpolation)
+if use_webhook and long_signal
+    msg = '{"strategy":"' + strategy_id + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","action":"long","entry":' + str.tostring(close) + ',"sl":' + str.tostring(long_sl) + ',"tp":' + str.tostring(long_tp) + ',"rr":' + str.tostring(rr_target) + '}'
+    alert(msg, alert.freq_once_per_bar_close)
+
+if use_webhook and short_signal
+    msg = '{"strategy":"' + strategy_id + '","symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period + '","action":"short","entry":' + str.tostring(close) + ',"sl":' + str.tostring(short_sl) + ',"tp":' + str.tostring(short_tp) + ',"rr":' + str.tostring(rr_target) + '}'
+    alert(msg, alert.freq_once_per_bar_close)

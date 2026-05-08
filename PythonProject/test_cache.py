@@ -2,7 +2,7 @@ import os
 from utils import fetch_live_fyers_symbols
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "data_cache")
+CACHE_DIR = os.path.join(BASE_DIR, "bse_data_cache")
 
 print("🔍 Fetching symbols...")
 all_stocks = fetch_live_fyers_symbols()

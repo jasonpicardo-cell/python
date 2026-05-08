@@ -8,7 +8,7 @@ from dateutil.relativedelta import relativedelta
 # 1. SETUP PATHS test
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR = os.path.join(BASE_DIR, "data_cache")
+CACHE_DIR = os.path.join(BASE_DIR, "bse_data_cache")
 
 if not os.path.exists(CACHE_DIR):
     print("❌ Cache directory not found! Run macro_scanner.py first.")

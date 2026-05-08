@@ -33,7 +33,7 @@ from pathlib import Path
 # CONFIG
 # ─────────────────────────────────────────────────────────────
 BASE_DIR       = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR       = os.path.join(BASE_DIR, "data_cache")
+DATA_DIR       = os.path.join(BASE_DIR, "bse_data_cache")
 NIFTY750_FILE  = os.path.join(BASE_DIR, "nifty750.txt")
 OUT_NIFTY750   = os.path.join(BASE_DIR, "nifty750_signals.html")
 OUT_OTHERS     = os.path.join(BASE_DIR, "other_stocks_signals.html")

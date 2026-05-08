@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pomodoro Timer</title>
+    <style>
+        :root {
+            --primary: #6366F1;
+            --primary-hover: #4F46E5;
+            --danger: #EF4444;
+            --danger-hover: #DC2626;
+            --success: #10B981;
+            --success-hover: #059669;
+
+            --bg: #111827;
+            --card-bg: #1F2937;
+            --text: #F9FAFB;
+            --text-muted: #D1D5DB;
+            --border: #374151;
+            --hover-bg: #4B5563;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .container {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            max-width: 650px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-top: 0;
+            color: var(--primary);
+        }
+
+        #timer-display {
+            font-size: 5rem;
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+            font-variant-numeric: tabular-nums;
+            color: var(--text);
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 20px;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            color: white;
+        }
+
+        .btn-start { background-color: var(--success); }
+        .btn-start:hover { background-color: var(--success-hover); }
+        .btn-pause { background-color: var(--primary); }
+        .btn-pause:hover { background-color: var(--primary-hover); }
+        .btn-reset { background-color: var(--danger); }
+        .btn-reset:hover { background-color: var(--danger-hover); }
+        .btn-standard { background-color: #4B5563; margin-bottom: 5px; }
+        .btn-standard:hover { background-color: #374151; }
+
+        .section {
+            border-top: 1px solid var(--border);
+            padding-top: 20px;
+            margin-top: 20px;
+        }
+
+        .section h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            color: var(--text-muted);
+        }
+
+        .radio-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .radio-label {
+            background-color: var(--bg);
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            font-size: 0.95rem;
+            color: var(--text);
+            transition: background-color 0.2s;
+        }
+
+        .radio-label:hover {
+            background-color: var(--hover-bg);
+        }
+
+        .radio-label input[type="radio"] {
+            margin-right: 8px;
+            accent-color: var(--primary);
+        }
+
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        input[type="number"] {
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            width: 80px;
+            font-size: 1rem;
+            background-color: var(--bg);
+            color: var(--text);
+        }
+
+        input[type="number"]:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        input[type="range"] {
+            accent-color: var(--primary);
+            cursor: pointer;
+            width: 120px;
+        }
+
+        .test-alarm-btn {
+            background-color: #F59E0B;
+            padding: 8px 12px;
+            font-size: 0.9rem;
+            color: #111827;
+            margin-left: auto;
+        }
+        .test-alarm-btn:hover {
+            background-color: #D97706;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Pomodoro Timer</h1>
+
+    <div id="timer-display">25:00</div>
+
+    <div class="controls">
+        <button class="btn-start" onclick="startTimer()">Start</button>
+        <button class="btn-pause" onclick="pauseTimer()">Pause</button>
+        <button class="btn-reset" onclick="resetTimer()">Reset</button>
+    </div>
+
+    <div class="section">
+        <h3>1. Standard Modes</h3>
+        <button class="btn-standard" onclick="setTimeFromStandard(25)">Pomodoro (25 min)</button>
+        <button class="btn-standard" onclick="setTimeFromStandard(5)">Short Break (5 min)</button>
+        <button class="btn-standard" onclick="setTimeFromStandard(15)">Long Break (15 min)</button>
+    </div>
+
+    <div class="section">
+        <h3>2. Custom Timer</h3>
+        <div class="input-group">
+            <label for="custom-input">Exact Minutes (Auto-starts):</label>
+            <input type="number" id="custom-input" min="0" step="1" value="25" oninput="setTimeFromInput()">
+        </div>
+
+        <label>Or select an interval (Auto-starts):</label>
+        <div class="radio-grid" id="custom-radios">
+            </div>
+    </div>
+
+    <div class="section">
+        <h3>3. Alarm Settings</h3>
+
+        <div class="input-group">
+            <label for="alarm-duration">Duration (sec):</label>
+            <input type="number" id="alarm-duration" value="3" min="1" style="width: 60px;">
+
+            <label for="volume-slider" style="margin-left: 10px;">Volume:</label>
+            <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="0.8">
+
+            <button class="test-alarm-btn" onclick="playAlarm()">Test Sound</button>
+        </div>
+
+        <label>Select Alarm Sound:</label>
+        <div class="radio-grid">
+            <label class="radio-label"><input type="radio" name="alarm-type" value="beep"> Beep</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="chime"> Chime</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="buzz"> Buzz</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="siren"> Siren</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="sonar"> Sonar</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="laser"> Laser</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="drop"> Bass Drop</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="alien"> Alien</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="telephone"> Telephone</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="pulse"> Pulse</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="magic"> Magic</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="gong"> Gong</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="trill"> Trill</label>
+
+            <label class="radio-label"><input type="radio" name="alarm-type" value="retro" checked> Retro</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="powerdown"> Power Down</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="bubbles"> Bubbles</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="alarmclock"> Alarm Clock</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="harp"> Harp</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="ufo"> UFO</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="warning"> Warning</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="heartbeat"> Heartbeat</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="cricket"> Cricket</label>
+            <label class="radio-label"><input type="radio" name="alarm-type" value="submarine"> Submarine</label>
+        </div>
+    </div>
+</div>
+
+<script>
+    /* --- AUDIO ENGINE & AUTOPLAY BYPASS --- */
+    let globalAudioCtx;
+    let audioUnlocked = false;
+
+    function unlockAudioContext() {
+        if (!globalAudioCtx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            globalAudioCtx = new AudioContext();
+        }
+
+        if (globalAudioCtx.state === 'suspended') {
+            globalAudioCtx.resume();
+        }
+
+        if (!audioUnlocked) {
+            const oscillator = globalAudioCtx.createOscillator();
+            const gainNode = globalAudioCtx.createGain();
+            gainNode.gain.value = 0;
+            oscillator.connect(gainNode);
+            gainNode.connect(globalAudioCtx.destination);
+            oscillator.start();
+            oscillator.stop(globalAudioCtx.currentTime + 0.001);
+            audioUnlocked = true;
+        }
+    }
+
+    document.addEventListener('click', unlockAudioContext, { once: true });
+    document.addEventListener('keydown', unlockAudioContext, { once: true });
+    document.addEventListener('touchstart', unlockAudioContext, { once: true });
+
+
+    /* --- WEB WORKER LOGIC --- */
+    const workerScript = `
+        let intervalId;
+        self.onmessage = function(e) {
+            if (e.data === 'start') {
+                if(intervalId) clearInterval(intervalId);
+                intervalId = setInterval(() => self.postMessage('tick'), 250);
+            } else if (e.data === 'stop') {
+                clearInterval(intervalId);
+            }
+        };
+    `;
+    const blob = new Blob([workerScript], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+
+    /* --- TIMER LOGIC --- */
+    let timeRemaining = 25 * 60;
+    let currentSetDuration = 25 * 60;
+    let targetEndTime = 0;
+    let isRunning = false;
+    let inputDebounceTimeout;
+
+    worker.onmessage = function(e) {
+        if (e.data === 'tick' && isRunning) {
+            processTick();
+        }
+    };
+
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && isRunning) {
+            processTick();
+        }
+    });
+
+    const customRadiosContainer = document.getElementById('custom-radios');
+    for (let i = 0; i <= 60; i += 5) {
+        const label = document.createElement('label');
+        label.className = 'radio-label';
+        label.innerHTML = `<input type="radio" name="interval-radio" value="${i}" onchange="setTimeFromRadio(this.value)"> ${i}`;
+        customRadiosContainer.appendChild(label);
+    }
+
+    function processTick() {
+        const now = Date.now();
+        timeRemaining = Math.ceil((targetEndTime - now) / 1000);
+
+        if (timeRemaining <= 0) {
+            timeRemaining = 0;
+            worker.postMessage('stop');
+            isRunning = false;
+            updateDisplay();
+            playAlarm();
+            return;
+        }
+        updateDisplay();
+    }
+
+    function updateDisplay() {
+        const minutes = Math.floor(timeRemaining / 60);
+        const seconds = timeRemaining % 60;
+        const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+        document.getElementById('timer-display').innerText = formattedTime;
+
+        if (timeRemaining > 0) {
+            document.title = `${formattedTime} - Pomodoro`;
+        } else {
+            document.title = "Time's up!";
+        }
+    }
+
+    function uncheckAllRadios() {
+        document.querySelectorAll('input[name="interval-radio"]').forEach(r => r.checked = false);
+    }
+
+    function setDuration(minutes) {
+        worker.postMessage('stop');
+        isRunning = false;
+        currentSetDuration = Math.floor(minutes * 60);
+        timeRemaining = currentSetDuration;
+        updateDisplay();
+    }
+
+    function setTimeFromStandard(minutes) {
+        unlockAudioContext();
+        uncheckAllRadios();
+        document.getElementById('custom-input').value = minutes;
+        setDuration(minutes);
+        startTimer();
+    }
+
+    function setTimeFromInput() {
+        unlockAudioContext();
+        uncheckAllRadios();
+        clearTimeout(inputDebounceTimeout);
+        inputDebounceTimeout = setTimeout(() => {
+            const mins = parseFloat(document.getElementById('custom-input').value) || 0;
+            setDuration(mins);
+            if (mins > 0) startTimer();
+        }, 600);
+    }
+
+    function setTimeFromRadio(minutes) {
+        unlockAudioContext();
+        document.getElementById('custom-input').value = minutes;
+        setDuration(parseFloat(minutes));
+        startTimer();
+    }
+
+    function startTimer() {
+        unlockAudioContext();
+        if (isRunning || timeRemaining <= 0) return;
+        isRunning = true;
+        targetEndTime = Date.now() + (timeRemaining * 1000);
+        worker.postMessage('start');
+        updateDisplay();
+    }
+
+    function pauseTimer() {
+        if (!isRunning) return;
+        worker.postMessage('stop');
+        isRunning = false;
+        timeRemaining = Math.ceil((targetEndTime - Date.now()) / 1000);
+        if (timeRemaining < 0) timeRemaining = 0;
+        updateDisplay();
+    }
+
+    function resetTimer() {
+        worker.postMessage('stop');
+        isRunning = false;
+        timeRemaining = currentSetDuration;
+        updateDisplay();
+    }
+
+    /* --- AUDIO SYNTHESIS LOGIC --- */
+    function playAlarm() {
+        unlockAudioContext();
+
+        const durationSecs = parseFloat(document.getElementById('alarm-duration').value) || 3;
+        const masterVolume = parseFloat(document.getElementById('volume-slider').value) || 0;
+        const alarmType = document.querySelector('input[name="alarm-type"]:checked').value;
+
+        if (masterVolume === 0) return; // Don't play if muted
+
+        const oscillator = globalAudioCtx.createOscillator();
+        const gainNode = globalAudioCtx.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(globalAudioCtx.destination);
+
+        const now = globalAudioCtx.currentTime;
+        gainNode.gain.setValueAtTime(0, now);
+
+        let hasCustomVolumeEnvelope = false;
+
+        switch(alarmType) {
+            /* ORIGINAL SOUNDS */
+            case 'beep':
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(800, now);
+                break;
+            case 'chime':
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(1200, now);
+                oscillator.frequency.exponentialRampToValueAtTime(600, now + durationSecs);
+                break;
+            case 'buzz':
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(150, now);
+                break;
+            case 'siren':
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(400, now);
+                oscillator.frequency.linearRampToValueAtTime(800, now + (durationSecs / 2));
+                oscillator.frequency.linearRampToValueAtTime(400, now + durationSecs);
+                break;
+            case 'sonar':
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(2000, now);
+                gainNode.gain.linearRampToValueAtTime(masterVolume, now + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.01 * masterVolume, now + durationSecs);
+                hasCustomVolumeEnvelope = true;
+                break;
+            case 'laser':
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(1500, now);
+                oscillator.frequency.exponentialRampToValueAtTime(100, now + durationSecs);
+                break;
+            case 'drop':
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(300, now);
+                oscillator.frequency.exponentialRampToValueAtTime(10, now + durationSecs);
+                break;
+            case 'alien':
+                oscillator.type = 'square';
+                let wobbleCycles = Math.ceil(durationSecs * 10);
+                for(let i = 0; i < wobbleCycles; i++) {
+                    oscillator.frequency.setValueAtTime(400, now + (i * 0.1));
+                    oscillator.frequency.setValueAtTime(600, now + (i * 0.1) + 0.05);
+                }
+                break;
+            case 'telephone':
+                oscillator.type = 'square';
+                let ringCycles = Math.ceil(durationSecs * 15);
+                for (let i = 0; i < ringCycles; i++) {
+                    oscillator.frequency.setValueAtTime(600, now + (i * 0.06));
+                    oscillator.frequency.setValueAtTime(750, now + (i * 0.06) + 0.03);
+                }
+                break;
+            case 'pulse':
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(100, now);
+                let pulseCycles = Math.ceil(durationSecs * 2);
+                for(let i = 0; i < pulseCycles; i++) {
+                    gainNode.gain.linearRampToValueAtTime(masterVolume, now + (i * 0.5) + 0.1);
+                    gainNode.gain.linearRampToValueAtTime(0.1 * masterVolume, now + (i * 0.5) + 0.4);
+                }
+                hasCustomVolumeEnvelope = true;
+                break;
+            case 'magic':
+                oscillator.type = 'sine';
+                let sweeps = Math.ceil(durationSecs * 2);
+                for(let i = 0; i < sweeps; i++) {
+                    oscillator.frequency.setValueAtTime(400, now + (i * 0.5));
+                    oscillator.frequency.linearRampToValueAtTime(1500, now + (i * 0.5) + 0.4);
+                }
+                break;
+            case 'gong':
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(120, now);
+                oscillator.frequency.exponentialRampToValueAtTime(40, now + durationSecs);
+                gainNode.gain.linearRampToValueAtTime(masterVolume, now + 0.05);
+                gainNode.gain.exponentialRampToValueAtTime(0.01 * masterVolume, now + durationSecs);
+                hasCustomVolumeEnvelope = true;
+                break;
+            case 'trill':
+                oscillator.type = 'sine';
+                let trillCycles = Math.ceil(durationSecs * 20);
+                for(let i = 0; i < trillCycles; i++) {
+                    oscillator.frequency.setValueAtTime(800, now + (i * 0.05));
+                    oscillator.frequency.setValueAtTime(1000, now + (i * 0.05) + 0.025);
+                }
+                break;
+
+            /* NEW SOUNDS */
+            case 'retro':
+                oscillator.type = 'square';
+                let notes = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99]; // Arpeggio
+                let speed = 0.1;
+                let loops = Math.ceil(durationSecs / (notes.length * speed));
+                for(let l = 0; l < loops; l++) {
+                    for(let i = 0; i < notes.length; i++) {
+                        let time = now + (l * notes.length * speed) + (i * speed);
+                        if(time < now + durationSecs) {
+                            oscillator.frequency.setValueAtTime(notes[i], time);
+                        }
+                    }
+                }
+                break;
+            case 'powerdown':
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(500, now);
+                oscillator.frequency.exponentialRampToValueAtTime(10, now + durationSecs);
+                break;
+            case 'bubbles':
+                oscillator.type = 'sine';
+                let bCount = Math.floor(durationSecs * 4);
+                for(let i=0; i<bCount; i++) {
+                    oscillator.frequency.setValueAtTime(300, now + i*0.25);
+                    oscillator.frequency.exponentialRampToValueAtTime(900, now + i*0.25 + 0.1);
+                }
+                break;
+            case 'alarmclock':
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(900, now);
+                let aCycles = Math.ceil(durationSecs * 5);
+                for(let i=0; i<aCycles; i++) {
+                    gainNode.gain.setValueAtTime(masterVolume, now + i*0.2);
+                    gainNode.gain.setValueAtTime(0, now + i*0.2 + 0.1);
+                }
+                hasCustomVolumeEnvelope = true;
+                break;
+            case 'harp':
+                oscillator.type = 'sine';
+                let harpNotes = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99, 1046.50];
+                for(let i=0; i<harpNotes.length; i++) {
+                    let hTime = now + (i * 0.15);
+                    if(hTime < now + durationSecs) {
+                        oscillator.frequency.setValueAtTime(harpNotes[i], hTime);
+                    }
+                }
+                // Leave frequency on last note, slowly fade out
+                gainNode.gain.linearRampToValueAtTime(masterVolume, now + 0.1);
+                gainNode.gain.exponentialRampToValueAtTime(0.01 * masterVolume, now + durationSecs);
+                hasCustomVolumeEnvelope = true;
+                break;
+            case 'ufo':
+                oscillator.type = 'triangle';
+                for(let i=0; i < durationSecs * 10; i++) {
+                    oscillator.frequency.linearRampToValueAtTime(600 + Math.sin(i) * 300, now + (i*0.1));
+                }
+                break;
+            case 'warning':
+                oscillator.type = 'square';
+                for(let i=0; i < durationSecs * 2; i++) {
+                    oscillator.frequency.setValueAtTime(500, now + (i*0.5));
+                    oscillator.frequency.setValueAtTime(750, now + (i*0.5) + 0.25);
+                }
+                break;
+            case 'heartbeat':
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(50, now);
+                let hCycles = Math.ceil(durationSecs);
+                for(let i=0; i<hCycles; i++) {
+                    gainNode.gain.setValueAtTime(0, now + i);
+                    gainNode.gain.linearRampToValueAtTime(masterVolume, now + i + 0.1);
+                    gainNode.gain.linearRampToValueAtTime(0, now + i + 0.2);
+                    gainNode.gain.linearRampToValueAtTime(masterVolume, now + i + 0.3);
+                    gainNode.gain.linearRampToValueAtTime(0, now + i + 0.4);
+                }
+                hasCustomVolumeEnvelope = true;
+                break;
+            case 'cricket':
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(2800, now);
+                let cCycles = Math.ceil(durationSecs * 20);
+                for(let i=0; i<cCycles; i++) {
+                    gainNode.gain.setValueAtTime(masterVolume, now + i*0.05);
+                    gainNode.gain.setValueAtTime(0, now + i*0.05 + 0.02);
+                }
+                hasCustomVolumeEnvelope = true;
+                break;
+            case 'submarine':
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(100, now);
+                let sCycles = Math.ceil(durationSecs / 2);
+                for(let i=0; i<sCycles; i++) {
+                    gainNode.gain.setValueAtTime(0, now + i*2);
+                    gainNode.gain.linearRampToValueAtTime(masterVolume, now + i*2 + 0.5);
+                    gainNode.gain.linearRampToValueAtTime(0, now + i*2 + 1);
+                }
+                hasCustomVolumeEnvelope = true;
+                break;
+        }
+
+        // Standard fade-in/fade-out scaled by Master Volume
+        if (!hasCustomVolumeEnvelope) {
+            gainNode.gain.linearRampToValueAtTime(masterVolume, now + 0.1);
+            gainNode.gain.setValueAtTime(masterVolume, now + durationSecs - 0.2);
+            gainNode.gain.linearRampToValueAtTime(0, now + durationSecs);
+        }
+
+        oscillator.start(now);
+        oscillator.stop(now + durationSecs);
+    }
+
+    updateDisplay();
+</script>
+
+</body>
+</html>
+
+

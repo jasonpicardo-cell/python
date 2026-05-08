@@ -1,0 +1,885 @@
+//@version=5
+indicator("Institutional Master Suite [God Mode V6 - The Monolith]", overlay=true, max_lines_count=500, max_boxes_count=500, max_labels_count=500, max_bars_back=5000)
+
+// ==========================================================================================================
+// █ 1. INTRODUCTION & ENTERPRISE ARCHITECTURE (God Mode V6)
+// ==========================================================================================================
+// This is the uncompressed, monolithic synthesis. 
+// It integrates SMC, Order Flow (Volume Profile), Dynamic VWAP deviations, Multi-Timeframe Liquidity, 
+// Initial Balance Extensions, Auto-Fibonacci, and the Elephant Edge 2.0 logic (Tanisha Garg).
+
+// ==========================================================================================================
+// █ 2. USER DEFINED TYPES (UDTs) & OBJECT ORIENTED METHODS
+// ==========================================================================================================
+
+type SwingPoint
+    int   index
+    float price
+    bool  isHigh
+    bool  isBroken
+    bool  isMajor 
+
+type OrderBlock
+    int   topIndex
+    int   bottomIndex
+    float topPrice
+    float bottomPrice
+    float meanThreshold
+    bool  isBullish
+    bool  mitigated
+    int   mitigationIndex
+    float volumeScore
+    box   visualBox
+    line  mtLine 
+
+type FairValueGap
+    int   index
+    float topPrice
+    float bottomPrice
+    float cePrice 
+    bool  isBullish
+    bool  mitigated
+    box   visualBox
+    line  ceLine
+
+type LiquidityPool
+    string levelName
+    float  price
+    int    originIndex
+    bool   swept
+    line   visualLine
+    label  visualLabel
+
+type ElephantZone
+    float top
+    float bottom
+    bool  isSupply
+    box   visualBox
+
+type VolumeProfileData
+    float highestPrice
+    float lowestPrice
+    float pocPrice
+    float vahPrice
+    float valPrice
+    float totalVolume
+
+type SessionData
+    float sHigh
+    float sLow
+    bool  isActive
+    line  lineHigh
+    line  lineLow
+
+// ==========================================================================================================
+// █ 3. EXTENSIVE INPUT MATRIX (Granular Control over every pixel)
+// ==========================================================================================================
+
+// --- 3.1. DASHBOARD & UI EXPERIENCES ---
+string GRP_UI = "1. Enterprise HUD & Data Matrix"
+bool showDashboard = input.bool(true, "Enable MTF Data Matrix Dashboard", group=GRP_UI)
+string dashPosition = input.string("Bottom Right", "Dashboard Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left", "Middle Right", "Middle Left"], group=GRP_UI)
+string dashSize = input.string("Small", "Dashboard Size", options=["Tiny", "Small", "Normal", "Large"], group=GRP_UI)
+color colDashBg = input.color(color.new(#0b0e14, 10), "Dashboard Background", group=GRP_UI)
+color colDashBorder = input.color(color.new(#2a2e39, 0), "Dashboard Border", group=GRP_UI)
+color colDashText = input.color(color.white, "Dashboard Text", group=GRP_UI)
+color colDashAccent = input.color(color.new(#00bcd4, 0), "Dashboard Accent", group=GRP_UI)
+
+// --- 3.2. ELEPHANT EDGE 2.0 ZONES (Tanisha Garg Update) ---
+string GRP_EE = "2. Elephant Edge 2.0 (Operator Zones)"
+bool showEE = input.bool(true, "Enable Elephant 2.0 Zones", group=GRP_EE)
+float zoneThick = input.float(0.15, "Zone Thickness Multiplier", step=0.01, minval=0.05, maxval=0.5, group=GRP_EE)
+color colEESell1 = input.color(color.new(#ff5722, 85), "Orange Supply Zone 1 (Inner)", group=GRP_EE)
+color colEESell2 = input.color(color.new(#e64a19, 85), "Orange Supply Zone 2 (Outer)", group=GRP_EE)
+color colEEBuy1 = input.color(color.new(#4caf50, 85), "Green Demand Zone 1 (Inner)", group=GRP_EE)
+color colEEBuy2 = input.color(color.new(#388e3c, 85), "Green Demand Zone 2 (Outer)", group=GRP_EE)
+bool showHistoricalEE = input.bool(false, "Plot Historical Zones", group=GRP_EE)
+bool detectOperatorCandles = input.bool(true, "Detect Shark Breakout Candles", group=GRP_EE)
+
+// --- 3.3. THE 5TH ELEMENT: RSI & MOMENTUM CONFIRMATION ---
+string GRP_RSI = "3. The 5th Element (RSI Matrix)"
+bool enableRSIFilter = input.bool(true, "Enable MTF RSI Confirmation Filter", group=GRP_RSI)
+int rsiPeriod = input.int(14, "RSI Period", group=GRP_RSI)
+int rsiUpper = input.int(60, "RSI Bullish Confirmation Level", group=GRP_RSI)
+int rsiLower = input.int(40, "RSI Bearish Confirmation Level", group=GRP_RSI)
+
+// --- 3.4. SMART MONEY CONCEPTS (SMC) CORE ENGINE ---
+string GRP_SMC = "4. SMC: Market Structure & Order Blocks"
+int swingLenExt = input.int(15, "External Swing Lookback", group=GRP_SMC)
+int swingLenInt = input.int(5, "Internal Swing Lookback", group=GRP_SMC)
+bool showBOS = input.bool(true, "Show BOS / CHoCH", group=GRP_SMC)
+bool showOB = input.bool(true, "Show Order Blocks", group=GRP_SMC)
+int obLimit = input.int(10, "Max Active Order Blocks", group=GRP_SMC)
+bool filterOBVol = input.bool(true, "Filter OBs by Displacement Volume", group=GRP_SMC)
+bool showOBThreshold = input.bool(true, "Show OB Mean Threshold (50%)", group=GRP_SMC)
+bool showFVG = input.bool(true, "Show Fair Value Gaps", group=GRP_SMC)
+bool showFVGCE = input.bool(true, "Show FVG Consequent Encroachment (50%)", group=GRP_SMC)
+int fvgLimit = input.int(15, "Max Active FVGs", group=GRP_SMC)
+bool showPremDisc = input.bool(true, "Shade Premium & Discount Zones", group=GRP_SMC)
+
+color colBOSBull = input.color(color.new(#00e676, 0), "Bullish Structure Line", group=GRP_SMC)
+color colBOSBear = input.color(color.new(#ff5252, 0), "Bearish Structure Line", group=GRP_SMC)
+color colOBBull = input.color(color.new(#00bfa5, 85), "Bullish OB Background", group=GRP_SMC)
+color colOBBullBorder = input.color(color.new(#00bfa5, 40), "Bullish OB Border", group=GRP_SMC)
+color colOBBear = input.color(color.new(#ff1744, 85), "Bearish OB Background", group=GRP_SMC)
+color colOBBearBorder = input.color(color.new(#ff1744, 40), "Bearish OB Border", group=GRP_SMC)
+color colFVGBull = input.color(color.new(#8bc34a, 90), "Bullish FVG", group=GRP_SMC)
+color colFVGBear = input.color(color.new(#e91e63, 90), "Bearish FVG", group=GRP_SMC)
+color colPremium = input.color(color.new(#f44336, 95), "Premium Zone Shade", group=GRP_SMC)
+color colDiscount = input.color(color.new(#4caf50, 95), "Discount Zone Shade", group=GRP_SMC)
+
+// --- 3.5. LIQUIDITY POOLS & SWEEP DETECTION ---
+string GRP_LIQ = "5. Multi-Timeframe Liquidity Pools"
+bool showDaily = input.bool(true, "Show Daily Liquidity (PDH/PDL/PDC)", group=GRP_LIQ)
+bool showWeekly = input.bool(true, "Show Weekly Liquidity (PWH/PWL)", group=GRP_LIQ)
+bool showMonthly = input.bool(false, "Show Monthly Liquidity (PMH/PML)", group=GRP_LIQ)
+color colLiqDaily = input.color(color.new(#9e9e9e, 30), "Daily Line Color", group=GRP_LIQ)
+color colLiqWeekly = input.color(color.new(#ff9800, 30), "Weekly Line Color", group=GRP_LIQ)
+color colLiqMonthly = input.color(color.new(#e040fb, 30), "Monthly Line Color", group=GRP_LIQ)
+bool enableSweepMarkers = input.bool(true, "Show Visual Markers on Liquidity Sweep", group=GRP_LIQ)
+
+// --- 3.6. VOLUME PROFILE & ORDER FLOW ---
+string GRP_VP = "6. Advanced Session Volume Profile"
+bool showVP = input.bool(true, "Enable Session Volume Profile", group=GRP_VP)
+int vpRows = input.int(50, "Volume Profile Rows (Resolution)", group=GRP_VP)
+float valueAreaPct = input.float(70.0, "Value Area %", group=GRP_VP)
+color colVPBg = input.color(color.new(#787b86, 90), "Profile Background Base", group=GRP_VP)
+color colVA = input.color(color.new(#2962ff, 80), "Value Area Node", group=GRP_VP)
+color colPOC = input.color(color.new(#ffeb3b, 0), "Point of Control (POC)", group=GRP_VP)
+int maxProfileWidth = input.int(60, "Max Profile Width (Bars)", group=GRP_VP)
+
+// --- 3.7. VWAP MATRIX ---
+string GRP_VWAP = "7. Dynamic VWAP & Deviations"
+bool showVWAP = input.bool(true, "Enable Dynamic Session VWAP", group=GRP_VWAP)
+bool showVWAPDev = input.bool(true, "Show VWAP Standard Deviations", group=GRP_VWAP)
+float devMult1 = input.float(1.5, "Deviation 1 Multiplier", group=GRP_VWAP)
+float devMult2 = input.float(2.5, "Deviation 2 Multiplier", group=GRP_VWAP)
+float devMult3 = input.float(3.5, "Deviation 3 Multiplier", group=GRP_VWAP)
+color colVWAP = input.color(color.new(#9c27b0, 0), "VWAP Anchor", group=GRP_VWAP)
+color colDev1 = input.color(color.new(#9c27b0, 60), "Deviation 1", group=GRP_VWAP)
+color colDev2 = input.color(color.new(#9c27b0, 75), "Deviation 2", group=GRP_VWAP)
+color colDev3 = input.color(color.new(#9c27b0, 90), "Deviation 3", group=GRP_VWAP)
+
+// --- 3.8. INITIAL BALANCE (IB) & KILLZONES ---
+string GRP_IB = "8. Initial Balance (IB) & Killzones"
+bool showIB = input.bool(true, "Show Initial Balance (First Hour)", group=GRP_IB)
+bool showIBExt = input.bool(true, "Show IB Extensions (1.5x, 2.0x)", group=GRP_IB)
+string ibSession = input.session("0915-1015", "IB Time Range", group=GRP_IB)
+color colIBHigh = input.color(color.new(#ff9800, 40), "IB High Line", group=GRP_IB)
+color colIBLow = input.color(color.new(#00bcd4, 40), "IB Low Line", group=GRP_IB)
+color colIBExt = input.color(color.new(#9e9e9e, 60), "IB Extensions", group=GRP_IB)
+
+bool showSessions = input.bool(true, "Highlight Trading Killzones", group=GRP_IB)
+bool drawSessionLiq = input.bool(true, "Draw Session High/Low Liquidity", group=GRP_IB)
+string kzIndian = input.session("0945-1430", "Prime Indian Killzone (Nifty)", group=GRP_IB)
+string kzAsian = input.session("0000-0600", "Asian Session", group=GRP_IB)
+string kzLondon = input.session("0700-1100", "London Killzone", group=GRP_IB)
+string kzNY = input.session("1300-1600", "New York Killzone", group=GRP_IB)
+color colKZIndian = input.color(color.new(#ff9800, 97), "Indian KZ Background", group=GRP_IB)
+color colKZAsian = input.color(color.new(#00bcd4, 98), "Asian KZ Background", group=GRP_IB)
+color colKZLondon = input.color(color.new(#4caf50, 98), "London KZ Background", group=GRP_IB)
+color colKZNY = input.color(color.new(#f44336, 98), "NY KZ Background", group=GRP_IB)
+
+// --- 3.9. AUTO-FIBONACCI MATRIX ---
+string GRP_FIB = "9. Auto-Fibonacci Engine"
+bool showAutoFib = input.bool(true, "Enable Auto-Fibonacci on Latest Macro Leg", group=GRP_FIB)
+color colFib0 = input.color(color.new(#ffffff, 50), "Fib 0.0 & 1.0 (Extremes)", group=GRP_FIB)
+color colFib382 = input.color(color.new(#2196f3, 50), "Fib 0.382", group=GRP_FIB)
+color colFib500 = input.color(color.new(#9c27b0, 30), "Fib 0.500 (Equilibrium)", group=GRP_FIB)
+color colFib618 = input.color(color.new(#ff9800, 30), "Fib 0.618 (Golden Pocket)", group=GRP_FIB)
+color colFib786 = input.color(color.new(#f44336, 50), "Fib 0.786", group=GRP_FIB)
+
+// --- 3.10. GLOBAL ALERT TOGGLES ---
+string GRP_AL = "10. Global Alert Toggles"
+bool alertOnSweep = input.bool(true, "Trigger Alert on Liquidity Sweep", group=GRP_AL)
+bool alertOnVWAP = input.bool(true, "Trigger Alert on VWAP Crossover", group=GRP_AL)
+bool alertOnCHoCH = input.bool(true, "Trigger Alert on Macro CHoCH", group=GRP_AL)
+bool alertOnShark = input.bool(true, "Trigger Alert on Shark Operator Breakout", group=GRP_AL)
+
+// ==========================================================================================================
+// █ 4. GLOBAL STATE VARIABLES & MEMORY ARRAYS
+// ==========================================================================================================
+
+var SwingPoint extLastH = SwingPoint.new(0, 0.0, true, false, true)
+var SwingPoint extLastL = SwingPoint.new(0, 0.0, false, false, true)
+var int extTrend = 0 
+
+var SwingPoint intLastH = SwingPoint.new(0, 0.0, true, false, false)
+var SwingPoint intLastL = SwingPoint.new(0, 0.0, false, false, false)
+var int intTrend = 0 
+
+var OrderBlock[] activeOBs = array.new<OrderBlock>()
+var FairValueGap[] activeFVGs = array.new<FairValueGap>()
+
+var float sessHighVP = na
+var float sessLowVP = na
+var float[] volBins = array.new_float(vpRows, 0.0)
+var float totalSessVol = 0.0
+var float rowSize = 0.0 
+
+var float ibHigh = na
+var float ibLow = na
+var float ibMid = na
+var bool ibLocked = false
+
+var SessionData asiaSess = SessionData.new(na, na, false, na, na)
+var SessionData lonSess = SessionData.new(na, na, false, na, na)
+var SessionData nySess = SessionData.new(na, na, false, na, na)
+
+// ==========================================================================================================
+// █ 5. HELPER FUNCTIONS & TIME LOGIC
+// ==========================================================================================================
+
+getSize() =>
+    dashSize == "Tiny" ? size.tiny : dashSize == "Small" ? size.small : dashSize == "Normal" ? size.normal : size.large
+
+is_newbar(res) => ta.change(time(res)) != 0
+isNewDay = is_newbar("D")
+isNewWeek = is_newbar("W")
+isNewMonth = is_newbar("M")
+
+avgVol = ta.sma(volume, 50)
+avgBody = ta.sma(math.abs(close - open), 50)
+isHighVol = volume > (avgVol * 1.5)
+isOperatorCandle = (volume > avgVol * 1.8) and (math.abs(close - open) > avgBody * 2)
+
+getMTFRSI(res) => request.security(syminfo.tickerid, res, ta.rsi(close, rsiPeriod))
+rsi_curr = ta.rsi(close, rsiPeriod)
+rsi_15m = getMTFRSI("15")
+rsi_1H = getMTFRSI("60")
+
+bool rsiBullConfirm = rsi_curr > rsiUpper and rsi_15m > 50
+bool rsiBearConfirm = rsi_curr < rsiLower and rsi_15m < 50
+
+getMTFTrend(res) =>
+    c = request.security(syminfo.tickerid, res, close)
+    ta.ema(c, 9) > ta.ema(c, 21) ? 1 : -1
+
+// ==========================================================================================================
+// █ 6. INITIAL BALANCE (IB) ENGINE & EXTENSIONS
+// ==========================================================================================================
+
+inIBSession = time(timeframe.period, ibSession)
+isNewIB = inIBSession and not inIBSession[1]
+isEndIB = not inIBSession and inIBSession[1]
+
+if isNewDay
+    ibHigh := na
+    ibLow := na
+    ibMid := na
+    ibLocked := false
+
+if inIBSession
+    if na(ibHigh)
+        ibHigh := high
+        ibLow := low
+    else
+        ibHigh := math.max(ibHigh, high)
+        ibLow := math.min(ibLow, low)
+
+var line lineIBH = na
+var line lineIBL = na
+var line lineIBMid = na
+var line lineIBExt1H = na, var line lineIBExt1L = na
+var line lineIBExt2H = na, var line lineIBExt2L = na
+
+if isEndIB
+    ibLocked := true
+    ibMid := ibLow + ((ibHigh - ibLow) / 2)
+    float ibRange = ibHigh - ibLow
+    
+    if showIB
+        lineIBH := line.new(bar_index, ibHigh, bar_index + 10, ibHigh, color=colIBHigh, style=line.style_dashed, extend=extend.right)
+        lineIBL := line.new(bar_index, ibLow, bar_index + 10, ibLow, color=colIBLow, style=line.style_dashed, extend=extend.right)
+        lineIBMid := line.new(bar_index, ibMid, bar_index + 10, ibMid, color=color.gray, style=line.style_dotted, extend=extend.right)
+        
+    if showIBExt
+        lineIBExt1H := line.new(bar_index, ibHigh + (ibRange * 0.5), bar_index + 10, ibHigh + (ibRange * 0.5), color=colIBExt, style=line.style_dotted, extend=extend.right)
+        lineIBExt1L := line.new(bar_index, ibLow - (ibRange * 0.5), bar_index + 10, ibLow - (ibRange * 0.5), color=colIBExt, style=line.style_dotted, extend=extend.right)
+        lineIBExt2H := line.new(bar_index, ibHigh + (ibRange * 1.0), bar_index + 10, ibHigh + (ibRange * 1.0), color=colIBExt, style=line.style_dotted, extend=extend.right)
+        lineIBExt2L := line.new(bar_index, ibLow - (ibRange * 1.0), bar_index + 10, ibLow - (ibRange * 1.0), color=colIBExt, style=line.style_dotted, extend=extend.right)
+
+// ==========================================================================================================
+// █ 7. SESSION KILLZONES & SESSION LIQUIDITY HIGHS/LOWS
+// ==========================================================================================================
+
+inIndian = time(timeframe.period, kzIndian)
+inAsian = time(timeframe.period, kzAsian)
+inLondon = time(timeframe.period, kzLondon)
+inNY = time(timeframe.period, kzNY)
+
+bgcolor(showSessions and inIndian ? colKZIndian : na, title="Indian Killzone")
+bgcolor(showSessions and inAsian ? colKZAsian : na, title="Asian Killzone")
+bgcolor(showSessions and inLondon ? colKZLondon : na, title="London Killzone")
+bgcolor(showSessions and inNY ? colKZNY : na, title="NY Killzone")
+
+// Asian Session Tracker
+if inAsian and not inAsian[1]
+    asiaSess.sHigh := high
+    asiaSess.sLow := low
+    asiaSess.isActive := true
+else if inAsian
+    asiaSess.sHigh := math.max(asiaSess.sHigh, high)
+    asiaSess.sLow := math.min(asiaSess.sLow, low)
+else if not inAsian and inAsian[1]
+    asiaSess.isActive := false
+    if drawSessionLiq
+        asiaSess.lineHigh := line.new(bar_index, asiaSess.sHigh, bar_index + 10, asiaSess.sHigh, color=colKZAsian, style=line.style_solid, width=1, extend=extend.right)
+        asiaSess.lineLow := line.new(bar_index, asiaSess.sLow, bar_index + 10, asiaSess.sLow, color=colKZAsian, style=line.style_solid, width=1, extend=extend.right)
+
+// London Session Tracker
+if inLondon and not inLondon[1]
+    lonSess.sHigh := high
+    lonSess.sLow := low
+    lonSess.isActive := true
+else if inLondon
+    lonSess.sHigh := math.max(lonSess.sHigh, high)
+    lonSess.sLow := math.min(lonSess.sLow, low)
+else if not inLondon and inLondon[1]
+    lonSess.isActive := false
+    if drawSessionLiq
+        lonSess.lineHigh := line.new(bar_index, lonSess.sHigh, bar_index + 10, lonSess.sHigh, color=colKZLondon, style=line.style_solid, width=1, extend=extend.right)
+        lonSess.lineLow := line.new(bar_index, lonSess.sLow, bar_index + 10, lonSess.sLow, color=colKZLondon, style=line.style_solid, width=1, extend=extend.right)
+
+// ==========================================================================================================
+// █ 8. MULTI-TIMEFRAME LIQUIDITY EXTRACTION (PDH, PWH, PMH)
+// ==========================================================================================================
+
+[pdh, pdl, pdc] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+[pwh, pwl, pwc] = request.security(syminfo.tickerid, "W", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+[pmh, pml, pmc] = request.security(syminfo.tickerid, "M", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+
+var line[] d_lines = array.new_line()
+var line[] w_lines = array.new_line()
+var line[] m_lines = array.new_line()
+
+if isNewDay and showDaily
+    if array.size(d_lines) > 0
+        for i = 0 to array.size(d_lines) - 1
+            line.delete(array.get(d_lines, i))
+        array.clear(d_lines)
+    array.push(d_lines, line.new(bar_index, pdh, bar_index + 1, pdh, color=colLiqDaily, style=line.style_dashed, extend=extend.right))
+    array.push(d_lines, line.new(bar_index, pdl, bar_index + 1, pdl, color=colLiqDaily, style=line.style_dashed, extend=extend.right))
+    array.push(d_lines, line.new(bar_index, pdc, bar_index + 1, pdc, color=colLiqDaily, style=line.style_dotted, extend=extend.right))
+
+if isNewWeek and showWeekly
+    if array.size(w_lines) > 0
+        for i = 0 to array.size(w_lines) - 1
+            line.delete(array.get(w_lines, i))
+        array.clear(w_lines)
+    array.push(w_lines, line.new(bar_index, pwh, bar_index + 1, pwh, color=colLiqWeekly, style=line.style_dashed, width=2, extend=extend.right))
+    array.push(w_lines, line.new(bar_index, pwl, bar_index + 1, pwl, color=colLiqWeekly, style=line.style_dashed, width=2, extend=extend.right))
+
+if isNewMonth and showMonthly
+    if array.size(m_lines) > 0
+        for i = 0 to array.size(m_lines) - 1
+            line.delete(array.get(m_lines, i))
+        array.clear(m_lines)
+    array.push(m_lines, line.new(bar_index, pmh, bar_index + 1, pmh, color=colLiqMonthly, style=line.style_solid, width=2, extend=extend.right))
+    array.push(m_lines, line.new(bar_index, pml, bar_index + 1, pml, color=colLiqMonthly, style=line.style_solid, width=2, extend=extend.right))
+
+// ==========================================================================================================
+// █ 9. PREMIUM & DISCOUNT DAILY MATRIX
+// ==========================================================================================================
+
+// Prevents keyword 'range' compilation error by using 'dayRange'
+dayRange = pdh - pdl
+dayPivot = (pdh + pdl + pdc) / 3
+
+var box premBox = na
+var box discBox = na
+
+if isNewDay and showPremDisc
+    box.delete(premBox[1])
+    box.delete(discBox[1])
+    float midPD = pdl + (dayRange / 2)
+    premBox := box.new(bar_index, pdh, bar_index + 1, midPD, border_color=na, bgcolor=colPremium, extend=extend.right)
+    discBox := box.new(bar_index, midPD, bar_index + 1, pdl, border_color=na, bgcolor=colDiscount, extend=extend.right)
+
+// ==========================================================================================================
+// █ 10. ELEPHANT EDGE 2.0 ZONES (Orange/Green Operator Logic)
+// ==========================================================================================================
+
+float res1 = (2 * dayPivot) - pdl
+float res2 = dayPivot + dayRange
+float sup1 = (2 * dayPivot) - pdh
+float sup2 = dayPivot - dayRange
+float zThick = dayRange * zoneThick
+
+var box[] eeActiveBoxes = array.new_box()
+
+if isNewDay and showEE
+    if not showHistoricalEE and array.size(eeActiveBoxes) > 0
+        for i = 0 to array.size(eeActiveBoxes) - 1
+            box.delete(array.get(eeActiveBoxes, i))
+        array.clear(eeActiveBoxes)
+    
+    array.push(eeActiveBoxes, box.new(bar_index, res2 + zThick/2, bar_index + 1, res2 - zThick/2, border_color=na, bgcolor=colEESell2, extend=extend.right))
+    array.push(eeActiveBoxes, box.new(bar_index, res1 + zThick/2, bar_index + 1, res1 - zThick/2, border_color=na, bgcolor=colEESell1, extend=extend.right))
+    array.push(eeActiveBoxes, box.new(bar_index, sup1 + zThick/2, bar_index + 1, sup1 - zThick/2, border_color=na, bgcolor=colEEBuy1, extend=extend.right))
+    array.push(eeActiveBoxes, box.new(bar_index, sup2 + zThick/2, bar_index + 1, sup2 - zThick/2, border_color=na, bgcolor=colEEBuy2, extend=extend.right))
+
+// Operator Breakout Detection
+bool operatorBullBreak = isOperatorCandle and close > open and close > res1 and (not enableRSIFilter or rsiBullConfirm)
+bool operatorBearBreak = isOperatorCandle and close < open and close < sup1 and (not enableRSIFilter or rsiBearConfirm)
+
+plotshape(detectOperatorCandles and operatorBullBreak, "Shark Buy", shape.triangleup, location.belowbar, color.lime, size=size.small, text="SHARK\nBUY")
+plotshape(detectOperatorCandles and operatorBearBreak, "Shark Sell", shape.triangledown, location.abovebar, color.red, size=size.small, text="SHARK\nSELL")
+
+// ==========================================================================================================
+// █ 11. SMC ENGINE: FRACTAL MARKET STRUCTURE (Internal & External)
+// ==========================================================================================================
+
+ext_ph = ta.pivothigh(high, swingLenExt, swingLenExt)
+ext_pl = ta.pivotlow(low, swingLenExt, swingLenExt)
+int_ph = ta.pivothigh(high, swingLenInt, swingLenInt)
+int_pl = ta.pivotlow(low, swingLenInt, swingLenInt)
+
+// --- EXTERNAL STRUCTURE (MACRO) ---
+if not na(ext_ph)
+    if extTrend == 1
+        if high[swingLenExt] > extLastH.price and not extLastH.isBroken
+            if showBOS
+                line.new(extLastH.index, extLastH.price, bar_index - swingLenExt, extLastH.price, color=colBOSBull, style=line.style_solid, width=2)
+            extLastH.isBroken := true
+    else if extTrend == -1
+        if high[swingLenExt] > extLastH.price and not extLastH.isBroken
+            if showBOS
+                line.new(extLastH.index, extLastH.price, bar_index - swingLenExt, extLastH.price, color=colBOSBull, style=line.style_dashed, width=2)
+            extTrend := 1
+            extLastH.isBroken := true
+    extLastH := SwingPoint.new(bar_index - swingLenExt, ext_ph, true, false, true)
+
+if not na(ext_pl)
+    if extTrend == -1
+        if low[swingLenExt] < extLastL.price and not extLastL.isBroken
+            if showBOS
+                line.new(extLastL.index, extLastL.price, bar_index - swingLenExt, extLastL.price, color=colBOSBear, style=line.style_solid, width=2)
+            extLastL.isBroken := true
+    else if extTrend == 1
+        if low[swingLenExt] < extLastL.price and not extLastL.isBroken
+            if showBOS
+                line.new(extLastL.index, extLastL.price, bar_index - swingLenExt, extLastL.price, color=colBOSBear, style=line.style_dashed, width=2)
+            extTrend := -1
+            extLastL.isBroken := true
+    extLastL := SwingPoint.new(bar_index - swingLenExt, ext_pl, false, false, true)
+
+// --- INTERNAL STRUCTURE (MICRO) & ORDER BLOCKS ---
+if not na(int_ph)
+    if intTrend == 1
+        if high[swingLenInt] > intLastH.price and not intLastH.isBroken
+            if showBOS
+                line.new(intLastH.index, intLastH.price, bar_index - swingLenInt, intLastH.price, color=colBOSBull, style=line.style_dotted, width=1)
+            intLastH.isBroken := true
+            
+            if showOB and array.size(activeOBs) < obLimit and (not filterOBVol or isHighVol[swingLenInt])
+                idx = bar_index - swingLenInt - 1
+                obTop = high[bar_index - idx]
+                obBot = low[bar_index - idx]
+                obMean = obBot + ((obTop - obBot) / 2)
+                bx = box.new(idx, obTop, idx, obBot, border_color=colOBBullBorder, bgcolor=colOBBull, extend=extend.right)
+                ln = showOBThreshold ? line.new(idx, obMean, idx, obMean, color=colOBBullBorder, style=line.style_dotted, extend=extend.right) : na
+                array.push(activeOBs, OrderBlock.new(idx, idx, obTop, obBot, obMean, true, false, 0, volume[bar_index - idx], bx, ln))
+                
+    else if intTrend == -1
+        if high[swingLenInt] > intLastH.price and not intLastH.isBroken
+            if showBOS
+                line.new(intLastH.index, intLastH.price, bar_index - swingLenInt, intLastH.price, color=colBOSBull, style=line.style_dotted, width=1)
+            intTrend := 1
+            intLastH.isBroken := true
+    intLastH := SwingPoint.new(bar_index - swingLenInt, int_ph, true, false, false)
+
+if not na(int_pl)
+    if intTrend == -1
+        if low[swingLenInt] < intLastL.price and not intLastL.isBroken
+            if showBOS
+                line.new(intLastL.index, intLastL.price, bar_index - swingLenInt, intLastL.price, color=colBOSBear, style=line.style_dotted, width=1)
+            intLastL.isBroken := true
+            
+            if showOB and array.size(activeOBs) < obLimit and (not filterOBVol or isHighVol[swingLenInt])
+                idx = bar_index - swingLenInt - 1
+                obTop = high[bar_index - idx]
+                obBot = low[bar_index - idx]
+                obMean = obBot + ((obTop - obBot) / 2)
+                bx = box.new(idx, obTop, idx, obBot, border_color=colOBBearBorder, bgcolor=colOBBear, extend=extend.right)
+                ln = showOBThreshold ? line.new(idx, obMean, idx, obMean, color=colOBBearBorder, style=line.style_dotted, extend=extend.right) : na
+                array.push(activeOBs, OrderBlock.new(idx, idx, obTop, obBot, obMean, false, false, 0, volume[bar_index - idx], bx, ln))
+                
+    else if intTrend == 1
+        if low[swingLenInt] < intLastL.price and not intLastL.isBroken
+            if showBOS
+                line.new(intLastL.index, intLastL.price, bar_index - swingLenInt, intLastL.price, color=colBOSBear, style=line.style_dotted, width=1)
+            intTrend := -1
+            intLastL.isBroken := true
+    intLastL := SwingPoint.new(bar_index - swingLenInt, int_pl, false, false, false)
+
+// ==========================================================================================================
+// █ 12. OB & FVG MITIGATION ENGINE
+// ==========================================================================================================
+
+if showOB and array.size(activeOBs) > 0
+    for i = array.size(activeOBs) - 1 to 0
+        ob = array.get(activeOBs, i)
+        if not ob.mitigated
+            if ob.isBullish and low <= ob.topPrice and bar_index > ob.topIndex + 2
+                ob.mitigated := true
+                box.set_extend(ob.visualBox, extend.none)
+                box.set_right(ob.visualBox, bar_index)
+                if not na(ob.mtLine)
+                    line.set_extend(ob.mtLine, extend.none)
+                    line.set_x2(ob.mtLine, bar_index)
+            else if not ob.isBullish and high >= ob.bottomPrice and bar_index > ob.topIndex + 2
+                ob.mitigated := true
+                box.set_extend(ob.visualBox, extend.none)
+                box.set_right(ob.visualBox, bar_index)
+                if not na(ob.mtLine)
+                    line.set_extend(ob.mtLine, extend.none)
+                    line.set_x2(ob.mtLine, bar_index)
+        if ob.mitigated
+            array.remove(activeOBs, i)
+
+if showFVG
+    if low > high[2] and close[1] > open[1]
+        fTop = low, fBot = high[2], fCE = fBot + ((fTop - fBot) / 2)
+        bx = box.new(bar_index - 2, fTop, bar_index, fBot, border_color=na, bgcolor=colFVGBull, extend=extend.right)
+        ln = showFVGCE ? line.new(bar_index - 2, fCE, bar_index, fCE, color=color.new(colFVGBull, 0), style=line.style_dotted, extend=extend.right) : na
+        array.push(activeFVGs, FairValueGap.new(bar_index - 2, fTop, fBot, fCE, true, false, bx, ln))
+        if array.size(activeFVGs) > fvgLimit
+            oldFvg = array.shift(activeFVGs)
+            box.delete(oldFvg.visualBox)
+            if not na(oldFvg.ceLine)
+                line.delete(oldFvg.ceLine)
+    
+    if high < low[2] and close[1] < open[1]
+        fTop = low[2], fBot = high, fCE = fBot + ((fTop - fBot) / 2)
+        bx = box.new(bar_index - 2, fTop, bar_index, fBot, border_color=na, bgcolor=colFVGBear, extend=extend.right)
+        ln = showFVGCE ? line.new(bar_index - 2, fCE, bar_index, fCE, color=color.new(colFVGBear, 0), style=line.style_dotted, extend=extend.right) : na
+        array.push(activeFVGs, FairValueGap.new(bar_index - 2, fTop, fBot, fCE, false, false, bx, ln))
+        if array.size(activeFVGs) > fvgLimit
+            oldFvg = array.shift(activeFVGs)
+            box.delete(oldFvg.visualBox)
+            if not na(oldFvg.ceLine)
+                line.delete(oldFvg.ceLine)
+
+if array.size(activeFVGs) > 0
+    for i = array.size(activeFVGs) - 1 to 0
+        fvg = array.get(activeFVGs, i)
+        if not fvg.mitigated
+            if fvg.isBullish and low <= fvg.bottomPrice
+                fvg.mitigated := true
+                box.set_extend(fvg.visualBox, extend.none)
+                box.set_right(fvg.visualBox, bar_index)
+                if not na(fvg.ceLine)
+                    line.set_extend(fvg.ceLine, extend.none)
+                    line.set_x2(fvg.ceLine, bar_index)
+            else if not fvg.isBullish and high >= fvg.topPrice
+                fvg.mitigated := true
+                box.set_extend(fvg.visualBox, extend.none)
+                box.set_right(fvg.visualBox, bar_index)
+                if not na(fvg.ceLine)
+                    line.set_extend(fvg.ceLine, extend.none)
+                    line.set_x2(fvg.ceLine, bar_index)
+        if fvg.mitigated
+            array.remove(activeFVGs, i)
+
+// ==========================================================================================================
+// █ 13. ADVANCED SESSION VOLUME PROFILE (VP) & POC MATRIX
+// ==========================================================================================================
+
+if isNewDay
+    sessHighVP := high
+    sessLowVP := low
+    totalSessVol := 0.0
+    array.fill(volBins, 0.0)
+else
+    sessHighVP := math.max(sessHighVP, high)
+    sessLowVP := math.min(sessLowVP, low)
+
+if showVP
+    if sessHighVP > sessLowVP
+        rowSize := (sessHighVP - sessLowVP) / vpRows
+    
+    if rowSize > 0
+        idxTop = math.floor((high - sessLowVP) / rowSize)
+        idxBot = math.floor((low - sessLowVP) / rowSize)
+        idxTop := math.min(idxTop, vpRows - 1)
+        idxBot := math.max(idxBot, 0)
+        
+        volPerBin = volume / math.max(1, (idxTop - idxBot + 1))
+        for i = idxBot to idxTop
+            if i >= 0 and i < vpRows
+                currentVol = array.get(volBins, i)
+                array.set(volBins, i, currentVol + volPerBin)
+                totalSessVol += volPerBin
+
+var box[] vpBoxes = array.new_box()
+var float pocPriceTracker = na
+var float vahTracker = na
+var float valTracker = na
+
+if showVP and barstate.islast and rowSize > 0
+    if array.size(vpBoxes) > 0
+        for i = 0 to array.size(vpBoxes) - 1
+            box.delete(array.get(vpBoxes, i))
+        array.clear(vpBoxes)
+    
+    float maxVol = 0.0
+    int pocIndex = 0
+    for i = 0 to vpRows - 1
+        vol = array.get(volBins, i)
+        if vol > maxVol
+            maxVol := vol
+            pocIndex := i
+            
+    float targetVol = totalSessVol * (valueAreaPct / 100.0)
+    float currentVolVA = maxVol
+    int upIndex = pocIndex + 1
+    int downIndex = pocIndex - 1
+    int[] inVA = array.new_int(vpRows, 0)
+    array.set(inVA, pocIndex, 1)
+    
+    while currentVolVA < targetVol and (upIndex < vpRows or downIndex >= 0)
+        float volUp = upIndex < vpRows ? array.get(volBins, upIndex) : 0.0
+        float volDown = downIndex >= 0 ? array.get(volBins, downIndex) : 0.0
+        if volUp > volDown
+            currentVolVA += volUp
+            array.set(inVA, upIndex, 1)
+            upIndex += 1
+        else
+            currentVolVA += volDown
+            array.set(inVA, downIndex, 1)
+            downIndex -= 1
+
+    vahTracker := sessLowVP + (upIndex * rowSize)
+    valTracker := sessLowVP + (downIndex * rowSize)
+
+    for i = 0 to vpRows - 1
+        vol = array.get(volBins, i)
+        if vol > 0
+            float widthRatio = vol / maxVol
+            int boxLength = math.round(widthRatio * maxProfileWidth) 
+            float priceLevel = sessLowVP + (i * rowSize)
+            isVA = array.get(inVA, i) == 1
+            boxColor = i == pocIndex ? colPOC : isVA ? colVA : colVPBg
+            b = box.new(bar_index, priceLevel + rowSize, bar_index + boxLength, priceLevel, border_color=na, bgcolor=boxColor)
+            array.push(vpBoxes, b)
+
+    pocPriceTracker := sessLowVP + (pocIndex * rowSize) + (rowSize / 2)
+
+// ==========================================================================================================
+// █ 14. AUTO-FIBONACCI MATRIX (Macro Swing Analysis)
+// ==========================================================================================================
+
+var line f_0 = na, var line f_382 = na, var line f_500 = na, var line f_618 = na, var line f_786 = na, var line f_1 = na
+
+if showAutoFib
+    float diff = math.abs(extLastH.price - extLastL.price)
+    float fib382 = extTrend == 1 ? extLastL.price + (diff * 0.382) : extLastH.price - (diff * 0.382)
+    float fib500 = extTrend == 1 ? extLastL.price + (diff * 0.500) : extLastH.price - (diff * 0.500)
+    float fib618 = extTrend == 1 ? extLastL.price + (diff * 0.618) : extLastH.price - (diff * 0.618)
+    float fib786 = extTrend == 1 ? extLastL.price + (diff * 0.786) : extLastH.price - (diff * 0.786)
+
+    if barstate.islast
+        line.delete(f_0[1]), line.delete(f_382[1]), line.delete(f_500[1]), line.delete(f_618[1]), line.delete(f_786[1]), line.delete(f_1[1])
+        int startX = math.min(extLastH.index, extLastL.index)
+        int endX = bar_index + 10
+        
+        f_0 := line.new(startX, extTrend == 1 ? extLastH.price : extLastL.price, endX, extTrend == 1 ? extLastH.price : extLastL.price, color=colFib0, style=line.style_dotted)
+        f_1 := line.new(startX, extTrend == 1 ? extLastL.price : extLastH.price, endX, extTrend == 1 ? extLastL.price : extLastH.price, color=colFib0, style=line.style_dotted)
+        f_382 := line.new(startX, fib382, endX, fib382, color=colFib382, style=line.style_solid)
+        f_500 := line.new(startX, fib500, endX, fib500, color=colFib500, style=line.style_dashed)
+        f_618 := line.new(startX, fib618, endX, fib618, color=colFib618, style=line.style_solid, width=2)
+        f_786 := line.new(startX, fib786, endX, fib786, color=colFib786, style=line.style_solid)
+
+// ==========================================================================================================
+// █ 15. DYNAMIC VWAP & 3X STANDARD DEVIATIONS
+// ==========================================================================================================
+
+var float vwapAnchor = na
+var float vwapSum = 0.0
+var float volSum = 0.0
+var float vwapDevSum = 0.0
+
+if isNewDay
+    vwapSum := 0.0
+    volSum := 0.0
+    vwapDevSum := 0.0
+
+vwapSum += hlc3 * volume
+volSum += volume
+vwapAnchor := vwapSum / volSum
+
+vwapDevSum += volume * math.pow(hlc3 - vwapAnchor, 2)
+float variance = vwapDevSum / volSum
+float stdev = math.sqrt(variance)
+
+float upperDev1 = vwapAnchor + (stdev * devMult1), float lowerDev1 = vwapAnchor - (stdev * devMult1)
+float upperDev2 = vwapAnchor + (stdev * devMult2), float lowerDev2 = vwapAnchor - (stdev * devMult2)
+float upperDev3 = vwapAnchor + (stdev * devMult3), float lowerDev3 = vwapAnchor - (stdev * devMult3)
+
+plot(showVWAP ? vwapAnchor : na, "Session VWAP", color=colVWAP, linewidth=2)
+plot(showVWAPDev ? upperDev1 : na, "Upper Dev 1", color=colDev1, linewidth=1, style=plot.style_circles)
+plot(showVWAPDev ? lowerDev1 : na, "Lower Dev 1", color=colDev1, linewidth=1, style=plot.style_circles)
+plot(showVWAPDev ? upperDev2 : na, "Upper Dev 2", color=colDev2, linewidth=1, style=plot.style_cross)
+plot(showVWAPDev ? lowerDev2 : na, "Lower Dev 2", color=colDev2, linewidth=1, style=plot.style_cross)
+plot(showVWAPDev ? upperDev3 : na, "Upper Dev 3", color=colDev3, linewidth=1, style=plot.style_cross)
+plot(showVWAPDev ? lowerDev3 : na, "Lower Dev 3", color=colDev3, linewidth=1, style=plot.style_cross)
+
+// ==========================================================================================================
+// █ 16. LIQUIDITY TRAPS & SWEEP ALERTS
+// ==========================================================================================================
+
+body = math.abs(close - open)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+isPinBull = lowerWick > (body * 2.5) and upperWick < body
+isPinBear = upperWick > (body * 2.5) and lowerWick < body
+
+bool sweptPDL = isPinBull and low <= pdl and close > pdl
+bool sweptPDH = isPinBear and high >= pdh and close < pdh
+bool sweptAsiaL = isPinBull and not na(asiaSess.sLow) and low <= asiaSess.sLow and close > asiaSess.sLow
+bool sweptAsiaH = isPinBear and not na(asiaSess.sHigh) and high >= asiaSess.sHigh and close < asiaSess.sHigh
+
+plotshape(enableSweepMarkers and sweptPDL, "PDL Sweep", shape.triangleup, location.belowbar, color.lime, size=size.small, text="PDL Sweep")
+plotshape(enableSweepMarkers and sweptPDH, "PDH Sweep", shape.triangledown, location.abovebar, color.red, size=size.small, text="PDH Sweep")
+plotshape(enableSweepMarkers and sweptAsiaL, "Asia Low Sweep", shape.triangleup, location.belowbar, color.lime, size=size.tiny, text="Asia L Sweep")
+plotshape(enableSweepMarkers and sweptAsiaH, "Asia High Sweep", shape.triangledown, location.abovebar, color.red, size=size.tiny, text="Asia H Sweep")
+
+// ==========================================================================================================
+// █ 17. THE DYNAMIC TOOLTIP ENGINE (HOVER MATRIX)
+// ==========================================================================================================
+
+var label ttVWAP = na, var label ttIBH = na, var label ttIBL = na, var label ttPDH = na, var label ttPDL = na, var label ttRes1 = na, var label ttSup1 = na
+
+if barstate.islast
+    if showVWAP
+        label.delete(ttVWAP[1])
+        string vwapTxt = "🎯 VWAP ANCHOR\nValue: " + str.tostring(vwapAnchor, "#.##") + "\nBias: " + (close > vwapAnchor ? "BULLISH" : "BEARISH")
+        ttVWAP := label.new(bar_index + 2, vwapAnchor, "V", color=color.new(colVWAP, 100), textcolor=colVWAP, style=label.style_label_left, size=size.small, tooltip=vwapTxt)
+
+    if showIB and ibLocked
+        label.delete(ttIBH[1]), label.delete(ttIBL[1])
+        string ibhTxt = "⏳ INITIAL BALANCE HIGH\nValue: " + str.tostring(ibHigh, "#.##")
+        string iblTxt = "⏳ INITIAL BALANCE LOW\nValue: " + str.tostring(ibLow, "#.##")
+        ttIBH := label.new(bar_index + 2, ibHigh, "IBH", color=color.new(colIBHigh, 100), textcolor=colIBHigh, style=label.style_label_left, size=size.small, tooltip=ibhTxt)
+        ttIBL := label.new(bar_index + 2, ibLow, "IBL", color=color.new(colIBLow, 100), textcolor=colIBLow, style=label.style_label_left, size=size.small, tooltip=iblTxt)
+
+    if showDaily
+        label.delete(ttPDH[1]), label.delete(ttPDL[1])
+        string pdhTxt = "💧 PREVIOUS DAY HIGH\nValue: " + str.tostring(pdh, "#.##") + "\nDistance: " + str.tostring(math.round(math.abs(close - pdh))) + " pts"
+        string pdlTxt = "💧 PREVIOUS DAY LOW\nValue: " + str.tostring(pdl, "#.##") + "\nDistance: " + str.tostring(math.round(math.abs(close - pdl))) + " pts"
+        ttPDH := label.new(bar_index + 2, pdh, "PDH", color=color.new(colLiqDaily, 100), textcolor=colLiqDaily, style=label.style_label_left, size=size.small, tooltip=pdhTxt)
+        ttPDL := label.new(bar_index + 2, pdl, "PDL", color=color.new(colLiqDaily, 100), textcolor=colLiqDaily, style=label.style_label_left, size=size.small, tooltip=pdlTxt)
+
+    if showEE
+        label.delete(ttRes1[1]), label.delete(ttSup1[1])
+        string res1Txt = "🐘 ORANGE SUPPLY ZONE\nTop: " + str.tostring(res2, "#.##") + "\nBot: " + str.tostring(res1, "#.##") + "\nLook for Shark Sell."
+        string sup1Txt = "🐘 GREEN DEMAND ZONE\nTop: " + str.tostring(sup1, "#.##") + "\nBot: " + str.tostring(sup2, "#.##") + "\nLook for Shark Buy."
+        ttRes1 := label.new(bar_index + 2, res1, "SUPPLY", color=color.new(colEESell1, 100), textcolor=color.orange, style=label.style_label_left, size=size.small, tooltip=res1Txt)
+        ttSup1 := label.new(bar_index + 2, sup1, "DEMAND", color=color.new(colEEBuy1, 100), textcolor=color.green, style=label.style_label_left, size=size.small, tooltip=sup1Txt)
+
+// ==========================================================================================================
+// █ 18. THE COLOSSAL ENTERPRISE DASHBOARD V6 (6x15 Matrix)
+// ==========================================================================================================
+
+trend5m = getMTFTrend("5"), trend15m = getMTFTrend("15"), trend1H = getMTFTrend("60"), trend4H = getMTFTrend("240")
+int totalTrendScore = trend5m + trend15m + trend1H + trend4H
+
+var table hud = table.new(dashPosition == "Top Right" ? position.top_right : dashPosition == "Top Left" ? position.top_left : dashPosition == "Bottom Right" ? position.bottom_right : dashPosition == "Bottom Left" ? position.bottom_left : dashPosition == "Middle Right" ? position.middle_right : position.middle_left, 5, 16, border_width=1, border_color=colDashBorder)
+
+if showDashboard and barstate.islast
+    table.cell(hud, 0, 0, "GOD MODE V6: THE MONOLITH", text_color=colDashAccent, bgcolor=colDashBg, text_size=getSize(), text_halign=text.align_center)
+    table.merge_cells(hud, 0, 0, 4, 0)
+    
+    table.cell(hud, 0, 1, "METRIC", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 1, "STATUS", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 1, "VALUE 1", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 1, "VALUE 2", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 1, "CONTEXT", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    
+    table.cell(hud, 0, 2, "Global MTF Bias", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 2, totalTrendScore >= 2 ? "STRONG BULL" : totalTrendScore <= -2 ? "STRONG BEAR" : "NEUTRAL", text_color=totalTrendScore >= 2 ? color.lime : totalTrendScore <= -2 ? color.red : color.yellow, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 2, "Score: " + str.tostring(totalTrendScore), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 2, "-", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 2, "5m/15m/1H/4H Array", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 3, "SMC Macro Trend", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 3, extTrend == 1 ? "BULLISH" : "BEARISH", text_color=extTrend == 1 ? color.lime : color.red, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 3, str.tostring(extLastH.price, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 3, str.tostring(extLastL.price, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 3, "External Swing High/Low", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 4, "SMC Micro Trend", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 4, intTrend == 1 ? "BULLISH" : "BEARISH", text_color=intTrend == 1 ? color.lime : color.red, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 4, str.tostring(intLastH.price, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 4, str.tostring(intLastL.price, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 4, "Internal Swing High/Low", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 5, "5th Element RSI", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 5, rsiBullConfirm ? "CONFIRMED BUY" : rsiBearConfirm ? "CONFIRMED SELL" : "NO SIGNAL", text_color=rsiBullConfirm ? color.lime : rsiBearConfirm ? color.red : color.yellow, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 5, "Cur: " + str.tostring(rsi_curr, "#"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 5, "15m: " + str.tostring(rsi_15m, "#"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 5, "RSI MTF Alignment", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 6, "Volume Profile POC", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 6, close > pocPriceTracker ? "ABOVE POC" : "BELOW POC", text_color=close > pocPriceTracker ? color.lime : color.red, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 6, str.tostring(pocPriceTracker, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 6, "VAH: " + str.tostring(vahTracker, "#"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 6, "High Volume Node", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 7, "VWAP Flow Matrix", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 7, close > vwapAnchor ? "PREMIUM" : "DISCOUNT", text_color=close > vwapAnchor ? color.lime : color.red, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 7, "VWAP: " + str.tostring(vwapAnchor, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 7, "Dev1: " + str.tostring(upperDev1, "#"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 7, "Institutional Anchor", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 8, "Initial Balance (IB)", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 8, ibLocked ? (close > ibHigh ? "BROKEN HIGH" : close < ibLow ? "BROKEN LOW" : "INSIDE IB") : "FORMING", text_color=ibLocked ? (close > ibHigh ? color.lime : close < ibLow ? color.red : color.yellow) : color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 8, "IBH: " + str.tostring(ibHigh, "#"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 8, "IBL: " + str.tostring(ibLow, "#"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 8, "First Hour Range", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 9, "Orange Supply Zone", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 9, "SHARK SELL ZONE", text_color=color.orange, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 9, "Top: " + str.tostring(res2, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 9, "Bot: " + str.tostring(res1, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 9, "Elephant Edge 2.0", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    table.cell(hud, 0, 10, "Green Demand Zone", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 10, "SHARK BUY ZONE", text_color=color.green, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 10, "Top: " + str.tostring(sup1, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 10, "Bot: " + str.tostring(sup2, "#.##"), text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 10, "Elephant Edge 2.0", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+    string currentKZ = not na(inIndian) ? "INDIAN" : not na(inLondon) ? "LONDON" : not na(inNY) ? "NEW YORK" : not na(inAsian) ? "ASIAN" : "NONE"
+    table.cell(hud, 0, 11, "Active Session", text_color=colDashText, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 1, 11, currentKZ, text_color=currentKZ != "NONE" ? color.yellow : color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 2, 11, "-", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 3, 11, "-", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+    table.cell(hud, 4, 11, "Killzone Tracker", text_color=color.gray, bgcolor=colDashBg, text_size=getSize())
+
+// ==========================================================================================================
+// █ 19. MASSIVE GLOBAL ALERTS MATRIX (All Events Tracked)
+// ==========================================================================================================
+
+cond_pdl_sweep = sweptPDL and alertOnSweep
+cond_pdh_sweep = sweptPDH and alertOnSweep
+cond_vwap_bull = ta.crossover(close, vwapAnchor) and alertOnVWAP
+cond_vwap_bear = ta.crossunder(close, vwapAnchor) and alertOnVWAP
+cond_choch_bull = ta.change(extTrend) > 0 and alertOnCHoCH
+cond_choch_bear = ta.change(extTrend) < 0 and alertOnCHoCH
+cond_operator_buy = operatorBullBreak and alertOnShark
+cond_operator_sell = operatorBearBreak and alertOnShark
+
+alertcondition(cond_pdl_sweep, title="[V6] PDL Sweep Rejection", message="Price swept Previous Day Low and formed a bullish rejection.")
+alertcondition(cond_pdh_sweep, title="[V6] PDH Sweep Rejection", message="Price swept Previous Day High and formed a bearish rejection.")
+alertcondition(cond_vwap_bull, title="[V6] VWAP Reclaim (Bullish)", message="Price successfully crossed and closed above the Session VWAP.")
+alertcondition(cond_vwap_bear, title="[V6] VWAP Loss (Bearish)", message="Price crossed and closed below the Session VWAP.")
+alertcondition(cond_choch_bull, title="[V6] Macro Structure Shift (Bullish)", message="External Market Structure printed a Bullish Change of Character.")
+alertcondition(cond_choch_bear, title="[V6] Macro Structure Shift (Bearish)", message="External Market Structure printed a Bearish Change of Character.")
+alertcondition(cond_operator_buy, title="[V6] Shark Buy Breakout", message="Institutional Operator Candle broke the Green Demand Zone with RSI confirmation.")
+alertcondition(cond_operator_sell, title="[V6] Shark Sell Breakout", message="Institutional Operator Candle broke the Orange Supply Zone with RSI confirmation.")
+
+// ==========================================================================================================
+// END OF SCRIPT - GOD MODE V6: THE MONOLITH
+// ==========================================================================================================

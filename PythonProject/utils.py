@@ -171,3 +171,39 @@ def fetch_live_fyers_symbols():
     except Exception as e:
         print(f"❌ Error: {e}")
         return {}
+
+def fetch_live_fyers_NSE_symbols():
+    # 🛑 NSE CONFIGURATION 🛑
+    url = "https://public.fyers.in/sym_details/NSE_CM.csv"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+
+    try:
+        print("⏳ Downloading NSE master list...")
+        import requests
+        import io
+        import pandas as pd
+        requests.packages.urllib3.disable_warnings()
+        response = requests.get(url, headers=headers, verify=False)
+        response.raise_for_status()
+
+        # Grab StockName (Index 1) and Symbol (Index 9)
+        df = pd.read_csv(io.StringIO(response.text), header=None, usecols=[1, 9], names=['StockName', 'Symbol'])
+
+        df['Symbol'] = df['Symbol'].astype(str).str.strip()
+        df['StockName'] = df['StockName'].astype(str).str.strip()
+
+        # 🛑 THE FIX: Include ALL Equity Groups and ETFs.
+        # Safely ignores -F (Fixed Income), -G (Govt Debt), and -INDEX
+        allowed_suffixes = (
+            '-EQ', '-BE'  #
+        )
+
+        # Filter for all valid stock/ETF suffixes
+        df_eq = df[df['Symbol'].str.endswith(allowed_suffixes)]
+
+        print(f"✅ Filtered down to {len(df_eq)} tradable NSE Equities & ETFs.")
+        return dict(zip(df_eq['StockName'], df_eq['Symbol']))
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return {}
