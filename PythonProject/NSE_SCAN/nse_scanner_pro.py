@@ -11,10 +11,10 @@ pip install yfinance pandas numpy requests tqdm tabulate
 
 
 # Run manually
-python nse_scanner_pro.py                         # all NSE stocks, daily
-python nse_scanner_pro.py --min-strength 3        # high conviction only
-python nse_scanner_pro.py --sector "Banking"      # filter to one sector
-python nse_scanner_pro.py --top 500 --tf 60m      # intraday Nifty-500
+python3 nse_scanner_pro.py                         # all NSE stocks, daily
+python3 nse_scanner_pro.py --min-strength 3        # high conviction only
+python3 nse_scanner_pro.py --sector "Banking"      # filter to one sector
+python3 nse_scanner_pro.py --top 500 --tf 60m      # intraday Nifty-500
 """
 
 

@@ -40,8 +40,8 @@ def fetch_historical_backfill(fyers_symbol):
 
     # 🛑 Define our exact target window
     #2021-06-04
-    target_start = datetime(2016, 6, 2)
-    target_end = datetime(2021, 6, 3)
+    target_start = datetime(2011, 6, 1)
+    target_end = datetime(2016, 6, 2)
 
     df_existing = None
 
