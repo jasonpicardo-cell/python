@@ -6,7 +6,7 @@ import concurrent.futures
 import threading
 
 # Import your working authentication
-from utils import get_fyers_session, fetch_live_fyers_symbols
+from utils import get_fyers_session, fetch_live_fyers_NSE_symbols
 #------------
 # Use this to fetch 5 yr data
 #    target_start = datetime(2007, 5, 28)
@@ -39,9 +39,9 @@ def fetch_historical_backfill(fyers_symbol):
     #file_path = os.path.join(CACHE_DIR, f"{fyers_symbol.replace(':', '_')}.csv")
 
     # 🛑 Define our exact target window
-    #2026-05-08
-    target_start = datetime(2016, 5, 28)
-    target_end = datetime(2016, 5, 27)
+    #2021-06-04
+    target_start = datetime(2016, 6, 2)
+    target_end = datetime(2021, 6, 3)
 
     df_existing = None
 
@@ -175,7 +175,7 @@ def threaded_worker(stock_item):
 # 4. THE TURBO SYNC MANAGER
 # ==========================================
 def run_historical_sync():
-    all_stocks = fetch_live_fyers_symbols()
+    all_stocks = fetch_live_fyers_NSE_symbols()
     to_process = []
 
     # Apply the Blacklist

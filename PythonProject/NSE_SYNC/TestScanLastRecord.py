@@ -1,9 +1,11 @@
 import os
 import csv
-from datetime import datetime
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_DIR = os.path.join(BASE_DIR, "../nse_data_cache")
+NIFTY750_DIR = os.path.join(CACHE_DIR, "../nifty750.txt")
 
-def load_nifty_list(filepath="nifty750.txt"):
+def load_nifty_list(filepath=NIFTY750_DIR):
     """Reads the Nifty 750 text file and returns a set of stock names."""
     nifty_stocks = set()
     if os.path.exists(filepath):
@@ -36,9 +38,9 @@ def extract_stock_name(filename):
     return base_name
 
 
-def find_outdated_csvs(directory="nse_data_cache", nifty_file="nifty750.txt"):
+def find_outdated_csvs(directory=CACHE_DIR, nifty_file=NIFTY750_DIR):
     # Generate today's date
-    today_str = '2026-05-07'  # datetime.today().strftime('%Y-%m-%d')
+    today_str = '2021-06-04'  # datetime.today().strftime('%Y-%m-%d')
 
     # Load the Nifty 750 master list
     nifty_750_stocks = load_nifty_list(nifty_file)
