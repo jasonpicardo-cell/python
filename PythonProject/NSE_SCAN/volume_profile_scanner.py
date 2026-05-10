@@ -40,7 +40,7 @@ OUTPUT_DIR = Path(".")          # current directory
 
 DEFAULT_BINS      = 150
 DEFAULT_LOOKBACK  = 0         # trading days; 0 = full history
-DEFAULT_TIMEFRAME = "weekly"       # "daily" | "weekly"
+DEFAULT_TIMEFRAME = "daily"       # "daily" | "weekly"
 
 
 # ────────────────────────────────────────────────────────────
