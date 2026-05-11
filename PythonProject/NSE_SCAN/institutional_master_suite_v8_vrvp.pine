@@ -96,13 +96,13 @@ int swingLenExt    = input.int(15, "External Swing Lookback",              group
 int swingLenInt    = input.int(5,  "Internal Swing Lookback",              group=GRP_SMC)
 bool showBOS       = input.bool(true, "Show BOS / CHoCH",                  group=GRP_SMC)
 bool showOB        = input.bool(true, "Show Order Blocks",                  group=GRP_SMC)
-int obLimit        = input.int(10, "Max Active Order Blocks",              group=GRP_SMC)
+int obLimit        = input.int(5,  "Max Active Order Blocks",              group=GRP_SMC)
 bool filterOBVol   = input.bool(true, "Filter OBs by Displacement Volume", group=GRP_SMC)
 bool showOBThreshold = input.bool(true, "Show OB Mean Threshold",          group=GRP_SMC)
 bool showFVG       = input.bool(true, "Show Fair Value Gaps",               group=GRP_SMC)
 bool showFVGCE     = input.bool(false, "Show FVG Consequent Encroachment",   group=GRP_SMC)
-int fvgLimit       = input.int(10, "Max Active FVGs",                      group=GRP_SMC)
-bool filterFVGDisplace = input.bool(true, "Filter FVGs by Displacement",   group=GRP_SMC, tooltip="Only plot FVGs whose middle candle has above-average volume AND body size — eliminates low-conviction gaps.")
+int fvgLimit       = input.int(5,  "Max Active FVGs",                      group=GRP_SMC)
+bool filterFVGDisplace = input.bool(false, "Filter FVGs by Displacement",   group=GRP_SMC, tooltip="Only plot FVGs whose middle candle has above-average volume AND body size — eliminates low-conviction gaps.")
 float fvgDisplaceMult  = input.float(1.5, "FVG Displacement Multiplier",   minval=1.0, maxval=5.0, step=0.1, group=GRP_SMC, tooltip="Middle candle must have volume AND body >= avgVol/avgBody × this multiplier.")
 bool showPremDisc  = input.bool(false, "Shade Premium & Discount Zones",    group=GRP_SMC)
 
@@ -123,7 +123,7 @@ color colPremium     = input.color(color.new(#f44336, 95), "Premium Zone Shade",
 color colDiscount    = input.color(color.new(#4caf50, 95), "Discount Zone Shade",    group=GRP_SMC)
 
 string GRP_HTF = "4B. HTF Order Block Confluence"
-bool   showHTFOB       = input.bool(true,  "Enable HTF OB Confluence",        group=GRP_HTF, tooltip="Highlights when price enters a displacement OB on a higher timeframe.")
+bool   showHTFOB       = input.bool(false, "Enable HTF OB Confluence",        group=GRP_HTF, tooltip="Highlights when price enters a displacement OB on a higher timeframe.")
 string htfTF           = input.timeframe("D", "HTF Timeframe",                group=GRP_HTF, tooltip="Must be higher than the current chart timeframe. Daily is recommended.")
 float  htfDisplaceMult = input.float(1.5,  "HTF Displacement Multiplier",     minval=1.0, maxval=5.0, step=0.1, group=GRP_HTF)
 color  colHTFOBBull    = input.color(color.new(#00bfa5, 70), "HTF Bull OB Color", group=GRP_HTF)
@@ -178,11 +178,11 @@ color colKZLondon = input.color(color.new(#4caf50, 98), "London KZ Background", 
 color colKZNY     = input.color(color.new(#f44336, 98), "NY KZ Background",     group=GRP_IB)
 
 string GRP_FIB = "9. Auto-Fibonacci Engine"
-bool showAutoFib = input.bool(true, "Enable Auto-Fibonacci", group=GRP_FIB)
+bool showAutoFib = input.bool(false, "Enable Auto-Fibonacci", group=GRP_FIB)
 color colFib0    = input.color(color.new(#ffffff, 0), "Fib 0.0 & 1.0", group=GRP_FIB)
 color colFib382  = input.color(color.new(#2196f3, 0), "Fib 0.382",     group=GRP_FIB)
-color colFib500  = input.color(color.new(#9c27b0, 30), "Fib 0.500",     group=GRP_FIB)
-color colFib618  = input.color(color.new(#ff9800, 30), "Fib 0.618",     group=GRP_FIB)
+color colFib500  = input.color(color.new(#9c27b0,  0), "Fib 0.500",     group=GRP_FIB)
+color colFib618  = input.color(color.new(#ff9800,  0), "Fib 0.618",     group=GRP_FIB)
 color colFib786  = input.color(color.new(#f44336, 0), "Fib 0.786",     group=GRP_FIB)
 
 string GRP_AL = "10. Global Alert Toggles"
@@ -216,10 +216,10 @@ bool   showCrossConnect  = input.bool(true,  "Connect Crosses with Line",       
 color  colCrossConnect   = input.color(color.new(#ffeb3b,  0), "Cross Connect Line Color", group=GRP_EMA)
 int    crossConnectWidth = input.int(3,     "Connect Line Width", minval=1, maxval=4, group=GRP_EMA)
 string crossConnectStyle = input.string("Solid",  "Connect Line Style", options=["Solid","Dashed","Dotted","Arrow"], group=GRP_EMA)
-bool   showEMA50          = input.bool(true,  "Enable EMA 50",  group=GRP_EMA)
+bool   showEMA50          = input.bool(false, "Enable EMA 50",  group=GRP_EMA)
 int    ema50Period         = input.int(50,     "EMA 50 Period",  minval=1,               group=GRP_EMA)
 color  colEMA50            = input.color(color.new(#00bcd4, 0),  "EMA 50 Color (Cyan)",  group=GRP_EMA)
-bool   showEMA100          = input.bool(true,  "Enable EMA 100", group=GRP_EMA)
+bool   showEMA100          = input.bool(false, "Enable EMA 100", group=GRP_EMA)
 int    ema100Period        = input.int(100,    "EMA 100 Period", minval=1,               group=GRP_EMA)
 color  colEMA100           = input.color(color.new(#ff9800, 0),  "EMA 100 Color (Orange)", group=GRP_EMA)
 bool   showEMA150          = input.bool(true,  "Enable EMA 150", group=GRP_EMA)
@@ -253,6 +253,7 @@ color  colVRVPPOC      = input.color(color.new(#ffeb3b, 50), "VRVP Point of Cont
 bool   showVRVPPOCLine = input.bool(true,  "Show VRVP POC Line (extends left)",       group=GRP_VRVP)
 color  colVRVPPOCLine  = input.color(color.new(#ffeb3b, 30), "VRVP POC Line Color",   group=GRP_VRVP)
 bool   showVRVPLabels  = input.bool(true,  "Show POC / VAH / VAL Labels",             group=GRP_VRVP)
+int    vrvpRightOffset = input.int(90, "Right Offset (Bars)", minval=0, maxval=400,   group=GRP_VRVP, tooltip="Shifts the VRVP profile this many bars to the right of the last candle. 0 = flush against price axis. 90 = floats in blank space.")
 
 // ==========================================================================================================
 // █ 4. GLOBAL STATE VARIABLES
@@ -760,9 +761,15 @@ if showVP and barstate.islast and rowSize > 0
         float volUp   = upIndex   < vpRows ? array.get(volBins, upIndex)   : 0.0
         float volDown = downIndex >= 0     ? array.get(volBins, downIndex) : 0.0
         if volUp > volDown
-            currentVolVA += volUp,  array.set(inVA, upIndex, 1),   upIndex   += 1
+            currentVolVA += volUp
+            if upIndex >= 0 and upIndex < vpRows
+                array.set(inVA, upIndex, 1)
+            upIndex += 1
         else
-            currentVolVA += volDown, array.set(inVA, downIndex, 1), downIndex -= 1
+            currentVolVA += volDown
+            if downIndex >= 0 and downIndex < vpRows
+                array.set(inVA, downIndex, 1)
+            downIndex -= 1
 
     vahTracker := sessLowVP + (upIndex   * rowSize)
     valTracker := sessLowVP + (downIndex * rowSize)
@@ -850,22 +857,36 @@ if showVRVP and barstate.islast
         int[]  vInVA     = array.new_int(vrvpRows, 0)
         array.set(vInVA, vPocIdx, 1)
 
-        while vCurVA < vTargetVA and (vUp < vrvpRows or vDown >= 0)
+        // Bounded for loop — guaranteed to run at most vrvpRows iterations.
+        // Replaces the while loop which could stall on zero-volume bins.
+        for _iter = 0 to vrvpRows - 1
+            if vCurVA >= vTargetVA
+                break
+            if vUp >= vrvpRows and vDown < 0
+                break
             float vVolUp   = vUp   < vrvpRows ? array.get(vBins, vUp)   : 0.0
             float vVolDown = vDown >= 0        ? array.get(vBins, vDown) : 0.0
-            if vVolUp >= vVolDown
-                vCurVA += vVolUp,   array.set(vInVA, vUp,   1), vUp   += 1
+            if vVolUp > vVolDown
+                vCurVA += vVolUp
+                if vUp >= 0 and vUp < vrvpRows
+                    array.set(vInVA, vUp, 1)
+                vUp += 1
             else
-                vCurVA += vVolDown, array.set(vInVA, vDown, 1), vDown -= 1
+                vCurVA += vVolDown
+                if vDown >= 0 and vDown < vrvpRows
+                    array.set(vInVA, vDown, 1)
+                vDown -= 1
 
         // Price levels for labels
         float vPocPrice = vrvpL + (vPocIdx                        * vrvpRowSz) + (vrvpRowSz / 2)
         float vVAH      = vrvpL + (math.min(vUp,   vrvpRows)      * vrvpRowSz)
         float vVAL      = vrvpL + (math.max(vDown + 1, 0)         * vrvpRowSz)
 
-        // ── draw VRVP boxes  ◄── LEFTWARD from bar_index ─────────────────────
-        // RIGHT edge of every box = bar_index  (sits against the price axis)
-        // LEFT  edge of every box = bar_index - proportional_bar_length
+        // ── draw VRVP boxes offset to the right ───────────────────────────────
+        // _vrvpRight = the right edge anchor; bars grow leftward from it.
+        // With offset=90, the entire profile floats in the blank space beyond
+        // the last candle — zero overlap with price action.
+        int _vrvpRight = bar_index + vrvpRightOffset
         for i = 0 to vrvpRows - 1
             float v = array.get(vBins, i)
             if v > 0
@@ -873,15 +894,15 @@ if showVRVP and barstate.islast
                 float pLow   = vrvpL + (i * vrvpRowSz)
                 float pHigh  = pLow + vrvpRowSz
                 color bColor = i == vPocIdx ? colVRVPPOC : array.get(vInVA, i) == 1 ? colVRVPVA : colVRVPBg
-                array.push(vrvpBoxes, box.new(bar_index - bLen, pHigh, bar_index, pLow, border_color=na, bgcolor=bColor))
+                array.push(vrvpBoxes, box.new(_vrvpRight - bLen, pHigh, _vrvpRight, pLow, border_color=na, bgcolor=bColor))
 
-        // ── optional POC dashed line ─────────────────────────────────────────
+        // ── optional POC line extends from chart into profile ─────────────────
         if showVRVPPOCLine
-            vrvpPOCLine := line.new(bar_index - vrvpMaxWidth, vPocPrice, bar_index, vPocPrice, color=colVRVPPOCLine, style=line.style_dashed, width=1)
+            vrvpPOCLine := line.new(bar_index - vrvpMaxWidth, vPocPrice, _vrvpRight, vPocPrice, color=colVRVPPOCLine, style=line.style_dashed, width=1)
 
-        // ── optional labels just right of bar_index (price-axis side) ───────
+        // ── labels placed just right of the profile right edge ───────────────
         if showVRVPLabels
-            int lblX = bar_index + 1
+            int lblX = _vrvpRight + 1
             vrvpLblPOC := label.new(lblX, vPocPrice, "POC " + str.tostring(vPocPrice, format.mintick), color=color.new(colVRVPPOC, 100), textcolor=colVRVPPOC, style=label.style_label_left, size=size.small)
             vrvpLblVAH := label.new(lblX, vVAH, "VAH " + str.tostring(vVAH, format.mintick), color=color.new(colVRVPVA, 100), textcolor=colVRVPVA, style=label.style_label_left, size=size.small)
             vrvpLblVAL := label.new(lblX, vVAL, "VAL " + str.tostring(vVAL, format.mintick), color=color.new(colVRVPVA, 100), textcolor=colVRVPVA, style=label.style_label_left, size=size.small)
@@ -889,27 +910,25 @@ if showVRVP and barstate.islast
 // ==========================================================================================================
 // █ 14. AUTO-FIBONACCI MATRIX
 // ==========================================================================================================
+// Fib levels are rendered as plot() series so each level's line thickness and style
+// can be configured individually in the chart's Style tab (right-click → Settings → Style).
+// Default linewidth = 2 for all levels.  Colors are set in the Inputs tab as before.
 
-var line f_0   = na, var line f_382 = na, var line f_500 = na
-var line f_618 = na, var line f_786 = na, var line f_1   = na
+bool  _fibValid = showAutoFib and extLastH.price > 0 and extLastL.price > 0
+float _fibDiff  = _fibValid ? math.abs(extLastH.price - extLastL.price) : na
+float _fib0     = _fibValid ? (extTrend == 1 ? extLastH.price : extLastL.price) : na
+float _fib1     = _fibValid ? (extTrend == 1 ? extLastL.price : extLastH.price) : na
+float _fib382   = _fibValid ? (extTrend == 1 ? extLastL.price + (_fibDiff * 0.382) : extLastH.price - (_fibDiff * 0.382)) : na
+float _fib500   = _fibValid ? (extTrend == 1 ? extLastL.price + (_fibDiff * 0.500) : extLastH.price - (_fibDiff * 0.500)) : na
+float _fib618   = _fibValid ? (extTrend == 1 ? extLastL.price + (_fibDiff * 0.618) : extLastH.price - (_fibDiff * 0.618)) : na
+float _fib786   = _fibValid ? (extTrend == 1 ? extLastL.price + (_fibDiff * 0.786) : extLastH.price - (_fibDiff * 0.786)) : na
 
-if showAutoFib
-    float diff   = math.abs(extLastH.price - extLastL.price)
-    float fib382 = extTrend == 1 ? extLastL.price + (diff * 0.382) : extLastH.price - (diff * 0.382)
-    float fib500 = extTrend == 1 ? extLastL.price + (diff * 0.500) : extLastH.price - (diff * 0.500)
-    float fib618 = extTrend == 1 ? extLastL.price + (diff * 0.618) : extLastH.price - (diff * 0.618)
-    float fib786 = extTrend == 1 ? extLastL.price + (diff * 0.786) : extLastH.price - (diff * 0.786)
-
-    if barstate.islast
-        line.delete(f_0[1]),   line.delete(f_382[1]), line.delete(f_500[1])
-        line.delete(f_618[1]), line.delete(f_786[1]), line.delete(f_1[1])
-        int startX = math.min(extLastH.index, extLastL.index), int endX = bar_index + 10
-        f_0   := line.new(startX, extTrend == 1 ? extLastH.price : extLastL.price, endX, extTrend == 1 ? extLastH.price : extLastL.price, color=colFib0,   style=line.style_dotted)
-        f_1   := line.new(startX, extTrend == 1 ? extLastL.price : extLastH.price, endX, extTrend == 1 ? extLastL.price : extLastH.price, color=colFib0,   style=line.style_dotted)
-        f_382 := line.new(startX, fib382, endX, fib382, color=colFib382, style=line.style_solid)
-        f_500 := line.new(startX, fib500, endX, fib500, color=colFib500, style=line.style_dashed)
-        f_618 := line.new(startX, fib618, endX, fib618, color=colFib618, style=line.style_solid, width=2)
-        f_786 := line.new(startX, fib786, endX, fib786, color=colFib786, style=line.style_solid)
+plot(_fib0,   "Fib 0.000", color=colFib0,   linewidth=2)
+plot(_fib382, "Fib 0.382", color=colFib382, linewidth=2)
+plot(_fib500, "Fib 0.500", color=colFib500, linewidth=2)
+plot(_fib618, "Fib 0.618", color=colFib618, linewidth=2)
+plot(_fib786, "Fib 0.786", color=colFib786, linewidth=2)
+plot(_fib1,   "Fib 1.000", color=colFib0,   linewidth=2)
 
 // ==========================================================================================================
 // █ 15. DYNAMIC VWAP & DEVIATIONS
