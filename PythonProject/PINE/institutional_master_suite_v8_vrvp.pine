@@ -266,6 +266,22 @@ color  colPivotS       = input.color(color.new(#00e676, 0), "Support Color",    
 int    pivotLineWidth  = input.int(2, "Line Thickness", minval=1, maxval=5,     group=GRP_PP)
 bool   showPivotLabels = input.bool(true, "Show Level Labels",                  group=GRP_PP)
 
+string GRP_HA = "15. Heiken Ashi Signals"
+bool   showHASignals    = input.bool(true,  "Enable Heiken Ashi Signals",              group=GRP_HA)
+bool   showHABasic      = input.bool(true,  "Show HA Color Change Signal",             group=GRP_HA, tooltip="Fires on the Nth consecutive candle after HA flips direction. N = Min Consecutive setting below.")
+bool   showHAStrong     = input.bool(true,  "Show Strong HA Signal (No Shadow)",       group=GRP_HA, tooltip="Bull: HA candle with NO lower shadow — price never went below open. Bear: NO upper shadow. Strongest HA signal.")
+int    haConsecutive    = input.int(1,      "Min Consecutive HA Candles", minval=1, maxval=5, group=GRP_HA, tooltip="1 = signal on first candle after direction change. 2 = only after 2 consecutive same-color candles. Higher = fewer, stronger signals.")
+int    haMinBars        = input.int(5,      "Min Bars Between Signals",   minval=1, maxval=100, group=GRP_HA, tooltip="Cooldown: blocks new signals for N bars after one fires. On 1min use 8-15. On 5min use 3-5. Eliminates repeated signals in a run.")
+float  haBodyFilter     = input.float(25.0, "Min HA Body Strength % of ATR", minval=0.0, maxval=100.0, step=5.0, group=GRP_HA, tooltip="HA body must be >= this % of ATR(14). Filters tiny indecision candles. 0 = off. 25 = recommended for 1min.")
+bool   haUseTrendFilter = input.bool(true,  "EMA Trend Alignment Filter", group=GRP_HA, tooltip="Buy signals only when price > Slow EMA. Sell signals only when price < Slow EMA. Eliminates counter-trend entries.")
+color  colHABuy         = input.color(color.new(#00bcd4, 0), "HA Buy Color (Cyan)",      group=GRP_HA)
+color  colHASell        = input.color(color.new(#e040fb, 0), "HA Sell Color (Magenta)",  group=GRP_HA)
+color  colHAStrongBuy   = input.color(color.new(#00e5ff, 0), "Strong HA Buy Color",      group=GRP_HA)
+color  colHAStrongSell  = input.color(color.new(#ea80fc, 0), "Strong HA Sell Color",     group=GRP_HA)
+bool   showHACandles    = input.bool(false, "Overlay HA Candles on Chart",               group=GRP_HA, tooltip="Draws semi-transparent Heiken Ashi candles on top of regular candles for visual context.")
+color  colHACandleBull  = input.color(color.new(#26a69a, 70), "HA Bull Candle",           group=GRP_HA)
+color  colHACandleBear  = input.color(color.new(#ef5350, 70), "HA Bear Candle",           group=GRP_HA)
+
 // ==========================================================================================================
 // █ 4. GLOBAL STATE VARIABLES
 // ==========================================================================================================
@@ -1137,11 +1153,9 @@ if showDashboard and barstate.islast
 // Fill between the two EMAs shifts color as the fast EMA crosses above / below the slow EMA.
 
 // ── EMA line plots (captured for fill()) — emaF/emaS computed above dashboard ─
-p_emaFast = plot(showEMA ? emaF : na, "Fast EMA", color=colEMAFast, linewidth=emaWidth)
-p_emaSlow = plot(showEMA ? emaS : na, "Slow EMA", color=colEMASlow, linewidth=emaWidth)
-
-// ── Fill between EMAs ─────────────────────────────────────────────────────────
-fill(p_emaFast, p_emaSlow, color=showEMAFill ? (emaF >= emaS ? colEMAFillBull : colEMAFillBear) : na, title="EMA Fill")
+// EMA lines — fill() removed to stay within Pine's 64-plot limit
+plot(showEMA ? emaF : na, "Fast EMA", color=colEMAFast, linewidth=emaWidth)
+plot(showEMA ? emaS : na, "Slow EMA", color=colEMASlow, linewidth=emaWidth)
 
 // ── Multi-EMA Lines (50 / 100 / 150) ─────────────────────────────────────────
 float _ema50  = ta.ema(close, ema50Period)
@@ -1293,10 +1307,103 @@ if showPivots and _pvNew and not na(_pvH) and not na(_pvL)
             array.push(_ppLabels, label.new(bar_index+2, _ppS4, "S4 " + str.tostring(_ppS4, format.mintick), color=color.new(colPivotS, 100), textcolor=colPivotS, style=label.style_label_right, size=size.tiny))
 
 // ==========================================================================================================
+// █ 17D. HEIKEN ASHI SIGNAL ENGINE
+// ==========================================================================================================
+// Heiken Ashi smooths price noise by averaging OHLC — making trend direction cleaner than raw candles.
+//
+// Three signal tiers (visually distinct from EMA 9/21 signals):
+//   ◉ HA  (circle)  — HA color change after N consecutive candles  → cyan/magenta
+//   ◆ HA+ (diamond) — No-shadow candle = institutional conviction   → bright cyan/pink
+//   [plotcandle]    — Optional semi-transparent HA overlay
+//
+// EMA signals use triangles at 0.8× ATR offset.
+// HA  signals use circles  at 1.6× ATR offset.
+// HA+ signals use diamonds at 2.4× ATR offset.
+// → No visual overlap even when all fire on the same bar.
+
+// ── Heiken Ashi OHLC ─────────────────────────────────────────────────────────
+float _haC = (open + high + low + close) / 4
+var float _haO = (open + close) / 2
+_haO := (nz(_haO[1], (open[1] + close[1]) / 2) + nz(_haC[1], (open[1] + high[1] + low[1] + close[1]) / 4)) / 2
+float _haH = math.max(high, math.max(_haO, _haC))
+float _haL = math.min(low,  math.min(_haO, _haC))
+
+bool _haBull = _haC >= _haO
+bool _haBear = _haC <  _haO
+
+// ── Consecutive candle counter ────────────────────────────────────────────────
+var int _haCntBull = 0
+var int _haCntBear = 0
+_haCntBull := _haBull ? _haCntBull[1] + 1 : 0
+_haCntBear := _haBear ? _haCntBear[1] + 1 : 0
+
+// ── Signal conditions ─────────────────────────────────────────────────────────
+// Basic: fires on the Nth consecutive candle of a new direction
+bool _haBuyBasic  = showHASignals and showHABasic and _haBull and _haCntBull == haConsecutive
+bool _haSellBasic = showHASignals and showHABasic and _haBear and _haCntBear == haConsecutive
+
+// Strong: HA candle with no shadow on conviction side (floating point safe)
+bool _haNoLowShadow = math.abs(_haL - math.min(_haO, _haC)) < syminfo.mintick
+bool _haNoUpShadow  = math.abs(_haH - math.max(_haO, _haC)) < syminfo.mintick
+bool _haStrongBuy   = showHASignals and showHAStrong and _haBull and _haNoLowShadow
+bool _haStrongSell  = showHASignals and showHAStrong and _haBear and _haNoUpShadow
+
+// When both basic AND strong fire → show strong only (avoids stacking on same bar)
+bool _showHABuyBasic  = _haBuyBasic  and not _haStrongBuy
+bool _showHASellBasic = _haSellBasic and not _haStrongSell
+
+// ── Signal quality filters ───────────────────────────────────────────────────
+// 1. Body strength: HA body must be >= haBodyFilter% of ATR (no tiny candles)
+// 2. Cooldown:      suppress new signals for haMinBars bars after one fires
+// 3. Trend align:   buy only above emaS, sell only below emaS
+
+float _haAtr14   = ta.atr(14)
+float _haBody    = math.abs(_haC - _haO)
+bool  _haBodyOK  = haBodyFilter == 0 or _haBody >= _haAtr14 * (haBodyFilter / 100.0)
+bool  _haTrendOK_bull = not haUseTrendFilter or close > emaS
+bool  _haTrendOK_bear = not haUseTrendFilter or close < emaS
+
+var int _haLastBuyBar  = -1000
+var int _haLastSellBar = -1000
+bool _haCooldownBuyOK  = (bar_index - _haLastBuyBar)  >= haMinBars
+bool _haCooldownSellOK = (bar_index - _haLastSellBar) >= haMinBars
+
+// Apply all filters to final gated signals
+bool _haGatedBuyBasic   = _showHABuyBasic  and _haBodyOK and _haTrendOK_bull and _haCooldownBuyOK
+bool _haGatedSellBasic  = _showHASellBasic and _haBodyOK and _haTrendOK_bear and _haCooldownSellOK
+bool _haGatedStrongBuy  = _haStrongBuy     and _haBodyOK and _haTrendOK_bull and _haCooldownBuyOK
+bool _haGatedStrongSell = _haStrongSell    and _haBodyOK and _haTrendOK_bear and _haCooldownSellOK
+
+// Update cooldown trackers
+if _haGatedBuyBasic  or _haGatedStrongBuy
+    _haLastBuyBar  := bar_index
+if _haGatedSellBasic or _haGatedStrongSell
+    _haLastSellBar := bar_index
+
+// ── Labels only (plotshape removed to stay within 64-plot limit) ─────────────
+// Labels do NOT count toward Pine's plot limit.
+// ◉ HA  = basic color-change signal  (Cyan buy / Magenta sell)
+// ◆ HA+ = strong no-shadow signal    (Bright Cyan / Pink) — rarer, higher conviction
+
+if showHASignals
+    if _haGatedStrongBuy
+        label.new(bar_index, low  - _haAtr14 * 2.4, "◆ HA+", color=color.new(colHAStrongBuy,  100), textcolor=colHAStrongBuy,  style=label.style_label_up,   size=size.small)
+    else if _haGatedBuyBasic
+        label.new(bar_index, low  - _haAtr14 * 1.6, "◉ HA",  color=color.new(colHABuy,        100), textcolor=colHABuy,        style=label.style_label_up,   size=size.small)
+    if _haGatedStrongSell
+        label.new(bar_index, high + _haAtr14 * 2.4, "◆ HA+", color=color.new(colHAStrongSell, 100), textcolor=colHAStrongSell, style=label.style_label_down, size=size.small)
+    else if _haGatedSellBasic
+        label.new(bar_index, high + _haAtr14 * 1.6, "◉ HA",  color=color.new(colHASell,       100), textcolor=colHASell,       style=label.style_label_down, size=size.small)
+
+// ==========================================================================================================
 // █ 18. GLOBAL ALERTS MATRIX
 // ==========================================================================================================
 
 alertcondition(operatorBullBreak and alertOnShark, title="[V8.0] Shark Buy",  message="Institutional Breakout of Demand Zone.")
 alertcondition(operatorBearBreak and alertOnShark, title="[V8.0] Shark Sell", message="Institutional Breakout of Supply Zone.")
 alertcondition(emaBullCross, title="[V8.0] EMA Bull Cross", message="EMA Bull Cross — Fast EMA crossed ABOVE Slow EMA. Bullish signal.")
-alertcondition(emaBearCross, title="[V8.0] EMA Bear Cross", message="EMA Bear Cross — Fast EMA crossed BELOW Slow EMA. Bearish signal.")
+alertcondition(emaBearCross,   title="[V8.0] EMA Bear Cross",    message="EMA Bear Cross — Fast EMA crossed BELOW Slow EMA. Bearish signal.")
+alertcondition(_haGatedBuyBasic,   title="[V8.0] HA Buy Signal",   message="Heiken Ashi Bullish — color change, body strength, trend and cooldown filters passed.")
+alertcondition(_haGatedSellBasic,  title="[V8.0] HA Sell Signal",  message="Heiken Ashi Bearish — color change, body strength, trend and cooldown filters passed.")
+alertcondition(_haGatedStrongBuy,  title="[V8.0] HA Strong Buy",   message="Strong HA Bull — no lower shadow, all quality filters passed.")
+alertcondition(_haGatedStrongSell, title="[V8.0] HA Strong Sell",  message="Strong HA Bear — no upper shadow, all quality filters passed.")
