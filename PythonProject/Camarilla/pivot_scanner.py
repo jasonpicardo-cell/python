@@ -13,7 +13,7 @@ import numpy as np
 DATA_DIR    = "../nse_data_cache"
 N50_FILE    = "../nifty50.txt"; N100_FILE = "../nifty100.txt"
 N200_FILE   = "../nifty200.txt"; N500_FILE = "../nifty500.txt"; N750_FILE = "../nifty750.txt"
-OUTPUT_HTML = "pivot_scanner.html"
+OUTPUT_HTML = "index.html"
 HIST_MONTHS = 25
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -574,6 +574,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="btn" onclick="scan()">▶ SCAN</button>
   <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
   <button class="btn btn-out btn-rst" onclick="resetPrefs()" title="Reset to defaults">↺ RESET</button>
+  <button class="btn btn-out" style="color:var(--a2);border-color:rgba(59,158,255,.4)" onclick="shareLink()" title="Copy shareable link with current settings">🔗 SHARE</button>
 </div>
 
 <!-- ═══ SMC CONTROLS ══════════════════════════════════════════════════════ -->
@@ -842,9 +843,31 @@ function updateFbar(){
     (FBAR[type]||'')+' &nbsp;·&nbsp; <span class="hb">Source:</span> '+(TF_SRC[tf]||tf);
 }
 
-// ── localStorage ───────────────────────────────────────────────────────────
+// ── Settings persistence — URL hash (primary) + localStorage (fallback) ───────
+// URL hash = shareable across devices and users; each user's URL is independent.
+// localStorage = same-device fallback when no hash is present.
+// Multiple users on the same server are fully isolated — nothing is stored server-side.
 const DEFAULTS={type:'fibonacci',lv:'S2',tf:'y',pr:'2',idx:'0',dma:'any',rs:'0',bc:'0',prMin:'',prMax:'',cvol:false,c52h:false,c52l:false};
 const PK='nse_scanner_v1';
+
+function _collectPrefs(){
+  return{
+    type:document.getElementById('sp-type').value,
+    lv:  document.getElementById('sp-lvl').value,
+    tf:  document.getElementById('sp-tf').value,
+    pr:  document.getElementById('sp-pr').value,
+    idx: document.getElementById('idx-flt').value,
+    dma: document.getElementById('dma-flt').value,
+    rs:  document.getElementById('rs-flt').value,
+    bc:  document.getElementById('bc-flt').value,
+    prMin:document.getElementById('pr-min').value,
+    prMax:document.getElementById('pr-max').value,
+    cvol: document.getElementById('cb-vol').checked?'1':'',
+    c52h: document.getElementById('cb-52h').checked?'1':'',
+    c52l: document.getElementById('cb-52l').checked?'1':'',
+  };
+}
+
 function applyPrefs(p){
   if(p.type) document.getElementById('sp-type').value=p.type;
   if(p.tf)   document.getElementById('sp-tf').value=p.tf;
@@ -855,34 +878,55 @@ function applyPrefs(p){
   if(p.bc)   document.getElementById('bc-flt').value=p.bc;
   document.getElementById('pr-min').value=p.prMin||'';
   document.getElementById('pr-max').value=p.prMax||'';
-  document.getElementById('cb-vol').checked=!!p.cvol;
-  document.getElementById('cb-52h').checked=!!p.c52h;
-  document.getElementById('cb-52l').checked=!!p.c52l;
+  document.getElementById('cb-vol').checked=p.cvol==='1'||p.cvol===true;
+  document.getElementById('cb-52h').checked=p.c52h==='1'||p.c52h===true;
+  document.getElementById('cb-52l').checked=p.c52l==='1'||p.c52l===true;
   onTypeChange(p.lv||'');
 }
+
 function savePrefs(){
-  try{
-    localStorage.setItem(PK,JSON.stringify({
-      type:document.getElementById('sp-type').value,
-      lv:document.getElementById('sp-lvl').value,
-      tf:document.getElementById('sp-tf').value,
-      pr:document.getElementById('sp-pr').value,
-      idx:document.getElementById('idx-flt').value,
-      dma:document.getElementById('dma-flt').value,
-      rs:document.getElementById('rs-flt').value,
-      bc:document.getElementById('bc-flt').value,
-      prMin:document.getElementById('pr-min').value,
-      prMax:document.getElementById('pr-max').value,
-      cvol:document.getElementById('cb-vol').checked,
-      c52h:document.getElementById('cb-52h').checked,
-      c52l:document.getElementById('cb-52l').checked,
-    }));
-    const l=document.getElementById('saved-lbl');
-    l.textContent='✓ SAVED';setTimeout(()=>l.textContent='',1800);
-  }catch(e){}
+  const p=_collectPrefs();
+  // 1. Write to URL hash (no reload; shareable link)
+  history.replaceState(null,'','#'+new URLSearchParams(p).toString());
+  // 2. Also persist to localStorage as same-device fallback
+  try{localStorage.setItem(PK,JSON.stringify(p));}catch(e){}
+  const l=document.getElementById('saved-lbl');
+  l.textContent='✓ SAVED';setTimeout(()=>l.textContent='',1800);
 }
-function loadPrefs(){try{return JSON.parse(localStorage.getItem(PK));}catch(e){return null;}}
-function resetPrefs(){try{localStorage.removeItem(PK);}catch(e){}applyPrefs(DEFAULTS);const l=document.getElementById('saved-lbl');l.textContent='↺ RESET';setTimeout(()=>l.textContent='',1800);scan();}
+
+function loadPrefs(){
+  // Priority 1: URL hash (shared/bookmarked link)
+  if(window.location.hash.length>1){
+    try{
+      const p=Object.fromEntries(new URLSearchParams(window.location.hash.slice(1)));
+      return Object.keys(p).length?p:null;
+    }catch(e){}
+  }
+  // Priority 2: localStorage (previous session, same device)
+  try{return JSON.parse(localStorage.getItem(PK));}catch(e){return null;}
+}
+
+function resetPrefs(){
+  // Clear both URL hash and localStorage
+  history.replaceState(null,'',window.location.pathname);
+  try{localStorage.removeItem(PK);}catch(e){}
+  applyPrefs(DEFAULTS);
+  const l=document.getElementById('saved-lbl');
+  l.textContent='↺ RESET';setTimeout(()=>l.textContent='',1800);
+  scan();
+}
+
+function shareLink(){
+  // Build a clean shareable URL with current settings encoded in hash
+  const p=_collectPrefs();
+  const url=window.location.origin+window.location.pathname+'#'+new URLSearchParams(p).toString();
+  navigator.clipboard.writeText(url).then(()=>{
+    const l=document.getElementById('saved-lbl');
+    l.textContent='🔗 LINK COPIED';setTimeout(()=>l.textContent='',2500);
+  }).catch(()=>{
+    prompt('Copy this link:',url);
+  });
+}
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 function symCell(sym){return`<td class="csym"><a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${sym}" target="_blank" rel="noopener"><svg class="tvi" width="12" height="12" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#131722"/><path d="M4 20h4v-8H4v8zm6 0h4V8h-4v12zm6 0h4v-5h-4v5z" fill="#2962FF"/></svg>${sym}</a></td>`;}

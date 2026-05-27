@@ -17,4 +17,6 @@ institutional_signals.csv
 institutional_signals.html
 *.html
 *.md
+!index.html
+
 
