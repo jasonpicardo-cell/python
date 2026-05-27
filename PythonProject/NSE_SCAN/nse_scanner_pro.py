@@ -8,15 +8,7 @@ Enhanced with:
   • config.json for persistent settings
 
 pip install yfinance pandas numpy requests tqdm tabulate
-
-
-# Run manually
-python3 nse_scanner_pro.py                         # all NSE stocks, daily
-python3 nse_scanner_pro.py --min-strength 3        # high conviction only
-python3 nse_scanner_pro.py --sector "Banking"      # filter to one sector
-python3 nse_scanner_pro.py --top 500 --tf 60m      # intraday Nifty-500
 """
-
 
 import os, sys, time, json, logging, argparse, datetime, warnings, io, platform
 import requests, pandas as pd, numpy as np
@@ -481,7 +473,8 @@ def save_html(df: pd.DataFrame, path: str):
             if r["breakout"]:     tags += f'<span class="tag bo">BO{r["bo_dir"]}</span>'
             if r["absorption"]:   tags += '<span class="tag abs">ABSORB</span>'
             body += (f"<tr>"
-                     f'<td class="sym">{r["ticker"]}</td>'
+                     f'<td class="sym"><a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A{r["ticker"]}" '
+                     f'target="_blank" rel="noopener">{r["ticker"]}</a></td>'
                      f'<td class="sec-pill">{r["sector"]}</td>'
                      f'<td>₹{r["price"]:,.2f}</td>'
                      f'<td class="{chg_cls}">{chg_str}</td>'
@@ -519,7 +512,8 @@ td{{padding:8px 12px;border-bottom:1px solid #161b22}}
 tr:hover td{{background:#161b22}}
 .sec-hdr td{{background:#1c2128;color:#58a6ff;font-size:12px;
              padding:8px 12px;border-top:1px solid #21262d}}
-.sym{{font-weight:700;color:#58a6ff;font-size:14px}}
+.sym a{{color:#58a6ff;text-decoration:none;font-weight:700;font-size:14px}}
+.sym a:hover{{text-decoration:underline;color:#79b8ff}}
 .sec-pill{{font-size:11px;color:#8b949e}}
 .pos{{color:#3fb950}}.neg{{color:#f85149}}
 .dots{{letter-spacing:2px;color:#d29922;font-size:14px}}
