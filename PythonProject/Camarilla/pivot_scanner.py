@@ -293,7 +293,202 @@ def compute_mi(df):
                 s200=r2(s200) if s200 else 0,
                 s30w=r2(s30w) if s30w else 0)
 
-# ── Stock stats ───────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Advanced Strategy Computations
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Darvas Box ─────────────────────────────────────────────────────────────
+def compute_darvas(df):
+    """Nicolas Darvas: 52W-high stock consolidates in tight box → volume breakout."""
+    if len(df) < 60: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); V=df["Volume"].values.astype(float)
+    n=len(df)
+    # Find last confirmed box: a high that holds for 3+ bars, then find base
+    for i in range(n-4, max(0,n-120), -1):
+        if all(H[i] >= H[j] for j in range(i+1, min(i+4,n))):  # box top confirmed
+            top = H[i]
+            bot = L[i:].min()
+            rng = (top-bot)/top
+            if rng < 0.20:  # tight box
+                avg20 = V[-21:-1].mean() if n>21 else V.mean()
+                brk   = bool(C[-1] > top and C[-2] <= top)
+                in_b  = bool(C[-1] <= top * 1.005 and C[-1] >= bot * 0.995)
+                return dict(top=r2(top), bot=r2(bot),
+                            dt=str(df.iloc[i]["Date"].date()),
+                            in_box=in_b, breakout=brk,
+                            vol_ok=bool(V[-1] > avg20*1.5))
+    return {}
+
+# ── 2. VCP — Volatility Contraction Pattern ───────────────────────────────────
+def compute_vcp(df):
+    """Minervini VCP: 3+ progressively tighter contractions, declining volume."""
+    if len(df) < 60: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); V=df["Volume"].values.astype(float)
+    n=len(df)
+    segs=3; seg=20
+    widths=[]; vols=[]
+    for i in range(segs,0,-1):
+        s=n-i*seg; e=n-(i-1)*seg
+        if s<0: continue
+        sh=H[s:e].max(); sl=L[s:e].min()
+        widths.append(round((sh-sl)/sl*100,1))
+        vols.append(float(V[s:e].mean()))
+    if len(widths)<2: return {}
+    contracting = all(widths[i]>widths[i+1] for i in range(len(widths)-1))
+    vol_dec     = all(vols[i]>vols[i+1]     for i in range(len(vols)-1))
+    tight_rng   = round((H[-10:].max()-L[-10:].min())/L[-10:].min()*100,1)
+    pivot       = r2(H[-10:].max())
+    is_vcp      = contracting and vol_dec and tight_rng < 10
+    return dict(widths=widths, tightest=tight_rng, vol_dec=vol_dec,
+                contracting=contracting, pivot=pivot, is_vcp=is_vcp)
+
+# ── 3. Wyckoff ────────────────────────────────────────────────────────────────
+def compute_wyckoff(df):
+    """Wyckoff phase + Spring / Upthrust detection."""
+    if len(df) < 60: return {}
+    C=df["Close"].values.astype(float); H=df["High"].values.astype(float)
+    L=df["Low"].values.astype(float);  V=df["Volume"].values.astype(float)
+    n=len(df); lb=min(60,n)
+    s20=C[-20:].mean(); s50=C[-50:].mean() if n>=50 else s20
+    last=C[-1]
+    vr=V[-20:].mean(); vp=V[-40:-20].mean() if n>=40 else vr
+    vol_up=bool(vr>vp)
+    if   last<s20<s50 and vol_up:  phase="Markdown"
+    elif last<s20 and not vol_up:  phase="Distribution"
+    elif last>s20>s50:             phase="Markup"
+    else:                          phase="Accumulation"
+    # Spring: price dips below support then recovers
+    sup=L[-lb:-5].min() if n>10 else L.min()
+    spring=any(L[i]<sup*0.99 and C[i]>sup for i in range(n-5,n-1)) if n>5 else False
+    res=H[-lb:-5].max() if n>10 else H.max()
+    upthrust=any(H[i]>res*1.01 and C[i]<res for i in range(n-5,n-1)) if n>5 else False
+    return dict(phase=phase, spring=bool(spring), upthrust=bool(upthrust),
+                support=r2(sup), resistance=r2(res),
+                vol_trend="Rising" if vol_up else "Falling")
+
+# ── 4. Turtle Trading / Donchian Channels ─────────────────────────────────────
+def compute_turtle(df):
+    """Donchian 20/55-day breakout + 10-day exit (Turtle Trading rules)."""
+    if len(df) < 60: return {}
+    C=df["Close"].values.astype(float)
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    n=len(df)
+    dc20h=r2(H[-21:-1].max()) if n>=21 else r2(H.max())
+    dc20l=r2(L[-21:-1].min()) if n>=21 else r2(L.min())
+    dc55h=r2(H[-56:-1].max()) if n>=56 else r2(H.max())
+    dc55l=r2(L[-56:-1].min()) if n>=56 else r2(L.min())
+    dc10l=r2(L[-11:-1].min()) if n>=11 else r2(L.min())
+    last=C[-1]
+    return dict(dc20h=dc20h,dc20l=dc20l,dc55h=dc55h,dc55l=dc55l,dc10l=dc10l,
+                bo20=bool(last>dc20h), bo55=bool(last>dc55h),
+                exit10=bool(last<dc10l))
+
+# ── 5. Ichimoku Cloud ─────────────────────────────────────────────────────────
+def compute_ichimoku(df):
+    """Ichimoku: Tenkan/Kijun, cloud position, TK cross, Kumo breakout."""
+    if len(df) < 60: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    def mid(p,off=0):
+        i=n-1-off; s=i-p+1
+        return (H[s:i+1].max()+L[s:i+1].min())/2 if s>=0 else None
+    tenkan=mid(9); kijun=mid(26)
+    sa26=(mid(9,26)+mid(26,26))/2 if (mid(9,26) and mid(26,26)) else None
+    sb26=mid(52,26)
+    last=C[-1]
+    above=below=False; thick=0
+    if sa26 and sb26:
+        ct=max(sa26,sb26); cb=min(sa26,sb26)
+        above=bool(last>ct); below=bool(last<cb)
+        thick=round((ct-cb)/cb*100,1)
+    # TK cross
+    tk_bull=tk_bear=False
+    if tenkan and kijun:
+        tp=mid(9,1); kp=mid(26,1)
+        if tp and kp:
+            tk_bull=bool(tenkan>kijun and tp<=kp)
+            tk_bear=bool(tenkan<kijun and tp>=kp)
+    # Kumo breakout (crossed above cloud in last 3 bars)
+    kbo=False
+    if sa26 and sb26:
+        ct=max(sa26,sb26)
+        kbo=bool(above and n>=4 and any(C[i]<ct for i in range(n-4,n-1)))
+    return dict(tenkan=r2(tenkan) if tenkan else 0,
+                kijun=r2(kijun) if kijun else 0,
+                span_a=r2(sa26) if sa26 else 0,
+                span_b=r2(sb26) if sb26 else 0,
+                above=above, below=below, thick=thick,
+                tk_bull=tk_bull, tk_bear=tk_bear, kbo=kbo)
+
+# ── 6. TD Sequential ──────────────────────────────────────────────────────────
+def compute_td(df):
+    """Tom DeMark: 9-bar Setup countdown signals exhaustion reversal."""
+    if len(df) < 14: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    # Count consecutive closes vs close 4 bars ago
+    sell_cnt=buy_cnt=0
+    for i in range(n-1,max(3,n-14),-1):
+        if C[i]>C[i-4]: sell_cnt+=1
+        else: break
+    if sell_cnt==0:
+        for i in range(n-1,max(3,n-14),-1):
+            if C[i]<C[i-4]: buy_cnt+=1
+            else: break
+    cnt    = sell_cnt if sell_cnt else buy_cnt
+    dirn   = "sell" if sell_cnt else ("buy" if buy_cnt else "none")
+    done   = cnt>=9
+    sig    = ("buy_9" if done and dirn=="buy" else
+              "sell_9" if done and dirn=="sell" else "none")
+    return dict(count=cnt, dir=dirn, complete=done, signal=sig)
+
+# ── 7. Supertrend ─────────────────────────────────────────────────────────────
+def compute_supertrend(df, period=10, mult=3.0):
+    """ATR-based Supertrend: direction flip = trend change signal."""
+    if len(df) < period+5: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    tr=np.maximum(H[1:]-L[1:],np.maximum(abs(H[1:]-C[:-1]),abs(L[1:]-C[:-1])))
+    tr=np.concatenate([[H[0]-L[0]],tr])
+    atr=np.zeros(n); atr[:period]=tr[:period].mean()
+    for i in range(period,n): atr[i]=(atr[i-1]*(period-1)+tr[i])/period
+    hl2=(H+L)/2; ub=hl2+mult*atr; lb=hl2-mult*atr
+    st=np.zeros(n); d=np.zeros(n); st[0]=ub[0]; d[0]=-1
+    for i in range(1,n):
+        if C[i]>st[i-1]: st[i]=max(lb[i],st[i-1]) if d[i-1]==1 else lb[i]; d[i]=1
+        else: st[i]=min(ub[i],st[i-1]) if d[i-1]==-1 else ub[i]; d[i]=-1
+    flipped=bool(d[-1]!=d[-2]) if n>=2 else False
+    return dict(value=r2(st[-1]), direction="up" if d[-1]==1 else "down",
+                flipped=flipped, atr=r2(atr[-1]))
+
+# ── 8. Elder Triple Screen ────────────────────────────────────────────────────
+def compute_elder(df):
+    """Elder: weekly MACD trend + daily Force Index timing."""
+    if len(df) < 60: return {}
+    C=df["Close"].values.astype(float); V=df["Volume"].values.astype(float)
+    n=len(df)
+    def ema(d,p):
+        a=2/(p+1); r=np.zeros(len(d)); r[0]=d[0]
+        for i in range(1,len(d)): r[i]=a*d[i]+(1-a)*r[i-1]
+        return r
+    # Screen 1 — weekly MACD (proxy: 60-day vs 130-day EMA histogram)
+    fp=min(60,n//2); sp=min(130,n-1)
+    macd=ema(C,fp)-ema(C,sp); sig=ema(macd,9)
+    trend="bull" if macd[-1]>sig[-1] else "bear"
+    rising=bool(macd[-1]>macd[min(5,n-1)])
+    # Screen 2 — 2-day EMA of Force Index
+    fi=np.concatenate([[0],(C[1:]-C[:-1])*V[1:]])
+    fi2=ema(fi,2)
+    signal="neutral"
+    if trend=="bull" and fi2[-1]<0: signal="buy_setup"
+    if trend=="bear" and fi2[-1]>0: signal="sell_setup"
+    return dict(macd_trend=trend, macd_rising=rising,
+                fi=r2(fi2[-1]),
+                fi_trend="pos" if fi2[-1]>0 else "neg",
+                signal=signal)
+
+
 def stock_stats(df, today):
     last = float(df.iloc[-1]["Close"])
     dma200 = float(df["Close"].tail(200).mean()) if len(df)>=50 else last
@@ -323,12 +518,23 @@ def precompute(fp, idx_map):
     smc = compute_smc(df)
     vol = compute_vol(df)
     mi  = compute_mi(df)
+    # Advanced strategies
+    adv = dict(
+        darvas   = compute_darvas(df),
+        vcp      = compute_vcp(df),
+        wyckoff  = compute_wyckoff(df),
+        turtle   = compute_turtle(df),
+        ichi     = compute_ichimoku(df),
+        td       = compute_td(df),
+        st       = compute_supertrend(df),
+        elder    = compute_elder(df),
+    )
     return dict(sym=sym, idx=idx_map.get(sym,0),
                 price=r2(float(df.iloc[-1]["Close"])),
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mhist=mh,whist=wh,qhist=qh,
-                smc=smc,vol=vol,mi=mi,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,adv=adv,**st,rs=0)
 
 def assign_rs(stocks):
     rets=sorted(s["ret12m"] for s in stocks); n=len(rets)
@@ -380,7 +586,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--sans);overflow-y:sc
 .tab-btn.active{color:var(--acc);border-bottom-color:var(--acc)}
 .tab-btn.t-smc.active{color:var(--a3);border-bottom-color:var(--a3)}
 .tab-btn.t-vol.active{color:var(--a2);border-bottom-color:var(--a2)}
-.tab-btn.t-mi.active{color:var(--gold);border-bottom-color:var(--gold)}
+.tab-btn.t-adv.active{color:#ff8c42;border-bottom-color:#ff8c42}
 
 /* ── Controls ── */
 .ctrl{padding:14px 22px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
@@ -506,6 +712,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-smc" data-tab="smc" onclick="switchTab('smc')">🎯 Price Action / SMC</button>
   <button class="tab-btn t-vol" data-tab="vol" onclick="switchTab('vol')">📈 Volume / Institutional</button>
   <button class="tab-btn t-mi"  data-tab="mi"  onclick="switchTab('mi')">⚡ Multi-Indicator</button>
+  <button class="tab-btn t-adv" data-tab="adv" onclick="switchTab('adv')">🔬 Advanced Strategies</button>
 </div>
 
 <!-- ═══ PIVOT CONTROLS ════════════════════════════════════════════════════ -->
@@ -708,7 +915,47 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
 </div>
 
-<!-- ═══ SHARED: INFO BAR · STATS · SEARCH · TABLE ══════════════════════════ -->
+<!-- ═══ ADVANCED STRATEGIES CONTROLS ══════════════════════════════════════ -->
+<div id="ctrl-adv" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <select id="adv-strat" style="min-width:260px" onchange="updateAdvInfo()">
+      <option value="darvas">Darvas Box — 52W-high + tight consolidation breakout</option>
+      <option value="vcp">VCP — Volatility Contraction Pattern (Minervini)</option>
+      <option value="wyckoff_acc">Wyckoff — Accumulation phase</option>
+      <option value="wyckoff_markup">Wyckoff — Markup phase (advancing)</option>
+      <option value="wyckoff_spring">Wyckoff — Spring / Upthrust signal</option>
+      <option value="turtle20">Turtle Trading — 20-day Donchian breakout</option>
+      <option value="turtle55">Turtle Trading — 55-day Donchian breakout</option>
+      <option value="ichi_above">Ichimoku — Price above cloud (bull trend)</option>
+      <option value="ichi_tk_bull">Ichimoku — Bullish TK cross</option>
+      <option value="ichi_kbo">Ichimoku — Kumo breakout (just crossed above cloud)</option>
+      <option value="td_buy9">TD Sequential — Buy Setup 9 (exhaustion low)</option>
+      <option value="td_sell9">TD Sequential — Sell Setup 9 (exhaustion high)</option>
+      <option value="st_up">Supertrend — Direction UP (bullish)</option>
+      <option value="st_flip_up">Supertrend — Just flipped UP (fresh signal)</option>
+      <option value="elder_buy">Elder Triple Screen — Buy Setup</option>
+      <option value="elder_sell">Elder Triple Screen — Sell Setup</option>
+    </select>
+  </div>
+  <div class="cg"><label>Index</label>
+    <select id="adv-idx">
+      <option value="0" selected>All</option><option value="50">N50</option>
+      <option value="100">N100</option><option value="200">N200</option>
+      <option value="500">N500</option><option value="750">N750</option>
+    </select>
+  </div>
+  <div class="cg"><label>Price Range ₹</label>
+    <div class="prange">
+      <input type="number" id="adv-pmin" placeholder="Min" min="0">
+      <span>–</span>
+      <input type="number" id="adv-pmax" placeholder="Max" min="0">
+    </div>
+  </div>
+  <button class="btn" style="background:#ff8c42;color:#000" onclick="scanAdv()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
 <div class="fbar" id="fbar">Select a tab and click ▶ SCAN</div>
 
 <div class="stats">
@@ -795,7 +1042,7 @@ let rows=[],sc=4,sd=1,currentTab='piv',lastRows=[];
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  ['piv','smc','vol','mi'].forEach(t=>{
+  ['piv','smc','vol','mi','adv'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -804,6 +1051,7 @@ function switchTab(tab){
   else if(tab==='smc') scanSMC();
   else if(tab==='vol') scanVol();
   else if(tab==='mi') scanMI();
+  else if(tab==='adv') scanAdv();
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -1148,7 +1396,69 @@ function scanMI(){
   sc=7;sd=-1;rows.sort((a,b)=>(b.mts-a.mts)||a.sym.localeCompare(b.sym));render();
 }
 
-// ── Render (tab-aware columns) ─────────────────────────────────────────────
+// ── ADVANCED STRATEGIES ───────────────────────────────────────────────────────
+const ADV_INFO = {
+  darvas:       '<b>Darvas Box</b> · Nicolas Darvas (made $2M in 18 months) · 52W-high stock consolidates in tight box (≤20% range) · Volume breakout above box top = entry signal',
+  vcp:          '<b>VCP — Volatility Contraction Pattern</b> · Mark Minervini · 3+ progressively tighter contractions with declining volume · Final tight base (&lt;10%) + breakout = high-probability entry',
+  wyckoff_acc:  '<b>Wyckoff Accumulation</b> · Richard Wyckoff · Price stabilising after decline, volume decreasing, 50SMA &lt; 200SMA · Institutions quietly accumulating; watch for spring or BOS',
+  wyckoff_markup:'<b>Wyckoff Markup</b> · Price advancing, above both SMAs · Trending phase — buy pullbacks to support',
+  wyckoff_spring:'<b>Wyckoff Spring / Upthrust</b> · Spring = fake breakdown below support that quickly reverses (bullish) · Upthrust = fake breakout above resistance that quickly reverses (bearish)',
+  turtle20:     '<b>Turtle Trading 20-day</b> · Richard Dennis · Price closed above highest high of last 20 days · Short-term breakout entry; exit if price closes below 10-day low',
+  turtle55:     '<b>Turtle Trading 55-day</b> · Stronger signal — price broke above 55-day high · Long-term breakout; used by professional trend-followers',
+  ichi_above:   '<b>Ichimoku — Above Cloud</b> · Price above both Span A and Span B · Bullish bias confirmed; cloud provides support zone below',
+  ichi_tk_bull: '<b>Ichimoku — TK Cross Bullish</b> · Tenkan-sen (9-period) crossed above Kijun-sen (26-period) · Medium-term buy signal, especially when above the cloud',
+  ichi_kbo:     '<b>Ichimoku — Kumo Breakout</b> · Price just crossed above the cloud (Span A &amp; B) · Strongest Ichimoku signal; often precedes sustained moves',
+  td_buy9:      '<b>TD Sequential — Buy 9</b> · Tom DeMark · 9 consecutive closes each below close 4 bars ago · Exhaustion of selling; potential reversal. Look for confluence with support',
+  td_sell9:     '<b>TD Sequential — Sell 9</b> · 9 consecutive closes each above close 4 bars ago · Exhaustion of buying; potential reversal. Look for confluence with resistance',
+  st_up:        '<b>Supertrend — Bullish</b> · ATR-based trailing indicator (period=10, mult=3) · Price above Supertrend line = uptrend confirmed',
+  st_flip_up:   '<b>Supertrend — Fresh Flip Up</b> · Supertrend just flipped from bearish to bullish (today or yesterday) · Early trend-change signal with tight stop',
+  elder_buy:    '<b>Elder Triple Screen — Buy Setup</b> · Dr. Alexander Elder · Screen 1: weekly MACD bullish (trend) · Screen 2: daily Force Index negative (pullback) · Enter long on next bar',
+  elder_sell:   '<b>Elder Triple Screen — Sell Setup</b> · Screen 1: weekly MACD bearish · Screen 2: daily Force Index positive (rally) · Enter short on next bar',
+};
+
+function updateAdvInfo(){
+  const s=document.getElementById('adv-strat').value;
+  document.getElementById('fbar').innerHTML='<span style="color:var(--warn)">Advanced Strategies</span> · '+(ADV_INFO[s]||s);
+}
+
+function scanAdv(){
+  const strat=document.getElementById('adv-strat').value;
+  const idxF =parseInt(document.getElementById('adv-idx').value);
+  const prMin=parseFloat(document.getElementById('adv-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('adv-pmax').value)||Infinity;
+  updateAdvInfo();
+  rows=[];
+  for(const s of S){
+    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if(!s.adv)continue;
+    const a=s.adv; let matched=false; let extra={};
+
+    if(strat==='darvas')      { const d=a.darvas;   matched=d&&(d.breakout||d.in_box); extra={sig:d?.breakout?'Breakout!':'In Box',box_top:d?.top,box_bot:d?.bot,vol_ok:d?.vol_ok,box_dt:d?.dt}; }
+    if(strat==='vcp')         { const v=a.vcp;      matched=v&&v.is_vcp; extra={sig:'VCP',widths:v?.widths?.join('→')+'%',tight:v?.tightest+'%',pivot:v?.pivot}; }
+    if(strat==='wyckoff_acc') { const w=a.wyckoff;  matched=w&&w.phase==='Accumulation'; extra={sig:w?.phase,spring:w?.spring,sup:w?.support,res:w?.resistance,vol:w?.vol_trend}; }
+    if(strat==='wyckoff_markup'){const w=a.wyckoff; matched=w&&w.phase==='Markup';       extra={sig:w?.phase,spring:w?.spring,sup:w?.support,res:w?.resistance,vol:w?.vol_trend}; }
+    if(strat==='wyckoff_spring'){const w=a.wyckoff; matched=w&&(w.spring||w.upthrust);   extra={sig:w?.spring?'Spring ↑':'Upthrust ↓',phase:w?.phase,sup:w?.support,res:w?.resistance}; }
+    if(strat==='turtle20')    { const t=a.turtle;   matched=t&&t.bo20; extra={sig:'20d BO',dc20h:t?.dc20h,dc20l:t?.dc20l,dc55h:t?.dc55h,dc10l:t?.dc10l}; }
+    if(strat==='turtle55')    { const t=a.turtle;   matched=t&&t.bo55; extra={sig:'55d BO',dc55h:t?.dc55h,dc55l:t?.dc55l,dc20h:t?.dc20h,dc10l:t?.dc10l}; }
+    if(strat==='ichi_above')  { const i=a.ichi;     matched=i&&i.above; extra={sig:'Above Cloud',span_a:i?.span_a,span_b:i?.span_b,tenkan:i?.tenkan,kijun:i?.kijun,thick:i?.thick+'%'}; }
+    if(strat==='ichi_tk_bull'){ const i=a.ichi;     matched=i&&i.tk_bull; extra={sig:'TK Cross ↑',tenkan:i?.tenkan,kijun:i?.kijun,above:i?.above?'Yes':'No',thick:i?.thick+'%'}; }
+    if(strat==='ichi_kbo')    { const i=a.ichi;     matched=i&&i.kbo;  extra={sig:'Kumo BO',span_a:i?.span_a,span_b:i?.span_b,tenkan:i?.tenkan,kijun:i?.kijun}; }
+    if(strat==='td_buy9')     { const t=a.td;       matched=t&&t.signal==='buy_9'; extra={sig:'Buy 9 ✓',count:t?.count,dir:t?.dir}; }
+    if(strat==='td_sell9')    { const t=a.td;       matched=t&&t.signal==='sell_9'; extra={sig:'Sell 9 ✓',count:t?.count,dir:t?.dir}; }
+    if(strat==='st_up')       { const t=a.st;       matched=t&&t.direction==='up'; extra={sig:'ST ↑',st_val:t?.value,atr:t?.atr,flipped:t?.flipped?'NEW':''}; }
+    if(strat==='st_flip_up')  { const t=a.st;       matched=t&&t.direction==='up'&&t.flipped; extra={sig:'Flip ↑ NEW',st_val:t?.value,atr:t?.atr}; }
+    if(strat==='elder_buy')   { const e=a.elder;    matched=e&&e.signal==='buy_setup'; extra={sig:'Buy Setup',macd:e?.macd_trend,rising:e?.macd_rising?'↑':'→',fi:e?.fi}; }
+    if(strat==='elder_sell')  { const e=a.elder;    matched=e&&e.signal==='sell_setup'; extra={sig:'Sell Setup',macd:e?.macd_trend,fi:e?.fi}; }
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      strat,extra,_tab:'adv'});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
 function buildCols(tab,r0){
   const common=[
     {k:'sym',  h:'Symbol',     fn:r=>symCell(r.sym)},
@@ -1248,6 +1558,30 @@ function buildCols(tab,r0){
       {k:'date',h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
+  if(tab==='adv'){
+    // Dynamic extra columns based on strategy
+    const extraCols = rows.length ? Object.keys(rows[0].extra||{}).map(k=>({
+      k:'extra_'+k, h:k,
+      fn: r=>{
+        const v=r.extra?.[k];
+        if(v===undefined||v===null||v==='')return`<td class="mu">—</td>`;
+        if(typeof v==='boolean') return`<td class="${v?'pos':'neg'}">${v?'✓':'✗'}</td>`;
+        if(k==='sig') return`<td style="color:var(--warn);font-weight:700">${v}</td>`;
+        return`<td class="mu">${v}</td>`;
+      }
+    })) : [];
+    return[
+      {k:'sym',   h:'Symbol',    fn:r=>symCell(r.sym)},
+      {k:'idx',   h:'Index',     fn:r=>idxBadge(r.idx)},
+      {k:'price', h:'Close',     fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
+      ...extraCols,
+      {k:'rs',    h:'RS',        fn:r=>rsCell(r.rs)},
+      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'w52h',  h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
+      {k:'avol',  h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
+      {k:'date',  h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
+    ];
+  }
   return common;
 }
 
@@ -1282,12 +1616,14 @@ function exportCSV(){
     smc:['Symbol','Index','Close','Signal','ZoneH','ZoneL','Trend','BOS_Bull','BOS_Bear','CHoCH','BullOB_H','BullOB_L','BearOB_H','BearOB_L','RS','vs200DMA','AvgVol20','LastDate'],
     vol:['Symbol','Index','Close','Signal','POC','VAH','VAL','VolRatio','OBV','AD','RS','vs200DMA','AvgVol20','LastDate'],
     mi: ['Symbol','Index','Close','MinerviniScore','WeinStage','StageLabel','RS','vs200DMA','SMA50','SMA150','SMA200','SMA30W','AvgVol20','LastDate'],
+    adv:['Symbol','Index','Close','Strategy','Signal',...Object.keys((rows[0]?.extra)||{}).filter(k=>k!=='sig'),'RS','vs200DMA','AvgVol20','LastDate'],
   };
   const cells={
     piv:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.lv,`${r.dist>=0?'+':''}${r.dist.toFixed(2)}%`,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.b6,r.b12,r.sh,r.sl2,r.sc2,r.sd,r.avol,r.date],
     smc:r=>[r.sym,r.idx||'Other',r.price,r.signal,r.zone_h,r.zone_l,r.smc.trend,r.smc.bos_bull?'Y':'N',r.smc.bos_bear?'Y':'N',r.smc.choch||'',r.smc.bull_ob?.h||'',r.smc.bull_ob?.l||'',r.smc.bear_ob?.h||'',r.smc.bear_ob?.l||'',r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
     vol:r=>[r.sym,r.idx||'Other',r.price,r.vsig,r.poc,r.vah,r.val,r.vr,r.obv,r.ad,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
     mi: r=>[r.sym,r.idx||'Other',r.price,`${r.mts}/8`,r.stg,r.stgl,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.s50,r.s150,r.s200,r.s30w,r.avol,r.date],
+    adv:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.strat,r.extra?.sig||'',...Object.keys((rows[0]?.extra)||{}).filter(k=>k!=='sig').map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
   const a=document.createElement('a');
@@ -1306,9 +1642,18 @@ document.addEventListener('DOMContentLoaded',()=>{
 </html>
 """
 
+class _NpEnc(json.JSONEncoder):
+    """Serialize numpy scalars that json.dumps can't handle natively."""
+    def default(self, o):
+        if isinstance(o, np.bool_):    return bool(o)
+        if isinstance(o, np.integer):  return int(o)
+        if isinstance(o, np.floating): return float(o)
+        if isinstance(o, np.ndarray):  return o.tolist()
+        return super().default(o)
+
 def build_html(stocks, data_dir):
     gt = datetime.now().strftime("%d %b %Y  %H:%M")
-    return (HTML.replace("__JSON__", json.dumps(stocks, separators=(",",":")))
+    return (HTML.replace("__JSON__", json.dumps(stocks, separators=(",",":"), cls=_NpEnc))
                 .replace("__GT__", gt).replace("__DD__", data_dir))
 
 def main():
