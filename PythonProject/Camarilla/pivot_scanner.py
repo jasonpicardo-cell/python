@@ -914,7 +914,8 @@ def compute_williams_r(df, period=14):
 
 # ── 1. Candlestick Patterns ───────────────────────────────────────────────────
 def compute_candles(df):
-    """14 classic candlestick reversal & continuation patterns from daily OHLC."""
+    """Comprehensive candlestick pattern scanner — 27 patterns from daily OHLC.
+    Covers all major StockEdge, Chartink, and MunafaSutra candlestick scans."""
     if len(df)<5: return {}
     O=df["Open"].values.astype(float); H=df["High"].values.astype(float)
     L=df["Low"].values.astype(float); C=df["Close"].values.astype(float)
@@ -922,35 +923,69 @@ def compute_candles(df):
 
     def body(i): return abs(C[i]-O[i])
     def rng(i):  return max(H[i]-L[i], 0.0001)
-    def sup(i):  return H[i]-max(C[i],O[i])  # upper shadow
-    def sdn(i):  return min(C[i],O[i])-L[i]  # lower shadow
+    def sup(i):  return H[i]-max(C[i],O[i])   # upper shadow
+    def sdn(i):  return min(C[i],O[i])-L[i]   # lower shadow
     def bull(i): return C[i]>O[i]
     def bear(i): return C[i]<O[i]
+    def mid(i):  return (H[i]+L[i])/2.0
 
     atr5=float(np.mean([rng(-j) for j in range(1,6)]))
 
     # ── Single-bar ──────────────────────────────────────────────────────────
     b0=body(-1); r0=rng(-1); su=sup(-1); sd=sdn(-1)
-    hammer       = bool(bull(-1) and b0/r0<0.35 and sd>2*b0 and su<0.5*b0)
-    hanging_man  = bool(bear(-1) and b0/r0<0.35 and sd>2*b0 and su<0.5*b0)
-    shooting_star= bool(bear(-1) and b0/r0<0.35 and su>2*b0 and sd<0.5*b0)
-    inv_hammer   = bool(bull(-1) and b0/r0<0.35 and su>2*b0 and sd<0.5*b0)
-    doji         = bool(b0/r0<0.1 and r0>atr5*0.3)
+    hammer        = bool(bull(-1) and b0/r0<0.35 and sd>2*b0 and su<0.5*b0)
+    hanging_man   = bool(bear(-1) and b0/r0<0.35 and sd>2*b0 and su<0.5*b0)
+    shooting_star = bool(bear(-1) and b0/r0<0.35 and su>2*b0 and sd<0.5*b0)
+    inv_hammer    = bool(bull(-1) and b0/r0<0.35 and su>2*b0 and sd<0.5*b0)
+    doji          = bool(b0/r0<0.1 and r0>atr5*0.3)
+    # Marubozu: strong body (≥90% of range), minimal shadows — StockEdge scan
+    marubozu_bull = bool(bull(-1) and b0/r0>=0.90)
+    marubozu_bear = bool(bear(-1) and b0/r0>=0.90)
+    # Spinning Top: small body, long shadows on BOTH sides — pure indecision
+    spinning_top  = bool(b0/r0<0.3 and su>b0 and sd>b0 and r0>atr5*0.4)
 
     # ── Two-bar ─────────────────────────────────────────────────────────────
     if n>=2:
         b1=body(-2)
-        bull_eng = bool(bull(-1) and bear(-2) and C[-1]>O[-2] and O[-1]<C[-2] and b0>b1)
-        bear_eng = bool(bear(-1) and bull(-2) and C[-1]<O[-2] and O[-1]>C[-2] and b0>b1)
-        bull_har = bool(bull(-1) and bear(-2) and O[-1]>C[-2] and C[-1]<O[-2] and b0<b1*0.5)
-        bear_har = bool(bear(-1) and bull(-2) and O[-1]<C[-2] and C[-1]>O[-2] and b0<b1*0.5)
-        # Piercing Line: big bear day, next bull opens below L[-2] closes >50% of prior body
-        piercing   = bool(bear(-2) and bull(-1) and O[-1]<L[-2]
-                          and C[-1]>(O[-2]+C[-2])/2 and C[-1]<O[-2])
-        dark_cloud = bool(bull(-2) and bear(-1) and O[-1]>H[-2]
-                          and C[-1]<(O[-2]+C[-2])/2 and C[-1]>O[-2])
+        # Classic reversals
+        bull_eng  = bool(bull(-1) and bear(-2) and C[-1]>O[-2] and O[-1]<C[-2] and b0>b1)
+        bear_eng  = bool(bear(-1) and bull(-2) and C[-1]<O[-2] and O[-1]>C[-2] and b0>b1)
+        bull_har  = bool(bull(-1) and bear(-2) and O[-1]>C[-2] and C[-1]<O[-2] and b0<b1*0.5)
+        bear_har  = bool(bear(-1) and bull(-2) and O[-1]<C[-2] and C[-1]>O[-2] and b0<b1*0.5)
+        piercing  = bool(bear(-2) and bull(-1) and O[-1]<L[-2]
+                         and C[-1]>(O[-2]+C[-2])/2 and C[-1]<O[-2])
+        dark_cloud= bool(bull(-2) and bear(-1) and O[-1]>H[-2]
+                         and C[-1]<(O[-2]+C[-2])/2 and C[-1]>O[-2])
+        # Inside Bar: current bar completely inside prior bar — Chartink #1 scan
+        inside_bar      = bool(H[-1]<H[-2] and L[-1]>L[-2])
+        inside_bar_bull = bool(inside_bar and C[-1]>mid(-1))   # closed upper half → bullish bias
+        inside_bar_bear = bool(inside_bar and C[-1]<mid(-1))   # closed lower half → bearish bias
+        # Outside Bar: current bar engulfs prior bar (range wider both sides)
+        outside_bar      = bool(H[-1]>H[-2] and L[-1]<L[-2])
+        outside_bar_bull = bool(outside_bar and bull(-1))
+        outside_bar_bear = bool(outside_bar and bear(-1))
+        # Tweezer: two candles with same high (top) or same low (bottom) within 0.3%
+        tol = 0.003
+        tweezer_top    = bool(abs(H[-1]-H[-2])/max(H[-2],0.01)<tol and bear(-1))
+        tweezer_bottom = bool(abs(L[-1]-L[-2])/max(L[-2],0.01)<tol and bull(-1))
+        # Gap: today's open vs yesterday's close (true price gap)
+        gap_pct   = float((O[-1]-C[-2])/max(C[-2],0.01)*100)
+        gap_up    = bool(gap_pct > 1.0)    # gap up > 1%
+        gap_down  = bool(gap_pct < -1.0)   # gap down < -1%
+        gap_up3   = bool(gap_pct > 3.0)    # gap up > 3% (Chartink style)
+        gap_down3 = bool(gap_pct < -3.0)   # gap down > 3%
     else:
         bull_eng=bear_eng=bull_har=bear_har=piercing=dark_cloud=False
+        inside_bar=inside_bar_bull=inside_bar_bear=False
+        outside_bar=outside_bar_bull=outside_bar_bear=False
+        tweezer_top=tweezer_bottom=False
+        gap_pct=0.0; gap_up=gap_down=gap_up3=gap_down3=False
+
+    # Double Inside Bar: two consecutive inside bars — even tighter coil
+    if n>=3:
+        double_inside = bool(inside_bar and H[-2]<H[-3] and L[-2]>L[-3])
+    else:
+        double_inside = False
 
     # ── Three-bar ───────────────────────────────────────────────────────────
     if n>=3:
@@ -966,6 +1001,7 @@ def compute_candles(df):
         morning_star=evening_star=tws=tbc=False
 
     return dict(
+        # Original 14
         hammer=bool(hammer), hanging_man=bool(hanging_man),
         shooting_star=bool(shooting_star), inv_hammer=bool(inv_hammer),
         doji=bool(doji),
@@ -974,6 +1010,17 @@ def compute_candles(df):
         piercing=bool(piercing), dark_cloud=bool(dark_cloud),
         morning_star=bool(morning_star), evening_star=bool(evening_star),
         tws=bool(tws), tbc=bool(tbc),
+        # New 13 — StockEdge / Chartink patterns
+        marubozu_bull=bool(marubozu_bull), marubozu_bear=bool(marubozu_bear),
+        spinning_top=bool(spinning_top),
+        inside_bar=bool(inside_bar),
+        inside_bar_bull=bool(inside_bar_bull), inside_bar_bear=bool(inside_bar_bear),
+        double_inside=bool(double_inside),
+        outside_bar_bull=bool(outside_bar_bull), outside_bar_bear=bool(outside_bar_bear),
+        tweezer_top=bool(tweezer_top), tweezer_bottom=bool(tweezer_bottom),
+        gap_up=bool(gap_up), gap_up3=bool(gap_up3),
+        gap_down=bool(gap_down), gap_down3=bool(gap_down3),
+        gap_pct=round(gap_pct,2),
     )
 
 # ── 2. Multi-EMA Crossovers ───────────────────────────────────────────────────
@@ -1106,6 +1153,46 @@ def compute_ma_alignment(df):
                 above_all3=bool(above_all3), all_bull=bool(all_bull))
 
 
+# ── OHLC timeframe aggregation helpers ───────────────────────────────────────
+def weekly_agg(df):
+    """Aggregate daily OHLC to weekly (week ending Friday)."""
+    tmp=df.copy(); tmp['Date']=pd.to_datetime(tmp['Date'])
+    try:
+        agg=tmp.set_index('Date').resample('W-FRI').agg(
+            Open=('Open','first'),High=('High','max'),
+            Low=('Low','min'),Close=('Close','last'),Volume=('Volume','sum'))
+    except Exception:
+        agg=tmp.set_index('Date').resample('W').agg(
+            Open=('Open','first'),High=('High','max'),
+            Low=('Low','min'),Close=('Close','last'),Volume=('Volume','sum'))
+    return agg.dropna(subset=['Open']).reset_index()
+
+def monthly_agg(df):
+    """Aggregate daily OHLC to monthly."""
+    tmp=df.copy(); tmp['Date']=pd.to_datetime(tmp['Date'])
+    for rule in ('ME','M','MS'):
+        try:
+            agg=tmp.set_index('Date').resample(rule).agg(
+                Open=('Open','first'),High=('High','max'),
+                Low=('Low','min'),Close=('Close','last'),Volume=('Volume','sum'))
+            return agg.dropna(subset=['Open']).reset_index()
+        except Exception:
+            continue
+    return df.tail(1).copy()
+
+def _ti_for(data_df):
+    """Run all India Pro compute functions on any OHLC DataFrame."""
+    return dict(
+        candle=compute_candles(data_df),
+        ema   =compute_ema_cross(data_df),
+        mom   =compute_momentum_score(data_df),
+        seq   =compute_sequential(data_df),
+        volbld=compute_volume_buildup(data_df),
+        consol=compute_52w_consol(data_df),
+        ma    =compute_ma_alignment(data_df),
+    )
+
+
 def stock_stats(df, today):
     last = float(df.iloc[-1]["Close"])
     dma200 = float(df["Close"].tail(200).mean()) if len(df)>=50 else last
@@ -1159,15 +1246,13 @@ def precompute(fp, idx_map, nifty_df=None):
         stoch= compute_stochastic(df),
         wr   = compute_williams_r(df),
     )
-    # 🏅 India Pro strategies (Chartink / StockEdge / Trendlyne style)
+    # 🏅 India Pro strategies — pre-computed for Daily / Weekly / Monthly
+    _df_w = weekly_agg(df)
+    _df_m = monthly_agg(df)
     ti = dict(
-        candle = compute_candles(df),
-        ema    = compute_ema_cross(df),
-        mom    = compute_momentum_score(df),
-        seq    = compute_sequential(df),
-        volbld = compute_volume_buildup(df),
-        consol = compute_52w_consol(df),
-        ma     = compute_ma_alignment(df),
+        d = _ti_for(df),
+        w = _ti_for(_df_w),
+        m = _ti_for(_df_m),
     )
     # Advanced strategies
     adv = dict(
@@ -1250,6 +1335,21 @@ body{background:var(--bg);color:var(--txt);font-family:var(--sans);overflow-y:sc
 .tab-btn.t-t2.active{color:#00e5a0;border-bottom-color:#00e5a0}
 .tab-btn.t-t3.active{color:#f5c518;border-bottom-color:#f5c518}
 .tab-btn.t-ti.active{color:#ff9500;border-bottom-color:#ff9500}
+
+/* GLOBAL FILTER BAR */
+.global-bar{display:flex;align-items:center;gap:10px;padding:6px 22px;
+  background:rgba(0,229,160,.04);border-bottom:1px solid rgba(0,229,160,.12);
+  flex-wrap:wrap}
+.gb-label{font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  text-transform:uppercase;color:var(--acc);font-weight:700}
+.gb-sep{width:1px;height:18px;background:var(--brd)}
+.gb-lbl{font-size:10px;color:var(--mu);font-family:var(--mono)}
+.gb-sel{font-family:var(--mono);font-size:10px;padding:3px 8px;
+  background:var(--surf);border:1px solid var(--brd);color:var(--txt);
+  border-radius:4px;cursor:pointer}
+.gb-sel:hover{border-color:var(--acc)}
+.gb-hint{font-size:9px;color:var(--mu);font-family:var(--mono);
+  letter-spacing:.5px;margin-left:auto}
 
 /* ── Controls ── */
 .ctrl{padding:14px 22px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
@@ -1382,6 +1482,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .badge-mi{background:rgba(59,158,255,.1);color:var(--a2)}
 .badge-adv{background:rgba(255,140,66,.1);color:var(--warn)}
 .badge-piv{background:rgba(74,92,120,.15);color:var(--mu)}
+.badge-ti{background:rgba(255,149,0,.1);color:#ff9500}
 .hcard-name{font-family:var(--mono);font-size:12px;font-weight:700;color:#dde5f5}
 .hcard-desc{font-size:10.5px;color:var(--mu);line-height:1.5;flex:1}
 .hcard-stars{font-size:10px;color:var(--gold);letter-spacing:1px}
@@ -1456,6 +1557,22 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-t3"  data-tab="t3"  onclick="switchTab('t3')">🎖 Tier-3</button>
   <button class="tab-btn t-ti"  data-tab="ti"  onclick="switchTab('ti')">🏅 India Pro</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
+</div>
+<!-- ═══ GLOBAL FILTERS ════════════════════════════════════════════════════ -->
+<div class="global-bar" id="global-bar">
+  <span class="gb-label">🌐 Global</span>
+  <div class="gb-sep"></div>
+  <label class="gb-lbl">Index</label>
+  <select id="global-idx" class="gb-sel">
+    <option value="0" selected>All Stocks</option>
+    <option value="50">Nifty 50</option>
+    <option value="100">Nifty 100</option>
+    <option value="200">Nifty 200</option>
+    <option value="500">Nifty 500</option>
+    <option value="750">Nifty 750</option>
+  </select>
+  <div class="gb-sep"></div>
+  <span class="gb-hint">Applies to all scanners ↓</span>
 </div>
 
 <!-- ═══ PIVOT CONTROLS ════════════════════════════════════════════════════ -->
@@ -1548,13 +1665,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="3">±3%</option><option value="5">±5%</option>
     </select>
   </div>
-  <div class="cg"><label>Index</label>
-    <select id="smc-idx">
-      <option value="0" selected>All</option><option value="50">N50</option><option value="100">N100</option>
-      <option value="200">N200</option><option value="500">N500</option>
-      <option value="750">N750</option>
-    </select>
-  </div>
   <div class="cg"><label>Price Range ₹</label>
     <div class="prange">
       <input type="number" id="smc-pmin" placeholder="Min" min="0">
@@ -1590,13 +1700,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
     <select id="vol-spike">
       <option value="1.5">1.5× avg</option><option value="2" selected>2× avg</option>
       <option value="3">3× avg</option><option value="5">5× avg</option>
-    </select>
-  </div>
-  <div class="cg"><label>Index</label>
-    <select id="vol-idx">
-      <option value="0" selected>All</option><option value="50">N50</option><option value="100">N100</option>
-      <option value="200">N200</option><option value="500">N500</option>
-      <option value="750">N750</option>
     </select>
   </div>
   <div class="cg"><label>Price Range ₹</label>
@@ -1640,13 +1743,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="70" selected>≥ 70</option><option value="80">≥ 80</option>
     </select>
   </div>
-  <div class="cg"><label>Index</label>
-    <select id="mi-idx">
-      <option value="0" selected>All</option><option value="50">N50</option><option value="100">N100</option>
-      <option value="200">N200</option><option value="500">N500</option>
-      <option value="750">N750</option>
-    </select>
-  </div>
   <div class="cg"><label>Price Range ₹</label>
     <div class="prange">
       <input type="number" id="mi-pmin" placeholder="Min" min="0">
@@ -1679,13 +1775,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="elder_buy">Elder Triple Screen — Buy Setup</option>
       <option value="elder_sell">Elder Triple Screen — Sell Setup</option>
     </select><button class="info-btn" onclick="showHelp('adv',document.getElementById('adv-strat').value)" title="Show strategy info">ℹ</button></div>
-  </div>
-  <div class="cg"><label>Index</label>
-    <select id="adv-idx">
-      <option value="0" selected>All</option><option value="50">N50</option>
-      <option value="100">N100</option><option value="200">N200</option>
-      <option value="500">N500</option><option value="750">N750</option>
-    </select>
   </div>
   <div class="cg"><label>Price Range ₹</label>
     <div class="prange">
@@ -1747,13 +1836,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="70">≤ 70</option><option value="60">≤ 60</option>
     </select>
   </div>
-  <div class="cg"><label>Index</label>
-    <select id="t1-idx">
-      <option value="0" selected>All</option><option value="50">N50</option>
-      <option value="100">N100</option><option value="200">N200</option>
-      <option value="500">N500</option><option value="750">N750</option>
-    </select>
-  </div>
   <div class="cg"><label>RS Rating ≥</label>
     <select id="t1-rs">
       <option value="0" selected>Any</option><option value="50">≥ 50</option>
@@ -1800,13 +1882,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="rsn_underperform">RS Underperforming Nifty — ratio in downtrend</option>
       </optgroup>
     </select><button class="info-btn" onclick="showHelp('t2',document.getElementById('t2-strat').value)" title="Show strategy info">ℹ</button></div>
-  </div>
-  <div class="cg"><label>Index</label>
-    <select id="t2-idx">
-      <option value="0" selected>All</option><option value="50">N50</option>
-      <option value="100">N100</option><option value="200">N200</option>
-      <option value="500">N500</option><option value="750">N750</option>
-    </select>
   </div>
   <div class="cg"><label>RS Rating ≥</label>
     <select id="t2-rs">
@@ -1869,13 +1944,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       </optgroup>
     </select><button class="info-btn" onclick="showHelp('t3',document.getElementById('t3-strat').value)" title="Show strategy info">ℹ</button></div>
   </div>
-  <div class="cg"><label>Index</label>
-    <select id="t3-idx">
-      <option value="0" selected>All</option><option value="50">N50</option>
-      <option value="100">N100</option><option value="200">N200</option>
-      <option value="500">N500</option><option value="750">N750</option>
-    </select>
-  </div>
   <div class="cg"><label>RS Rating ≥</label>
     <select id="t3-rs">
       <option value="0" selected>Any</option><option value="50">≥ 50</option>
@@ -1913,6 +1981,28 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="candle_evening_star">Evening Star — 3-bar bearish reversal: bull→star→bear</option>
         <option value="candle_bear_har">Bearish Harami — small bear body inside large bull</option>
         <option value="candle_tbc">Three Black Crows — 3 consecutive bearish closes</option>
+        <option value="candle_doji">Doji — indecision candle, body &lt;10% of range</option>
+      </optgroup>
+      <optgroup label="── 🕯 Inside Bar (Chartink #1 scan) ──">
+        <option value="candle_inside_bar">Inside Bar — current bar entirely within prior bar (neutral)</option>
+        <option value="candle_inside_bar_bull">Inside Bar + Bullish Close — closed upper half → bullish bias</option>
+        <option value="candle_inside_bar_bear">Inside Bar + Bearish Close — closed lower half → bearish bias</option>
+        <option value="candle_double_inside">Double Inside Bar — 2 consecutive inside bars (tightest coil)</option>
+      </optgroup>
+      <optgroup label="── 📊 StockEdge Premium Patterns ──">
+        <option value="candle_marubozu_bull">White Marubozu — full bull body ≥90% range, no shadows (StockEdge)</option>
+        <option value="candle_marubozu_bear">Black Marubozu — full bear body ≥90% range, no shadows (StockEdge)</option>
+        <option value="candle_spinning_top">Spinning Top — small body, long shadows both sides (indecision)</option>
+        <option value="candle_tweezer_bottom">Tweezer Bottom — two candles with identical/near-identical lows</option>
+        <option value="candle_tweezer_top">Tweezer Top — two candles with identical/near-identical highs</option>
+        <option value="candle_outside_bull">Bullish Outside Bar — engulfs prior bar range, closes up</option>
+        <option value="candle_outside_bear">Bearish Outside Bar — engulfs prior bar range, closes down</option>
+      </optgroup>
+      <optgroup label="── 🚀 Gap Scans (Chartink most-used) ──">
+        <option value="candle_gap_up">Gap Up &gt;1% — opened above yesterday's close by 1%+</option>
+        <option value="candle_gap_up3">Gap Up &gt;3% — strong gap (Chartink style: 3%+)</option>
+        <option value="candle_gap_down">Gap Down &lt;-1% — opened below yesterday's close by 1%+</option>
+        <option value="candle_gap_down3">Gap Down &lt;-3% — strong gap down (Chartink style: 3%+)</option>
       </optgroup>
       <optgroup label="── 📈 EMA Crossovers (Chartink paid alerts) ──">
         <option value="ema_c921_bull">EMA 9 crossed above EMA 21 — short-term bull signal</option>
@@ -1955,11 +2045,12 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
     <button class="info-btn" onclick="showHelp('ti',document.getElementById('ti-strat').value)" title="Show strategy info">ℹ</button>
     </div>
   </div>
-  <div class="cg"><label>Index</label>
-    <select id="ti-idx">
-      <option value="0" selected>All</option><option value="50">N50</option>
-      <option value="100">N100</option><option value="200">N200</option>
-      <option value="500">N500</option><option value="750">N750</option>
+
+  <div class="cg"><label>Timeframe</label>
+    <select id="ti-tf">
+      <option value="d" selected>📅 Daily</option>
+      <option value="w">📅 Weekly</option>
+      <option value="m">📅 Monthly</option>
     </select>
   </div>
   <div class="cg"><label>RS Rating ≥</label>
@@ -2142,7 +2233,7 @@ function _collectPrefs(){
     lv:  document.getElementById('sp-lvl').value,
     tf:  document.getElementById('sp-tf').value,
     pr:  document.getElementById('sp-pr').value,
-    idx: document.getElementById('idx-flt').value,
+    idx: document.getElementById('global-idx').value,
     dma: document.getElementById('dma-flt').value,
     rs:  document.getElementById('rs-flt').value,
     bc:  document.getElementById('bc-flt').value,
@@ -2158,7 +2249,7 @@ function applyPrefs(p){
   if(p.type) document.getElementById('sp-type').value=p.type;
   if(p.tf)   document.getElementById('sp-tf').value=p.tf;
   if(p.pr)   document.getElementById('sp-pr').value=p.pr;
-  if(p.idx)  document.getElementById('idx-flt').value=p.idx;
+  if(p.idx)  document.getElementById('global-idx').value=p.idx;
   if(p.dma)  document.getElementById('dma-flt').value=p.dma;
   if(p.rs)   document.getElementById('rs-flt').value=p.rs;
   if(p.bc)   document.getElementById('bc-flt').value=p.bc;
@@ -2255,7 +2346,7 @@ function scan(){
   const lvKey=document.getElementById('sp-lvl').value;
   const tf=document.getElementById('sp-tf').value;
   const prox=parseFloat(document.getElementById('sp-pr').value);
-  const idxF=parseInt(document.getElementById('idx-flt').value);
+  const idxF=parseInt(document.getElementById('global-idx').value);
   const dmaF=document.getElementById('dma-flt').value;
   const rsF=parseInt(document.getElementById('rs-flt').value);
   const bcF=parseInt(document.getElementById('bc-flt').value);
@@ -2291,7 +2382,7 @@ function scan(){
 function scanSMC(){
   const sig=document.getElementById('smc-sig').value;
   const prox=parseFloat(document.getElementById('smc-prox').value)/100;
-  const idxF=parseInt(document.getElementById('smc-idx').value);
+  const idxF=parseInt(document.getElementById('global-idx').value);
   const prMin=parseFloat(document.getElementById('smc-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('smc-pmax').value)||Infinity;
 
@@ -2357,7 +2448,7 @@ function scanVol(){
   const sig=document.getElementById('vol-sig').value;
   const prox=parseFloat(document.getElementById('vol-prox').value)/100;
   const spk=parseFloat(document.getElementById('vol-spike').value);
-  const idxF=parseInt(document.getElementById('vol-idx').value);
+  const idxF=parseInt(document.getElementById('global-idx').value);
   const prMin=parseFloat(document.getElementById('vol-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('vol-pmax').value)||Infinity;
 
@@ -2403,7 +2494,7 @@ function scanMI(){
   const minScore=parseInt(document.getElementById('mi-score').value);
   const stgReq=parseInt(document.getElementById('mi-stg').value);
   const rsMin=parseInt(document.getElementById('mi-rs').value);
-  const idxF=parseInt(document.getElementById('mi-idx').value);
+  const idxF=parseInt(document.getElementById('global-idx').value);
   const prMin=parseFloat(document.getElementById('mi-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('mi-pmax').value)||Infinity;
 
@@ -2461,7 +2552,7 @@ function updateAdvInfo(){
 
 function scanAdv(){
   const strat=document.getElementById('adv-strat').value;
-  const idxF =parseInt(document.getElementById('adv-idx').value);
+  const idxF =parseInt(document.getElementById('global-idx').value);
   const prMin=parseFloat(document.getElementById('adv-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('adv-pmax').value)||Infinity;
   updateAdvInfo();
@@ -2528,7 +2619,7 @@ function updateT1Info(){
 
 function scanT1(){
   const strat  = document.getElementById('t1-strat').value;
-  const idxF   = parseInt(document.getElementById('t1-idx').value);
+  const idxF   = parseInt(document.getElementById('global-idx').value);
   const rsMin  = parseInt(document.getElementById('t1-rs').value);
   const rsiMin = parseInt(document.getElementById('t1-rsi-min').value);
   const rsiMax = parseInt(document.getElementById('t1-rsi-max').value);
@@ -2603,7 +2694,7 @@ function updateT2Info(){
 
 function scanT2(){
   const strat=document.getElementById('t2-strat').value;
-  const idxF =parseInt(document.getElementById('t2-idx').value);
+  const idxF =parseInt(document.getElementById('global-idx').value);
   const rsMin=parseInt(document.getElementById('t2-rs').value);
   const prMin=parseFloat(document.getElementById('t2-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('t2-pmax').value)||Infinity;
@@ -2691,7 +2782,7 @@ function updateT3Info(){
 
 function scanT3(){
   const strat=document.getElementById('t3-strat').value;
-  const idxF =parseInt(document.getElementById('t3-idx').value);
+  const idxF =parseInt(document.getElementById('global-idx').value);
   const rsMin=parseInt(document.getElementById('t3-rs').value);
   const prMin=parseFloat(document.getElementById('t3-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('t3-pmax').value)||Infinity;
@@ -2774,10 +2865,17 @@ const HOME_CARDS=[
   {tab:'t1',  strat:'rsi_oversold',  emoji:'🟩', badge:'t1', label:'RSI Oversold ≤ 30',     desc:'Extreme selling exhaustion — best at support or pivot level',                stars:'★★★', section:2},
   {tab:'t3',  strat:'stoch_bull_cross',emoji:'📊',badge:'t3',label:'Stochastic Bull Cross', desc:'%K crossed above %D in oversold zone — momentum turning up',                stars:'★★★', section:2},
   {tab:'t3',  strat:'wr_bull_exit',  emoji:'↗', badge:'t3', label:'Williams %R Exit OS',   desc:'Was at extreme oversold −80, now recovering — timing mean reversion',       stars:'★★★', section:2},
+  // 🏅 India Pro (Chartink / StockEdge / Trendlyne)
+  {tab:'ti', strat:'candle_bull_eng',    emoji:'📗', badge:'ti', label:'Bullish Engulfing',      desc:'Current bull body engulfs prior bear — institutional buyers overwhelm sellers', stars:'★★★★', section:3},
+  {tab:'ti', strat:'candle_morning_star',emoji:'🌅', badge:'ti', label:'Morning Star',            desc:"3-bar reversal: bear→star→bull — O'Neil's most reliable candlestick bottom",   stars:'★★★★', section:3},
+  {tab:'ti', strat:'ema_fan_bull',       emoji:'🔥', badge:'ti', label:'EMA Fan Bullish',         desc:'Price > EMA9 > EMA21 > EMA50 — Chartink momentum leader alignment',            stars:'★★★★', section:3},
+  {tab:'ti', strat:'ma_all_bull',        emoji:'🏆', badge:'ti', label:'Full MA Stack',           desc:'MA20>MA50>MA100>MA200 — StockEdge maximum bullish alignment',                  stars:'★★★★', section:3},
+  {tab:'ti', strat:'consol_10',          emoji:'🎯', badge:'ti', label:'52W Tight Coil',          desc:'Within 5% of 52W high, 10-day range <5% — pre-breakout coil',                 stars:'★★★★', section:3},
+  {tab:'ti', strat:'vol_acc3',           emoji:'📦', badge:'ti', label:'3-Day Accumulation',      desc:'3 up-days with rising volume — StockEdge institutional accumulation',          stars:'★★★',  section:3},
 ];
 
-const SECTIONS=['⭐ HIGHEST EDGE — TREND FOLLOWING','🔥 MOMENTUM & TIMING SIGNALS','🔄 MEAN REVERSION & REVERSAL'];
-const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot'};
+const SECTIONS=['⭐ HIGHEST EDGE — TREND FOLLOWING','🔥 MOMENTUM & TIMING SIGNALS','🔄 MEAN REVERSION & REVERSAL','🏅 INDIA PRO — CHARTINK · STOCKEDGE · TRENDLYNE'];
+const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',ti:'India Pro'};
 
 function renderHome(){
   let html=`<div class="home-wrap">`;
@@ -2863,9 +2961,24 @@ const STRAT_HELP_KEY={
   t1:{gc_fresh_golden:0,gc_fresh_death:0,gc_bull_zone:0,gc_near_golden:0,rsi_bull_div:1,rsi_bear_div:1,rsi_oversold:1,rsi_overbought:1,bb_squeeze_bull:2,bb_squeeze_bear:2,bb_squeeze_any:2,w52_breakout:3,w52_close_above:3,w52_near:3,w52_consol_near:3,nr7_bull:4,nr7_bear:4,nr4:4,inside_bar:4,nr7_inside:4},
   t2:{ch_breakout:0,ch_near:0,ch_handle:0,macd_bull_div:1,macd_bear_div:1,macd_flip_bull:1,macd_flip_bear:1,macd_bull_trend:1,zs_oversold:2,zs_overbought:2,zs_extreme_os:2,zs_extreme_ob:2,zs_reverting:2,rsn_outperform:2,rsn_new_hi:2,rsn_underperform:2},
   t3:{fib_near_382:0,fib_near_500:0,fib_near_618:0,fib_near_786:0,fib_any:0,ce_bull:0,ce_bear:0,ce_flip_bull:0,ce_flip_bear:0,psar_bull:0,psar_bear:0,psar_flip_bull:0,psar_flip_bear:0,adx_strong_bull:1,adx_strong_bear:1,adx_di_cross_bull:1,adx_di_cross_bear:1,adx_extreme:1,stoch_bull_cross:2,stoch_bear_cross:2,stoch_oversold:2,stoch_overbought:2,wr_oversold:3,wr_overbought:3,wr_bull_exit:3,wr_bear_exit:3},
+  ti:{
+    candle_hammer:0,candle_inv_hammer:0,candle_bull_eng:0,candle_morning_star:0,candle_piercing:0,candle_bull_har:0,candle_tws:0,
+    candle_doji:0,candle_shooting_star:0,candle_bear_eng:0,candle_dark_cloud:0,candle_evening_star:0,candle_bear_har:0,candle_tbc:0,
+    candle_inside_bar:0,candle_inside_bar_bull:0,candle_inside_bar_bear:0,candle_double_inside:0,
+    candle_marubozu_bull:0,candle_marubozu_bear:0,candle_spinning_top:0,
+    candle_tweezer_bottom:0,candle_tweezer_top:0,
+    candle_outside_bull:0,candle_outside_bear:0,
+    candle_gap_up:0,candle_gap_up3:0,candle_gap_down:0,candle_gap_down3:0,
+    ema_c921_bull:1,ema_c921_bear:1,ema_c2050_bull:1,ema_c2050_bear:1,ema_fan_bull:1,ema_fan_bear:1,ema_recent_921:1,
+    mom_high:2,mom_positive_all:2,mom_roc10_bull:2,mom_roc21_bull:2,mom_neg:2,
+    seq_hh3:3,seq_hh5:3,seq_hl3:3,seq_hc3_vol:3,seq_ll3:3,
+    vol_acc3:4,vol_acc5:4,vol_quiet:4,
+    consol_10:5,consol_15:5,
+    ma_max4:6,ma_all_bull:6,ma_above3:6,
+  },
 };
 // Map tab → section index in H array inside renderHelp
-const TAB_SEC={piv_type:0,smc:1,vol:2,mi:3,adv:4,t1:5,t2:6,t3:7};
+const TAB_SEC={piv_type:0,smc:1,vol:2,mi:3,adv:4,t1:5,t2:6,t3:7,ti:8};
 
 function showHelp(tab,stratVal){
   // Trigger renderHelp once to ensure H is in scope — store it on window
@@ -3062,6 +3175,51 @@ function renderHelp(){
         ai:'Explain Williams %R for NSE trading. How does it compare to Stochastic %K mathematically? Why did Williams use an inverted scale? What is the statistical reliability of the exit-from-oversold signal? How should Williams %R be combined with trend indicators? What period setting works best on NSE daily vs intraday charts? How did Larry Williams personally use this indicator in his 1987 World Cup strategy? Provide examples of Williams %R signals on NSE F&O stocks.'
       },
     ]},
+    // ── 🏅 INDIA PRO (index 8) ─────────────────────────────────────────────
+    {icon:'🏅', title:'India Pro — Chartink · StockEdge · Trendlyne', items:[
+      { n:'Candlestick Patterns — Bullish Reversals',
+        f:'Hammer: body/range<0.35, lower_shadow>2×body · Bullish Engulfing: C[-1]>O[-1] AND C[-2]<O[-2] AND bull body engulfs bear · Morning Star: bear→doji/star→bull closing >50% of bar 1',
+        d:`Candlestick patterns are the most widely used technical signals in Indian markets, offered as premium scans on both Chartink (₹780/month) and StockEdge Club. They were originally developed by Japanese rice traders in the 18th century and formalized by Steve Nison in his 1991 book "Japanese Candlestick Charting Techniques." Each candlestick encodes four pieces of information (Open, High, Low, Close) into a single visual pattern that reveals the psychology of market participants during that session. The Hammer is the most reliable single-bar reversal pattern: a small real body at the top of the range with a lower shadow at least 2× the body length, indicating that sellers pushed price down aggressively but buyers rejected the lows and pushed it back up by close. Hammer reliability increases significantly when it appears at a key support level — Fibonacci pivot, order block, or weekly MA. The Bullish Engulfing two-bar pattern is the most institutionally significant reversal: the current bull candle's real body completely covers the prior bear candle, representing a wholesale shift in sentiment from selling to buying. The Morning Star three-bar pattern — large bear, small indecision star, large bull closing above 50% of the first bar — is the most complete reversal signal because it requires three consecutive sessions of transitioning sentiment, making false signals rare. The Three White Soldiers continuation pattern (three consecutive large-body bullish closes, each higher than the previous) is the most powerful bullish confirmation signal on daily charts. The Piercing Line forms when a bull candle opens below the prior day's low (gap down) then recovers to close above 50% of the prior bear candle's body — the sharp intraday reversal demonstrates strong buying conviction. On NSE, candlestick patterns are most reliable on stocks with high liquidity (Nifty 500 components) and should always be confirmed with volume — a hammer on 3× average volume is dramatically more reliable than one on below-average volume.`,
+        links:[['Investopedia Candlesticks','https://www.investopedia.com/trading/candlestick-charting-what-is-it/'],['StockEdge Patterns','https://blog.stockedge.com/how-to-use-stockedge-price-scans/'],['Wikipedia','https://en.wikipedia.org/wiki/Candlestick_chart']],
+        ai:'Explain bullish candlestick reversal patterns (hammer, engulfing, morning star, three white soldiers) for NSE stock trading. How reliable are each of these patterns statistically? Which patterns require volume confirmation? How should traders combine candlestick patterns with support levels and pivot points? What are the most common false signals in each pattern and how to avoid them? Provide historical examples of these patterns working on NSE large-cap stocks before significant rallies.'
+      },
+      { n:'EMA Crossovers — 9/21 and 20/50',
+        f:'EMA(n) = α×Close + (1−α)×EMA_prev, α=2/(n+1) · Cross: EMA_fast[-1]>EMA_slow[-1] AND EMA_fast[-2]≤EMA_slow[-2] · Fan: Price>EMA9>EMA21>EMA50',
+        d:`EMA (Exponential Moving Average) crossovers are the most popular technical alert on Chartink's paid platform, generating real-time alerts every minute for subscribers. Unlike Simple Moving Averages that weight all periods equally, EMAs apply exponentially decreasing weights so that the most recent prices have the greatest influence, making them significantly more responsive to current price action. The 9/21 EMA crossover is the short-term momentum signal: when the 9-period EMA crosses above the 21-period EMA, recent price momentum has decisively shifted upward and the short-term trend is turning bullish. This crossover is particularly popular among NSE intraday and swing traders because it responds quickly to price changes while still providing meaningful trend signals. The 20/50 EMA crossover is the medium-term momentum signal — slower and therefore more reliable, with fewer whipsaws than the 9/21 cross. When the 20-period EMA crosses above the 50-period EMA, institutions are committing to the uptrend and the signal typically precedes moves lasting several weeks to months. The "EMA Fan" pattern — where price is above EMA9, EMA9 is above EMA21, and EMA21 is above EMA50 — represents perfect bullish alignment and is one of the most powerful continuation signals for momentum traders. Trendlyne's momentum scan specifically identifies stocks in EMA fan formation as their "momentum leaders" category. The "Fresh 9/21 Bull Cross" (occurring within the last 8 bars) is particularly valuable because the move is still in its early stages, providing the best risk-reward entry window. In NSE markets, EMA crossovers have historically been most reliable when the broader Nifty index is also in an EMA fan configuration — this ensures that market-wide momentum supports individual stock moves.`,
+        links:[['Chartink Scanner','https://chartink.com'],['Investopedia EMA','https://www.investopedia.com/terms/e/ema.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:moving_averages']],
+        ai:'Explain EMA crossover strategies (9/21, 20/50, EMA fan) for NSE stock trading as used on Chartink. What is the difference between SMA and EMA crossovers in terms of signal quality? How should traders filter EMA crossover signals to reduce whipsaws? What is the EMA fan pattern and why is it a powerful continuation signal? How do Chartink premium real-time alerts use EMA crossovers? Provide backtesting analysis of 9/21 EMA crossovers on NSE Nifty 50 stocks.'
+      },
+      { n:'Price Momentum Score — Trendlyne Style',
+        f:'Score = r1M×0.15 + r3M×0.25 + r6M×0.30 + r12M×0.30 · ROC_N = (Close[-1]/Close[-N-1]−1)×100 · Positive all: all 4 timeframe returns > 0',
+        d:`The composite Momentum Score is inspired by Trendlyne's momentum screening system, which is one of the most sophisticated publicly available momentum ranking tools for Indian markets. Price momentum — the tendency for stocks that have recently outperformed to continue outperforming — is one of the most empirically robust phenomena in financial markets, documented in academic research dating back to Jegadeesh and Titman's landmark 1993 Journal of Finance paper. The composite score weights four return horizons: 1-month (15%), 3-month (25%), 6-month (30%), and 12-month (30%). The higher weights on longer timeframes reflect the evidence that 6-12 month momentum is the most persistent and actionable signal, while 1-month momentum can be mean-reverting (the "short-term reversal" effect). A composite score above 20% means the stock has delivered exceptional risk-adjusted returns across all four measurement windows — a profile characteristic of the top 10-15% of NSE performers at any given time. The "All Positive" filter (all four return windows positive simultaneously) identifies stocks in sustained uptrends across every meaningful time horizon — these are the stocks where every buyer, regardless of entry point, is in profit. The Rate of Change (ROC) measures how fast recent momentum is accelerating: a 10-day ROC above 5% signals aggressive buying in the immediate term, often seen just before breakouts. Trendlyne's premium platform provides this momentum scoring for all 5000+ NSE/BSE listed stocks and allows sorting by composite score — a feature we approximate here using daily OHLC returns. Research consistently shows that buying the top momentum quintile and avoiding the bottom quintile produces significant alpha in Indian markets, with the best signals generated at the start of new market uptrends.`,
+        links:[['Trendlyne','https://trendlyne.com'],['Investopedia Momentum','https://www.investopedia.com/terms/m/momentum.asp'],['Jegadeesh & Titman 1993','https://scholar.google.com/scholar?q=jegadeesh+titman+returns+buying+winners+1993']],
+        ai:'Explain price momentum scoring for NSE stock screening as used by Trendlyne. How is composite momentum calculated across 1M, 3M, 6M, 12M return windows? What weighting scheme produces the best results? What is the Rate of Change indicator and how does it differ from simple returns? What does academic research show about momentum persistence in Indian markets? How does Trendlyne\'s momentum score compare to simple 12-month return ranking? Provide examples of high-momentum NSE stocks and their subsequent performance.'
+      },
+      { n:'Sequential Higher Highs / Higher Lows',
+        f:'HH3: High[-1]>High[-2]>High[-3] · HL3: Low[-1]>Low[-2]>Low[-3] · HC3+Vol: Close[-1]>Close[-2]>Close[-3] AND Volume[-1]>avg20×1.2',
+        d:`Sequential Higher Highs and Higher Lows analysis is a fundamental concept in Dow Theory (1902) that has been popularized in modern form by ScanX and Chartink as a quantitative filter for identifying stocks in confirmed uptrends. Charles Dow observed that a primary uptrend is defined by a series of Higher Highs (HH) and Higher Lows (HL) — each rally peak exceeds the prior peak, and each pullback finds support above the prior pullback's low. When both conditions hold simultaneously (HH+HL), the stock is in a healthy Stage 2 uptrend where buyers are consistently willing to pay progressively higher prices. The "3 Consecutive Higher Highs" (HH3) filter identifies stocks in immediate short-term uptrend momentum — the last three daily highs form a rising staircase. This is more specific and timely than traditional uptrend identification because it focuses on the most recent three sessions, capturing stocks actively being accumulated. The "5 Consecutive Higher Highs" (HH5) is an even stronger signal indicating a sustained, persistent trend that has been building for an entire trading week without a single down-day in terms of daily highs. The "3 Higher Closes with Volume Confirmation" is arguably the most valuable variant: consecutive higher closes indicate that closing prices (the most important price in each session) are rising, and the volume confirmation above average validates that institutional money is driving the move rather than thin-volume drift. In NSE markets, sequential higher highs are most often seen in stocks experiencing sector tailwinds — banking stocks during rate cut expectations, IT stocks during USD appreciation, or infrastructure stocks during government capex announcements.`,
+        links:[['ScanX','https://scanx.trade'],['Chartink','https://chartink.com'],['Investopedia Dow Theory','https://www.investopedia.com/terms/d/dowtheory.asp']],
+        ai:'Explain sequential higher highs and higher lows analysis for NSE trading as used by ScanX and Chartink. How does this connect to Dow Theory? What is the difference between HH3 and HH5 in terms of signal strength? How should volume be used to confirm sequential higher closes? What are common false signals in this approach and how to filter them? How does sequential structure analysis compare to moving average trend identification for NSE stocks?'
+      },
+      { n:'Volume Buildup / Accumulation Streaks',
+        f:'Acc streak: each of last N days: Close[i]>Close[i-1] AND Volume[i]>Volume[i-1] · Quiet acc: |price_change_3d|<2% AND all(Volume[-i]>avg20×1.3) for i in [1,2,3]',
+        d:`Volume Buildup scanning is one of StockEdge Club's signature features, used by over 1 million Indian retail investors to identify institutional accumulation before price breakouts. The core insight is that institutional investors — mutual funds, FIIs, insurance companies — must purchase shares over multiple sessions to build large positions without significantly moving the price. This accumulation process creates a characteristic pattern: consecutive days of rising price accompanied by rising volume, as demand progressively exceeds supply at each higher price level. A 3-day accumulation streak (three consecutive up-days each with higher volume than the prior day) is a reliable early signal that institutional demand is building. A 5-day accumulation streak is significantly rarer and much more powerful — five straight sessions of rising price and volume indicates sustained, programmatic institutional buying with strong conviction. The "Quiet Accumulation" pattern is even more sophisticated: it detects stocks where the price has moved very little (less than 2% in three days) but trading volume is persistently 30%+ above average. This pattern suggests that institutions are buying in size but carefully pacing their orders to avoid moving the market — exactly the kind of "stealth buying" that precedes major breakouts. StockEdge reports that high-delivery-percentage stocks combined with volume buildup streaks have historically been among the highest-quality pre-breakout setups in Indian markets. The delivery percentage (available from NSE bhav copy, not in the scanner's daily OHLC data) adds a crucial layer: when high delivery % accompanies a volume streak, it confirms genuine long-term buying rather than intraday speculative activity. Combining volume buildup with price consolidation near the 52-week high creates a very high-probability setup.`,
+        links:[['StockEdge Scans','https://blog.stockedge.com/how-to-use-stockedge-volume-delivery-scans/'],['Investopedia Volume','https://www.investopedia.com/terms/v/volume.asp'],['StockEdge','https://web.stockedge.com/scan-groups']],
+        ai:'Explain volume accumulation streaks and quiet accumulation for NSE stock scanning as used by StockEdge. How many consecutive up-volume days indicate genuine institutional buying? What is the difference between volume buildup and quiet accumulation? How does delivery percentage (NSE bhav copy data) enhance this signal? What is the historical success rate of 3-day vs 5-day accumulation streaks before price breakouts in NSE markets? How should traders combine volume buildup with price pattern analysis?'
+      },
+      { n:'52-Week High Consolidation / Tight Coil',
+        f:'Coil10: dist%=(w52h−Close)/w52h×100 ≤5% AND (max_High_10d − min_Low_10d)/w52h×100 ≤5% · Coil15: dist%≤7% AND volume_5d_avg/vol_20d_avg<0.8',
+        d:`The 52-Week High Consolidation scan is one of the most popular pre-breakout setups in Indian markets, offered as a premium filter on both Chartink and StockEdge. The pattern identifies stocks that are within 5-7% of their annual high but have entered a period of tight range consolidation — a "coil" — where the daily price range has contracted significantly. This pattern is the quantified version of the Volatility Contraction Pattern (VCP) and Darvas Box: after reaching new highs, the best stocks don't fall sharply — they consolidate tightly near the high, absorbing any remaining sellers, before resuming the uptrend. The "10-day tight coil" filter requires that the stock is within 5% of its 52-week high AND that the entire 10-day high-low range fits within a 5% band relative to the 52-week high. This extremely tight requirement ensures genuine supply/demand equilibrium — not a wide, sloppy consolidation but a genuine coil. The "15-day extended base" is a less strict but more common variant that adds the volume dimension: volume during the last 5 days should be below 80% of the 20-day average, indicating that the selling interest has completely dried up. William O'Neil's research showed that stocks in these tight bases near new highs had dramatically higher breakout follow-through rates than stocks breaking out from wide, volatile bases. Chartink's paid subscribers specifically scan for this pattern daily as it represents stocks where the "risk/reward is most favorable" — a very small stop (just below the recent low) with potentially large upside once the resistance is cleared. In NSE large-cap stocks, this setup has been particularly reliable for Nifty 50 constituents during sector rotation where FII inflows are building.`,
+        links:[['Chartink','https://chartink.com'],['Investopedia Consolidation','https://www.investopedia.com/terms/c/consolidation.asp'],['IBD Chartink style','https://www.investors.com/ibd-university/can-slim/']],
+        ai:'Explain the 52-week high consolidation / tight coil pattern for NSE trading as scanned by Chartink. What percentage from the 52W high qualifies as a valid consolidation? How tight should the price range be? What does volume drying up signal about supply? How is this pattern related to VCP and Darvas Box? What is the historical breakout success rate for tight coil setups within 5% of 52W high on NSE stocks? How should traders set entry and stop-loss for this setup?'
+      },
+      { n:'Multi-MA Alignment — All 4 Key Moving Averages',
+        f:'Above all 4: Close>SMA20>SMA50>SMA100>SMA200 · above_count = count(Close > each SMA) 0-4 · Full stack: MA20>MA50>MA100>MA200 in descending order',
+        d:`The "Price above All Key Moving Averages" scan is one of StockEdge's most popular price scan categories, representing the absolute strongest configuration a stock can be in from a technical standpoint. The four key Simple Moving Averages — 20 (1 month), 50 (2.5 months), 100 (5 months), and 200 (10 months) — represent distinct institutional time horizons. Short-term traders use 20-day MA, medium-term managers use 50-day MA, portfolio advisors use 100-day MA, and long-term institutional investors defend the 200-day MA. When all four MAs are in ascending order (MA20 > MA50 > MA100 > MA200) AND price is above all of them, every institutional holding period is profitable, and every major category of investor is supportive of the stock rather than looking to exit. This "Full MA Stack" is the most demanding technical filter in the entire scanner — typically only 5-10% of NSE-listed stocks pass this test at any given time. The "Above All 4 MAs" filter is the Minervini Trend Template compatible signal: it satisfies conditions 1-5 of Minervini's 8 conditions simultaneously. StockEdge reports this as one of their "price momentum" scans and it consistently identifies the strongest trending stocks in the market. The "above_count" metric (0-4) provides a useful ranking system: 4/4 is the strongest, while stocks at 3/4 (missing only 200-day) are often in the process of transitioning from Stage 1 to Stage 2. In NSE market bull phases (2020-2021, 2023-2024), approximately 40-50% of Nifty 50 stocks qualified for the full MA stack — serving as a market health indicator. During corrections, this number drops to 10-15%, signaling broad deterioration.`,
+        links:[['StockEdge Price Scans','https://blog.stockedge.com/how-to-use-stockedge-price-scans/'],['Investopedia Moving Averages','https://www.investopedia.com/terms/m/movingaverage.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:moving_averages']],
+        ai:'Explain the multi-MA alignment scan (price above 20/50/100/200 SMA) for NSE trading as used by StockEdge. Why are these four specific periods important for institutional investors? What percentage of NSE stocks typically qualify for all 4 simultaneously? How does this signal relate to Minervini\'s Trend Template? How should traders use the above_count (0-4) as a ranking system? What does the percentage of Nifty 50 stocks passing this filter tell you about market health? Provide historical analysis for Indian bull and bear markets.'
+      },
+    ]},
   ];
 
   let html=`<div class="help-wrap">
@@ -3133,6 +3291,9 @@ function triggerAutoScan(){
   },350);
 }
 function initAutoScan(){
+  // Global index dropdown triggers re-scan on any tab
+  const gi=document.getElementById('global-idx');
+  if(gi) gi.addEventListener('change',triggerAutoScan);
   // Attach change/input listeners to all ctrl panel form elements
   document.querySelectorAll('[id^="ctrl-"] select').forEach(el=>{
     el.addEventListener('change',triggerAutoScan);
@@ -3158,6 +3319,24 @@ const TI_INFO={
   candle_evening_star:'<b>Evening Star</b> · Three-bar reversal: large bull → small star → large bear closing below 50% of bar 1 · High-probability top at resistance',
   candle_bear_har:'<b>Bearish Harami</b> · Small bear candle inside prior large bull · Indecision at top — monitor for confirmation breakdown next session',
   candle_tbc:'<b>Three Black Crows</b> · Three consecutive large-body bearish candles with lower closes · Strongest bearish continuation pattern',
+  // Inside Bar
+  candle_inside_bar:'<b>Inside Bar</b> · Chartink #1 most-used scan · Current bar\'s High is below prior High AND Low is above prior Low — the entire bar is "inside" the prior bar · Represents perfect consolidation and supply/demand equilibrium · Breakout in either direction follows — use trend direction to determine bias',
+  candle_inside_bar_bull:'<b>Inside Bar + Bullish Close</b> · Inside bar where the close is in the upper half of the bar\'s range · Buyers stepped in during consolidation · Higher probability of upside breakout — combine with uptrend or support level for conviction',
+  candle_inside_bar_bear:'<b>Inside Bar + Bearish Close</b> · Inside bar where the close is in the lower half of the bar\'s range · Sellers maintained pressure during consolidation · Higher probability of downside breakout — most relevant in downtrends or at resistance',
+  candle_double_inside:'<b>Double Inside Bar</b> · Two consecutive inside bars — the most compressed volatility pattern available from daily data · Extremely rare (~1-2% of sessions) · When this fires, the subsequent breakout is typically large and fast · Best combined with 52W consolidation for pre-breakout timing',
+  // StockEdge premium
+  candle_marubozu_bull:'<b>White Marubozu</b> · StockEdge Club scan · Bullish candle where the body is ≥90% of the entire High-Low range — virtually no upper or lower shadows · Opens at or near the low, closes at or near the high · Signals overwhelming, uninterrupted buying pressure with no seller resistance at any point in the session · Often seen at the start of strong trends',
+  candle_marubozu_bear:'<b>Black Marubozu</b> · StockEdge Club scan · Bearish candle where the body is ≥90% of the High-Low range — no shadows · Opens at or near the high, closes at or near the low · Signals pure, relentless selling pressure throughout the session · Exit signal for longs; potential short entry at next resistance',
+  candle_spinning_top:'<b>Spinning Top</b> · Small real body (< 30% of range) with long shadows on BOTH upper and lower sides · Represents complete indecision — bulls and bears fought for control, neither won · Most significant at swing highs (warns of exhaustion) or swing lows (warns of potential reversal) · Combine with volume — spinning top on high volume = institutional indecision worth watching',
+  candle_tweezer_bottom:'<b>Tweezer Bottom</b> · Two consecutive candles that share the same (or very nearly the same) low · The market tested a specific support price twice and rejected it both times · Institutions are defending that price level · Best when the second candle is bullish and appears at a known support zone · Often marks the exact bottom of a short-term move',
+  candle_tweezer_top:'<b>Tweezer Top</b> · Two consecutive candles sharing the same (or very nearly the same) high · Resistance was tested twice and rejected both times · Most reliable when the second candle is bearish and occurs at a known resistance level (prior high, pivot, order block) · A third rejection from the same level confirms distribution',
+  candle_outside_bull:'<b>Bullish Outside Bar</b> · Current bar has a higher high AND lower low than the prior bar, AND closes bullishly · The bulls completely dominated the session, reversing the prior day\'s range and closing near the high · More aggressive than Bullish Engulfing because the range itself expands both ways · Signals strong momentum shift — particularly reliable when appearing after a downtrend',
+  candle_outside_bear:'<b>Bearish Outside Bar</b> · Current bar engulfs prior bar range and closes bearishly · Bears completely overwhelmed bulls · Strong reversal or continuation signal depending on context · At resistance after an uptrend = high-conviction reversal; mid-trend downtrend = acceleration',
+  // Gap scans
+  candle_gap_up:'<b>Gap Up Opening (&gt;1%)</b> · Chartink most-popular scan · Today\'s opening price is more than 1% above yesterday\'s closing price · A true price gap shows that buy orders overnight overwhelmed sell orders · Gaps have strong statistical tendency to either fill (revert) or accelerate — the direction depends on the catalyst · Combine with volume to determine intent: gap + high volume = institutional, gap + low volume = retail FOMO',
+  candle_gap_up3:'<b>Strong Gap Up (&gt;3%)</b> · Chartink style: the classic 3%+ gap up alert · Stock opened 3% or more above yesterday\'s close — a significant overnight move · Typically driven by earnings, results, corporate actions, or sector news · Gap + consolidation above the gap = bullish continuation; gap + immediate fill = potential mean reversion short',
+  candle_gap_down:'<b>Gap Down Opening (&lt;-1%)</b> · Today\'s open is 1%+ below yesterday\'s close · Overnight selling overwhelmed buying — negative catalyst or fear · Gap downs can be mean-reversion opportunities (buy the dip) or continuation signals (sell the gap) · Always check the news catalyst: earnings miss or promoter selling = continuation; market-wide gap = possible bounce',
+  candle_gap_down3:'<b>Strong Gap Down (&lt;-3%)</b> · Chartink 3%+ gap down alert · Aggressive overnight sell-off of 3%+ · High-information content event — typically result of significant negative news · Watch the first 30 minutes: if price recovers above the gap open, institutional buyers have stepped in; if it continues lower, the selling is genuine',
   ema_c921_bull:'<b>EMA 9/21 Bull Cross</b> · Chartink real-time alert · 9-period EMA just crossed above 21-period EMA · Short-term trend shift to bullish · Best when ADX ≥25',
   ema_c921_bear:'<b>EMA 9/21 Bear Cross</b> · 9 EMA just crossed below 21 EMA · Short-term trend turning bearish · Exit longs, reduce exposure',
   ema_c2050_bull:'<b>EMA 20/50 Bull Cross</b> · Chartink premium alert · Medium-term trend confirmed bullish · More reliable than 9/21, fewer whipsaws',
@@ -3192,21 +3371,25 @@ function updateTIInfo(){
 
 function scanTI(){
   const strat=document.getElementById('ti-strat').value;
-  const idxF =parseInt(document.getElementById('ti-idx').value);
+  const tf   =document.getElementById('ti-tf').value||'d';
+  const idxF =parseInt(document.getElementById('global-idx').value);
   const rsMin=parseInt(document.getElementById('ti-rs').value);
   const prMin=parseFloat(document.getElementById('ti-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('ti-pmax').value)||Infinity;
   updateTIInfo();
+  const TF_LABEL={d:'Daily',w:'Weekly',m:'Monthly'};
+  const tfLabel=TF_LABEL[tf]||'Daily';
   rows=[];
   for(const s of S){
     if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.ti)continue;
-    const ti=s.ti;
-    const cd=ti.candle||{}; const em=ti.ema||{}; const mo=ti.mom||{};
-    const sq=ti.seq||{}; const vb=ti.volbld||{}; const co=ti.consol||{};
-    const ma=ti.ma||{};
+    // Pick timeframe sub-dict; fall back to daily if unavailable
+    const tiData=s.ti[tf]||s.ti['d']||{};
+    const cd=tiData.candle||{}; const em=tiData.ema||{}; const mo=tiData.mom||{};
+    const sq=tiData.seq||{}; const vb=tiData.volbld||{}; const co=tiData.consol||{};
+    const ma=tiData.ma||{};
     let matched=false; let sig=''; let extra={};
 
     // Candlestick
@@ -3223,7 +3406,28 @@ function scanTI(){
     if(strat==='candle_dark_cloud') {matched=!!cd.dark_cloud;  sig='☁️ Dark Cloud';   extra={close:s.price};}
     if(strat==='candle_evening_star'){matched=!!cd.evening_star;sig='🌆 Eve Star';    extra={close:s.price};}
     if(strat==='candle_bear_har')   {matched=!!cd.bear_har;    sig='📙 Bear Harami';  extra={close:s.price};}
-    if(strat==='candle_tbc')        {matched=!!cd.tbc;         sig='🕯🕯🕯 3B Crow';  extra={close:s.price};}
+    if(strat==='candle_tbc')        {matched=!!cd.tbc;              sig='🕯🕯🕯 3B Crow';    extra={close:s.price};}
+
+    // Inside Bar (Chartink #1 scan)
+    if(strat==='candle_inside_bar')      {matched=!!cd.inside_bar;       sig='📦 Inside Bar';    extra={h:s.price,prev_h:s.w52h};}
+    if(strat==='candle_inside_bar_bull') {matched=!!cd.inside_bar_bull;  sig='📦↑ IB Bull';     extra={close:s.price};}
+    if(strat==='candle_inside_bar_bear') {matched=!!cd.inside_bar_bear;  sig='📦↓ IB Bear';     extra={close:s.price};}
+    if(strat==='candle_double_inside')   {matched=!!cd.double_inside;    sig='📦📦 2x Inside';  extra={close:s.price};}
+
+    // StockEdge premium patterns
+    if(strat==='candle_marubozu_bull')   {matched=!!cd.marubozu_bull;    sig='💚 White Marub';  extra={close:s.price};}
+    if(strat==='candle_marubozu_bear')   {matched=!!cd.marubozu_bear;    sig='🔴 Black Marub';  extra={close:s.price};}
+    if(strat==='candle_spinning_top')    {matched=!!cd.spinning_top;     sig='🔄 Spin Top';     extra={close:s.price};}
+    if(strat==='candle_tweezer_bottom')  {matched=!!cd.tweezer_bottom;   sig='🔻🔻 Twz Bot';   extra={close:s.price};}
+    if(strat==='candle_tweezer_top')     {matched=!!cd.tweezer_top;      sig='🔺🔺 Twz Top';   extra={close:s.price};}
+    if(strat==='candle_outside_bull')    {matched=!!cd.outside_bar_bull; sig='⬆ Outside Bull'; extra={close:s.price};}
+    if(strat==='candle_outside_bear')    {matched=!!cd.outside_bar_bear; sig='⬇ Outside Bear'; extra={close:s.price};}
+
+    // Gap scans (Chartink most-used)
+    if(strat==='candle_gap_up')    {matched=!!cd.gap_up;    sig=`⬆ Gap +${cd.gap_pct}%`;  extra={gap:cd.gap_pct+'%'};}
+    if(strat==='candle_gap_up3')   {matched=!!cd.gap_up3;   sig=`🚀 Gap +${cd.gap_pct}%`; extra={gap:cd.gap_pct+'%'};}
+    if(strat==='candle_gap_down')  {matched=!!cd.gap_down;  sig=`⬇ Gap ${cd.gap_pct}%`;   extra={gap:cd.gap_pct+'%'};}
+    if(strat==='candle_gap_down3') {matched=!!cd.gap_down3; sig=`💥 Gap ${cd.gap_pct}%`;  extra={gap:cd.gap_pct+'%'};}
 
     // EMA
     if(strat==='ema_c921_bull')  {matched=!!em.c921_bull;  sig='📈 EMA 9↑21'; extra={e9:em.e9,e21:em.e21,e50:em.e50};}
@@ -3263,9 +3467,11 @@ function scanTI(){
     if(strat==='ma_above3') {matched=!!ma.above_all3;sig='📊 Above3MA'; extra={ma20:ma.ma20,ma50:ma.ma50,ma100:ma.ma100};}
 
     if(!matched)continue;
+    // Append timeframe label to signal so user knows which TF fired
+    const tfTag=tf!=='d'?` [${tfLabel}]`:'';
     rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
       above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
-      sig, extra, strat, _tab:'ti'});
+      sig:sig+tfTag, extra, strat, _tab:'ti'});
   }
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
