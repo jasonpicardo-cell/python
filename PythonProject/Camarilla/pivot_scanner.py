@@ -489,6 +489,623 @@ def compute_elder(df):
                 signal=signal)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Tier-1 High-Edge Strategy Computations
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Golden Cross / Death Cross ─────────────────────────────────────────────
+def compute_golden_cross(df):
+    if len(df) < 210: return {}
+    C = df["Close"].values.astype(float); n = len(df)
+    s50  = float(C[-50:].mean()); s200 = float(C[-200:].mean())
+    last = C[-1]
+    cross = "none"; cross_dt = ""
+    for i in range(1, min(11, n-200)):
+        e=n-i+1; s=n-i
+        ma50n  = float(C[e-50:e].mean())   if e>=50  else None
+        ma200n = float(C[e-200:e].mean())  if e>=200 else None
+        ma50p  = float(C[s-50:s].mean())   if s>=50  else None
+        ma200p = float(C[s-200:s].mean())  if s>=200 else None
+        if None in (ma50n,ma200n,ma50p,ma200p): continue
+        if ma50p<=ma200p and ma50n>ma200n:
+            cross="golden"; cross_dt=str(df.iloc[n-i]["Date"].date()); break
+        if ma50p>=ma200p and ma50n<ma200n:
+            cross="death";  cross_dt=str(df.iloc[n-i]["Date"].date()); break
+    alignment = "bull" if s50>s200 else "bear"
+    return dict(s50=r2(s50), s200=r2(s200), alignment=alignment,
+                cross=cross, cross_dt=cross_dt,
+                dist_50=round((last-s50)/s50*100,2),
+                dist_200=round((last-s200)/s200*100,2),
+                gap_pct=round((s50-s200)/s200*100,2))
+
+# ── 2. RSI Divergence ─────────────────────────────────────────────────────────
+def compute_rsi_div(df, period=14, lookback=60):
+    if len(df) < period+lookback+5: return {}
+    C = df["Close"].values.astype(float); n = len(df)
+    delta=np.diff(C); gain=np.where(delta>0,delta,0); loss=np.where(delta<0,-delta,0)
+    ag=np.zeros(n-1); al=np.zeros(n-1)
+    ag[period-1]=gain[:period].mean(); al[period-1]=loss[:period].mean()
+    for i in range(period,n-1):
+        ag[i]=(ag[i-1]*(period-1)+gain[i])/period
+        al[i]=(al[i-1]*(period-1)+loss[i])/period
+    rs=np.where(al==0, np.inf, ag/np.where(al==0,1,al))
+    rsi=np.where(np.isinf(rs),100,100-100/(1+rs))
+    rsi=np.concatenate([[np.nan],rsi])
+    cur=float(rsi[-1]) if not np.isnan(rsi[-1]) else 50.0
+    seg=rsi[-lookback:]; pr=C[-lookback:]; valid=~np.isnan(seg)
+    bull_div=bear_div=False
+    if valid.sum()>10:
+        lo=[i for i in range(2,len(seg)-2) if valid[i] and pr[i]<pr[i-1] and pr[i]<pr[i+1] and pr[i]<pr[i-2] and pr[i]<pr[i+2]]
+        hi=[i for i in range(2,len(seg)-2) if valid[i] and pr[i]>pr[i-1] and pr[i]>pr[i+1] and pr[i]>pr[i-2] and pr[i]>pr[i+2]]
+        if len(lo)>=2:
+            i1,i2=lo[-2],lo[-1]
+            if pr[i2]<pr[i1] and seg[i2]>seg[i1]: bull_div=True
+        if len(hi)>=2:
+            i1,i2=hi[-2],hi[-1]
+            if pr[i2]>pr[i1] and seg[i2]<seg[i1]: bear_div=True
+    return dict(rsi=round(cur,1), bull_div=bool(bull_div), bear_div=bool(bear_div),
+                overbought=bool(cur>=70), oversold=bool(cur<=30))
+
+# ── 3. Bollinger Band Squeeze ─────────────────────────────────────────────────
+def compute_bb_squeeze(df, period=20, mult=2.0):
+    if len(df) < period+50: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    ma  = np.array([C[i-period:i].mean() for i in range(period,n+1)])
+    std = np.array([C[i-period:i].std()  for i in range(period,n+1)])
+    upper=ma+mult*std; lower=ma-mult*std; bw=(upper-lower)/ma*100
+    hist=bw[-126:] if len(bw)>=126 else bw
+    thr=np.percentile(hist,25)                    # bottom 25% = squeeze
+    in_sq=bool(bw[-1]<=thr)
+    mom=float(C[-1]-C[-13]) if n>=13 else 0.0
+    return dict(upper=r2(float(upper[-1])), lower=r2(float(lower[-1])),
+                mid=r2(float(ma[-1])), bw=round(float(bw[-1]),2),
+                in_squeeze=in_sq, momentum=round(mom,2),
+                bias="bull" if mom>0 else "bear",
+                above_mid=bool(C[-1]>float(ma[-1])))
+
+# ── 4. 52-Week High Breakout ───────────────────────────────────────────────────
+def compute_w52_breakout(df):
+    if len(df) < 60: return {}
+    C=df["Close"].values.astype(float)
+    H=df["High"].values.astype(float); V=df["Volume"].values.astype(float)
+    n=len(df); yr=min(252,n)
+    w52h=float(H[-yr-1:-1].max()) if n>yr else float(H[:-1].max())
+    last=C[-1]; last_h=H[-1]
+    avg20=float(V[-21:-1].mean()) if n>=21 else float(V.mean())
+    breakout=bool(last_h>w52h); close_bo=bool(last>w52h)
+    near=bool(last>=w52h*0.97 and not breakout)
+    consol=bool((H[-10:].max()-C[-10:].min())/C[-10:].min()*100<5) if n>=10 else False
+    return dict(w52h=r2(w52h), breakout=breakout, close_bo=close_bo, near=near,
+                vol_surge=bool(V[-1]>=avg20*1.5),
+                pct_from=round((last-w52h)/w52h*100,2), consol=consol)
+
+# ── 5. NR7 / Inside Bar ────────────────────────────────────────────────────────
+def compute_nr7(df):
+    if len(df) < 10: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    ranges=H-L; today_rng=float(ranges[-1])
+    is_nr7=bool(today_rng<=float(ranges[-7:].min())) if n>=7 else False
+    is_nr4=bool(today_rng<=float(ranges[-4:].min())) if n>=4 else False
+    is_inside=bool(H[-1]<H[-2] and L[-1]>L[-2]) if n>=2 else False
+    atr14=float(ranges[-14:].mean()) if n>=14 else float(ranges.mean())
+    return dict(is_nr7=is_nr7, is_nr4=is_nr4, is_inside=is_inside,
+                compression=round(today_rng/atr14*100,1) if atr14>0 else 100.0,
+                bias="bull" if float(C[-1])>float(C[-6]) else "bear" if n>=6 else "none",
+                rng=r2(today_rng), atr14=r2(atr14))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tier-2 Strategy Computations
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Cup & Handle ───────────────────────────────────────────────────────────
+def compute_cup_handle(df):
+    """William O'Neil Cup & Handle: U-shaped base + tight handle + volume breakout."""
+    if len(df) < 80: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); V=df["Volume"].values.astype(float)
+    n=len(df)
+    handle_bars=15; lb=min(200,n-handle_bars)
+    sh=H[-lb-handle_bars:-handle_bars]; sl=L[-lb-handle_bars:-handle_bars]
+    if len(sh)<30: return {}
+    # Left lip: highest high in the cup segment
+    lip_i=int(np.argmax(sh)); left_lip=float(sh[lip_i])
+    # Cup bottom: lowest low after the left lip
+    bot_seg=sl[lip_i:]; cup_bot=float(bot_seg.min())
+    depth=(left_lip-cup_bot)/left_lip*100
+    if not (8<=depth<=55): return {}          # 8-55% cup depth
+    # Recovery: right side must recover ≥80% of the depth
+    rec_seg=sh[lip_i+int(np.argmin(bot_seg)):]; right_lip=float(rec_seg.max())
+    recovery=(right_lip-cup_bot)/(left_lip-cup_bot)*100 if (left_lip-cup_bot)>0 else 0
+    if recovery<75: return {}
+    # Handle: last 15 bars — tight (range <12% of lip) and doesn't exceed lip
+    hdl_h=H[-handle_bars:]; hdl_l=L[-handle_bars:]; hdl_c=C[-handle_bars:]
+    hdl_rng=(hdl_h.max()-hdl_l.min())/left_lip*100
+    in_handle=bool(hdl_rng<12 and hdl_h.max()<=left_lip*1.04)
+    # Breakout
+    last=C[-1]; avg20=float(V[-21:-1].mean()) if n>=21 else float(V.mean())
+    breakout=bool(last>left_lip and float(V[-1])>avg20*1.2)
+    near_bo=bool(last>=left_lip*0.97 and not breakout)
+    return dict(left_lip=r2(left_lip), cup_bot=r2(cup_bot),
+                depth=round(depth,1), recovery=round(recovery,1),
+                in_handle=in_handle, hdl_rng=round(hdl_rng,1),
+                breakout=breakout, near_bo=near_bo, valid=True)
+
+# ── 2. MACD Divergence ────────────────────────────────────────────────────────
+def compute_macd_div(df, fast=12, slow=26, sig=9, lookback=60):
+    """MACD with bullish/bearish divergence + histogram zero-cross."""
+    if len(df)<slow+sig+lookback+5: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    def ema(d,p):
+        a=2/(p+1); r=np.zeros(len(d)); r[0]=d[0]
+        for i in range(1,len(d)): r[i]=a*d[i]+(1-a)*r[i-1]
+        return r
+    ml=ema(C,fast)-ema(C,slow); sl2=ema(ml,sig); hist=ml-sl2
+    cur_m=float(ml[-1]); cur_s=float(sl2[-1]); cur_h=float(hist[-1])
+    pr=C[-lookback:]; ms=ml[-lookback:]; hs=hist[-lookback:]
+    bull_div=bear_div=False
+    lo=[i for i in range(2,len(pr)-2) if pr[i]<pr[i-1] and pr[i]<pr[i+1] and pr[i]<pr[i-2] and pr[i]<pr[i+2]]
+    hi=[i for i in range(2,len(pr)-2) if pr[i]>pr[i-1] and pr[i]>pr[i+1] and pr[i]>pr[i-2] and pr[i]>pr[i+2]]
+    if len(lo)>=2:
+        i1,i2=lo[-2],lo[-1]
+        if pr[i2]<pr[i1] and ms[i2]>ms[i1]: bull_div=True
+    if len(hi)>=2:
+        i1,i2=hi[-2],hi[-1]
+        if pr[i2]>pr[i1] and ms[i2]<ms[i1]: bear_div=True
+    flip_bull=bool(n>=2 and hist[-1]>0 and hist[-2]<=0)
+    flip_bear=bool(n>=2 and hist[-1]<0 and hist[-2]>=0)
+    return dict(macd=round(cur_m,3), signal=round(cur_s,3), hist=round(cur_h,3),
+                trend="bull" if cur_m>cur_s else "bear",
+                rising=bool(ml[-1]>ml[-min(5,n)]),
+                bull_div=bool(bull_div), bear_div=bool(bear_div),
+                flip_bull=flip_bull, flip_bear=flip_bear)
+
+# ── 3. Mean Reversion Z-Score ─────────────────────────────────────────────────
+def compute_zscore(df):
+    """Z-score: how many std-devs is price from its moving average.
+    Z < -2 = extreme oversold (mean reversion long).
+    Z > +2 = extreme overbought (mean reversion short)."""
+    if len(df)<25: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    def zs(p):
+        if n<p: return None
+        m=C[-p:].mean(); s=C[-p:].std()
+        return round(float((C[-1]-m)/s),2) if s>0 else 0.0
+    z20=zs(20); z50=zs(50); z200=zs(200)
+    ma20=float(C[-20:].mean()) if n>=20 else float(C.mean())
+    std20=float(C[-20:].std()) if n>=20 else 1.0
+    pct_b=round((C[-1]-(ma20-2*std20))/(4*std20)*100,1) if std20>0 else 50.0
+    return dict(z20=z20 or 0.0, z50=z50 or 0.0, z200=z200 or 0.0,
+                oversold=bool(z20 is not None and z20<-2.0),
+                overbought=bool(z20 is not None and z20>2.0),
+                extreme_os=bool(z20 is not None and z20<-3.0),
+                extreme_ob=bool(z20 is not None and z20>3.0),
+                pct_b=pct_b, ma20=r2(ma20))
+
+# ── 4. Relative Strength vs Nifty ─────────────────────────────────────────────
+def compute_rs_nifty(df, nifty_df):
+    """RS ratio = stock / Nifty. Rising ratio = outperforming the index."""
+    if nifty_df is None or len(df)<30 or len(nifty_df)<30: return {}
+    # Align dates
+    merged=pd.merge(df[["Date","Close"]].rename(columns={"Close":"stk"}),
+                    nifty_df[["Date","Close"]].rename(columns={"Close":"nif"}),
+                    on="Date", how="inner").sort_values("Date")
+    if len(merged)<20: return {}
+    stk=merged["stk"].values.astype(float)
+    nif=merged["nif"].values.astype(float)
+    nif=np.where(nif==0,1,nif)
+    rs=stk/nif; m=len(rs)
+    cur=float(rs[-1]); rs20=float(rs[-21]) if m>=21 else float(rs[0])
+    rs_trend="bull" if cur>rs20 else "bear"
+    # RS making new 3-month high
+    rs3m=rs[-63:] if m>=63 else rs
+    rs_new_hi=bool(cur>=float(rs3m.max())*0.995)
+    # RS vs 20-day MA of RS ratio
+    rs_ma20=float(rs[-20:].mean()) if m>=20 else float(rs.mean())
+    above_rs_ma=bool(cur>rs_ma20)
+    chg20=round((cur-rs20)/rs20*100,2) if rs20>0 else 0.0
+    # z-score of RS (how extreme is the outperformance)
+    rs_std=float(rs[-20:].std()) if m>=20 else 1.0
+    rs_z=round((cur-rs_ma20)/rs_std,2) if rs_std>0 else 0.0
+    return dict(rs_trend=rs_trend, rs_new_hi=rs_new_hi,
+                above_rs_ma=above_rs_ma, chg20=chg20, rs_z=rs_z)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Tier-3 Strategy Computations
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Fibonacci Retracement from Swing Points ────────────────────────────────
+def compute_fib_retracement(df, lookback=120):
+    """Find most recent swing high/low and compute Fib retracement levels.
+    Near a Fib level = high-probability support/resistance."""
+    if len(df) < 40: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    lb=min(lookback,n)
+    sh=H[-lb:]; sl=L[-lb:]
+    swing_h=float(sh.max()); swing_l=float(sl.min())
+    sh_i=int(np.argmax(sh)); sl_i=int(np.argmin(sl))
+    rng=swing_h-swing_l
+    if rng<=0: return {}
+    # Determine trend direction for retracement
+    uptrend=sh_i>sl_i   # high came after low = uptrend, measure retracement down
+    last=C[-1]
+    FIBS=[0.0,0.236,0.382,0.5,0.618,0.786,1.0]
+    FIB_NAMES=["0%","23.6%","38.2%","50%","61.8%","78.6%","100%"]
+    if uptrend:
+        levels={n:round(swing_h-f*rng,2) for f,n in zip(FIBS,FIB_NAMES)}
+    else:
+        levels={n:round(swing_l+f*rng,2) for f,n in zip(FIBS,FIB_NAMES)}
+    # Find nearest level
+    nearest_name=min(levels,key=lambda k:abs(levels[k]-last))
+    nearest_val=levels[nearest_name]
+    dist_pct=round((last-nearest_val)/nearest_val*100,2)
+    near=bool(abs(dist_pct)<=2.0)
+    # Key levels dict (compact)
+    return dict(swing_h=r2(swing_h), swing_l=r2(swing_l),
+                uptrend=uptrend,
+                f236=r2(levels["23.6%"]), f382=r2(levels["38.2%"]),
+                f500=r2(levels["50%"]),   f618=r2(levels["61.8%"]),
+                f786=r2(levels["78.6%"]),
+                nearest=nearest_name, nearest_val=r2(nearest_val),
+                dist_pct=dist_pct, near=near)
+
+# ── 2. Chandelier Exit ────────────────────────────────────────────────────────
+def compute_chandelier(df, period=22, mult=3.0):
+    """Chandelier Exit: ATR-based trailing stop.
+    Long stop  = Highest Close(N) − mult × ATR(N)
+    Short stop = Lowest  Close(N) + mult × ATR(N)"""
+    if len(df)<period+5: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    tr=np.maximum(H[1:]-L[1:],np.maximum(abs(H[1:]-C[:-1]),abs(L[1:]-C[:-1])))
+    tr=np.concatenate([[H[0]-L[0]],tr])
+    atr=np.zeros(n); atr[:period]=tr[:period].mean()
+    for i in range(period,n): atr[i]=(atr[i-1]*(period-1)+tr[i])/period
+    hh=float(C[-period:].max()); ll=float(C[-period:].min())
+    long_stop  = r2(hh - mult*atr[-1])
+    short_stop = r2(ll + mult*atr[-1])
+    last=C[-1]
+    bull=bool(last>long_stop)
+    bear=bool(last<short_stop)
+    # Flip: direction changed in last 3 bars
+    flip_bull=flip_bear=False
+    if n>=4:
+        for i in range(1,4):
+            ph=float(C[-period-i:-i].max()) if n>=period+i else float(C.max())
+            pl=float(C[-period-i:-i].min()) if n>=period+i else float(C.min())
+            ps=r2(ph-mult*atr[-i])
+            pb=r2(pl+mult*atr[-i])
+            was_bull=C[-i]>ps; was_bear=C[-i]<pb
+            if not was_bull and bull: flip_bull=True
+            if not was_bear and bear: flip_bear=True
+    return dict(long_stop=long_stop, short_stop=short_stop,
+                bull=bull, bear=bear,
+                flip_bull=bool(flip_bull), flip_bear=bool(flip_bear),
+                atr=r2(atr[-1]))
+
+# ── 3. Parabolic SAR ──────────────────────────────────────────────────────────
+def compute_psar(df, af_start=0.02, af_step=0.02, af_max=0.20):
+    """Parabolic SAR: accelerating trailing stop.
+    Price above SAR = bull; price below SAR = bear."""
+    if len(df)<10: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    # Initialise
+    bull=C[1]>C[0]; sar=L[0] if bull else H[0]
+    ep=H[1] if bull else L[1]; af=af_start
+    sars=np.zeros(n); sars[0]=sar; dirs=np.zeros(n); dirs[0]=1 if bull else -1
+    for i in range(1,n):
+        if bull:
+            sar=min(sar+af*(ep-sar), L[i-1], L[max(0,i-2)])
+            if L[i]<sar:
+                bull=False; sar=ep; ep=L[i]; af=af_start
+            else:
+                if H[i]>ep: ep=H[i]; af=min(af+af_step,af_max)
+        else:
+            sar=max(sar+af*(ep-sar), H[i-1], H[max(0,i-2)])
+            if H[i]>sar:
+                bull=True; sar=ep; ep=H[i]; af=af_start
+            else:
+                if L[i]<ep: ep=L[i]; af=min(af+af_step,af_max)
+        sars[i]=sar; dirs[i]=1 if bull else -1
+    last_sar=r2(float(sars[-1])); last_dir="bull" if bull else "bear"
+    flip=bool(dirs[-1]!=dirs[-2]) if n>=2 else False
+    dist=round((C[-1]-last_sar)/last_sar*100,2)
+    return dict(sar=last_sar, direction=last_dir, flip=flip,
+                dist_pct=dist, af=round(af,3))
+
+# ── 4. ADX + DI Crossover ─────────────────────────────────────────────────────
+def compute_adx(df, period=14):
+    """ADX: trend strength (>25=strong). +DI/-DI crossover = trend direction change."""
+    if len(df)<period*2+5: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    # True Range and Directional Movement
+    tr=np.zeros(n); dm_p=np.zeros(n); dm_m=np.zeros(n)
+    for i in range(1,n):
+        tr[i]=max(H[i]-L[i],abs(H[i]-C[i-1]),abs(L[i]-C[i-1]))
+        h_diff=H[i]-H[i-1]; l_diff=L[i-1]-L[i]
+        dm_p[i]=h_diff if h_diff>l_diff and h_diff>0 else 0
+        dm_m[i]=l_diff if l_diff>h_diff and l_diff>0 else 0
+    # Wilder smoothing
+    def wilder(arr,p):
+        r=np.zeros(n); r[p]=arr[1:p+1].sum()
+        for i in range(p+1,n): r[i]=r[i-1]-r[i-1]/p+arr[i]
+        return r
+    atr14=wilder(tr,period); dp14=wilder(dm_p,period); dm14=wilder(dm_m,period)
+    safe=np.where(atr14==0,1,atr14)
+    di_p=100*dp14/safe; di_m=100*dm14/safe
+    safe_sum=np.where((di_p+di_m)==0, 1, di_p+di_m)
+    dx=np.where((di_p+di_m)==0, 0, 100*np.abs(di_p-di_m)/safe_sum)
+    adx=np.zeros(n); adx[period*2]=dx[period:period*2+1].mean()
+    for i in range(period*2+1,n): adx[i]=(adx[i-1]*(period-1)+dx[i])/period
+    cur_adx=round(float(adx[-1]),1)
+    cur_dip=round(float(di_p[-1]),1); cur_dim=round(float(di_m[-1]),1)
+    trending=bool(cur_adx>=25)
+    strong=bool(cur_adx>=40)
+    bull_trend=bool(cur_dip>cur_dim)
+    # DI crossover (last 3 bars)
+    di_cross_bull=di_cross_bear=False
+    if n>=4:
+        if di_p[-1]>di_m[-1] and di_p[-2]<=di_m[-2]: di_cross_bull=True
+        if di_m[-1]>di_p[-1] and di_m[-2]<=di_p[-2]: di_cross_bear=True
+    return dict(adx=cur_adx, di_plus=cur_dip, di_minus=cur_dim,
+                trending=trending, strong=strong, bull_trend=bull_trend,
+                di_cross_bull=bool(di_cross_bull),
+                di_cross_bear=bool(di_cross_bear))
+
+# ── 5. Stochastic %K/%D ───────────────────────────────────────────────────────
+def compute_stochastic(df, k_period=14, d_period=3, slowing=3):
+    """Stochastic: %K=(C-LL)/(HH-LL)*100, %D=SMA(%K).
+    Overbought >80, Oversold <20. Crossovers in extreme zones = high-prob."""
+    if len(df)<k_period+d_period+slowing+5: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    raw_k=np.zeros(n)
+    for i in range(k_period-1,n):
+        hh=H[i-k_period+1:i+1].max(); ll=L[i-k_period+1:i+1].min()
+        raw_k[i]=(C[i]-ll)/(hh-ll)*100 if hh>ll else 50
+    # Slow %K = SMA of raw_k
+    slow_k=np.zeros(n)
+    for i in range(k_period+slowing-2,n):
+        slow_k[i]=raw_k[i-slowing+1:i+1].mean()
+    # %D = SMA of slow_k
+    slow_d=np.zeros(n)
+    for i in range(k_period+slowing+d_period-3,n):
+        slow_d[i]=slow_k[i-d_period+1:i+1].mean()
+    ck=round(float(slow_k[-1]),1); cd=round(float(slow_d[-1]),1)
+    ob=bool(ck>=80); os_=bool(ck<=20)
+    # Crossovers
+    bull_cross=bool(slow_k[-1]>slow_d[-1] and slow_k[-2]<=slow_d[-2] and ck<=40)
+    bear_cross=bool(slow_k[-1]<slow_d[-1] and slow_k[-2]>=slow_d[-2] and ck>=60)
+    return dict(k=ck, d=cd, overbought=ob, oversold=os_,
+                bull_cross=bool(bull_cross), bear_cross=bool(bear_cross))
+
+# ── 6. Williams %R ────────────────────────────────────────────────────────────
+def compute_williams_r(df, period=14):
+    """Williams %R: momentum oscillator -100 to 0.
+    Near 0 = overbought. Near -100 = oversold. Failure swing = reversal."""
+    if len(df)<period+5: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    wr=np.zeros(n)
+    for i in range(period-1,n):
+        hh=H[i-period+1:i+1].max(); ll=L[i-period+1:i+1].min()
+        wr[i]=((hh-C[i])/(hh-ll)*-100) if hh>ll else -50
+    cur=round(float(wr[-1]),1)
+    ob=bool(cur>=-20); os_=bool(cur<=-80)
+    # Momentum shift: was extreme, now moving away
+    bull_exit=bool(wr[-2]<=-80 and wr[-1]>-80)  # exiting oversold
+    bear_exit=bool(wr[-2]>=-20 and wr[-1]<-20)  # exiting overbought
+    # 14-bar momentum direction
+    trend="bull" if wr[-1]>wr[-min(14,n)] else "bear"
+    return dict(wr=cur, overbought=ob, oversold=os_,
+                bull_exit=bool(bull_exit), bear_exit=bool(bear_exit),
+                trend=trend)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🏅 India Pro — strategies from top Indian paid platforms
+# (Chartink, StockEdge, Trendlyne)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── 1. Candlestick Patterns ───────────────────────────────────────────────────
+def compute_candles(df):
+    """14 classic candlestick reversal & continuation patterns from daily OHLC."""
+    if len(df)<5: return {}
+    O=df["Open"].values.astype(float); H=df["High"].values.astype(float)
+    L=df["Low"].values.astype(float); C=df["Close"].values.astype(float)
+    n=len(df)
+
+    def body(i): return abs(C[i]-O[i])
+    def rng(i):  return max(H[i]-L[i], 0.0001)
+    def sup(i):  return H[i]-max(C[i],O[i])  # upper shadow
+    def sdn(i):  return min(C[i],O[i])-L[i]  # lower shadow
+    def bull(i): return C[i]>O[i]
+    def bear(i): return C[i]<O[i]
+
+    atr5=float(np.mean([rng(-j) for j in range(1,6)]))
+
+    # ── Single-bar ──────────────────────────────────────────────────────────
+    b0=body(-1); r0=rng(-1); su=sup(-1); sd=sdn(-1)
+    hammer       = bool(bull(-1) and b0/r0<0.35 and sd>2*b0 and su<0.5*b0)
+    hanging_man  = bool(bear(-1) and b0/r0<0.35 and sd>2*b0 and su<0.5*b0)
+    shooting_star= bool(bear(-1) and b0/r0<0.35 and su>2*b0 and sd<0.5*b0)
+    inv_hammer   = bool(bull(-1) and b0/r0<0.35 and su>2*b0 and sd<0.5*b0)
+    doji         = bool(b0/r0<0.1 and r0>atr5*0.3)
+
+    # ── Two-bar ─────────────────────────────────────────────────────────────
+    if n>=2:
+        b1=body(-2)
+        bull_eng = bool(bull(-1) and bear(-2) and C[-1]>O[-2] and O[-1]<C[-2] and b0>b1)
+        bear_eng = bool(bear(-1) and bull(-2) and C[-1]<O[-2] and O[-1]>C[-2] and b0>b1)
+        bull_har = bool(bull(-1) and bear(-2) and O[-1]>C[-2] and C[-1]<O[-2] and b0<b1*0.5)
+        bear_har = bool(bear(-1) and bull(-2) and O[-1]<C[-2] and C[-1]>O[-2] and b0<b1*0.5)
+        # Piercing Line: big bear day, next bull opens below L[-2] closes >50% of prior body
+        piercing   = bool(bear(-2) and bull(-1) and O[-1]<L[-2]
+                          and C[-1]>(O[-2]+C[-2])/2 and C[-1]<O[-2])
+        dark_cloud = bool(bull(-2) and bear(-1) and O[-1]>H[-2]
+                          and C[-1]<(O[-2]+C[-2])/2 and C[-1]>O[-2])
+    else:
+        bull_eng=bear_eng=bull_har=bear_har=piercing=dark_cloud=False
+
+    # ── Three-bar ───────────────────────────────────────────────────────────
+    if n>=3:
+        morning_star = bool(bear(-3) and body(-2)/rng(-2)<0.35
+                            and bull(-1) and C[-1]>(O[-3]+C[-3])/2)
+        evening_star = bool(bull(-3) and body(-2)/rng(-2)<0.35
+                            and bear(-1) and C[-1]<(O[-3]+C[-3])/2)
+        tws = bool(all(bull(-j) for j in [1,2,3]) and C[-1]>C[-2]>C[-3]
+                   and all(body(-j)/rng(-j)>0.55 for j in [1,2,3]))
+        tbc = bool(all(bear(-j) for j in [1,2,3]) and C[-1]<C[-2]<C[-3]
+                   and all(body(-j)/rng(-j)>0.55 for j in [1,2,3]))
+    else:
+        morning_star=evening_star=tws=tbc=False
+
+    return dict(
+        hammer=bool(hammer), hanging_man=bool(hanging_man),
+        shooting_star=bool(shooting_star), inv_hammer=bool(inv_hammer),
+        doji=bool(doji),
+        bull_eng=bool(bull_eng), bear_eng=bool(bear_eng),
+        bull_har=bool(bull_har), bear_har=bool(bear_har),
+        piercing=bool(piercing), dark_cloud=bool(dark_cloud),
+        morning_star=bool(morning_star), evening_star=bool(evening_star),
+        tws=bool(tws), tbc=bool(tbc),
+    )
+
+# ── 2. Multi-EMA Crossovers ───────────────────────────────────────────────────
+def compute_ema_cross(df):
+    """EMA 9/21/50 crossovers + EMA fan alignment (Chartink premium style)."""
+    if len(df)<55: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    def ema_arr(p):
+        a=2/(p+1); r=np.zeros(n); r[0]=C[0]
+        for i in range(1,n): r[i]=a*C[i]+(1-a)*r[i-1]
+        return r
+    e9=ema_arr(9); e21=ema_arr(21); e20=ema_arr(20); e50=ema_arr(50)
+    # Crossovers (last 3 bars)
+    def cross_up(a,b): return bool(a[-1]>b[-1] and a[-2]<=b[-2])
+    def cross_dn(a,b): return bool(a[-1]<b[-1] and a[-2]>=b[-2])
+    def was_up(a,b,k=5): return any(a[-i]>b[-i] and a[-i-1]<=b[-i-1] for i in range(1,min(k,n-1)))
+    c921_bull=cross_up(e9,e21); c921_bear=cross_dn(e9,e21)
+    c2050_bull=cross_up(e20,e50); c2050_bear=cross_dn(e20,e50)
+    # Alignment
+    fan_bull=bool(C[-1]>e9[-1]>e21[-1]>e50[-1])
+    fan_bear=bool(C[-1]<e9[-1]<e21[-1]<e50[-1])
+    # Above all
+    above_all=bool(C[-1]>e9[-1] and C[-1]>e21[-1] and C[-1]>e50[-1])
+    recent_921=bool(was_up(e9,e21,8))  # 9 crossed above 21 in last 8 bars
+    return dict(c921_bull=c921_bull, c921_bear=c921_bear,
+                c2050_bull=c2050_bull, c2050_bear=c2050_bear,
+                fan_bull=fan_bull, fan_bear=fan_bear,
+                above_all=above_all, recent_921=bool(recent_921),
+                e9=r2(e9[-1]), e21=r2(e21[-1]), e50=r2(e50[-1]))
+
+# ── 3. Price Momentum Score ───────────────────────────────────────────────────
+def compute_momentum_score(df):
+    """Trendlyne-style composite momentum: weighted 1M+3M+6M+12M returns."""
+    if len(df)<25: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    def ret(d): return round((C[-1]/C[-d-1]-1)*100,2) if n>d+1 else None
+    r1m=ret(21); r3m=ret(63); r6m=ret(126); r12m=ret(252)
+    wts=[(r1m,.15),(r3m,.25),(r6m,.30),(r12m,.30)]
+    tw=sum(w for v,w in wts if v is not None)
+    score=round(sum(v*w for v,w in wts if v is not None)/tw,2) if tw>0 else 0.0
+    # Rate of Change (10-day, 21-day)
+    roc10=round((C[-1]/C[-11]-1)*100,2) if n>11 else 0.0
+    roc21=round((C[-1]/C[-22]-1)*100,2) if n>22 else 0.0
+    return dict(r1m=r1m or 0.0, r3m=r3m or 0.0, r6m=r6m or 0.0, r12m=r12m or 0.0,
+                score=score, roc10=roc10, roc21=roc21,
+                positive_all=bool(all(v is not None and v>0 for v,_ in wts if v is not None)))
+
+# ── 4. Sequential Higher Highs/Lows ──────────────────────────────────────────
+def compute_sequential(df, n_bars=3):
+    """3+ consecutive higher highs or lower lows — trend structure (ScanX/Chartink)."""
+    if len(df)<n_bars+2: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); n=len(df)
+    # Higher highs
+    hh3=bool(all(H[-i]>H[-i-1] for i in range(1,n_bars+1)))
+    hh5=bool(all(H[-i]>H[-i-1] for i in range(1,6))) if n>=7 else False
+    # Higher lows
+    hl3=bool(all(L[-i]>L[-i-1] for i in range(1,n_bars+1)))
+    # Lower lows / highs
+    ll3=bool(all(L[-i]<L[-i-1] for i in range(1,n_bars+1)))
+    lh3=bool(all(H[-i]<H[-i-1] for i in range(1,n_bars+1)))
+    # 3 consecutive higher closes
+    hc3=bool(C[-1]>C[-2]>C[-3]>C[-4]) if n>=5 else False
+    lc3=bool(C[-1]<C[-2]<C[-3]<C[-4]) if n>=5 else False
+    # Volume confirmation for the higher close pattern
+    V=df["Volume"].values.astype(float)
+    avgv=float(V[-21:-1].mean()) if n>=21 else float(V.mean())
+    vol_confirm=bool(float(V[-1])>avgv*1.2)
+    return dict(hh3=hh3, hh5=hh5, hl3=hl3, ll3=ll3, lh3=lh3,
+                hc3=hc3, lc3=lc3, vol_confirm=vol_confirm)
+
+# ── 5. Volume Buildup (Accumulation Days) ────────────────────────────────────
+def compute_volume_buildup(df):
+    """StockEdge-style: 3+ rising-volume up-days = institutional accumulation."""
+    if len(df)<10: return {}
+    C=df["Close"].values.astype(float); V=df["Volume"].values.astype(float)
+    n=len(df)
+    avg20=float(V[-21:-1].mean()) if n>=21 else float(V.mean())
+    # Count consecutive up-days with rising volume
+    streak=0
+    for i in range(1,8):
+        if C[-i]>C[-i-1] and V[-i]>V[-i-1]: streak+=1
+        else: break
+    # Quiet accumulation: price flat but volume steadily above avg
+    quiet_acc=bool(streak==0 and all(V[-i]>avg20*1.3 for i in range(1,4))
+                   and abs(C[-1]-C[-4])/C[-4]<0.02)
+    return dict(streak=streak, acc3=bool(streak>=3), acc5=bool(streak>=5),
+                quiet_acc=bool(quiet_acc), avg20=r2(avg20))
+
+# ── 6. 52W Consolidation Near High ───────────────────────────────────────────
+def compute_52w_consol(df):
+    """Price within 5% of 52W high in tight range (5-15 days) — pre-breakout coil."""
+    if len(df)<30: return {}
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    C=df["Close"].values.astype(float); V=df["Volume"].values.astype(float)
+    n=len(df); lb=min(252,n)
+    w52h=float(H[-lb:].max())
+    dist_pct=(w52h-C[-1])/w52h*100
+    # Last 10 days range as % of 52W high
+    last10_rng=(H[-10:].max()-L[-10:].min())/w52h*100 if n>=10 else 100.0
+    last15_rng=(H[-15:].max()-L[-15:].min())/w52h*100 if n>=15 else 100.0
+    avg20=float(V[-21:-1].mean()) if n>=21 else float(V.mean())
+    vol_dry=float(V[-5:].mean())/avg20 if avg20>0 else 1.0
+    coil10=bool(dist_pct<=5 and last10_rng<=5)
+    coil15=bool(dist_pct<=7 and last15_rng<=7 and vol_dry<0.8)
+    return dict(dist_pct=round(dist_pct,1), last10_rng=round(last10_rng,1),
+                last15_rng=round(last15_rng,1), vol_dry=round(vol_dry,2),
+                coil10=coil10, coil15=coil15, w52h=r2(w52h))
+
+# ── 7. Price vs All Key MAs ───────────────────────────────────────────────────
+def compute_ma_alignment(df):
+    """Price above/below 20/50/100/200 SMA — maximum bullish/bearish alignment."""
+    if len(df)<25: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    def sma(p): return round(float(C[-p:].mean()),2) if n>=p else None
+    ma20=sma(20); ma50=sma(50); ma100=sma(100); ma200=sma(200)
+    last=C[-1]
+    above=[ma20,ma50,ma100,ma200].count(lambda m: m is not None and last>m
+                                        if callable(lambda:None) else 0)
+    # Count how many MAs price is above
+    above_count=sum(1 for m in [ma20,ma50,ma100,ma200] if m is not None and last>m)
+    max4=bool(above_count==4)
+    above_20_50=bool(ma20 and ma50 and last>ma20 and last>ma50)
+    above_all3=bool(ma20 and ma50 and ma100 and last>ma20 and last>ma50 and last>ma100)
+    all_bull=bool(ma20 and ma50 and ma100 and ma200
+                  and last>ma20 and ma20>ma50 and ma50>ma100 and ma100>ma200)
+    return dict(ma20=ma20 or 0.0, ma50=ma50 or 0.0,
+                ma100=ma100 or 0.0, ma200=ma200 or 0.0,
+                above_count=above_count, max4=max4,
+                above_all3=bool(above_all3), all_bull=bool(all_bull))
+
+
 def stock_stats(df, today):
     last = float(df.iloc[-1]["Close"])
     dma200 = float(df["Close"].tail(200).mean()) if len(df)>=50 else last
@@ -504,7 +1121,7 @@ def stock_stats(df, today):
                 w52h=r2(w52h), w52l=r2(w52l), ret12m=ret12m, avol=avol)
 
 # ── Per-stock precompute ──────────────────────────────────────────────────────
-def precompute(fp, idx_map):
+def precompute(fp, idx_map, nifty_df=None):
     sym = Path(fp).stem.upper(); df = load_csv(fp)
     if df is None or len(df) < 2: return None
     today = pd.Timestamp(datetime.now().date())
@@ -518,6 +1135,40 @@ def precompute(fp, idx_map):
     smc = compute_smc(df)
     vol = compute_vol(df)
     mi  = compute_mi(df)
+    # Tier-1 high-edge strategies
+    t1 = dict(
+        gc  = compute_golden_cross(df),
+        rsi = compute_rsi_div(df),
+        bb  = compute_bb_squeeze(df),
+        w52 = compute_w52_breakout(df),
+        nr  = compute_nr7(df),
+    )
+    # Tier-2 strategies
+    t2 = dict(
+        ch   = compute_cup_handle(df),
+        macd = compute_macd_div(df),
+        zs   = compute_zscore(df),
+        rsn  = compute_rs_nifty(df, nifty_df),
+    )
+    # Tier-3 strategies
+    t3 = dict(
+        fib  = compute_fib_retracement(df),
+        ce   = compute_chandelier(df),
+        psar = compute_psar(df),
+        adx  = compute_adx(df),
+        stoch= compute_stochastic(df),
+        wr   = compute_williams_r(df),
+    )
+    # 🏅 India Pro strategies (Chartink / StockEdge / Trendlyne style)
+    ti = dict(
+        candle = compute_candles(df),
+        ema    = compute_ema_cross(df),
+        mom    = compute_momentum_score(df),
+        seq    = compute_sequential(df),
+        volbld = compute_volume_buildup(df),
+        consol = compute_52w_consol(df),
+        ma     = compute_ma_alignment(df),
+    )
     # Advanced strategies
     adv = dict(
         darvas   = compute_darvas(df),
@@ -534,7 +1185,7 @@ def precompute(fp, idx_map):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mhist=mh,whist=wh,qhist=qh,
-                smc=smc,vol=vol,mi=mi,adv=adv,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,adv=adv,**st,rs=0)
 
 def assign_rs(stocks):
     rets=sorted(s["ret12m"] for s in stocks); n=len(rets)
@@ -544,13 +1195,21 @@ def assign_rs(stocks):
             s["mi"]["mt"][7] = int(s["rs"]>=70)
             s["mi"]["mts"]   = sum(s["mi"]["mt"])
 
-def build_dataset(data_dir, index_files):
+def build_dataset(data_dir, index_files, nifty_path=None):
     idx_map = load_index_map(index_files)
     files   = sorted(glob.glob(os.path.join(data_dir,"*.csv")))
+    # Load Nifty index data (optional — for RS vs Nifty)
+    nifty_df = None
+    if nifty_path and os.path.exists(nifty_path):
+        nifty_df = load_csv(nifty_path)
+        if nifty_df is not None:
+            print(f"  Nifty data loaded: {len(nifty_df)} rows from {nifty_path}")
+        else:
+            print(f"  Warning: could not load Nifty data from {nifty_path}")
     stocks  = []
     for i,fp in enumerate(files,1):
         if i%100==0 or i==len(files): print(f"  [{i}/{len(files)}]…",end="\r")
-        rec = precompute(fp, idx_map)
+        rec = precompute(fp, idx_map, nifty_df)
         if rec: stocks.append(rec)
     print(f"\n  Done — {len(stocks)} stocks"); assign_rs(stocks); return stocks
 
@@ -587,6 +1246,10 @@ body{background:var(--bg);color:var(--txt);font-family:var(--sans);overflow-y:sc
 .tab-btn.t-smc.active{color:var(--a3);border-bottom-color:var(--a3)}
 .tab-btn.t-vol.active{color:var(--a2);border-bottom-color:var(--a2)}
 .tab-btn.t-adv.active{color:#ff8c42;border-bottom-color:#ff8c42}
+.tab-btn.t-t1.active{color:#c47aff;border-bottom-color:#c47aff}
+.tab-btn.t-t2.active{color:#00e5a0;border-bottom-color:#00e5a0}
+.tab-btn.t-t3.active{color:#f5c518;border-bottom-color:#f5c518}
+.tab-btn.t-ti.active{color:#ff9500;border-bottom-color:#ff9500}
 
 /* ── Controls ── */
 .ctrl{padding:14px 22px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
@@ -701,6 +1364,80 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .ft{padding:12px 22px 4px;font-size:9.5px;color:var(--mu);font-family:var(--mono);
   display:flex;justify-content:space-between;flex-wrap:wrap;gap:5px;
   border-top:1px solid var(--brd);margin-top:10px}
+/* HOME */
+.tab-btn.t-home.active{color:#fff;border-bottom-color:#fff}
+.tab-btn.t-help.active{color:#80a0c0;border-bottom-color:#80a0c0}
+.home-wrap{padding:16px 22px 22px;overflow-y:auto;max-height:58vh;scrollbar-color:var(--a2) var(--brd);scrollbar-width:thin}
+.home-title{font-family:var(--mono);font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--mu);margin:18px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--brd)}
+.home-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:6px}
+@media(max-width:900px){.home-grid{grid-template-columns:repeat(2,1fr)}}
+.hcard{background:var(--surf);border:1px solid var(--brd);border-radius:8px;padding:12px 13px 10px;cursor:pointer;transition:all .18s;display:flex;flex-direction:column;gap:5px;position:relative}
+.hcard:hover{border-color:var(--acc);transform:translateY(-2px);box-shadow:0 4px 18px rgba(0,229,160,.1)}
+.hcard-top{display:flex;align-items:center;justify-content:space-between}
+.hcard-emoji{font-size:18px}
+.hcard-badge{font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:2px 6px;border-radius:3px;font-family:var(--mono)}
+.badge-t1{background:rgba(196,122,255,.12);color:var(--a3)}
+.badge-t2{background:rgba(0,229,160,.1);color:var(--acc)}
+.badge-t3{background:rgba(245,197,24,.1);color:var(--gold)}
+.badge-mi{background:rgba(59,158,255,.1);color:var(--a2)}
+.badge-adv{background:rgba(255,140,66,.1);color:var(--warn)}
+.badge-piv{background:rgba(74,92,120,.15);color:var(--mu)}
+.hcard-name{font-family:var(--mono);font-size:12px;font-weight:700;color:#dde5f5}
+.hcard-desc{font-size:10.5px;color:var(--mu);line-height:1.5;flex:1}
+.hcard-stars{font-size:10px;color:var(--gold);letter-spacing:1px}
+.hcard-btn{margin-top:4px;background:rgba(0,229,160,.1);border:1px solid rgba(0,229,160,.2);color:var(--acc);font-family:var(--mono);font-size:9px;letter-spacing:2px;text-transform:uppercase;padding:5px 10px;border-radius:4px;text-align:center;transition:all .15s}
+.hcard:hover .hcard-btn{background:var(--acc);color:#000}
+/* HELP */
+.help-wrap{padding:10px 22px 22px;overflow-y:auto;max-height:58vh;scrollbar-color:var(--a2) var(--brd);scrollbar-width:thin}
+.help-wrap details{border:1px solid var(--brd);border-radius:6px;margin-bottom:6px;overflow:hidden}
+.help-wrap details summary{padding:10px 14px;cursor:pointer;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:1px;background:var(--surf);list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+.help-wrap details summary::-webkit-details-marker{display:none}
+.help-wrap details[open] summary{border-bottom:1px solid var(--brd);color:var(--acc)}
+.help-wrap details summary::before{content:'▶';font-size:8px;color:var(--mu);transition:transform .2s}
+.help-wrap details[open] summary::before{transform:rotate(90deg);color:var(--acc)}
+.help-body{padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+@media(max-width:800px){.help-body{grid-template-columns:1fr}}
+.help-item{background:rgba(255,255,255,.02);border:1px solid var(--brd);border-radius:5px;padding:10px 12px}
+.help-item-name{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--txt);margin-bottom:4px}
+.help-item-desc{font-size:10.5px;color:var(--mu);line-height:1.6}
+.help-item-formula{font-family:var(--mono);font-size:9.5px;color:var(--a2);margin-top:4px;padding:3px 6px;background:rgba(59,158,255,.05);border-radius:3px}
+/* INFO PANEL */
+.fbar{cursor:pointer;position:relative}
+.fbar::after{content:'ⓘ';position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--a2);opacity:.5}
+.fbar:hover::after{opacity:1}
+.info-panel{display:none;margin:0 22px 6px;padding:10px 14px;background:rgba(59,158,255,.04);border:1px solid rgba(59,158,255,.15);border-radius:0 0 6px 6px;font-size:11px;color:var(--txt);line-height:1.8;font-family:var(--sans)}
+.info-panel.open{display:block}
+
+/* AI BUTTONS & REF LINKS */
+.help-ai{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap}
+.ai-btn{font-size:9px;font-family:var(--mono);letter-spacing:1px;padding:3px 9px;border-radius:4px;text-decoration:none;font-weight:600;border:1px solid;transition:all .15s;white-space:nowrap}
+.ai-claude{color:#c47aff;border-color:rgba(196,122,255,.4);background:rgba(196,122,255,.06)}
+.ai-claude:hover{background:rgba(196,122,255,.18)}
+.ai-chatgpt{color:#10a37f;border-color:rgba(16,163,127,.4);background:rgba(16,163,127,.06)}
+.ai-chatgpt:hover{background:rgba(16,163,127,.18)}
+.ai-copilot{color:#3b9eff;border-color:rgba(59,158,255,.4);background:rgba(59,158,255,.06)}
+.ai-copilot:hover{background:rgba(59,158,255,.18)}
+.ai-gemini{color:#f5c518;border-color:rgba(245,197,24,.4);background:rgba(245,197,24,.06)}
+.ai-gemini:hover{background:rgba(245,197,24,.18)}
+/* TOAST */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surf);border:1px solid var(--acc);color:var(--acc);padding:9px 22px;border-radius:20px;font-family:var(--mono);font-size:10px;letter-spacing:.5px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;box-shadow:0 4px 20px rgba(0,229,160,.15)}
+.toast.show{opacity:1}
+/* HELP MODAL */
+.hm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:998;display:none}
+.hm-overlay.open{display:block}
+.hm-box{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(780px,93vw);max-height:84vh;overflow-y:auto;background:var(--surf);border:1px solid var(--brd);border-radius:10px;z-index:999;display:none;scrollbar-color:var(--a2) var(--brd);scrollbar-width:thin}
+.hm-box.open{display:block}
+.hm-hdr{position:sticky;top:0;background:var(--hdr);border-bottom:1px solid var(--brd);padding:12px 18px;display:flex;justify-content:space-between;align-items:center;z-index:1}
+.hm-title{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--acc)}
+.hm-close{background:none;border:1px solid rgba(255,64,96,.3);color:var(--red);font-size:14px;padding:2px 9px;border-radius:4px;cursor:pointer}
+.hm-close:hover{background:rgba(255,64,96,.12)}
+.hm-body{padding:18px 20px}
+/* INFO BUTTON */
+.info-btn{background:rgba(59,158,255,.06);border:1px solid rgba(59,158,255,.25);color:var(--a2);font-size:11px;font-weight:700;width:24px;height:24px;border-radius:50%;cursor:pointer;flex-shrink:0;transition:all .15s;display:flex;align-items:center;justify-content:center}
+.info-btn:hover{background:rgba(59,158,255,.2);border-color:var(--a2)}
+.help-refs{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.ref-link{font-size:9px;font-family:var(--mono);color:var(--a2);text-decoration:none;padding:2px 7px;border:1px solid rgba(59,158,255,.2);border-radius:3px;background:rgba(59,158,255,.04)}
+.ref-link:hover{background:rgba(59,158,255,.14);color:#fff}
 </style>
 </head>
 <body>
@@ -708,17 +1445,23 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ TAB NAV ═══════════════════════════════════════════════════════════ -->
 <div class="tabnav">
   <div class="logo">◈ NSE Scanner</div>
-  <button class="tab-btn t-piv active" data-tab="piv" onclick="switchTab('piv')">📊 Pivot Points</button>
+  <button class="tab-btn t-home active" data-tab="home" onclick="switchTab('home')">🏠 Home</button>
+  <button class="tab-btn t-piv" data-tab="piv" onclick="switchTab('piv')">📊 Pivot Points</button>
   <button class="tab-btn t-smc" data-tab="smc" onclick="switchTab('smc')">🎯 Price Action / SMC</button>
   <button class="tab-btn t-vol" data-tab="vol" onclick="switchTab('vol')">📈 Volume / Institutional</button>
   <button class="tab-btn t-mi"  data-tab="mi"  onclick="switchTab('mi')">⚡ Multi-Indicator</button>
-  <button class="tab-btn t-adv" data-tab="adv" onclick="switchTab('adv')">🔬 Advanced Strategies</button>
+  <button class="tab-btn t-adv" data-tab="adv" onclick="switchTab('adv')">🔬 Advanced</button>
+  <button class="tab-btn t-t1"  data-tab="t1"  onclick="switchTab('t1')">⭐ Tier-1</button>
+  <button class="tab-btn t-t2"  data-tab="t2"  onclick="switchTab('t2')">🏆 Tier-2</button>
+  <button class="tab-btn t-t3"  data-tab="t3"  onclick="switchTab('t3')">🎖 Tier-3</button>
+  <button class="tab-btn t-ti"  data-tab="ti"  onclick="switchTab('ti')">🏅 India Pro</button>
+  <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
 
 <!-- ═══ PIVOT CONTROLS ════════════════════════════════════════════════════ -->
 <div id="ctrl-piv" class="ctrl">
   <div class="cg"><label>Pivot Type</label>
-    <select id="sp-type" onchange="onTypeChange()">
+    <div style="display:flex;gap:6px;align-items:center"><select id="sp-type" onchange="onTypeChange()">
       <option value="camarilla">Camarilla</option>
       <option value="traditional">Traditional</option>
       <option value="classic">Classic</option>
@@ -726,7 +1469,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="woodie">Woodie</option>
       <option value="dm">DeMark (DM)</option>
       <option value="floor">Floor</option>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('piv_type',document.getElementById('sp-type').value)" title="Show strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Level</label><select id="sp-lvl" style="min-width:190px"></select></div>
   <div class="cg"><label>Timeframe</label>
@@ -787,7 +1530,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ SMC CONTROLS ══════════════════════════════════════════════════════ -->
 <div id="ctrl-smc" class="ctrl" style="display:none">
   <div class="cg"><label>Signal Type</label>
-    <select id="smc-sig" style="min-width:220px">
+    <div style="display:flex;gap:6px;align-items:center"><select id="smc-sig" style="min-width:220px">
       <option value="all">All Signals</option>
       <option value="bull_ob" selected>Bullish Order Block — near support zone</option>
       <option value="bear_ob">Bearish Order Block — near resistance zone</option>
@@ -797,7 +1540,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="bos_bear">BOS Bearish — broke below swing low</option>
       <option value="choch_bull">CHoCH Bullish — trend reversal signal up</option>
       <option value="choch_bear">CHoCH Bearish — trend reversal signal down</option>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('smc',document.getElementById('smc-sig').value)" title="Show strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Proximity ±%</label>
     <select id="smc-prox">
@@ -826,7 +1569,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ VOLUME CONTROLS ═══════════════════════════════════════════════════ -->
 <div id="ctrl-vol" class="ctrl" style="display:none">
   <div class="cg"><label>Signal Type</label>
-    <select id="vol-sig" style="min-width:240px">
+    <div style="display:flex;gap:6px;align-items:center"><select id="vol-sig" style="min-width:240px">
       <option value="near_poc" selected>Near POC — point of control</option>
       <option value="above_vah">Above VAH — value area breakout</option>
       <option value="below_val">Below VAL — value area breakdown</option>
@@ -835,7 +1578,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="obv_div_bear">OBV Bearish Divergence</option>
       <option value="ad_up">A/D Line Rising — accumulation</option>
       <option value="all">All Signals</option>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('vol',document.getElementById('vol-sig').value)" title="Show strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Proximity ±%</label>
     <select id="vol-prox">
@@ -870,12 +1613,12 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ MULTI-INDICATOR CONTROLS ══════════════════════════════════════════ -->
 <div id="ctrl-mi" class="ctrl" style="display:none">
   <div class="cg"><label>Strategy</label>
-    <select id="mi-strat" style="min-width:220px">
+    <div style="display:flex;gap:6px;align-items:center"><select id="mi-strat" style="min-width:220px">
       <option value="both" selected>Both — Minervini + Weinstein Stage 2</option>
       <option value="minervini">Minervini Trend Template only</option>
       <option value="weinstein">Weinstein Stage 2 only</option>
       <option value="any">Any strategy match</option>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('mi',document.getElementById('mi-strat').value)" title="Show strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Min Minervini Score</label>
     <select id="mi-score">
@@ -918,7 +1661,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ ADVANCED STRATEGIES CONTROLS ══════════════════════════════════════ -->
 <div id="ctrl-adv" class="ctrl" style="display:none">
   <div class="cg"><label>Strategy</label>
-    <select id="adv-strat" style="min-width:260px" onchange="updateAdvInfo()">
+    <div style="display:flex;gap:6px;align-items:center"><select id="adv-strat" style="min-width:260px" onchange="updateAdvInfo()">
       <option value="darvas">Darvas Box — 52W-high + tight consolidation breakout</option>
       <option value="vcp">VCP — Volatility Contraction Pattern (Minervini)</option>
       <option value="wyckoff_acc">Wyckoff — Accumulation phase</option>
@@ -935,7 +1678,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="st_flip_up">Supertrend — Just flipped UP (fresh signal)</option>
       <option value="elder_buy">Elder Triple Screen — Buy Setup</option>
       <option value="elder_sell">Elder Triple Screen — Sell Setup</option>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('adv',document.getElementById('adv-strat').value)" title="Show strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Index</label>
     <select id="adv-idx">
@@ -956,7 +1699,288 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 </div>
 
 
-<div class="fbar" id="fbar">Select a tab and click ▶ SCAN</div>
+<!-- ═══ TIER-1 STRATEGIES CONTROLS ═══════════════════════════════════════ -->
+<div id="ctrl-t1" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="t1-strat" style="min-width:280px" onchange="updateT1Info()">
+      <optgroup label="── Golden / Death Cross ──">
+        <option value="gc_fresh_golden">Golden Cross — fresh (last 10 days)</option>
+        <option value="gc_fresh_death">Death Cross — fresh (last 10 days)</option>
+        <option value="gc_bull_zone">Bull Zone — 50 SMA above 200 SMA</option>
+        <option value="gc_near_golden">Near Golden Cross — gap closing (within 1%)</option>
+      </optgroup>
+      <optgroup label="── RSI Divergence ──">
+        <option value="rsi_bull_div">RSI Bullish Divergence — hidden accumulation</option>
+        <option value="rsi_bear_div">RSI Bearish Divergence — hidden distribution</option>
+        <option value="rsi_oversold">RSI Oversold ≤ 30 — extreme selling exhaustion</option>
+        <option value="rsi_overbought">RSI Overbought ≥ 70 — extreme buying exhaustion</option>
+      </optgroup>
+      <optgroup label="── Bollinger Band Squeeze ──">
+        <option value="bb_squeeze_bull">BB Squeeze + Bullish Momentum — explosion up</option>
+        <option value="bb_squeeze_bear">BB Squeeze + Bearish Momentum — explosion down</option>
+        <option value="bb_squeeze_any">BB Squeeze (any direction) — watch for breakout</option>
+      </optgroup>
+      <optgroup label="── 52-Week High Breakout ──">
+        <option value="w52_breakout">52W High Breakout + Volume surge</option>
+        <option value="w52_close_above">52W High Close Breakout (close above 52W high)</option>
+        <option value="w52_near">Near 52W High (within 3%) — pre-breakout watch</option>
+        <option value="w52_consol_near">Near 52W High + Consolidating — coiling for breakout</option>
+      </optgroup>
+      <optgroup label="── NR7 / Inside Bar ──">
+        <option value="nr7_bull">NR7 — Bull Bias (narrowest range of 7 bars, uptrend)</option>
+        <option value="nr7_bear">NR7 — Bear Bias (narrowest range of 7 bars, downtrend)</option>
+        <option value="nr4">NR4 — Narrowest of 4 bars (shorter compression)</option>
+        <option value="inside_bar">Inside Bar — price coiling inside previous bar's range</option>
+        <option value="nr7_inside">NR7 + Inside Bar — double compression signal</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('t1',document.getElementById('t1-strat').value)" title="Show strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Min RSI</label>
+    <select id="t1-rsi-min">
+      <option value="0" selected>Any</option>
+      <option value="40">≥ 40</option><option value="50">≥ 50</option>
+    </select>
+  </div>
+  <div class="cg"><label>Max RSI</label>
+    <select id="t1-rsi-max">
+      <option value="100" selected>Any</option>
+      <option value="70">≤ 70</option><option value="60">≤ 60</option>
+    </select>
+  </div>
+  <div class="cg"><label>Index</label>
+    <select id="t1-idx">
+      <option value="0" selected>All</option><option value="50">N50</option>
+      <option value="100">N100</option><option value="200">N200</option>
+      <option value="500">N500</option><option value="750">N750</option>
+    </select>
+  </div>
+  <div class="cg"><label>RS Rating ≥</label>
+    <select id="t1-rs">
+      <option value="0" selected>Any</option><option value="50">≥ 50</option>
+      <option value="70">≥ 70</option><option value="80">≥ 80</option>
+    </select>
+  </div>
+  <div class="cg"><label>Price Range ₹</label>
+    <div class="prange">
+      <input type="number" id="t1-pmin" placeholder="Min" min="0">
+      <span>–</span>
+      <input type="number" id="t1-pmax" placeholder="Max" min="0">
+    </div>
+  </div>
+  <button class="btn" style="background:#c47aff;color:#000" onclick="scanT1()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+<!-- ═══ TIER-2 STRATEGIES CONTROLS ═══════════════════════════════════════ -->
+<div id="ctrl-t2" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="t2-strat" style="min-width:300px" onchange="updateT2Info()">
+      <optgroup label="── Cup & Handle (O'Neil) ──">
+        <option value="ch_breakout">Cup & Handle — Breakout + Volume</option>
+        <option value="ch_near">Cup & Handle — Near breakout (within 3%)</option>
+        <option value="ch_handle">Cup & Handle — In handle (watch zone)</option>
+      </optgroup>
+      <optgroup label="── MACD Divergence ──">
+        <option value="macd_bull_div">MACD Bullish Divergence — hidden accumulation</option>
+        <option value="macd_bear_div">MACD Bearish Divergence — hidden distribution</option>
+        <option value="macd_flip_bull">MACD Histogram — flipped positive (just crossed 0)</option>
+        <option value="macd_flip_bear">MACD Histogram — flipped negative (just crossed 0)</option>
+        <option value="macd_bull_trend">MACD Bull Trend — MACD above signal line</option>
+      </optgroup>
+      <optgroup label="── Mean Reversion Z-Score ──">
+        <option value="zs_oversold">Z-Score Oversold — price ≤ −2 std devs from MA20</option>
+        <option value="zs_overbought">Z-Score Overbought — price ≥ +2 std devs from MA20</option>
+        <option value="zs_extreme_os">Z-Score Extreme OS — price ≤ −3 std devs (rare reversal)</option>
+        <option value="zs_extreme_ob">Z-Score Extreme OB — price ≥ +3 std devs (rare reversal)</option>
+        <option value="zs_reverting">Z-Score Reverting — was extreme, now pulling back toward MA</option>
+      </optgroup>
+      <optgroup label="── RS vs Nifty (needs --nifty flag) ──">
+        <option value="rsn_outperform">RS Outperforming Nifty — ratio in uptrend</option>
+        <option value="rsn_new_hi">RS at New 3-Month High — accelerating leadership</option>
+        <option value="rsn_underperform">RS Underperforming Nifty — ratio in downtrend</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('t2',document.getElementById('t2-strat').value)" title="Show strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Index</label>
+    <select id="t2-idx">
+      <option value="0" selected>All</option><option value="50">N50</option>
+      <option value="100">N100</option><option value="200">N200</option>
+      <option value="500">N500</option><option value="750">N750</option>
+    </select>
+  </div>
+  <div class="cg"><label>RS Rating ≥</label>
+    <select id="t2-rs">
+      <option value="0" selected>Any</option><option value="50">≥ 50</option>
+      <option value="70">≥ 70</option><option value="80">≥ 80</option>
+    </select>
+  </div>
+  <div class="cg"><label>Price Range ₹</label>
+    <div class="prange">
+      <input type="number" id="t2-pmin" placeholder="Min" min="0">
+      <span>–</span>
+      <input type="number" id="t2-pmax" placeholder="Max" min="0">
+    </div>
+  </div>
+  <button class="btn" style="background:var(--acc)" onclick="scanT2()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+<!-- ═══ TIER-3 STRATEGIES CONTROLS ═══════════════════════════════════════ -->
+<div id="ctrl-t3" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="t3-strat" style="min-width:310px" onchange="updateT3Info()">
+      <optgroup label="── Fibonacci Retracement ──">
+        <option value="fib_near_382">Near 38.2% Fibonacci level (±2%)</option>
+        <option value="fib_near_500">Near 50.0% Fibonacci level (±2%)</option>
+        <option value="fib_near_618">Near 61.8% Fibonacci level — golden ratio (±2%)</option>
+        <option value="fib_near_786">Near 78.6% Fibonacci level (±2%)</option>
+        <option value="fib_any">Near any Fibonacci level (±2%)</option>
+      </optgroup>
+      <optgroup label="── Chandelier Exit ──">
+        <option value="ce_bull">Chandelier — Bullish (price above long stop)</option>
+        <option value="ce_bear">Chandelier — Bearish (price below short stop)</option>
+        <option value="ce_flip_bull">Chandelier — Just flipped Bullish (fresh signal)</option>
+        <option value="ce_flip_bear">Chandelier — Just flipped Bearish (fresh signal)</option>
+      </optgroup>
+      <optgroup label="── Parabolic SAR ──">
+        <option value="psar_bull">PSAR — Bullish (price above SAR dots)</option>
+        <option value="psar_bear">PSAR — Bearish (price below SAR dots)</option>
+        <option value="psar_flip_bull">PSAR — Just flipped Bullish (trend reversal up)</option>
+        <option value="psar_flip_bear">PSAR — Just flipped Bearish (trend reversal down)</option>
+      </optgroup>
+      <optgroup label="── ADX + DI ──">
+        <option value="adx_strong_bull">ADX Strong Bull Trend — ADX ≥25 + +DI &gt; -DI</option>
+        <option value="adx_strong_bear">ADX Strong Bear Trend — ADX ≥25 + -DI &gt; +DI</option>
+        <option value="adx_di_cross_bull">ADX DI Crossover — +DI just crossed above -DI</option>
+        <option value="adx_di_cross_bear">ADX DI Crossover — -DI just crossed above +DI</option>
+        <option value="adx_extreme">ADX Extreme Trend — ADX ≥ 40 (very strong move)</option>
+      </optgroup>
+      <optgroup label="── Stochastic %K/%D ──">
+        <option value="stoch_bull_cross">Stochastic Bullish Cross — %K crossed above %D (oversold)</option>
+        <option value="stoch_bear_cross">Stochastic Bearish Cross — %K crossed below %D (overbought)</option>
+        <option value="stoch_oversold">Stochastic Oversold — %K ≤ 20</option>
+        <option value="stoch_overbought">Stochastic Overbought — %K ≥ 80</option>
+      </optgroup>
+      <optgroup label="── Williams %R ──">
+        <option value="wr_oversold">Williams %R Oversold — %R ≤ −80 (exhaustion)</option>
+        <option value="wr_overbought">Williams %R Overbought — %R ≥ −20 (exhaustion)</option>
+        <option value="wr_bull_exit">Williams %R Exiting Oversold — momentum turning up</option>
+        <option value="wr_bear_exit">Williams %R Exiting Overbought — momentum turning down</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('t3',document.getElementById('t3-strat').value)" title="Show strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Index</label>
+    <select id="t3-idx">
+      <option value="0" selected>All</option><option value="50">N50</option>
+      <option value="100">N100</option><option value="200">N200</option>
+      <option value="500">N500</option><option value="750">N750</option>
+    </select>
+  </div>
+  <div class="cg"><label>RS Rating ≥</label>
+    <select id="t3-rs">
+      <option value="0" selected>Any</option><option value="50">≥ 50</option>
+      <option value="70">≥ 70</option><option value="80">≥ 80</option>
+    </select>
+  </div>
+  <div class="cg"><label>Price Range ₹</label>
+    <div class="prange">
+      <input type="number" id="t3-pmin" placeholder="Min" min="0">
+      <span>–</span>
+      <input type="number" id="t3-pmax" placeholder="Max" min="0">
+    </div>
+  </div>
+  <button class="btn" style="background:var(--gold);color:#000" onclick="scanT3()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+<!-- ═══ INDIA PRO CONTROLS ═══════════════════════════════════════════════ -->
+<div id="ctrl-ti" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center">
+    <select id="ti-strat" style="min-width:320px" onchange="updateTIInfo()">
+      <optgroup label="── 🕯 Candlestick Patterns (StockEdge / Chartink) ──">
+        <option value="candle_hammer">Hammer — bullish reversal at bottom (long lower shadow)</option>
+        <option value="candle_inv_hammer">Inverted Hammer — bullish reversal, long upper shadow</option>
+        <option value="candle_bull_eng">Bullish Engulfing — current candle fully engulfs prior bear</option>
+        <option value="candle_morning_star">Morning Star — 3-bar bullish reversal: bear→star→bull</option>
+        <option value="candle_piercing">Piercing Line — opens below prior low, closes above 50%</option>
+        <option value="candle_bull_har">Bullish Harami — small bull body inside large bear</option>
+        <option value="candle_tws">Three White Soldiers — 3 consecutive bullish closes</option>
+        <option value="candle_doji">Doji — indecision candle, body &lt;10% of range</option>
+        <option value="candle_shooting_star">Shooting Star — bearish reversal, long upper shadow at top</option>
+        <option value="candle_bear_eng">Bearish Engulfing — current bear candle engulfs prior bull</option>
+        <option value="candle_dark_cloud">Dark Cloud Cover — opens above prior high, closes below 50%</option>
+        <option value="candle_evening_star">Evening Star — 3-bar bearish reversal: bull→star→bear</option>
+        <option value="candle_bear_har">Bearish Harami — small bear body inside large bull</option>
+        <option value="candle_tbc">Three Black Crows — 3 consecutive bearish closes</option>
+      </optgroup>
+      <optgroup label="── 📈 EMA Crossovers (Chartink paid alerts) ──">
+        <option value="ema_c921_bull">EMA 9 crossed above EMA 21 — short-term bull signal</option>
+        <option value="ema_c921_bear">EMA 9 crossed below EMA 21 — short-term bear signal</option>
+        <option value="ema_c2050_bull">EMA 20 crossed above EMA 50 — medium-term bull signal</option>
+        <option value="ema_c2050_bear">EMA 20 crossed below EMA 50 — medium-term bear signal</option>
+        <option value="ema_fan_bull">EMA Fan Bullish — price &gt; EMA9 &gt; EMA21 &gt; EMA50</option>
+        <option value="ema_fan_bear">EMA Fan Bearish — price &lt; EMA9 &lt; EMA21 &lt; EMA50</option>
+        <option value="ema_recent_921">EMA 9/21 Bull Cross (last 8 bars) — fresh momentum signal</option>
+      </optgroup>
+      <optgroup label="── 🚀 Price Momentum Score (Trendlyne style) ──">
+        <option value="mom_high">Composite Momentum Score ≥ 20% — strongest movers</option>
+        <option value="mom_positive_all">All timeframes positive — 1M, 3M, 6M, 12M all up</option>
+        <option value="mom_roc10_bull">Rate of Change 10-day &gt; 5% — fast mover</option>
+        <option value="mom_roc21_bull">Rate of Change 21-day &gt; 8% — strong monthly mover</option>
+        <option value="mom_neg">Composite Momentum Negative — weakest / avoid longs</option>
+      </optgroup>
+      <optgroup label="── 📊 Sequential Higher Highs (ScanX / Chartink) ──">
+        <option value="seq_hh3">3 Consecutive Higher Highs — uptrend building</option>
+        <option value="seq_hh5">5 Consecutive Higher Highs — strong sustained uptrend</option>
+        <option value="seq_hl3">3 Consecutive Higher Lows — buyers defending higher ground</option>
+        <option value="seq_hc3_vol">3 Higher Closes + Volume Confirm — conviction up-move</option>
+        <option value="seq_ll3">3 Consecutive Lower Lows — downtrend building</option>
+      </optgroup>
+      <optgroup label="── 📦 Volume Buildup / Accumulation (StockEdge) ──">
+        <option value="vol_acc3">3+ Days Rising Volume + Price Up — accumulation streak</option>
+        <option value="vol_acc5">5+ Days Rising Volume + Price Up — sustained accumulation</option>
+        <option value="vol_quiet">Quiet Accumulation — flat price, volume &gt;1.3× avg for 3 days</option>
+      </optgroup>
+      <optgroup label="── 🎯 52W Consolidation / Coiling (Chartink) ──">
+        <option value="consol_10">Tight Coil — within 5% of 52W high, 10-day range &lt;5%</option>
+        <option value="consol_15">Extended Base — within 7% of 52W high, volume drying up</option>
+      </optgroup>
+      <optgroup label="── 🔝 Multi-MA Alignment (StockEdge price scans) ──">
+        <option value="ma_max4">Price above all 4 MAs — 20, 50, 100, 200 SMA</option>
+        <option value="ma_all_bull">Full MA Stack — price &gt; MA20 &gt; MA50 &gt; MA100 &gt; MA200</option>
+        <option value="ma_above3">Price above 20, 50, 100 SMA (less strict)</option>
+      </optgroup>
+    </select>
+    <button class="info-btn" onclick="showHelp('ti',document.getElementById('ti-strat').value)" title="Show strategy info">ℹ</button>
+    </div>
+  </div>
+  <div class="cg"><label>Index</label>
+    <select id="ti-idx">
+      <option value="0" selected>All</option><option value="50">N50</option>
+      <option value="100">N100</option><option value="200">N200</option>
+      <option value="500">N500</option><option value="750">N750</option>
+    </select>
+  </div>
+  <div class="cg"><label>RS Rating ≥</label>
+    <select id="ti-rs">
+      <option value="0" selected>Any</option><option value="50">≥ 50</option>
+      <option value="70">≥ 70</option><option value="80">≥ 80</option>
+    </select>
+  </div>
+  <div class="cg"><label>Price Range ₹</label>
+    <div class="prange">
+      <input type="number" id="ti-pmin" placeholder="Min" min="0">
+      <span>–</span>
+      <input type="number" id="ti-pmax" placeholder="Max" min="0">
+    </div>
+  </div>
+  <button class="btn" style="background:#ff9500;color:#000" onclick="scanTI()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+<div class="fbar" id="fbar" onclick="toggleInfo()" title="Click to expand/collapse details">Select a tab and click ▶ SCAN</div>
+<div class="info-panel" id="info-panel"></div>
 
 <div class="stats">
   <div class="st"><div class="sl">Hits</div><div class="sv" id="st-h">—</div></div>
@@ -1036,22 +2060,36 @@ function bounceCount(mh,wh,qh,tf,type,lv,periods){
 }
 
 // ── State ──────────────────────────────────────────────────────────────────
-let rows=[],sc=4,sd=1,currentTab='piv',lastRows=[];
+let rows=[],sc=4,sd=1,currentTab='home',lastRows=[];
 
 // ── Tab switching ──────────────────────────────────────────────────────────
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  ['piv','smc','vol','mi','adv'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
-  document.getElementById('ts').innerHTML='<div class="nodata">Click ▶ SCAN to find stocks</div>';
+  if(tab==='home'){
+    document.getElementById('ts').innerHTML=renderHome();
+    setFbar('🏠 <b>Quick Launch</b> · Click any card to instantly run the scan · Strategies ranked by professional success rate','');
+    updateStats([]); return;
+  }
+  if(tab==='help'){
+    document.getElementById('ts').innerHTML=renderHelp();
+    setFbar('❓ <b>Help</b> · Complete reference for all 100+ scan signals · Click any section to expand','');
+    updateStats([]); return;
+  }
+  document.getElementById('ts').innerHTML='<div class="nodata">Select options above — scan runs automatically</div>';
   if(tab==='piv') scan();
   else if(tab==='smc') scanSMC();
   else if(tab==='vol') scanVol();
   else if(tab==='mi') scanMI();
-  else if(tab==='adv') scanAdv();
+  else if(tab==='adv'){ updateAdvInfo(); scanAdv(); }
+  else if(tab==='t1'){ updateT1Info(); scanT1(); }
+  else if(tab==='t2'){ updateT2Info(); scanT2(); }
+  else if(tab==='t3'){ updateT3Info(); scanT3(); }
+  else if(tab==='ti'){ updateTIInfo(); scanTI(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -1087,8 +2125,8 @@ function updateFbar(){
     dm:`<b>DeMark</b> · X depends on O vs C · P=X/4`,
     floor:`<b>Floor</b> (=Traditional) · <code>P=(H+L+C)/3</code>`,
   };
-  document.getElementById('fbar').innerHTML=
-    (FBAR[type]||'')+' &nbsp;·&nbsp; <span class="hb">Source:</span> '+(TF_SRC[tf]||tf);
+  const detail=`${FBAR[type]||''} &nbsp;·&nbsp; <span class="hb">Source:</span> ${TF_SRC[tf]||tf} &nbsp;·&nbsp; <span style="color:var(--mu);font-size:10px">Click ⓘ for more detail</span>`;
+  setFbar((FBAR[type]||'')+' &nbsp;·&nbsp; <span class="hb">Source:</span> '+(TF_SRC[tf]||tf), detail);
 }
 
 // ── Settings persistence — URL hash (primary) + localStorage (fallback) ───────
@@ -1268,7 +2306,7 @@ function scanSMC(){
     choch_bull:'<span class="hd">CHoCH Bullish</span> — Change of Character; bearish trend broke upward → potential reversal',
     choch_bear:'<span class="hd">CHoCH Bearish</span> — Change of Character; bullish trend broke downward → potential reversal',
   };
-  document.getElementById('fbar').innerHTML='<b>Price Action / Smart Money Concepts</b> · '+FBAR_LABELS[sig];
+  setFbar('<b>Price Action / Smart Money Concepts</b> · '+FBAR_LABELS[sig]);
   rows=[];
   for(const s of S){
     if(!s.smc||Object.keys(s.smc).length===0)continue;
@@ -1333,7 +2371,7 @@ function scanVol(){
     ad_up:'<span class="ha">A/D Rising</span> — Accumulation/Distribution line trending up; institutional buying',
     all:'All volume signals — POC/VAH/VAL/Spike/OBV divergence',
   };
-  document.getElementById('fbar').innerHTML='<b>Volume / Institutional Footprint</b> · '+(FBAR_VOL[sig]||sig);
+  setFbar('<b>Volume / Institutional Footprint</b> · '+(FBAR_VOL[sig]||sig));
   rows=[];
   for(const s of S){
     if(!s.vol||Object.keys(s.vol).length===0)continue;
@@ -1370,9 +2408,9 @@ function scanMI(){
   const prMax=parseFloat(document.getElementById('mi-pmax').value)||Infinity;
 
   const MT_LABELS=['Price > 150 & 200 SMA','150 SMA > 200 SMA','200 SMA rising','50 SMA > 150 & 200 SMA','Price > 50 SMA','≥ 25% above 52W low','Within 25% of 52W high','RS ≥ 70'];
-  document.getElementById('fbar').innerHTML=
+  setFbar(
     '<b>Minervini Trend Template</b> · 8 conditions: '+ MT_LABELS.map((l,i)=>`<span style="color:var(--mu)">${i+1}.${l}</span>`).join(' · ')+'<br>'+
-    '<b>Weinstein Stage Analysis</b> · Stage 2 (Advancing): price above rising 30-week (150-day) SMA';
+    '<b>Weinstein Stage Analysis</b> · Stage 2 (Advancing): price above rising 30-week (150-day) SMA');
   rows=[];
   for(const s of S){
     if(!s.mi||Object.keys(s.mi).length===0)continue;
@@ -1418,7 +2456,7 @@ const ADV_INFO = {
 
 function updateAdvInfo(){
   const s=document.getElementById('adv-strat').value;
-  document.getElementById('fbar').innerHTML='<span style="color:var(--warn)">Advanced Strategies</span> · '+(ADV_INFO[s]||s);
+  setFbar('<span style="color:var(--warn)">Advanced Strategies</span> · '+(ADV_INFO[s]||s));
 }
 
 function scanAdv(){
@@ -1455,6 +2493,779 @@ function scanAdv(){
     rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
       above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
       strat,extra,_tab:'adv'});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ── TIER-1 STRATEGIES ─────────────────────────────────────────────────────────
+const T1_INFO = {
+  gc_fresh_golden:  '<b>Golden Cross</b> · 50 SMA crossed <b>above</b> 200 SMA in last 10 days · Most-watched institutional signal',
+  gc_fresh_death:   '<b>Death Cross</b> · 50 SMA crossed <b>below</b> 200 SMA in last 10 days · Institutional selling trigger',
+  gc_bull_zone:     '<b>Bull Zone</b> · 50 SMA currently above 200 SMA · Long-term uptrend backdrop',
+  gc_near_golden:   '<b>Near Golden Cross</b> · 50/200 SMA gap closing (within 1%) · Cross imminent — enter early',
+  rsi_bull_div:     '<b>RSI Bullish Divergence</b> · Price lower low, RSI higher low · Hidden accumulation — highest-probability reversal signal',
+  rsi_bear_div:     '<b>RSI Bearish Divergence</b> · Price higher high, RSI lower high · Hidden distribution — exit or short signal',
+  rsi_oversold:     '<b>RSI Oversold ≤ 30</b> · Extreme selling exhaustion · Combine with support for high-conviction long',
+  rsi_overbought:   '<b>RSI Overbought ≥ 70</b> · Extreme buying exhaustion · Combine with resistance for exit or short',
+  bb_squeeze_bull:  '<b>BB Squeeze + Bull Momentum</b> · Bands at tightest 25% + positive 12-bar momentum · Upside explosion imminent',
+  bb_squeeze_bear:  '<b>BB Squeeze + Bear Momentum</b> · Bands tight + negative momentum · Downside explosion imminent',
+  bb_squeeze_any:   '<b>BB Squeeze (any direction)</b> · Volatility historically low · Big directional move imminent — wait for break with volume',
+  w52_breakout:     '<b>52W High Breakout + Volume</b> · Broke above 52W high with volume ≥ 1.5× avg · Strongest momentum signal',
+  w52_close_above:  '<b>52W High Close Breakout</b> · Closing price above prior 52W high · Close above is more significant than intraday',
+  w52_near:         '<b>Near 52W High (within 3%)</b> · Approaching 52W resistance · Watch list for breakout',
+  w52_consol_near:  '<b>Near 52W High + Consolidating</b> · Within 3% of 52W high + last 10d range &lt;5% · Classic coiling pre-breakout',
+  nr7_bull:         '<b>NR7 Bull</b> · Narrowest range of 7 bars + uptrend bias · Volatility expansion up imminent · Toby Crabel 70%+ directional accuracy',
+  nr7_bear:         '<b>NR7 Bear</b> · Narrowest 7-bar range + downtrend bias · Volatility expansion down imminent',
+  nr4:              '<b>NR4</b> · Narrowest range of 4 bars · Shorter compression — active trader setup',
+  inside_bar:       '<b>Inside Bar</b> · High &lt; yesterday high AND Low &gt; yesterday low · Full consolidation — mother-bar breakout = entry',
+  nr7_inside:       '<b>NR7 + Inside Bar</b> · Both compressions together · Double signal — highest-probability volatility expansion setup',
+};
+
+function updateT1Info(){
+  const s=document.getElementById('t1-strat').value;
+  setFbar('<span style="color:#c47aff">⭐ Tier-1 Strategy</span> · '+(T1_INFO[s]||s));
+}
+
+function scanT1(){
+  const strat  = document.getElementById('t1-strat').value;
+  const idxF   = parseInt(document.getElementById('t1-idx').value);
+  const rsMin  = parseInt(document.getElementById('t1-rs').value);
+  const rsiMin = parseInt(document.getElementById('t1-rsi-min').value);
+  const rsiMax = parseInt(document.getElementById('t1-rsi-max').value);
+  const prMin  = parseFloat(document.getElementById('t1-pmin').value)||0;
+  const prMax  = parseFloat(document.getElementById('t1-pmax').value)||Infinity;
+  updateT1Info();
+  rows=[];
+  for(const s of S){
+    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if(s.rs<rsMin)continue;
+    if(!s.t1)continue;
+    const t=s.t1; const gc=t.gc||{}; const ri=t.rsi||{}; const bb=t.bb||{}; const w=t.w52||{}; const nr=t.nr||{};
+    if(ri.rsi!==undefined){if(ri.rsi<rsiMin||ri.rsi>rsiMax)continue;}
+    let matched=false; let sig=''; let extra={};
+
+    if(strat==='gc_fresh_golden')   { matched=gc.cross==='golden'; sig='🟡 Golden Cross'; extra={cross_dt:gc.cross_dt,s50:gc.s50,s200:gc.s200,gap:gc.gap_pct+'%',vs200:gc.dist_200+'%'}; }
+    if(strat==='gc_fresh_death')    { matched=gc.cross==='death';  sig='☠ Death Cross';  extra={cross_dt:gc.cross_dt,s50:gc.s50,s200:gc.s200,gap:gc.gap_pct+'%',vs200:gc.dist_200+'%'}; }
+    if(strat==='gc_bull_zone')      { matched=gc.alignment==='bull'; sig='📈 Bull Zone'; extra={s50:gc.s50,s200:gc.s200,gap:gc.gap_pct+'%',vs50:gc.dist_50+'%',vs200:gc.dist_200+'%'}; }
+    if(strat==='gc_near_golden')    { matched=gc.alignment==='bear'&&typeof gc.gap_pct==='number'&&gc.gap_pct>=-1; sig='⚡ Near GC'; extra={gap:gc.gap_pct+'%',s50:gc.s50,s200:gc.s200}; }
+    if(strat==='rsi_bull_div')   { matched=!!ri.bull_div;   sig='📗 RSI Bull Div'; extra={rsi:ri.rsi}; }
+    if(strat==='rsi_bear_div')   { matched=!!ri.bear_div;   sig='📕 RSI Bear Div'; extra={rsi:ri.rsi}; }
+    if(strat==='rsi_oversold')   { matched=!!ri.oversold;   sig='🟢 RSI OS ≤30';   extra={rsi:ri.rsi}; }
+    if(strat==='rsi_overbought') { matched=!!ri.overbought; sig='🔴 RSI OB ≥70';   extra={rsi:ri.rsi}; }
+    if(strat==='bb_squeeze_bull') { matched=!!bb.in_squeeze&&bb.bias==='bull'; sig='🔵 BB Squeeze ↑'; extra={bw:bb.bw,mom:bb.momentum,upper:bb.upper,lower:bb.lower,mid:bb.mid}; }
+    if(strat==='bb_squeeze_bear') { matched=!!bb.in_squeeze&&bb.bias==='bear'; sig='🔵 BB Squeeze ↓'; extra={bw:bb.bw,mom:bb.momentum,upper:bb.upper,lower:bb.lower,mid:bb.mid}; }
+    if(strat==='bb_squeeze_any')  { matched=!!bb.in_squeeze;                   sig='🔵 BB Squeeze';   extra={bw:bb.bw,bias:bb.bias,upper:bb.upper,lower:bb.lower,mid:bb.mid}; }
+    if(strat==='w52_breakout')    { matched=!!w.breakout&&!!w.vol_surge; sig='🚀 52W BO+Vol';  extra={w52h:w.w52h,pct:w.pct_from+'%'}; }
+    if(strat==='w52_close_above') { matched=!!w.close_bo;                sig='🚀 52W Close BO'; extra={w52h:w.w52h,pct:w.pct_from+'%',vol:w.vol_surge?'Yes':'No'}; }
+    if(strat==='w52_near')        { matched=!!w.near;                    sig='👀 Near 52W H';  extra={w52h:w.w52h,pct:w.pct_from+'%',consol:w.consol?'Yes':'No'}; }
+    if(strat==='w52_consol_near') { matched=!!w.near&&!!w.consol;        sig='🎯 52W+Consol';  extra={w52h:w.w52h,pct:w.pct_from+'%'}; }
+    if(strat==='nr7_bull')   { matched=!!nr.is_nr7&&nr.bias==='bull'; sig='📦 NR7 ↑'; extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,nr4:nr.is_nr4?'Yes':'No'}; }
+    if(strat==='nr7_bear')   { matched=!!nr.is_nr7&&nr.bias==='bear'; sig='📦 NR7 ↓'; extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,nr4:nr.is_nr4?'Yes':'No'}; }
+    if(strat==='nr4')        { matched=!!nr.is_nr4;                   sig='📦 NR4';   extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,bias:nr.bias}; }
+    if(strat==='inside_bar') { matched=!!nr.is_inside;                sig='📦 Inside'; extra={rng:nr.rng,atr14:nr.atr14,bias:nr.bias,comp:nr.compression+'%'}; }
+    if(strat==='nr7_inside') { matched=!!nr.is_nr7&&!!nr.is_inside;  sig='🎯 NR7+IB'; extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,bias:nr.bias}; }
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      rsi:ri.rsi||0, sig, extra, strat, _tab:'t1'});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ── TIER-2 STRATEGIES ─────────────────────────────────────────────────────────
+const T2_INFO = {
+  ch_breakout:    '<b>Cup & Handle Breakout</b> · William O\'Neil · U-shaped base (8-55% deep) + tight handle + price breaks the cup lip with volume · Most big winners form this before major moves',
+  ch_near:        '<b>Cup & Handle Near Breakout</b> · Within 3% of the cup lip · Watch list: stock coiling for breakout · Enter when it clears the lip with volume',
+  ch_handle:      '<b>In Handle Zone</b> · Cup formed, now consolidating in handle (tight range &lt;12%) · Best time to build a position ahead of the breakout',
+  macd_bull_div:  '<b>MACD Bullish Divergence</b> · Price makes lower low but MACD makes higher low · Smart money accumulating while weak hands sell · High-probability reversal',
+  macd_bear_div:  '<b>MACD Bearish Divergence</b> · Price makes higher high but MACD makes lower high · Distribution occurring at highs · Exit longs or initiate shorts',
+  macd_flip_bull: '<b>MACD Histogram Flipped +ve</b> · Histogram just crossed above zero · Early trend change signal · Combine with support for entry',
+  macd_flip_bear: '<b>MACD Histogram Flipped -ve</b> · Histogram just crossed below zero · Early downtrend signal · Reduce longs or short',
+  macd_bull_trend:'<b>MACD Bull Trend</b> · MACD line above signal line · Trend is up · Use as a backdrop filter to only take longs',
+  zs_oversold:    '<b>Z-Score Oversold (−2σ)</b> · Price is 2 standard deviations below its 20-day MA · Statistically extreme — expect mean reversion up · Buy with a tight stop below recent low',
+  zs_overbought:  '<b>Z-Score Overbought (+2σ)</b> · Price 2 std devs above 20-day MA · Statistically stretched — expect pullback · Exit longs, do not chase',
+  zs_extreme_os:  '<b>Extreme Oversold (−3σ)</b> · Rare event — occurs &lt;1% of days · Panic selling exhaustion · High-conviction reversal buy (best combined with strong support)',
+  zs_extreme_ob:  '<b>Extreme Overbought (+3σ)</b> · Rare parabolic extension · Very high risk for longs · Consider partial profit-taking',
+  zs_reverting:   '<b>Z-Score Reverting</b> · Was extreme (|Z|≥2) last week, now pulling back toward MA · Timing the reversion — price is moving back to fair value',
+  rsn_outperform: '<b>RS Outperforming Nifty</b> · Stock/Nifty ratio in uptrend · Fund managers prefer stocks that lead the index · Rising relative strength precedes big moves',
+  rsn_new_hi:     '<b>RS at 3-Month High</b> · Stock is accelerating vs Nifty — hitting new RS highs · Most powerful leadership signal · O\'Neil: buy leaders, not laggards',
+  rsn_underperform:'<b>RS Underperforming Nifty</b> · Stock/Nifty ratio in downtrend · Avoid or reduce these · Even if price is up, weakness vs index signals institutional selling',
+};
+
+function updateT2Info(){
+  const s=document.getElementById('t2-strat').value;
+  const isRsn=s.startsWith('rsn_');
+  const rsNote=isRsn?' <span style="color:var(--warn);font-size:9px">· Requires --nifty flag when generating</span>':'';
+  setFbar('<span style="color:var(--acc)">🏆 Tier-2 Strategy</span> · '+(T2_INFO[s]||s)+rsNote);
+}
+
+function scanT2(){
+  const strat=document.getElementById('t2-strat').value;
+  const idxF =parseInt(document.getElementById('t2-idx').value);
+  const rsMin=parseInt(document.getElementById('t2-rs').value);
+  const prMin=parseFloat(document.getElementById('t2-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('t2-pmax').value)||Infinity;
+  updateT2Info();
+  rows=[];
+  for(const s of S){
+    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if(s.rs<rsMin)continue;
+    if(!s.t2)continue;
+    const t=s.t2; const ch=t.ch||{}; const md=t.macd||{}; const zs=t.zs||{}; const rn=t.rsn||{};
+    let matched=false; let sig=''; let extra={};
+
+    // Cup & Handle
+    if(strat==='ch_breakout') { matched=!!ch.breakout&&!!ch.valid; sig='🏆 C&H Breakout'; extra={lip:ch.left_lip,depth:ch.depth+'%',recovery:ch.recovery+'%',hdl:ch.hdl_rng+'%'}; }
+    if(strat==='ch_near')     { matched=!!ch.near_bo&&!!ch.valid; sig='👀 Near C&H BO'; extra={lip:ch.left_lip,depth:ch.depth+'%',pct_from:ch.left_lip?((s.price-ch.left_lip)/ch.left_lip*100).toFixed(1)+'%':'—'}; }
+    if(strat==='ch_handle')   { matched=!!ch.in_handle&&!!ch.valid&&!ch.breakout; sig='🔄 In Handle'; extra={lip:ch.left_lip,depth:ch.depth+'%',hdl_rng:ch.hdl_rng+'%'}; }
+
+    // MACD
+    if(strat==='macd_bull_div')  { matched=!!md.bull_div;   sig='📗 MACD Bull Div'; extra={macd:md.macd,signal:md.signal,hist:md.hist,trend:md.trend}; }
+    if(strat==='macd_bear_div')  { matched=!!md.bear_div;   sig='📕 MACD Bear Div'; extra={macd:md.macd,signal:md.signal,hist:md.hist,trend:md.trend}; }
+    if(strat==='macd_flip_bull') { matched=!!md.flip_bull;  sig='🟢 MACD Flip +'; extra={macd:md.macd,hist:md.hist}; }
+    if(strat==='macd_flip_bear') { matched=!!md.flip_bear;  sig='🔴 MACD Flip −'; extra={macd:md.macd,hist:md.hist}; }
+    if(strat==='macd_bull_trend'){ matched=md.trend==='bull'; sig='📈 MACD Bull'; extra={macd:md.macd,signal:md.signal,hist:md.hist,rising:md.rising?'Yes':'No'}; }
+
+    // Z-Score
+    if(strat==='zs_oversold')   { matched=!!zs.oversold&&!zs.extreme_os; sig='🟢 OS −2σ'; extra={z20:zs.z20,z50:zs.z50,pct_b:zs.pct_b,ma20:zs.ma20}; }
+    if(strat==='zs_overbought') { matched=!!zs.overbought&&!zs.extreme_ob; sig='🔴 OB +2σ'; extra={z20:zs.z20,z50:zs.z50,pct_b:zs.pct_b,ma20:zs.ma20}; }
+    if(strat==='zs_extreme_os') { matched=!!zs.extreme_os; sig='⚡ Extreme OS −3σ'; extra={z20:zs.z20,z50:zs.z50,z200:zs.z200,ma20:zs.ma20}; }
+    if(strat==='zs_extreme_ob') { matched=!!zs.extreme_ob; sig='⚡ Extreme OB +3σ'; extra={z20:zs.z20,z50:zs.z50,z200:zs.z200,ma20:zs.ma20}; }
+    if(strat==='zs_reverting')  {
+      const wasEx=Math.abs(zs.z20||0)>=1&&Math.abs(zs.z20||0)<2;
+      matched=wasEx;
+      sig=(zs.z20||0)<0?'↗ Reverting Up':'↘ Reverting Dn';
+      extra={z20:zs.z20,z50:zs.z50,ma20:zs.ma20};
+    }
+
+    // RS vs Nifty
+    if(strat==='rsn_outperform')  { matched=rn.rs_trend==='bull'&&!!rn.above_rs_ma; sig='🚀 RS Leader'; extra={trend:rn.rs_trend,new_hi:rn.rs_new_hi?'Yes':'No',chg20:rn.chg20+'%',rs_z:rn.rs_z}; }
+    if(strat==='rsn_new_hi')      { matched=!!rn.rs_new_hi; sig='🏅 RS New Hi'; extra={trend:rn.rs_trend,chg20:rn.chg20+'%',rs_z:rn.rs_z}; }
+    if(strat==='rsn_underperform'){ matched=rn.rs_trend==='bear'&&!rn.above_rs_ma; sig='📉 RS Laggard'; extra={trend:rn.rs_trend,new_hi:rn.rs_new_hi?'Yes':'No',chg20:rn.chg20+'%'}; }
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig, extra, strat, _tab:'t2'});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ── TIER-3 STRATEGIES ─────────────────────────────────────────────────────────
+const T3_INFO = {
+  fib_near_382: '<b>Fibonacci 38.2%</b> · First key retracement — shallow pullback in strong trends · Best entry in a fast-moving stock',
+  fib_near_500: '<b>Fibonacci 50%</b> · Mid-point retracement · Widely watched by traders · Strong support/resistance',
+  fib_near_618: '<b>Fibonacci 61.8% — Golden Ratio</b> · Most significant Fib level · "The last stand" for bulls/bears · Deepest pullback before trend resumes',
+  fib_near_786: '<b>Fibonacci 78.6%</b> · Deep retracement level · Near the start of the move — high risk but high reward if it holds',
+  fib_any:      '<b>Near any Fibonacci level</b> · Price within ±2% of any Fib retracement level (23.6%, 38.2%, 50%, 61.8%, 78.6%)',
+  ce_bull:      '<b>Chandelier Exit — Bullish</b> · Price above the long stop (Highest Close − 3×ATR) · Trend is up and confirmed · Trail stops using the Chandelier long stop level',
+  ce_bear:      '<b>Chandelier Exit — Bearish</b> · Price below short stop (Lowest Close + 3×ATR) · Trend is down · Chandelier short stop acts as overhead resistance',
+  ce_flip_bull: '<b>Chandelier Just Flipped Bullish</b> · Fresh signal — Chandelier flipped from bear to bull within last 3 bars · Early trend change entry',
+  ce_flip_bear: '<b>Chandelier Just Flipped Bearish</b> · Fresh signal — flipped from bull to bear · Exit longs, consider shorts',
+  psar_bull:    '<b>Parabolic SAR — Bullish</b> · Price above the SAR dots · Uptrend in force · SAR level = trailing stop for long positions',
+  psar_bear:    '<b>Parabolic SAR — Bearish</b> · Price below SAR dots · Downtrend in force · Avoid longs',
+  psar_flip_bull:'<b>PSAR Just Flipped Bullish</b> · SAR dots just moved from above to below price · Trend reversal up signal · Enter long with SAR as stop',
+  psar_flip_bear:'<b>PSAR Just Flipped Bearish</b> · SAR dots just moved below to above price · Trend reversal down · Exit longs',
+  adx_strong_bull:'<b>ADX Strong Bull</b> · ADX ≥ 25 (strong trend) + +DI above -DI · Trending stocks outperform in this condition · Momentum strategy entry',
+  adx_strong_bear:'<b>ADX Strong Bear</b> · ADX ≥ 25 + -DI above +DI · Strong downtrend — avoid longs, wait for ADX to peak and fall',
+  adx_di_cross_bull:'<b>ADX DI Bull Cross</b> · +DI just crossed above -DI · Trend is shifting to bullish · Early entry signal — confirm with ADX rising',
+  adx_di_cross_bear:'<b>ADX DI Bear Cross</b> · -DI just crossed above +DI · Trend shifting to bearish · Exit signal for longs',
+  adx_extreme:  '<b>ADX Extreme ≥ 40</b> · Exceptionally strong trend · Parabolic moves — momentum is intense · Trade with the trend, widen stops',
+  stoch_bull_cross:'<b>Stochastic Bull Cross</b> · %K crossed above %D while below 40 · Classic oversold reversal signal · Best when price is at support',
+  stoch_bear_cross:'<b>Stochastic Bear Cross</b> · %K crossed below %D while above 60 · Overbought reversal signal · Best at resistance',
+  stoch_oversold: '<b>Stochastic Oversold ≤ 20</b> · %K in extreme oversold zone · Combined with support = high-conviction buy',
+  stoch_overbought:'<b>Stochastic Overbought ≥ 80</b> · %K in extreme overbought · Combined with resistance = reduce exposure',
+  wr_oversold:   '<b>Williams %R Oversold ≤ −80</b> · Extreme oversold — selling exhaustion · Fast oscillator — good for short-term bounce trades',
+  wr_overbought: '<b>Williams %R Overbought ≥ −20</b> · Extreme overbought — buying exhaustion · Consider taking profits',
+  wr_bull_exit:  '<b>Williams %R Exiting Oversold</b> · Was at −80, now crossing above − momentum turning positive · Entry signal for mean reversion bounce',
+  wr_bear_exit:  '<b>Williams %R Exiting Overbought</b> · Was at −20, now crossing below − momentum turning negative · Exit or short signal',
+};
+
+function updateT3Info(){
+  const s=document.getElementById('t3-strat').value;
+  setFbar('<span style="color:var(--gold)">🎖 Tier-3 Strategy</span> · '+(T3_INFO[s]||s));
+}
+
+function scanT3(){
+  const strat=document.getElementById('t3-strat').value;
+  const idxF =parseInt(document.getElementById('t3-idx').value);
+  const rsMin=parseInt(document.getElementById('t3-rs').value);
+  const prMin=parseFloat(document.getElementById('t3-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('t3-pmax').value)||Infinity;
+  updateT3Info();
+  rows=[];
+  for(const s of S){
+    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if(s.rs<rsMin)continue;
+    if(!s.t3)continue;
+    const t=s.t3;
+    const fb=t.fib||{}; const ce=t.ce||{}; const ps=t.psar||{};
+    const ax=t.adx||{}; const st=t.stoch||{}; const wr=t.wr||{};
+    let matched=false; let sig=''; let extra={};
+
+    // Fibonacci
+    if(strat==='fib_near_382') { matched=!!fb.near&&fb.nearest==='38.2%'; sig='🔶 Fib 38.2%'; extra={level:fb.f382,dist:fb.dist_pct+'%',swing_h:fb.swing_h,swing_l:fb.swing_l,trend:fb.uptrend?'Up':'Down'}; }
+    if(strat==='fib_near_500') { matched=!!fb.near&&fb.nearest==='50%';   sig='🔶 Fib 50%';   extra={level:fb.f500,dist:fb.dist_pct+'%',swing_h:fb.swing_h,swing_l:fb.swing_l}; }
+    if(strat==='fib_near_618') { matched=!!fb.near&&fb.nearest==='61.8%'; sig='🔶 Fib 61.8%'; extra={level:fb.f618,dist:fb.dist_pct+'%',swing_h:fb.swing_h,swing_l:fb.swing_l,trend:fb.uptrend?'Up':'Down'}; }
+    if(strat==='fib_near_786') { matched=!!fb.near&&fb.nearest==='78.6%'; sig='🔶 Fib 78.6%'; extra={level:fb.f786,dist:fb.dist_pct+'%',swing_h:fb.swing_h,swing_l:fb.swing_l}; }
+    if(strat==='fib_any')      { matched=!!fb.near; sig=`🔶 Fib ${fb.nearest||''}`;            extra={level:fb.nearest_val,nearest:fb.nearest,dist:fb.dist_pct+'%',f382:fb.f382,f618:fb.f618}; }
+
+    // Chandelier
+    if(strat==='ce_bull')      { matched=!!ce.bull;      sig='🕯 CE Bull';    extra={long_stop:ce.long_stop,atr:ce.atr,dist:ce.long_stop?((s.price-ce.long_stop)/ce.long_stop*100).toFixed(1)+'%':'—'}; }
+    if(strat==='ce_bear')      { matched=!!ce.bear;      sig='🕯 CE Bear';    extra={short_stop:ce.short_stop,atr:ce.atr}; }
+    if(strat==='ce_flip_bull') { matched=!!ce.flip_bull; sig='🕯 CE Flip ↑'; extra={long_stop:ce.long_stop,atr:ce.atr}; }
+    if(strat==='ce_flip_bear') { matched=!!ce.flip_bear; sig='🕯 CE Flip ↓'; extra={short_stop:ce.short_stop,atr:ce.atr}; }
+
+    // Parabolic SAR
+    if(strat==='psar_bull')      { matched=ps.direction==='bull'; sig='🔵 PSAR Bull';   extra={sar:ps.sar,dist:ps.dist_pct+'%',af:ps.af}; }
+    if(strat==='psar_bear')      { matched=ps.direction==='bear'; sig='🔴 PSAR Bear';   extra={sar:ps.sar,dist:ps.dist_pct+'%',af:ps.af}; }
+    if(strat==='psar_flip_bull') { matched=!!ps.flip&&ps.direction==='bull'; sig='⚡ PSAR Flip ↑'; extra={sar:ps.sar,af:ps.af}; }
+    if(strat==='psar_flip_bear') { matched=!!ps.flip&&ps.direction==='bear'; sig='⚡ PSAR Flip ↓'; extra={sar:ps.sar,af:ps.af}; }
+
+    // ADX
+    if(strat==='adx_strong_bull')  { matched=!!ax.trending&&!!ax.bull_trend; sig='📊 ADX Bull';    extra={adx:ax.adx,di_plus:ax.di_plus,di_minus:ax.di_minus}; }
+    if(strat==='adx_strong_bear')  { matched=!!ax.trending&&!ax.bull_trend;  sig='📊 ADX Bear';    extra={adx:ax.adx,di_plus:ax.di_plus,di_minus:ax.di_minus}; }
+    if(strat==='adx_di_cross_bull'){ matched=!!ax.di_cross_bull; sig='↗ DI Cross ↑'; extra={adx:ax.adx,di_plus:ax.di_plus,di_minus:ax.di_minus}; }
+    if(strat==='adx_di_cross_bear'){ matched=!!ax.di_cross_bear; sig='↘ DI Cross ↓'; extra={adx:ax.adx,di_plus:ax.di_plus,di_minus:ax.di_minus}; }
+    if(strat==='adx_extreme')      { matched=!!ax.strong;        sig='💥 ADX Extreme'; extra={adx:ax.adx,di_plus:ax.di_plus,di_minus:ax.di_minus,bull:ax.bull_trend?'Yes':'No'}; }
+
+    // Stochastic
+    if(strat==='stoch_bull_cross') { matched=!!st.bull_cross;   sig='📈 Stoch Bull X'; extra={k:st.k,d:st.d}; }
+    if(strat==='stoch_bear_cross') { matched=!!st.bear_cross;   sig='📉 Stoch Bear X'; extra={k:st.k,d:st.d}; }
+    if(strat==='stoch_oversold')   { matched=!!st.oversold;     sig='🟢 Stoch OS';     extra={k:st.k,d:st.d}; }
+    if(strat==='stoch_overbought') { matched=!!st.overbought;   sig='🔴 Stoch OB';     extra={k:st.k,d:st.d}; }
+
+    // Williams %R
+    if(strat==='wr_oversold')   { matched=!!wr.oversold;   sig='📗 WR OS';      extra={wr:wr.wr,trend:wr.trend}; }
+    if(strat==='wr_overbought') { matched=!!wr.overbought; sig='📕 WR OB';      extra={wr:wr.wr,trend:wr.trend}; }
+    if(strat==='wr_bull_exit')  { matched=!!wr.bull_exit;  sig='↗ WR Exit OS'; extra={wr:wr.wr}; }
+    if(strat==='wr_bear_exit')  { matched=!!wr.bear_exit;  sig='↘ WR Exit OB'; extra={wr:wr.wr}; }
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig, extra, strat, _tab:'t3'});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ── HOME PAGE ─────────────────────────────────────────────────────────────────
+const HOME_CARDS=[
+  // Highest edge — trend following
+  {tab:'mi',  strat:null,           emoji:'⚡', badge:'mi',  label:'Minervini + Stage 2',  desc:'All 8 Minervini conditions + Weinstein Stage 2 advancing',         stars:'★★★★★', section:0},
+  {tab:'t1',  strat:'gc_fresh_golden',emoji:'🟡',badge:'t1', label:'Golden Cross (Fresh)',  desc:'50 SMA just crossed above 200 SMA — most-watched institutional signal',stars:'★★★★★', section:0},
+  {tab:'t1',  strat:'rsi_bull_div',  emoji:'📗', badge:'t1', label:'RSI Bull Divergence',   desc:'Price lower low + RSI higher low = hidden institutional accumulation',  stars:'★★★★★', section:0},
+  {tab:'t1',  strat:'w52_breakout',  emoji:'🚀', badge:'t1', label:'52W High + Volume',     desc:'New 52-week high with volume surge — most winners break out this way',    stars:'★★★★★', section:0},
+  {tab:'t1',  strat:'bb_squeeze_bull',emoji:'🔵',badge:'t1', label:'BB Squeeze Bull',       desc:'Bollinger bands at tightest 25% + bullish momentum = explosion up',       stars:'★★★★', section:0},
+  {tab:'t2',  strat:'ch_breakout',   emoji:'🏆', badge:'t2', label:'Cup & Handle Breakout', desc:"O'Neil's U-shaped base + tight handle + price breaks lip with volume",     stars:'★★★★', section:0},
+  {tab:'t1',  strat:'nr7_inside',    emoji:'🎯', badge:'t1', label:'NR7 + Inside Bar',      desc:'Double compression — narrowest range in 7 bars AND inside prev bar',       stars:'★★★★', section:0},
+  {tab:'adv', strat:'vcp',           emoji:'📐', badge:'adv', label:'VCP Pattern',          desc:'Volatility contraction with declining volume — Minervini setup',           stars:'★★★★', section:0},
+  // Momentum / timing
+  {tab:'t3',  strat:'psar_flip_bull',emoji:'💠', badge:'t3', label:'PSAR Flip Bullish',     desc:'Parabolic SAR just flipped from bear to bull — early trend reversal entry', stars:'★★★★', section:1},
+  {tab:'t2',  strat:'macd_flip_bull',emoji:'🟢', badge:'t2', label:'MACD Histogram Flip +', desc:'Histogram just crossed above zero — early trend change confirmed',          stars:'★★★★', section:1},
+  {tab:'t3',  strat:'adx_di_cross_bull',emoji:'↗️',badge:'t3',label:'ADX DI Bull Cross',   desc:'+DI crossed above -DI with trend strength — institutional momentum',       stars:'★★★★', section:1},
+  {tab:'adv', strat:'wyckoff_markup',emoji:'📈', badge:'adv', label:'Wyckoff Markup',       desc:'Advancing phase — institutions completed accumulation, mark-up begins',      stars:'★★★★', section:1},
+  // Mean reversion / reversal
+  {tab:'t2',  strat:'zs_extreme_os', emoji:'🔮', badge:'t2', label:'Z-Score −3σ (Extreme)', desc:'Price 3 std devs below 20-day MA — rare panic sell, high-conviction bounce', stars:'★★★★', section:2},
+  {tab:'t1',  strat:'rsi_oversold',  emoji:'🟩', badge:'t1', label:'RSI Oversold ≤ 30',     desc:'Extreme selling exhaustion — best at support or pivot level',                stars:'★★★', section:2},
+  {tab:'t3',  strat:'stoch_bull_cross',emoji:'📊',badge:'t3',label:'Stochastic Bull Cross', desc:'%K crossed above %D in oversold zone — momentum turning up',                stars:'★★★', section:2},
+  {tab:'t3',  strat:'wr_bull_exit',  emoji:'↗', badge:'t3', label:'Williams %R Exit OS',   desc:'Was at extreme oversold −80, now recovering — timing mean reversion',       stars:'★★★', section:2},
+];
+
+const SECTIONS=['⭐ HIGHEST EDGE — TREND FOLLOWING','🔥 MOMENTUM & TIMING SIGNALS','🔄 MEAN REVERSION & REVERSAL'];
+const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot'};
+
+function renderHome(){
+  let html=`<div class="home-wrap">`;
+  for(let si=0;si<3;si++){
+    const cards=HOME_CARDS.filter(c=>c.section===si);
+    if(!cards.length) continue;
+    html+=`<div class="home-title">${SECTIONS[si]}</div><div class="home-grid">`;
+    cards.forEach(c=>{
+      html+=`<div class="hcard" onclick="launchScanner('${c.tab}','${c.strat||''}')">
+        <div class="hcard-top"><span class="hcard-emoji">${c.emoji}</span>
+          <span class="hcard-badge badge-${c.badge}">${BADGES[c.badge]||c.badge}</span></div>
+        <div class="hcard-name">${c.label}</div>
+        <div class="hcard-desc">${c.desc}</div>
+        <div class="hcard-stars">${c.stars}</div>
+        <div class="hcard-btn">▶ Launch</div>
+      </div>`;
+    });
+    html+=`</div>`;
+  }
+  html+=`<div style="font-family:var(--mono);font-size:9px;color:var(--mu);margin-top:12px;padding-top:8px;border-top:1px solid var(--brd)">
+    ★★★★★ = Highest probability · ★★★★ = Strong edge · ★★★ = Good confluence tool · 
+    All strategies computable from daily OHLC data · Success rates based on professional backtesting research
+  </div></div>`;
+  return html;
+}
+
+function launchScanner(tab, strat){
+  // Set dropdown value before switching tab
+  const maps={adv:'adv-strat',t1:'t1-strat',t2:'t2-strat',t3:'t3-strat'};
+  if(strat && maps[tab]){
+    const el=document.getElementById(maps[tab]);
+    if(el) el.value=strat;
+  }
+  if(tab==='mi'){
+    const ms=document.getElementById('mi-strat'); if(ms) ms.value='both';
+    const sc=document.getElementById('mi-score'); if(sc) sc.value='7';
+  }
+  switchTab(tab);
+}
+
+// ── HELP PAGE ─────────────────────────────────────────────────────────────────
+// ── AI links — open chat + copy prompt to clipboard ───────────────────────
+const AI_URLS={
+  claude:'https://claude.ai/new',
+  chatgpt:'https://chatgpt.com/',
+  copilot:'https://copilot.microsoft.com/',
+  gemini:'https://gemini.google.com/app',
+};
+function openAI(service,b64prompt){
+  const prompt=decodeURIComponent(escape(atob(b64prompt)));
+  navigator.clipboard.writeText(prompt).then(()=>{
+    showToast('✓ Prompt copied! Paste in '+(service==='chatgpt'?'ChatGPT':service.charAt(0).toUpperCase()+service.slice(1))+' (Ctrl+V / ⌘V)');
+  }).catch(()=>showToast('Opening '+service+'…'));
+  window.open(AI_URLS[service],'_blank');
+}
+function showToast(msg){
+  const t=document.getElementById('_toast');
+  if(!t)return;
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._tmr); t._tmr=setTimeout(()=>t.classList.remove('show'),3200);
+}
+function aiLinks(topic,prompt){
+  const b64=btoa(unescape(encodeURIComponent(prompt)));
+  return `<div class="help-ai">
+    <span style="font-size:9px;color:var(--mu);font-family:var(--mono);letter-spacing:1px">ASK AI ›</span>
+    <button class="ai-btn ai-claude"  onclick="openAI('claude','${b64}')">◈ Claude</button>
+    <button class="ai-btn ai-chatgpt" onclick="openAI('chatgpt','${b64}')">✦ ChatGPT</button>
+    <button class="ai-btn ai-copilot" onclick="openAI('copilot','${b64}')">⊞ Copilot</button>
+    <button class="ai-btn ai-gemini"  onclick="openAI('gemini','${b64}')">✦ Gemini</button>
+  </div>`;
+}
+function refLinks(links){
+  return `<div class="help-refs">${links.map(([l,u])=>`<a href="${u}" target="_blank" class="ref-link">${l}</a>`).join('')}</div>`;
+}
+
+// ── HELP POPUP ─────────────────────────────────────────────────────────────
+const STRAT_HELP_KEY={
+  piv_type:{fibonacci:0,traditional:1,camarilla:2,woodie:3,dm:4,floor:1,classic:1},
+  smc:{bull_ob:0,bear_ob:0,bull_fvg:1,bear_fvg:1,bos_bull:2,bos_bear:2,choch_bull:2,choch_bear:2,all:0},
+  vol:{near_poc:0,above_vah:0,below_val:0,vol_spike:1,obv_div_bull:1,obv_div_bear:1,ad_up:1,all:0},
+  mi:{both:0,minervini:0,weinstein:1,any:0},
+  adv:{darvas:0,vcp:1,wyckoff_acc:2,wyckoff_markup:2,wyckoff_spring:2,turtle20:3,turtle55:3,ichi_above:4,ichi_tk_bull:4,ichi_kbo:4,td_buy9:5,td_sell9:5,st_up:5,st_flip_up:5,elder_buy:5,elder_sell:5},
+  t1:{gc_fresh_golden:0,gc_fresh_death:0,gc_bull_zone:0,gc_near_golden:0,rsi_bull_div:1,rsi_bear_div:1,rsi_oversold:1,rsi_overbought:1,bb_squeeze_bull:2,bb_squeeze_bear:2,bb_squeeze_any:2,w52_breakout:3,w52_close_above:3,w52_near:3,w52_consol_near:3,nr7_bull:4,nr7_bear:4,nr4:4,inside_bar:4,nr7_inside:4},
+  t2:{ch_breakout:0,ch_near:0,ch_handle:0,macd_bull_div:1,macd_bear_div:1,macd_flip_bull:1,macd_flip_bear:1,macd_bull_trend:1,zs_oversold:2,zs_overbought:2,zs_extreme_os:2,zs_extreme_ob:2,zs_reverting:2,rsn_outperform:2,rsn_new_hi:2,rsn_underperform:2},
+  t3:{fib_near_382:0,fib_near_500:0,fib_near_618:0,fib_near_786:0,fib_any:0,ce_bull:0,ce_bear:0,ce_flip_bull:0,ce_flip_bear:0,psar_bull:0,psar_bear:0,psar_flip_bull:0,psar_flip_bear:0,adx_strong_bull:1,adx_strong_bear:1,adx_di_cross_bull:1,adx_di_cross_bear:1,adx_extreme:1,stoch_bull_cross:2,stoch_bear_cross:2,stoch_oversold:2,stoch_overbought:2,wr_oversold:3,wr_overbought:3,wr_bull_exit:3,wr_bear_exit:3},
+};
+// Map tab → section index in H array inside renderHelp
+const TAB_SEC={piv_type:0,smc:1,vol:2,mi:3,adv:4,t1:5,t2:6,t3:7};
+
+function showHelp(tab,stratVal){
+  // Trigger renderHelp once to ensure H is in scope — store it on window
+  if(!window._HS){ const dummy=renderHelp(); } // renderHelp sets window._HS
+  const secIdx=TAB_SEC[tab];
+  const itemMap=STRAT_HELP_KEY[tab]||{};
+  const itemIdx=(itemMap[stratVal]!==undefined)?itemMap[stratVal]:0;
+  const item=window._HS&&window._HS[secIdx]&&window._HS[secIdx].items[itemIdx];
+  const overlay=document.getElementById('hm-overlay');
+  const box=document.getElementById('hm-box');
+  const title=document.getElementById('hm-title');
+  const body=document.getElementById('hm-body');
+  if(!overlay||!box)return;
+  if(!item){
+    title.textContent='Strategy Info';
+    body.innerHTML=`<p style="color:var(--mu);font:11px var(--mono)">Detailed help for this strategy is in the <b>❓ Help</b> tab.</p>`;
+  } else {
+    title.textContent=item.n;
+    body.innerHTML=`
+      <div class="help-item-formula" style="margin-bottom:10px">${item.f}</div>
+      <div style="font-size:11.5px;line-height:1.85;color:var(--txt)">${item.d}</div>
+      ${item.links?refLinks(item.links):''}
+      ${item.ai?aiLinks(item.n,item.ai):''}`;
+  }
+  overlay.classList.add('open'); box.classList.add('open');
+}
+function closeHelpModal(){
+  document.getElementById('hm-overlay')?.classList.remove('open');
+  document.getElementById('hm-box')?.classList.remove('open');
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeHelpModal();});
+
+
+function renderHelp(){
+  // Each item: n=name, f=formula, d=description, links=[[label,url]], ai=prompt
+  const H=[
+    {icon:'📊', title:'Pivot Points', items:[
+      { n:'Fibonacci Pivot Points',
+        f:'P=(H+L+C)/3 · R1=P+0.382×Range · R2=P+0.618×Range · R3=P+Range · S1=P−0.382×Range · S2=P−0.618×Range · S3=P−Range',
+        d:'Fibonacci pivot points combine the classic floor-trader pivot formula with mathematical ratios discovered by Leonardo Fibonacci. The central pivot P is the simple average of the prior period\'s High, Low, and Close — the same as Traditional. Support and resistance levels are then derived by multiplying the period\'s trading range (High − Low) by Fibonacci ratios: 0.382, 0.618, and 1.000. These ratios emerge from the Fibonacci sequence, where consecutive numbers (1,1,2,3,5,8,13...) approach the Golden Ratio φ≈1.618. S2 at the 61.8% extension is the most-watched level because the Golden Ratio appears throughout nature and financial markets. When price approaches S2 from above, professional traders watch for reversal candlestick patterns, volume spikes, or RSI divergence. S1 at the 38.2% level is a shallow retracement level seen in fast-trending markets. R1 and R2 are resistance zones where profit-taking and short sellers emerge. The yearly timeframe matches TradingView\'s Auto pivot on weekly charts — thousands of traders are simultaneously watching these levels. Confluence of a Fibonacci pivot with a key EMA or order block significantly increases reversal probability. Backtesting on NSE large-caps shows S2 Fibonacci yearly holds as support with approximately 60-65% probability on initial tests.',
+        links:[['Investopedia','https://www.investopedia.com/terms/f/fibonacciretracement.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:pivot_points'],['Wikipedia','https://en.wikipedia.org/wiki/Fibonacci_retracement']],
+        ai:'Explain Fibonacci pivot points in detail for NSE stock trading. Include: how to calculate all levels, which levels are most significant and why, how to trade bounces at S2 and S3, what timeframe source gives levels matching TradingView weekly charts, the mathematical origin of 0.382 and 0.618 ratios, how confluence with other indicators improves reliability, historical examples on Nifty 50 stocks, and common mistakes traders make using Fibonacci pivots.'
+      },
+      { n:'Traditional Pivot Points',
+        f:'P=(H+L+C)/3 · R1=2P−L · S1=2P−H · R2=P+(H−L) · S2=P−(H−L) · R3=2P+(H−2L) · S3=2P−(2H−L)',
+        d:'Traditional pivot points are the oldest and most widely used pivot system, developed by floor traders at the Chicago Board of Trade before electronic trading existed. The central pivot P represents the "fair value" of the prior session — the balance point between buyers and sellers. R1 and S1 are the most closely watched levels, representing the first meaningful support/resistance after the pivot. The formula R1=2P−Low reflects where resistance forms if price retraces exactly the amount it rose above pivot. S2 and R2 capture the full prior range from pivot, targeting larger moves. S3 and R3 are extreme levels reached only in high-volatility sessions like earnings or macro events. Floor traders historically shouted levels referencing "pivot" or "R1" to execute without screens. Modern algorithmic trading systems place limit orders at Traditional pivot levels, creating self-fulfilling effects. When NSE opens above pivot, bias is bullish and S1 is first support; when it opens below, R1 is first resistance. The yearly Traditional pivot used by TradingView on weekly charts requires matching the exact H/L/C source period to align with institutional levels.',
+        links:[['Investopedia','https://www.investopedia.com/terms/p/pivotpoint.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:pivot_points'],['Babypips','https://www.babypips.com/learn/forex/pivot-points']],
+        ai:'Explain Traditional pivot points for NSE stock trading. How were they used by floor traders historically? Which levels are most important? How do algorithmic traders use these levels today? What is the difference between daily vs yearly source data? How do Traditional pivots compare to Fibonacci pivots in reliability? Provide specific examples of Traditional S1 and R1 levels working on Reliance or HDFC Bank over the past year.'
+      },
+      { n:'Camarilla Pivot Points',
+        f:'R1=C+Range×1.1/12 · R2=C+Range×1.1/6 · R3=C+Range×1.1/4 · R4=C+Range×1.1/2 · S1=C−Range×1.1/12 · S2=C−Range×1.1/6 · S3=C−Range×1.1/4 · S4=C−Range×1.1/2',
+        d:'Camarilla pivots were developed by Nick Stott in 1989 while trading bonds at Camarilla Capital Management, and the system was kept proprietary for years. The key innovation is using the previous period\'s closing price as the basis — not the (H+L+C)/3 midpoint. This makes Camarilla a mean-reversion system: price tends to revert toward the prior close rather than trending indefinitely away from it. The 1.1 multiplier was derived empirically from historical bond market data representing typical intraday noise. S3 and R3 are the critical mean-reversion levels — price reaching S3 has moved far from the prior close and has high probability of reverting. S4 and R4 are breakout levels: price breaking through S4 signals a genuine trend day has begun. Professional traders buy at S3 with a stop below S4, or sell at R3 with a stop above R4. R5 and S5 are extreme "capitulation-level" moves. The system performs best in range-bound markets and underperforms on strong trend days. On NSE Nifty 50 stocks, Camarilla S3 from the yearly source attracts significant institutional buying and selling interest.',
+        links:[['Investopedia','https://www.investopedia.com/terms/c/camarilla.asp'],['TradingView','https://www.tradingview.com/scripts/camarilla/'],['Wikipedia','https://en.wikipedia.org/wiki/Camarilla_equation']],
+        ai:'Explain the Camarilla pivot system developed by Nick Stott in 1989. How does using the closing price instead of (H+L+C)/3 change the levels? What is the logic behind S3/R3 for mean reversion vs S4/R4 for breakouts? When does Camarilla fail and why? How should traders combine Camarilla with other indicators? Provide a complete trading plan using Camarilla on NSE stocks with entry, stop, and target examples.'
+      },
+      { n:'DeMark Pivot Points',
+        f:'If C<O: X=H+2L+C · If C>O: X=2H+L+C · If C=O: X=H+L+2C · P=X/4 · R1=X/2−L · S1=X/2−H',
+        d:'DeMark pivots were developed by Tom DeMark, quantitative analyst whose clients include George Soros, Paul Tudor Jones, and Steven Cohen, and whose indicators are built into Bloomberg terminals. The system is minimalist — only three levels (P, S1, R1) — because DeMark believed more levels dilute focus. The conditional X formula adjusts directionally: when the close is below the open (bearish session), more weight goes to the low; when the close is above the open (bullish), more weight to the high. This makes DeMark\'s pivot inherently directional — it shifts with yesterday\'s sentiment. When price closes near the session high, the pivot shifts upward, signaling buyers were dominant. DeMark pivot\'s P level is the most reliable "directional bias" filter: open above P = bullish bias, below P = bearish. The tightest range of the seven pivot types makes DeMark conservative and precise. Professional quants use DeMark pivots as a first-pass directional filter before applying other systems. DeMark also created TD Sequential (also in this scanner) with the same philosophy of objective market structure analysis. For NSE weekly chart analysis, DeMark pivots on the yearly source provide clean first-indication support and resistance.',
+        links:[['DeMark Analytics','https://demark.com'],['Investopedia','https://www.investopedia.com/terms/d/demark-pivot-point.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:pivot_points']],
+        ai:'Explain Tom DeMark pivot points and how they differ from all other pivot types. Why does DeMark use a conditional formula based on close vs open? What is the significance of having only 3 levels instead of 7+? Who uses DeMark pivots professionally? How do DeMark pivots connect philosophically to TD Sequential? Provide practical trading examples of DeMark S1 and R1 acting as support/resistance on NSE large-cap stocks over the past 2 years.'
+      },
+    ]},
+    {icon:'🎯', title:'Price Action / Smart Money Concepts', items:[
+      { n:'Bullish Order Block',
+        f:'Last bearish (red) candle before a significant upward impulse move',
+        d:'Order blocks are a cornerstone of Smart Money Concepts (SMC), popularized by the Inner Circle Trader (ICT) methodology developed by Michael Huddleston. A bullish OB represents where large institutions placed bulk buy orders, creating an imbalance that drove price sharply upward. Large institutions must distribute millions of shares over a price range rather than all at once — that distribution zone becomes the order block. The last red candle before an impulsive up-move is specifically identified because it represents the final shakeout of retail sellers before institutional buying overwhelmed the market. When price returns to this zone later, unfilled institutional orders theoretically still wait there, ready to absorb selling. Traders look for two confirmations: a liquidity sweep below the OB zone (stop-loss grab), then a rejection pattern (engulfing candle or pin bar) when price touches the OB. The quality depends on how aggressive the resulting move was — a 2% daily candle from an OB carries more significance than a 0.5% move. OBs lose validity if price trades through them cleanly without reaction. In NSE markets, OBs appear near index rebalancing, quarterly earnings, and FII block deal periods. Combining an OB with a key Fibonacci or pivot level creates the highest-confidence confluence entry in the SMC framework.',
+        links:[['ICT YouTube','https://www.youtube.com/c/InnerCircleTrader'],['Investopedia SMC','https://www.investopedia.com/terms/s/smart-money.asp'],['TradingView Scripts','https://www.tradingview.com/scripts/orderblocks/']],
+        ai:'Explain Smart Money Concepts (SMC) order blocks in detail for NSE stock trading. How are bullish vs bearish order blocks identified? What is the institutional logic behind why price returns to order blocks? How do you distinguish high-quality from low-quality order blocks? What is the relationship between order blocks, liquidity sweeps, and fair value gaps? Provide a complete trade setup using a bullish order block on an NSE stock with precise entry, stop loss, and target levels.'
+      },
+      { n:'Fair Value Gap (FVG)',
+        f:'Bullish FVG: candle[i−1].High < candle[i+1].Low · Bearish FVG: candle[i−1].Low > candle[i+1].High',
+        d:'Fair Value Gaps are three-candle patterns where price moves so aggressively that no two-way trading occurs in a specific price range — an imbalance zone. In a bullish FVG, the high of the candle two bars ago is completely below the low of the candle ahead, meaning the middle candle leaped upward with no downside wicks bridging the gap. Markets tend to fill these imbalance zones over time as price seeks fair value — this is supported by both SMC theory and traditional gap theory in technical analysis. Unfilled bullish FVGs below current price act as support magnets; unfilled bearish FVGs above act as resistance magnets. Research suggests daily FVGs fill approximately 70-80% of the time within 90 days. Traders use FVGs as pullback entries: instead of chasing a move, they wait for price to retrace into the FVG zone. FVG size matters — very small FVGs (below 0.2% of price) are noise; large FVGs (above 1% of price) signal genuine institutional urgency. The scanner tracks the most recent 3 unfilled FVGs per stock in both directions. When a FVG overlaps with an order block it creates an "Optimal Trade Entry" zone — the highest-confidence SMC setup. In NSE markets, FVGs frequently form during earnings announcements and RBI policy decisions.',
+        links:[['ICT FVG Guide','https://www.youtube.com/results?search_query=ICT+fair+value+gap'],['Babypips SMC','https://www.babypips.com/learn/forex/smart-money-concepts'],['TradingView','https://www.tradingview.com/scripts/fairvaluegap/']],
+        ai:'Explain Fair Value Gaps (FVG) in Smart Money Concepts trading for NSE stocks. What is the precise mathematical definition of bullish vs bearish FVG? Why do markets fill these gaps and what percentage historically get filled? How should traders enter when price returns to an FVG? What is the difference between a FVG and a traditional price gap? When is an FVG considered invalid? Provide NSE examples where FVGs acted as strong support or resistance with specific stocks and dates.'
+      },
+    ]},
+    {icon:'📈', title:'Volume / Institutional Footprint', items:[
+      { n:'Volume Profile — POC, VAH, VAL',
+        f:'POC = highest-volume price bucket · VAH/VAL = boundaries of 70% volume concentration (expanding from POC)',
+        d:'Volume Profile is a histogram that distributes trading volume across price levels rather than time, revealing where the market has accepted or rejected price. The Point of Control (POC) is the price level with the most volume traded — the market\'s "fair value" or equilibrium price where most business was conducted. Price consistently gravitates toward the POC because institutions who traded there are motivated to defend their positions. The Value Area (70% of volume) derives from statistical theory — approximately 70% of data falls within one standard deviation in a normal distribution. VAH and VAL are decision points: breaking above VAH with conviction signals bullish sentiment shift, breaking below VAL signals bearish shift. When price is inside the Value Area, the market is balanced; when outside, it either returns (rejection) or continues away (breakout). The scanner approximates Volume Profile by distributing daily volume across 50 price bins using the High-Low range — a standard approximation when intraday tick data is unavailable. Market Profile theory (the academic predecessor) was developed by J. Peter Steidlmayer and the CBOT in 1985 for futures trading. On NSE large-cap stocks, the annual POC acts as a powerful equilibrium level where institutional portfolios were rebalanced. Price returning to the POC from above after a breakout gives high-probability re-entry opportunities.',
+        links:[['Investopedia','https://www.investopedia.com/terms/v/volume-profile.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:volume_by_price'],['Wikipedia Market Profile','https://en.wikipedia.org/wiki/Market_profile']],
+        ai:'Explain Volume Profile trading (POC, VAH, VAL) for NSE stocks. How is Volume Profile calculated from daily OHLC data without intraday ticks? How do traders use POC as support/resistance? What is the significance of the 70% value area? How does Volume Profile differ from On-Balance Volume? What trading strategies use VAH breakouts and VAL breakdowns? Provide examples of institutional price acceptance and rejection at POC levels on NSE large-cap stocks.'
+      },
+      { n:'OBV — On Balance Volume Divergence',
+        f:'OBV[i] = OBV[i−1] + Volume (if Close>prev) or − Volume (if Close<prev) · Divergence: OBV direction ≠ price direction',
+        d:'On-Balance Volume was developed by Joseph Granville and introduced in his 1963 book "New Key to Stock Market Profits." The fundamental premise: volume precedes price — institutions must accumulate shares before price rises, and this shows in OBV before price moves. The calculation adds the full day\'s volume when price closes up and subtracts when it closes down. Bullish OBV divergence (price falling, OBV rising) means buying volume is increasing even as price declines — classic institutional stealth buying. Bearish divergence (price rising, OBV falling) means institutions are distributing into retail buying strength. This divergence pattern was validated by multiple academic studies in the 1970s-1980s showing above-random prediction accuracy for price reversals. The most significant OBV divergences appear during the final phase of bear markets — price still grinding lower but delivery volumes quietly rising, signaling long-term institutional accumulation. The Accumulation/Distribution line (also in the scanner) is OBV\'s more sophisticated cousin, using the Money Flow Multiplier to weight sessions by where the close fell in the High-Low range. Combining OBV divergence with RSI divergence simultaneously is a powerful confluence signal. On NSE, OBV divergences are particularly visible in delivery percentage data during sector bottoms — often appearing 4-8 weeks before the price reversal confirms.',
+        links:[['Investopedia OBV','https://www.investopedia.com/terms/o/onbalancevolume.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:on_balance_volume_obv'],['Wikipedia','https://en.wikipedia.org/wiki/On-balance_volume']],
+        ai:'Explain OBV divergence for NSE stock trading. How does OBV detect institutional accumulation and distribution before price moves? What percentage of OBV divergences correctly predict reversals? How does OBV compare to the Accumulation/Distribution line? What are the most common causes of false OBV divergence? How should NSE traders combine OBV divergence with price action signals? Provide 3 historical examples of OBV divergence predicting major bottoms or tops in NSE sectors.'
+      },
+    ]},
+    {icon:'⚡', title:'Multi-Indicator (Minervini + Weinstein)', items:[
+      { n:'Minervini Trend Template — All 8 Conditions',
+        f:'1.Price>150&200SMA · 2.150SMA>200SMA · 3.200SMA rising 1M · 4.50SMA>150&200SMA · 5.Price>50SMA · 6.≥25% above 52Wlow · 7.≤25% from 52Whigh · 8.RS≥70',
+        d:'Mark Minervini won the US Investing Championship in 1997 with a 155% return and again in 2021 with a 334.8% return — one of the greatest verified trading records in history. He published the Trend Template in his 2013 book "Trade Like a Stock Market Wizard," which became required reading for growth stock traders globally. The eight conditions are designed as a progressive filter: each subsequent condition narrows the universe further, ensuring that only stocks in the strongest possible technical configuration are selected. Condition 1 confirms the stock is in a long-term uptrend above both major moving averages. Condition 2 (150>200 SMA) ensures the medium-term average is above the long-term — no "death crosses" in the background. Condition 3 (200 SMA rising) filters out stocks where the long-term trend is still turning rather than clearly established. Condition 4 (the "golden alignment") ensures all three major MAs are stacked in proper bullish order. Conditions 6 and 7 eliminate stocks near their annual lows (weak fundamentals) and those that have already had major runs and are far from recent highs. A perfect 8/8 score qualifies typically only 2-5% of NSE stocks at any time. Research shows stocks meeting 7-8 conditions significantly outperform the Nifty 50 on a risk-adjusted 12-month basis. The template functions as a "universe filter" — Minervini then applies fundamental analysis only to 8/8 stocks.',
+        links:[['Minervini Official','https://www.minervini.com'],['Amazon Book','https://www.amazon.com/Trade-Like-Stock-Market-Wizard/dp/0071807225'],['Investopedia','https://www.investopedia.com/trading/minervini-trading-strategy/']],
+        ai:'Explain Mark Minervini\'s Trend Template in complete detail for NSE trading. Why are all 8 conditions necessary and what does each filter out? How does the Trend Template connect to Weinstein Stage Analysis? What is Minervini\'s SEPA entry methodology beyond the Template? How should traders use the 8/8 score to prioritize watchlist stocks? What is the historical outperformance of 7-8 score stocks vs Nifty 50 in Indian markets? Include examples of specific NSE stocks that met all 8 conditions before major advances.'
+      },
+      { n:'Weinstein Stage Analysis',
+        f:'Stage 1:Basing (flat 30W SMA) · Stage 2:Advancing (price above rising 30W SMA) · Stage 3:Topping · Stage 4:Declining (price below falling 30W SMA)',
+        d:'Stan Weinstein published his Stage Analysis in "Secrets for Profiting in Bull and Bear Markets" (1988), formalizing a framework professional fund managers had used informally for decades. The 30-week Simple Moving Average (≈150 trading days) is the backbone — it represents half a year of trading, enough to smooth out noise while remaining responsive to genuine trend changes. Stage 1 (Basing) is smart money\'s quiet accumulation phase: price oscillates in a flat range while the 30W SMA bottoms and begins turning up. Stage 2 (Advancing) begins when price closes decisively above the flat/rising 30W SMA with expanding volume — Weinstein\'s buy signal. This is the only stage he recommends being long: the 30W SMA acts as a rising support floor that institutional investors defend with buy programs. Stage 3 (Topping) is distribution: institutions quietly sell to retail buyers attracted by positive momentum, causing the 30W SMA to flatten. Stage 4 (Declining) is the most dangerous: price below falling 30W SMA, any rallies are exit opportunities rather than buying opportunities. The framework is powerful because it aligns individual analysis with institutional investment behavior rather than retail sentiment cycles. In NSE markets, stocks transitioning from Stage 1 to Stage 2 in sectors experiencing FII inflows have historically generated the best risk-adjusted returns. The Stage 2 entry combined with RS Rating ≥ 80 represents Weinstein\'s highest-quality setup.',
+        links:[['Weinstein Book','https://www.amazon.com/Secrets-Profiting-Bull-Bear-Markets/dp/1556236832'],['Investopedia','https://www.investopedia.com/terms/w/weinstein-stagge-analysis.asp'],['StockCharts','https://school.stockcharts.com']],
+        ai:'Explain Weinstein Stage Analysis in complete detail for NSE trading. How do you precisely identify when a stock transitions from Stage 1 to Stage 2? What volume characteristics confirm a Stage 2 breakout? What is the "30-week line" and how do institutional investors use it? How do you identify Stage 3 topping behavior early? Provide examples of NSE stocks going through all 4 stages with specific dates, price levels, and what fundamental changes coincided with stage transitions.'
+      },
+    ]},
+    {icon:'🔬', title:'Advanced Strategies', items:[
+      { n:'Darvas Box',
+        f:'Box top = high confirmed by 3+ subsequent bars not exceeding it · Box bottom = lowest low within box · Breakout = close above top with volume ≥ 1.5×avg',
+        d:'Nicolas Darvas was a Hungarian professional dancer who turned $36,000 into $2,345,000 in 18 months during 1957-1958, documented in his 1960 book "How I Made $2,000,000 in the Stock Market." The Darvas Box emerges from his observation that stocks making new highs consolidate in tight boxes before the next leg up. A box forms when price makes a high, then fails to exceed that high for at least 3 consecutive bars — the high becomes the confirmed box top. The box bottom is the lowest point within the consolidation range. The key quality criterion is tightness: boxes where the High-Low range is below 15-20% of stock price indicate true institutional accumulation. The breakout occurs when price closes decisively above the box top with volume surge, confirming supply exhaustion and new demand entering. Stop loss is placed at the box bottom — a fall back through the bottom invalidates the trade thesis. Darvas received stock quotes via telegram while performing in European nightclubs, making his returns extraordinary given limited data access. Boxes work because they represent supply/demand equilibrium — when demand overcomes supply (breakout), price moves rapidly to the next equilibrium zone. In NSE mid and small-cap stocks, Darvas boxes forming alongside earnings growth acceleration and FII accumulation are among the most powerful setups.',
+        links:[['Amazon Book','https://www.amazon.com/How-Made-2-000-000-Stock/dp/0818403969'],['Investopedia','https://www.investopedia.com/terms/d/darvas-box-theory.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Nicolas_Darvas']],
+        ai:'Explain Darvas Box Theory for NSE trading. How did Nicolas Darvas discover this system while touring as a dancer? What are the exact criteria for a valid box? How tight must the consolidation be? What volume confirms a valid breakout vs false breakout? How should position sizing and stops be set? How does the modern NSE market differ from the 1950s US market where Darvas traded — does the pattern still work? Provide recent examples of Darvas Box breakouts on NSE stocks.'
+      },
+      { n:'VCP — Volatility Contraction Pattern',
+        f:'3+ contractions, each smaller range and lower volume · Final contraction range < 10% of stock price · Pivot = high of last contraction',
+        d:'The Volatility Contraction Pattern was developed and named by Mark Minervini, described in "Trade Like a Stock Market Wizard" as his most reliable entry pattern for growth stocks. VCP identifies the precise transition from consolidation to breakout with the highest continuation probability. The pattern requires three or more progressively tighter price contractions — for example, 25% → 12% → 6% — with each swing having lower amplitude AND lower volume. The contraction of both price range and volume is critical: it indicates sellers becoming exhausted and fewer shares available at current prices, while weak holders ("tourists") sell to strong hands ("residents"). The final pivot point — the highest point of the last contraction — is the precise buy entry level. Ideal VCP has 3-4 contractions; more than 5-6 suggests the base is "stale." Volume during the final contraction should dry up to below 50% of average daily volume — complete supply exhaustion. Breakout volume should surge at least 40-50% above average, confirming genuine demand overwhelming residual supply. VCP patterns typically take 6-16 weeks to develop fully. On NSE, VCP patterns alongside earnings acceleration in small/mid-caps are among the most powerful setups with strong follow-through statistics. Combining VCP with Minervini\'s Trend Template (8 conditions) eliminates weak patterns from stronger ones.',
+        links:[['Minervini','https://www.minervini.com'],['Amazon','https://www.amazon.com/Trade-Like-Stock-Market-Wizard/dp/0071807225'],['Investopedia VCP','https://www.investopedia.com/terms/v/vcp.asp']],
+        ai:'Explain Minervini\'s VCP pattern for NSE trading. What are the exact criteria for counting valid contractions? How do you measure contraction percentages from swing highs and lows? What does volume drying up indicate about supply/demand? How is the precise pivot entry point identified? What is the ideal stop-loss placement relative to the pivot? What is the average advance expected after a confirmed VCP breakout? Provide step-by-step analysis of a historical VCP on an NSE mid-cap stock.'
+      },
+    ]},
+    {icon:'⭐', title:'Tier-1 Strategies', items:[
+      { n:'Golden Cross / Death Cross',
+        f:'Golden Cross: 50SMA crosses above 200SMA · Death Cross: 50SMA crosses below 200SMA · Both detected within last 10 days for "Fresh" signals',
+        d:'The Golden Cross and Death Cross are the most widely watched technical signals in global finance, followed by institutional investors, retail traders, algorithmic systems, and financial media simultaneously. The 50-day SMA captures approximately 10 weeks of momentum; the 200-day captures approximately 40 weeks of trend. When the faster MA crosses above the slower, it mathematically means that medium-term momentum has shifted to exceed long-term momentum — a confirmation that recent positive action represents genuine trend change rather than a bounce. Ned Davis Research data shows that investing when the S&P 500\'s 50-day is above its 200-day and exiting otherwise has historically generated better risk-adjusted returns than buy-and-hold since 1900. Many large pension funds and systematic hedge funds have explicit mandates requiring equity exposure reduction when the 200-day MA is declining — this creates reflexive buying and selling pressure that amplifies these signals. The "Fresh" Golden Cross (last 10 days) is specifically valuable because large institutional reallocation processes are still early — funds that haven\'t repositioned are still in the buying process. The "Bull Zone" (ongoing 50>200) is valuable as a filter: many professional strategies only enter long positions when this condition is met. Death Cross can be particularly destructive in NSE\'s liquidity-constrained mid-cap stocks where institutional selling pressure faces limited absorption. Combining Golden Cross with RS Rating ≥ 70 and above-average volume on the cross day dramatically improves signal quality. Academic backtesting on NSE indices shows Golden Cross signals on weekly charts have strong predictive power for 3-6 month returns.',
+        links:[['Investopedia Golden Cross','https://www.investopedia.com/terms/g/goldencross.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Golden_cross_(finance)'],['StockCharts MA','https://school.stockcharts.com/doku.php?id=technical_indicators:moving_averages']],
+        ai:'Explain Golden Cross and Death Cross signals for NSE stock trading. What is the statistical win rate historically? Do they work differently in bull vs bear markets? How do algorithmic traders use these signals? What is the best way to combine Golden Cross with volume, RS Rating, and sector analysis? What are the biggest failure modes of Golden Cross signals in NSE markets? Provide backtesting of Golden Cross on Nifty 50 stocks over the last 10 years with win rates and average returns.'
+      },
+      { n:'RSI Divergence',
+        f:'RSI = 100 − 100/(1 + RS), RS = Avg14gain/Avg14loss (Wilder smoothing) · Bullish div: price lower low + RSI higher low · Bearish div: price higher high + RSI lower high',
+        d:'RSI was developed by J. Welles Wilder Jr. in his 1978 book "New Concepts in Technical Trading Systems," one of the most influential technical analysis books ever written. Wilder chose 14 periods based on his belief that markets operate on half-lunar cycle rhythms of 28 days — modern research has not confirmed this, but 14 periods has become so standard that self-fulfilling forces make it effective. RSI measures the magnitude of recent gains versus losses, normalized to 0-100. The most powerful RSI signal is divergence — not the overbought/oversold extremes. Bullish divergence (price lower low, RSI higher low) means each successive decline brings fewer new sellers and less downside momentum, even as price continues falling — institutions are quietly buying into weakness. This hidden accumulation typically occurs over 2-4 weeks before the visible reversal. The divergence is most reliable when RSI\'s second low is below 40 and when the divergence spans at least 10-15 trading sessions. False divergences occur frequently in strong downtrends — RSI can form bullish divergence multiple times before the actual bottom. Combining RSI divergence with a key support level (Fibonacci, pivot, or order block) dramatically reduces false signals. Academic research confirms RSI divergence has statistically significant predictive power for medium-term reversals on weekly charts. In NSE banking and IT sectors, RSI bullish divergence on weekly charts at yearly Fibonacci S2 or S3 levels has historically been among the highest-probability reversal signals.',
+        links:[['Investopedia RSI','https://www.investopedia.com/terms/r/rsi.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Relative_strength_index'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:relative_strength_index_rsi']],
+        ai:'Explain RSI divergence in complete detail for NSE stock trading. How is Wilder\'s smoothed RSI different from simple RSI? What is the statistical reliability of bullish vs bearish RSI divergence? How do you avoid false divergences in strongly trending markets? How does RSI divergence compare to MACD divergence in reliability? What is the optimal RSI period for NSE daily vs weekly analysis? Provide historical examples of RSI divergence predicting major bottoms or tops on NSE Nifty or sector indices.'
+      },
+      { n:'Bollinger Band Squeeze',
+        f:'Upper = 20SMA + 2σ · Lower = 20SMA − 2σ · BW = (Upper−Lower)/20SMA×100 · Squeeze = BW in bottom 25th percentile of prior 126-bar history',
+        d:'Bollinger Bands were developed by John Bollinger CFA, CMT in the early 1980s, who observed that price volatility follows cycles — low volatility inevitably precedes high volatility. The "Squeeze" is Bollinger\'s specific signal when band width reaches its lowest level in 6 months (126 trading days), signaling that price is compressed and an explosive move is imminent. John Bollinger trademarked the phrase and spent years defending it from unauthorized use, reflecting the system\'s commercial value. The 20-period SMA and 2 standard deviation multiplier were chosen to contain approximately 95% of price action in a normal distribution — upper/lower band touches occur only during genuine volatility events. The squeeze alone does not indicate direction — it signals imminent large movement, which is why the scanner pairs it with 12-bar momentum for directional bias. The TTM Squeeze (John Carter\'s extension) adds Keltner Channels as a filter, firing only when Bollinger Bands are entirely inside Keltner Channels — producing fewer, higher-quality signals. In NSE markets, Bollinger Band squeezes develop over 4-8 week periods before major sector breakouts, especially in interest-rate-sensitive sectors before RBI policy meetings. The "momentum" measurement (12-bar price change) determines whether the eventual breakout is likely to be upward or downward, though false directional signals do occur. Professional volatility traders use BB squeeze to identify premium-selling opportunities in options markets — low volatility = cheap options, and buying straddles during the squeeze capitalizes on the inevitable expansion.',
+        links:[['Bollinger Official','https://www.bollingerbands.com'],['Investopedia','https://www.investopedia.com/terms/b/bollingerbands.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:bollinger_bands'],['Wikipedia','https://en.wikipedia.org/wiki/Bollinger_Bands']],
+        ai:'Explain Bollinger Band Squeeze in detail for NSE trading. How is band width calculated and what level defines a squeeze? What is the statistical relationship between squeeze duration and subsequent move size? How does the TTM Squeeze differ from standard Bollinger Squeeze? How do options traders use the Squeeze for straddle strategies? How do you identify breakout direction during a squeeze? Provide historical examples of Bollinger Band squeezes before major breakouts in NSE stocks or Nifty index.'
+      },
+      { n:'52-Week High Breakout + Volume',
+        f:'Breakout: today\'s High > max(High, last 252 days excluding today) · Volume surge: today\'s Volume ≥ 1.5× 20-day average',
+        d:'The 52-week high breakout is one of the most consistently documented phenomena in academic finance research. A seminal 2004 study by George and Hwang in the Journal of Finance showed that proximity to the 52-week high is among the strongest predictors of near-term price momentum — more powerful than traditional price momentum measures alone. The psychological mechanism is anchoring bias: investors compare current prices to the 52-week high as a mental reference point, creating persistent resistance. When demand finally overwhelms this supply and price breaks above the 52-week high, the sellers who anchored to that reference have exhausted their supply and the path clears for rapid advance. William O\'Neil documented that virtually every major market winner — Google, Amazon, Apple — made new all-time highs before their largest price advances, never buying near 52-week lows. The volume confirmation (1.5× average) distinguishes institutional demand from retail momentum chasing — institutions buying millions of shares produce characteristic volume spikes that precede sustained rallies. In NSE Nifty 50 stocks, 52-week breakouts coinciding with sector rotation (FII shifting from underweight to neutral) produce the most durable advances. The "consolidation" filter (last 10 days range < 5%) identifies stocks that have "coiled" below the 52-week high, where supply has been absorbed in tight range before the breakout. Combining 52-week high breakout with RS Rating ≥ 80 and above-average volume on the breakout day eliminates most false breakouts and produces a high-quality signal historically above 60% win rate for 20%+ advance.',
+        links:[['CANSLIM','https://www.investors.com/ibd-university/can-slim/'],['George & Hwang 2004','https://scholar.google.com/scholar?q=george+hwang+52+week+high+momentum+2004'],['Investopedia','https://www.investopedia.com/terms/1/52weekhighlow.asp']],
+        ai:'Explain the 52-week high breakout strategy for NSE stock trading. What does academic research show about buying near 52-week highs vs lows? What is the anchoring bias mechanism? What volume level confirms genuine institutional demand? How does O\'Neil\'s CANSLIM methodology use 52-week highs? What is the historical win rate of volume-confirmed 52-week breakouts on NSE? How do you set stop-losses for this strategy? Provide statistics and examples from NSE markets.'
+      },
+      { n:'NR7 / Inside Bar',
+        f:'NR7: today\'s range (H−L) is narrowest of last 7 bars · Inside Bar: today\'s High < yesterday\'s High AND today\'s Low > yesterday\'s Low · Compression: today\'s range / 14-day ATR',
+        d:'The NR7 pattern was documented by Toby Crabel in his 1990 book "Day Trading with Short-Term Price Patterns and Opening Range Breakout," which became so sought-after that second-hand copies sold for hundreds of dollars. Crabel\'s research on historical commodity and equity data showed that when a day\'s range is narrowest of the past 7 sessions, the probability of a larger-than-average range the following day increases significantly. The statistical logic is volatility mean reversion — volatility alternates between compression and expansion, and a 7-period extreme low tends to be followed by expansion. The specific "7" came from Crabel\'s empirical backtesting; NR4 produces more frequent but slightly less reliable signals, NR10+ produces rarer but more powerful signals. The Inside Bar represents complete price indecision — the current bar\'s entire range fits within the prior bar, indicating supply/demand equilibrium. This equilibrium resolves with a directional breakout, ideally in the direction of the underlying trend. The "ATR Compression %" shown in the scanner is the key quality metric: below 50% of ATR = extremely tight compression, best setups. Professional traders combine NR7 with trend alignment, proximity to support/resistance, and volume characteristics to filter high-quality setups. NR7 + Inside Bar (double compression) is the highest-confidence volatility expansion signal available from daily data. In NSE Nifty Bank options trading, NR7 days on the index frequently precede large directional moves — professional options traders use NR7 to identify ideal straddle entry days.',
+        links:[['Toby Crabel Book','https://www.amazon.com/Day-Trading-Short-Term-Patterns-Opening/dp/0934380171'],['Investopedia Inside Bar','https://www.investopedia.com/terms/i/inside-days.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Candlestick_pattern']],
+        ai:'Explain NR7 and Inside Bar patterns for NSE trading. Why did Crabel specifically use 7 periods? What is the statistical win rate and average range expansion following NR7 days? How does the Inside Bar relate to volatility compression? How should traders determine breakout direction? What is the best way to trade NR7 + Inside Bar double compression using Nifty options? Provide historical analysis of NR7 patterns on Nifty 50 or Bank Nifty before major moves.'
+      },
+    ]},
+    {icon:'🏆', title:'Tier-2 Strategies', items:[
+      { n:'Cup & Handle',
+        f:'Cup: U-shape, depth 8-55%, recovery ≥75% · Handle: tight range <12% near cup lip, duration 5-20 days · Breakout: close above lip with volume ≥1.4×avg',
+        d:'The Cup & Handle was discovered by William O\'Neil, founder of Investor\'s Business Daily, documented in "How to Make Money in Stocks" (1988). O\'Neil studied every major stock market winner from 1880-1990 and found the Cup & Handle pattern appeared repeatedly before the largest price advances. The cup represents institutional accumulation: price declines as weak holders sell (left side), reaches bottom where institutions begin buying (round bottom), then recovers as buying exceeds selling (right side). Ideal cup depth: 12-33% in normal markets, up to 50% in bear conditions. The U-shape (round bottom) is critical — V-shapes indicate panic without sufficient accumulation time. The handle is the final shakeout: it should slope slightly downward, duration 5-20 days, range below 12% of stock price, with volume drying up to signal complete supply exhaustion before the breakout. The breakout occurs when price closes above the cup lip (pivot point) on volume at least 40% above average. O\'Neil\'s research showed stocks breaking out of proper Cup & Handle patterns advance an average of 20-25% from the pivot before the next consolidation. False breakouts occur when volume is insufficient at the pivot break — proper volume surge is non-negotiable. In NSE markets, Cup & Handle patterns are most reliable in large-cap stocks with growing earnings, increasing institutional ownership, and RS Rating above 80. The pattern duration on NSE typically ranges from 7-26 weeks, with longer cups producing larger subsequent advances.',
+        links:[['O\'Neil Book','https://www.amazon.com/How-Make-Money-Stocks-Winning/dp/0071614133'],['IBD CANSLIM','https://www.investors.com/ibd-university/can-slim/'],['Investopedia','https://www.investopedia.com/terms/c/cupandhandle.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Cup_and_handle']],
+        ai:'Explain Cup and Handle in complete detail for NSE trading using O\'Neil criteria. What is ideal cup depth? How deep should the handle be? What confirms valid breakout vs false? What is the average advance after confirmed breakout historically? How does Cup & Handle connect to Weinstein Stage Analysis? What is the failure rate and what causes Cup & Handle breakouts to fail? Provide analysis of historical Cup & Handle breakouts on NSE stocks with price targets and outcomes.'
+      },
+      { n:'MACD Divergence & Histogram Flip',
+        f:'MACD = EMA12 − EMA26 · Signal = EMA9(MACD) · Histogram = MACD − Signal · Bullish div: price lower low + MACD higher low · Flip: histogram crosses above/below zero',
+        d:'MACD (Moving Average Convergence Divergence) was developed by Gerald Appel in the late 1970s and remains one of the top three most-used technical indicators globally. The 12/26/9 parameter combination was chosen by Appel through empirical optimization on equity markets. The histogram (MACD minus Signal) is often the most useful component — it shows the momentum of momentum: rising histogram means acceleration, falling histogram means deceleration. MACD divergence differs from basic MACD crossovers: it compares MACD peaks/troughs to corresponding price peaks/troughs, revealing hidden momentum changes not visible in price. Bullish divergence (price lower low, MACD higher low) indicates selling momentum weakening — smart money buying gradually supports the market, causing MACD to bottom before price. Academic research consistently shows MACD divergence has statistically significant predictive power for medium-term reversals, particularly on weekly charts. The Histogram Flip (crossing zero) is an early confirmation: when histogram crosses from negative to positive, the 12-period EMA has just crossed above the 26-period EMA. The NSE scanner detects flip events that occurred on the most recent bar, providing the earliest possible signal of momentum reversal. MACD divergence combined with RSI divergence simultaneously — "double divergence" — is considered one of the highest-probability reversal signals available from technical indicators. In NSE banking stocks, MACD divergence on weekly charts at major support levels (yearly Fibonacci or Camarilla S3) has historically produced 65%+ win-rate reversal trades.',
+        links:[['Investopedia MACD','https://www.investopedia.com/terms/m/macd.asp'],['Wikipedia','https://en.wikipedia.org/wiki/MACD'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:moving_average_convergence_divergence_macd']],
+        ai:'Explain MACD divergence and histogram flip for NSE trading. What is the difference between MACD line divergence and histogram divergence? How reliable is MACD divergence vs RSI divergence historically? When does MACD give false divergence signals and how to avoid them? How should the 12/26/9 parameters be adjusted for NSE weekly analysis? What is "double divergence" and why is it especially powerful? Provide examples of MACD divergence preceding major reversals in NSE sectors.'
+      },
+      { n:'Z-Score Mean Reversion',
+        f:'Z = (Close − MA20) / StdDev20 · Extreme Oversold: Z < −3.0 (occurs <0.5% of sessions) · Oversold: Z < −2.0 · Overbought: Z > +2.0',
+        d:'Z-score mean reversion is a quantitative strategy used by systematic hedge funds, statistical arbitrage desks at major banks, and algorithmic trading firms globally. The Z-score measures how many standard deviations the current price is from its 20-day moving average — a reading of +2 means price is statistically 2 standard deviations above recent mean, occurring only 2.5% of the time in a normal distribution. Mean reversion strategies rest on the empirical observation that asset prices oscillate around short-term moving averages, and extreme deviations self-correct. Z below −2.0 signals an unusually severe short-term decline — not a fundamental bear market, but a statistical outlier tending to retrace toward the mean within 5-20 days. Z below −3.0 (extreme oversold) is particularly powerful: research on global indices shows buying when Z < −3 and holding 10 days produces positive returns approximately 72% of the time with average gains of 3-5%. Bollinger %B (shown alongside Z-score) normalizes this to 0-100: below 0 means price is below the lower Bollinger Band, above 100 means above upper band. The key risk of mean reversion: "value traps" — a stock can be statistically oversold for fundamental reasons (deteriorating earnings, fraud, regulatory action) making further decline likely. This is why the scanner should be combined with 200-day SMA filter and minimum RS rating — statistically oversold stocks in long-term uptrends have much better mean reversion characteristics than those in downtrends. In NSE markets, Z-score extreme oversold signals have historically worked best in Nifty 50 index components during market-wide corrections rather than individual stock-specific declines.',
+        links:[['Investopedia Mean Reversion','https://www.investopedia.com/terms/m/meanreversion.asp'],['Wikipedia Z-score','https://en.wikipedia.org/wiki/Standard_score'],['QuantifiedStrategies','https://www.quantifiedstrategies.com/mean-reversion-trading/']],
+        ai:'Explain Z-score mean reversion for NSE stock trading. How is the Z-score calculated? What is the win rate of Z<-2 vs Z<-3 signals historically? How do you avoid value traps when using Z-score? How should position sizing be adjusted for mean reversion trades? What holding period maximizes returns on NSE Z-score signals? How does the Bollinger %B metric relate to Z-score? Provide backtesting results comparing Z-score mean reversion signals in Nifty 50 stocks.'
+      },
+    ]},
+    {icon:'🎖', title:'Tier-3 Strategies', items:[
+      { n:'Fibonacci Retracement from Swing Points',
+        f:'Swing High → Low (or Low → High) · 23.6%=(H−L)×0.236 · 38.2%=×0.382 · 50%=midpoint · 61.8%=golden ratio · 78.6%=deep retracement',
+        d:'Fibonacci retracements measure pullbacks within the most recent significant swing move — dynamic and context-dependent, unlike Fibonacci pivots which use fixed formulas on recent sessions. The 61.8% level comes from dividing any Fibonacci number by the one following it (55÷89=0.618); the 38.2% level from dividing by the number two positions forward (55÷144=0.382). The 50% level has no Fibonacci basis — it derives from Dow Theory and Gann Analysis — but has been empirically observed as a powerful equilibrium level. The 61.8% "Golden Ratio" is the most significant level because this ratio appears throughout nature (galaxy spirals, shell growth, leaf patterns) and financial markets have collectively decided to respect it as a major support zone. Professional traders draw Fibonacci from clear swing lows to highs on clean trends and look for confluence — when a Fibonacci level coincides with a pivot point, order block, or moving average, reaction probability increases significantly. The 38.2% retracement is typically the first meaningful support in a strong uptrend — shallow enough to retain momentum, deep enough to shake out weak hands. The 78.6% level (√0.618) is the "last line of defense" — a closing breach typically indicates a full reversal rather than retracement. The NSE scanner identifies the most recent swing high/low within 120 bars and computes all Fibonacci levels dynamically, including the trend direction. In NSE markets, the 61.8% Fibonacci of major Nifty corrections (2020 crash, 2022 correction) has historically attracted massive institutional buying. Fibonacci levels achieve their highest accuracy when 3+ technical factors converge at the same price zone.',
+        links:[['Investopedia','https://www.investopedia.com/terms/f/fibonacciretracement.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Fibonacci_retracement'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:fibonacci_retracemen']],
+        ai:'Explain Fibonacci retracement for NSE trading. How are the 23.6%, 38.2%, 50%, 61.8%, 78.6% levels mathematically derived? Why does 61.8% work so consistently in markets? How do you identify valid swing points for drawing Fibonacci? What is confluence and how does combining Fibonacci with pivots increase reliability? What is the difference between Fibonacci retracement and Fibonacci extension? Provide detailed examples of Fibonacci retracements on major NSE sector moves.'
+      },
+      { n:'ADX — Average Directional Index + DI System',
+        f:'+DI = smoothed(+DM)/ATR×100 · −DI = smoothed(−DM)/ATR×100 · DX = |+DI−−DI|/(+DI+−DI)×100 · ADX = Wilder-smoothed DX (14 periods)',
+        d:'ADX was developed by J. Welles Wilder Jr. and introduced in "New Concepts in Technical Trading Systems" (1978), alongside RSI, ATR, and Parabolic SAR — a remarkable set of indicators from a single source still universally used today. ADX measures trend strength without indicating direction — a high ADX means the market is trending strongly (either up or down); a low ADX means range-bound or choppy conditions. The +DI (Positive Directional Indicator) measures upward movement force; −DI measures downward force; when +DI exceeds −DI, the trend direction is bullish. Wilder\'s key thresholds: ADX below 20 = no meaningful trend (avoid trend-following strategies), ADX 20-25 = emerging trend, ADX 25-40 = established trend (trade confidently), ADX above 40 = extremely powerful trend (widen stops considerably). The DI Crossover is a trend direction change signal: +DI crossing above −DI indicates bulls gaining control; −DI crossing above +DI signals bears taking control. Without the ADX strength filter, DI crossovers produce excessive false signals in choppy markets — the ADX ≥25 filter dramatically reduces whipsaws. Professional trend-following funds historically used ADX as a "gating" condition: only apply trend system if ADX > threshold. In NSE sector ETF trading, ADX crossovers have been effective for identifying when beaten-down sectors begin institutional recovery. The ADX Extreme signal (≥40) on NSE large-caps signals a powerful trend that should be traded with momentum rather than contra-trend strategies.',
+        links:[['Investopedia ADX','https://www.investopedia.com/terms/a/adx.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Average_directional_movement_index'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:average_directional_index_adx']],
+        ai:'Explain ADX and the DI system for NSE trading. How is ADX calculated differently from +DI and -DI? What ADX level defines a meaningful trend? How should DI crossovers be used with ADX filters to reduce false signals? How do trend-following funds use ADX as a gating condition? What is the "ADX peak" signal and what does it indicate? Compare ADX to moving average crossovers for trend detection. Provide NSE examples of ADX extreme signals preceding sustained sector trends.'
+      },
+      { n:'Stochastic Oscillator',
+        f:'%K = (Close − LowestLow14)/(HighestHigh14 − LowestLow14)×100 · Slow%K = 3-period MA of %K · %D = 3-period MA of Slow%K',
+        d:'The Stochastic Oscillator was developed by George Lane in the late 1950s, one of the first computer-generated indicators, created on early mainframes for commodity analysis. Lane\'s core insight: in uptrends, closes tend near the daily high; in downtrends, near the low — measuring where the close falls within the recent range reveals momentum direction. The raw %K formula is called "fast stochastic" and is highly sensitive to noise; "slow stochastic" applies a 3-period MA before computing %D, significantly reducing noise while retaining signal sensitivity. The overbought zone (>80) and oversold zone (<20) represent extremes of momentum where statistical reversal probability increases. The bullish cross (%K crossing above %D) while both lines are below 40 combines oversold conditions with a momentum inflection — the scanner specifically requires the cross to occur below 40, not 80, for maximum reliability. George Lane himself warned against buying simply because Stochastic is oversold — in strong downtrends, the oscillator can remain oversold for weeks. "Triple divergence" (price making 3 lower lows while Stochastic forms progressively higher lows across 3 cycles) is considered by many analysts to be the single most powerful oscillator reversal signal. Stochastic performs best in range-bound markets where overbought/oversold levels have genuine reversal implications. In NSE futures and options trading, Stochastic crosses in the 15-minute timeframe using a 21-period setting (covering one full trading session) are popular for short-term entry timing.',
+        links:[['Investopedia Stochastic','https://www.investopedia.com/terms/s/stochasticoscillator.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Stochastic_oscillator'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:stochastic_oscillator_fast_slow_and_full']],
+        ai:'Explain the Stochastic Oscillator for NSE trading. What is the difference between fast, slow, and full stochastic? When is a stochastic buy signal valid vs invalid? How do you avoid false signals in trending markets? How do overbought/oversold thresholds need adjusting in different market regimes? Compare Stochastic to RSI and Williams %R for NSE trading applications. What is the statistical win rate of stochastic bullish crosses at key NSE support levels?'
+      },
+      { n:'Williams %R',
+        f:'%R = (HighestHigh14 − Close)/(HighestHigh14 − LowestLow14) × (−100) · Overbought: > −20 · Oversold: < −80',
+        d:'Williams %R was developed by Larry Williams, who famously turned $10,000 into $1.1 million in one year during the 1987 World Cup Championship of Futures Trading — one of the most documented short-term trading performances in history. The indicator is mathematically the inverse of Stochastic %K: while Stochastic measures from the bottom of the range, %R measures from the top. The −100 to 0 scale means readings near 0 (between 0 and −20) indicate the close is near the session high (overbought), while readings near −100 (between −80 and −100) indicate the close is near the session low (oversold). Williams intentionally designed the inverted scale to force traders to think differently, avoiding mechanical over-reliance. The most valuable signal is the "exit from oversold" (was below −80, now crossed above −80): this indicates the selling force that compressed price to extremes is losing momentum and a bounce is underway. As a 14-period fast oscillator, %R responds significantly more quickly to price changes than MACD or RSI, making it ideal for entry timing within a larger trend framework. Williams used %R as part of his "Ultimate Oscillator" system combining three timeframe Stochastics. Professional traders typically use %R for timing entries within trends established by slower indicators — for example, entering a long position on Williams %R oversold (−80) only when weekly MACD is in bull territory. In NSE derivatives trading, %R computed on 15-minute bars is particularly popular among F&O traders for timing positions at key intraday support/resistance levels.',
+        links:[['Investopedia Williams %R','https://www.investopedia.com/terms/w/williamsr.asp'],['Wikipedia','https://en.wikipedia.org/wiki/Williams_%25R'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:williams_r']],
+        ai:'Explain Williams %R for NSE trading. How does it compare to Stochastic %K mathematically? Why did Williams use an inverted scale? What is the statistical reliability of the exit-from-oversold signal? How should Williams %R be combined with trend indicators? What period setting works best on NSE daily vs intraday charts? How did Larry Williams personally use this indicator in his 1987 World Cup strategy? Provide examples of Williams %R signals on NSE F&O stocks.'
+      },
+    ]},
+  ];
+
+  let html=`<div class="help-wrap">
+    <div style="font-family:var(--mono);font-size:9px;color:var(--mu);margin-bottom:14px;padding:8px 12px;background:rgba(59,158,255,.04);border:1px solid rgba(59,158,255,.12);border-radius:5px">
+      ❓ Detailed reference for every strategy in the scanner — 10+ sentence explanations, authoritative references, and AI chat shortcuts to learn more. Click any section to expand.
+    </div>`;
+
+  window._HS=H; // expose to showHelp() popup
+  H.forEach(sec=>{
+    const cnt=sec.items.length;
+    html+=`<details><summary>${sec.icon} ${sec.title} <span style="color:var(--mu);font-size:9px;margin-left:auto">${cnt} strategies ▼</span></summary><div style="padding:10px 14px;display:flex;flex-direction:column;gap:14px">`;
+    sec.items.forEach(item=>{
+      const refs=item.links?refLinks(item.links):'';
+      const ai=item.ai?aiLinks(item.n,item.ai):'';
+      html+=`<div class="help-item" style="max-width:100%">
+        <div class="help-item-name">${item.n}</div>
+        <div class="help-item-formula">${item.f}</div>
+        <div class="help-item-desc" style="font-size:11px;line-height:1.85;color:var(--txt);margin-top:6px">${item.d}</div>
+        ${refs}${ai}
+      </div>`;
+    });
+    html+=`</div></details>`;
+  });
+
+  html+=`<div style="font-family:var(--mono);font-size:9px;color:var(--mu);margin-top:10px;padding:8px 12px;background:rgba(255,140,66,.04);border:1px solid rgba(255,140,66,.12);border-radius:4px">
+    ⚠️ Not buildable from daily OHLC: VWAP (needs intraday) · FII/DII buying (needs NSE bhav copy) · Options Max Pain/PCR (needs options chain) · 
+    Use <code>--nifty</code> flag to enable RS vs Nifty · Regenerate index.html after running pivot_scanner.py
+  </div></div>`;
+  return html;
+}
+
+
+
+// ── INFO PANEL TOGGLE ─────────────────────────────────────────────────────────
+let _infoOpen=false;
+function toggleInfo(){
+  _infoOpen=!_infoOpen;
+  const p=document.getElementById('info-panel');
+  if(!p) return;
+  p.classList.toggle('open',_infoOpen);
+  if(_infoOpen && !p.innerHTML){
+    p.innerHTML=document.getElementById('fbar').innerHTML;
+  }
+}
+function setFbar(html, detail){
+  _infoOpen=false;
+  const fb=document.getElementById('fbar');
+  const ip=document.getElementById('info-panel');
+  if(fb) fb.innerHTML=html;
+  if(ip){ ip.innerHTML=detail||html; ip.classList.remove('open'); }
+}
+
+// ── AUTO-SCAN (debounced) ─────────────────────────────────────────────────────
+let _aScanTimer=null;
+function triggerAutoScan(){
+  clearTimeout(_aScanTimer);
+  _aScanTimer=setTimeout(()=>{
+    const t=currentTab;
+    if(t==='home'||t==='help') return;
+    if(t==='piv') scan();
+    else if(t==='smc') scanSMC();
+    else if(t==='vol') scanVol();
+    else if(t==='mi') scanMI();
+    else if(t==='adv'){ updateAdvInfo(); scanAdv(); }
+    else if(t==='t1'){ updateT1Info(); scanT1(); }
+    else if(t==='t2'){ updateT2Info(); scanT2(); }
+    else if(t==='t3'){ updateT3Info(); scanT3(); }
+    else if(t==='ti'){ updateTIInfo(); scanTI(); }
+  },350);
+}
+function initAutoScan(){
+  // Attach change/input listeners to all ctrl panel form elements
+  document.querySelectorAll('[id^="ctrl-"] select').forEach(el=>{
+    el.addEventListener('change',triggerAutoScan);
+  });
+  document.querySelectorAll('[id^="ctrl-"] input[type=number]').forEach(el=>{
+    el.addEventListener('input',triggerAutoScan);
+  });
+}
+
+// ── 🏅 INDIA PRO ─────────────────────────────────────────────────────────────
+const TI_INFO={
+  candle_hammer:'<b>Hammer</b> · Chartink/StockEdge · Small body at top, long lower shadow (≥2× body) — sellers tried but buyers rejected the lows · Most reliable at support levels or pivot zones',
+  candle_inv_hammer:'<b>Inverted Hammer</b> · StockEdge · Small body at bottom, long upper shadow — buyers attempted a rally · Often precedes reversal when found at support',
+  candle_bull_eng:'<b>Bullish Engulfing</b> · Chartink · Current bull candle body fully covers prior bear candle — aggressive buying overwhelmed selling · Most reliable at key support',
+  candle_morning_star:'<b>Morning Star</b> · StockEdge · Three-bar reversal: large bear → small indecision star → large bull closing above 50% of bar 1 · High-probability bottom',
+  candle_piercing:'<b>Piercing Line</b> · Chartink · Bear day, then bull opens below prior low and closes above 50% of prior body · Strong reversal signal at support',
+  candle_bull_har:'<b>Bullish Harami</b> · Small bull candle body contained inside prior large bear candle · Indecision — watch for follow-through on next bar',
+  candle_tws:'<b>Three White Soldiers</b> · Three consecutive bullish candles each with large body (>55% of range) and progressively higher closes · Strongest bullish pattern',
+  candle_doji:'<b>Doji</b> · Body <10% of range — perfect indecision between buyers and sellers · Critical at swing highs/lows as potential reversal warning',
+  candle_shooting_star:'<b>Shooting Star</b> · Bear candle with long upper shadow (≥2× body) at the top of an uptrend · Sellers rejected the highs — bearish reversal',
+  candle_bear_eng:'<b>Bearish Engulfing</b> · Current bear candle engulfs prior bull candle · Institutional selling signal especially at resistance levels',
+  candle_dark_cloud:'<b>Dark Cloud Cover</b> · Bull day, then bear opens above prior high and closes below 50% · Distribution signal — exit longs on confirmation',
+  candle_evening_star:'<b>Evening Star</b> · Three-bar reversal: large bull → small star → large bear closing below 50% of bar 1 · High-probability top at resistance',
+  candle_bear_har:'<b>Bearish Harami</b> · Small bear candle inside prior large bull · Indecision at top — monitor for confirmation breakdown next session',
+  candle_tbc:'<b>Three Black Crows</b> · Three consecutive large-body bearish candles with lower closes · Strongest bearish continuation pattern',
+  ema_c921_bull:'<b>EMA 9/21 Bull Cross</b> · Chartink real-time alert · 9-period EMA just crossed above 21-period EMA · Short-term trend shift to bullish · Best when ADX ≥25',
+  ema_c921_bear:'<b>EMA 9/21 Bear Cross</b> · 9 EMA just crossed below 21 EMA · Short-term trend turning bearish · Exit longs, reduce exposure',
+  ema_c2050_bull:'<b>EMA 20/50 Bull Cross</b> · Chartink premium alert · Medium-term trend confirmed bullish · More reliable than 9/21, fewer whipsaws',
+  ema_c2050_bear:'<b>EMA 20/50 Bear Cross</b> · Medium-term trend turning bearish · Portfolio-level signal to reduce equity exposure',
+  ema_fan_bull:'<b>EMA Fan Bullish</b> · Price > EMA9 > EMA21 > EMA50 — all EMAs stacked in perfect bullish order · Trendlyne momentum hallmark · Strong trend confirmation',
+  ema_fan_bear:'<b>EMA Fan Bearish</b> · Price < EMA9 < EMA21 < EMA50 — all EMAs in bearish stack · Strong downtrend — avoid longs',
+  ema_recent_921:'<b>Fresh 9/21 Bull Cross</b> · EMA 9 crossed above 21 within last 8 bars — still early in the move · Best entry window for short-term momentum',
+  mom_high:'<b>High Composite Momentum</b> · Trendlyne-style weighted score (1M×15%+3M×25%+6M×30%+12M×30%) ≥ 20% · Top-tier price performance across all time horizons',
+  mom_positive_all:'<b>All-Timeframe Positive</b> · 1M, 3M, 6M, and 12M returns all positive — consistent performer across every lookback · Classic bull market leader',
+  mom_roc10_bull:'<b>Fast Mover (ROC 10-day >5%)</b> · Chartink scan · 10-day Rate of Change above 5% · Strong recent momentum — buyers are aggressive',
+  mom_roc21_bull:'<b>Monthly Mover (ROC 21-day >8%)</b> · 21-day ROC above 8% · Sustained buying pressure over the past month',
+  mom_neg:'<b>Negative Composite Momentum</b> · Weighted score negative — stock is underperforming across all timeframes · Avoid long positions',
+  seq_hh3:'<b>3 Higher Highs</b> · ScanX/Chartink · Three consecutive days where each high exceeds the prior day\'s high · Uptrend structure forming — institutional buying',
+  seq_hh5:'<b>5 Higher Highs</b> · Five consecutive higher highs — sustained uptrend with consistent bid · Very reliable for momentum entry',
+  seq_hl3:'<b>3 Higher Lows</b> · Three consecutive higher lows — buyers are defending progressively higher prices · Classic uptrend structure (HH+HL)',
+  seq_hc3_vol:'<b>3 Higher Closes + Volume</b> · Three consecutive higher closes WITH volume above 20-day average · Best quality accumulation signal — institutions buying consistently',
+  seq_ll3:'<b>3 Lower Lows</b> · Three consecutive lower lows — downtrend structure · Avoid longs, wait for reversal confirmation',
+  vol_acc3:'<b>3-Day Accumulation Streak</b> · StockEdge signature · 3+ days of both rising price AND rising volume — classic institutional steady accumulation pattern',
+  vol_acc5:'<b>5-Day Accumulation Streak</b> · Five consecutive up-days with rising volume — sustained institutional buying · Very high conviction setup',
+  vol_quiet:'<b>Quiet Accumulation</b> · StockEdge Club · Price flat (±2%) but volume consistently 1.3× average for 3 days — institutions accumulating without moving price · Pre-breakout signal',
+  consol_10:'<b>10-Day Tight Coil</b> · Chartink pre-breakout scan · Within 5% of 52W high AND last 10-day range is less than 5% of the high · Classic pre-breakout compression like VCP',
+  consol_15:'<b>Extended Base (15-day)</b> · Within 7% of 52W high with volume drying up below 80% of avg — stock coiling for a move · Watch for high-volume breakout above the high',
+  ma_max4:'<b>Above All 4 MAs</b> · StockEdge price scan · Price above 20, 50, 100, AND 200 SMA simultaneously · Maximum bullish alignment — stock is above all significant moving average levels',
+  ma_all_bull:'<b>Full MA Stack Bullish</b> · Price > MA20 > MA50 > MA100 > MA200 — perfect stacking in descending order · The "holy grail" of MA alignment — Minervini Trend Template compatible',
+  ma_above3:'<b>Above 20/50/100 SMA</b> · Less strict version · All three key MAs confirmed bullish · Good for mid-cap and small-cap where 200 SMA may lag',
+};
+
+function updateTIInfo(){
+  const s=document.getElementById('ti-strat').value;
+  setFbar(`<span style="color:#ff9500">🏅 India Pro</span> · ${TI_INFO[s]||s}`);
+}
+
+function scanTI(){
+  const strat=document.getElementById('ti-strat').value;
+  const idxF =parseInt(document.getElementById('ti-idx').value);
+  const rsMin=parseInt(document.getElementById('ti-rs').value);
+  const prMin=parseFloat(document.getElementById('ti-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('ti-pmax').value)||Infinity;
+  updateTIInfo();
+  rows=[];
+  for(const s of S){
+    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if(s.rs<rsMin)continue;
+    if(!s.ti)continue;
+    const ti=s.ti;
+    const cd=ti.candle||{}; const em=ti.ema||{}; const mo=ti.mom||{};
+    const sq=ti.seq||{}; const vb=ti.volbld||{}; const co=ti.consol||{};
+    const ma=ti.ma||{};
+    let matched=false; let sig=''; let extra={};
+
+    // Candlestick
+    if(strat==='candle_hammer')     {matched=!!cd.hammer;      sig='🔨 Hammer';       extra={close:s.price};}
+    if(strat==='candle_inv_hammer') {matched=!!cd.inv_hammer;  sig='🔼 Inv Hammer';   extra={close:s.price};}
+    if(strat==='candle_bull_eng')   {matched=!!cd.bull_eng;    sig='📗 Bull Eng';     extra={close:s.price};}
+    if(strat==='candle_morning_star'){matched=!!cd.morning_star;sig='🌅 Morn Star';   extra={close:s.price};}
+    if(strat==='candle_piercing')   {matched=!!cd.piercing;    sig='🔵 Piercing';     extra={close:s.price};}
+    if(strat==='candle_bull_har')   {matched=!!cd.bull_har;    sig='📘 Bull Harami';  extra={close:s.price};}
+    if(strat==='candle_tws')        {matched=!!cd.tws;         sig='🕯🕯🕯 3W Sold';  extra={close:s.price};}
+    if(strat==='candle_doji')       {matched=!!cd.doji;        sig='➕ Doji';         extra={close:s.price};}
+    if(strat==='candle_shooting_star'){matched=!!cd.shooting_star;sig='🔻 Shoot Star';extra={close:s.price};}
+    if(strat==='candle_bear_eng')   {matched=!!cd.bear_eng;    sig='📕 Bear Eng';     extra={close:s.price};}
+    if(strat==='candle_dark_cloud') {matched=!!cd.dark_cloud;  sig='☁️ Dark Cloud';   extra={close:s.price};}
+    if(strat==='candle_evening_star'){matched=!!cd.evening_star;sig='🌆 Eve Star';    extra={close:s.price};}
+    if(strat==='candle_bear_har')   {matched=!!cd.bear_har;    sig='📙 Bear Harami';  extra={close:s.price};}
+    if(strat==='candle_tbc')        {matched=!!cd.tbc;         sig='🕯🕯🕯 3B Crow';  extra={close:s.price};}
+
+    // EMA
+    if(strat==='ema_c921_bull')  {matched=!!em.c921_bull;  sig='📈 EMA 9↑21'; extra={e9:em.e9,e21:em.e21,e50:em.e50};}
+    if(strat==='ema_c921_bear')  {matched=!!em.c921_bear;  sig='📉 EMA 9↓21'; extra={e9:em.e9,e21:em.e21};}
+    if(strat==='ema_c2050_bull') {matched=!!em.c2050_bull; sig='📈 EMA 20↑50'; extra={e21:em.e21,e50:em.e50};}
+    if(strat==='ema_c2050_bear') {matched=!!em.c2050_bear; sig='📉 EMA 20↓50'; extra={e21:em.e21,e50:em.e50};}
+    if(strat==='ema_fan_bull')   {matched=!!em.fan_bull;   sig='🚀 EMA Fan ↑'; extra={e9:em.e9,e21:em.e21,e50:em.e50};}
+    if(strat==='ema_fan_bear')   {matched=!!em.fan_bear;   sig='📉 EMA Fan ↓'; extra={e9:em.e9,e21:em.e21,e50:em.e50};}
+    if(strat==='ema_recent_921') {matched=!!em.recent_921; sig='⚡ Fresh 9↑21'; extra={e9:em.e9,e21:em.e21};}
+
+    // Momentum
+    if(strat==='mom_high')        {matched=(mo.score||0)>=20;       sig='🔥 High Mom';   extra={score:mo.score+'%',r1m:mo.r1m+'%',r3m:mo.r3m+'%',r6m:mo.r6m+'%'};}
+    if(strat==='mom_positive_all'){matched=!!mo.positive_all;       sig='📈 All+ve';     extra={r1m:mo.r1m+'%',r3m:mo.r3m+'%',r6m:mo.r6m+'%',r12m:mo.r12m+'%'};}
+    if(strat==='mom_roc10_bull')  {matched=(mo.roc10||0)>5;         sig='⚡ ROC10>5%';   extra={roc10:mo.roc10+'%',r1m:mo.r1m+'%'};}
+    if(strat==='mom_roc21_bull')  {matched=(mo.roc21||0)>8;         sig='🚀 ROC21>8%';   extra={roc21:mo.roc21+'%',r3m:mo.r3m+'%'};}
+    if(strat==='mom_neg')         {matched=(mo.score||0)<0;         sig='📉 Neg Mom';    extra={score:mo.score+'%',r3m:mo.r3m+'%',r12m:mo.r12m+'%'};}
+
+    // Sequential
+    if(strat==='seq_hh3')    {matched=!!sq.hh3; sig='↗ 3 Higher H';  extra={vol_conf:sq.vol_confirm?'Yes':'No'};}
+    if(strat==='seq_hh5')    {matched=!!sq.hh5; sig='↗↗ 5 Higher H'; extra={};}
+    if(strat==='seq_hl3')    {matched=!!sq.hl3; sig='↗ 3 Higher L';  extra={};}
+    if(strat==='seq_hc3_vol'){matched=!!sq.hc3&&!!sq.vol_confirm; sig='📈 3HC+Vol'; extra={vol_confirm:'Yes'};}
+    if(strat==='seq_ll3')    {matched=!!sq.ll3; sig='↘ 3 Lower L';   extra={};}
+
+    // Volume buildup
+    if(strat==='vol_acc3')  {matched=!!vb.acc3;    sig='📦 Acc 3d';    extra={streak:vb.streak+'d',avg20:vb.avg20};}
+    if(strat==='vol_acc5')  {matched=!!vb.acc5;    sig='📦📦 Acc 5d';  extra={streak:vb.streak+'d',avg20:vb.avg20};}
+    if(strat==='vol_quiet') {matched=!!vb.quiet_acc;sig='🔕 Quiet Acc';extra={avg20:vb.avg20};}
+
+    // Consolidation
+    if(strat==='consol_10') {matched=!!co.coil10; sig='🎯 Coil 10d'; extra={dist:co.dist_pct+'%',rng10:co.last10_rng+'%',w52h:co.w52h};}
+    if(strat==='consol_15') {matched=!!co.coil15; sig='🎯 Coil 15d'; extra={dist:co.dist_pct+'%',vol_dry:co.vol_dry+'×',w52h:co.w52h};}
+
+    // MA alignment
+    if(strat==='ma_max4')   {matched=!!ma.max4;    sig='🔝 Above All4'; extra={ma20:ma.ma20,ma50:ma.ma50,ma100:ma.ma100,ma200:ma.ma200};}
+    if(strat==='ma_all_bull'){matched=!!ma.all_bull;sig='🏆 MA Stack';  extra={ma20:ma.ma20,ma50:ma.ma50,ma100:ma.ma100,ma200:ma.ma200};}
+    if(strat==='ma_above3') {matched=!!ma.above_all3;sig='📊 Above3MA'; extra={ma20:ma.ma20,ma50:ma.ma50,ma100:ma.ma100};}
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig, extra, strat, _tab:'ti'});
   }
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
@@ -1582,6 +3393,91 @@ function buildCols(tab,r0){
       {k:'date',  h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
+  if(tab==='t1'){
+    const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
+      k:'ex_'+k,h:k,
+      fn:r=>{const v=r.extra?.[k];
+        if(v===undefined||v===null||v==='')return`<td class="mu">—</td>`;
+        if(k==='rsi')return`<td class="${v<=30?'pos':v>=70?'neg':''}" style="font-weight:700">${v}</td>`;
+        return`<td class="mu">${v}</td>`;}
+    })):[];
+    return[
+      {k:'sym',  h:'Symbol',   fn:r=>symCell(r.sym)},
+      {k:'idx',  h:'Index',    fn:r=>idxBadge(r.idx)},
+      {k:'price',h:'Close',    fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
+      {k:'sig',  h:'Signal',   fn:r=>`<td style="color:#c47aff;font-weight:700;font-size:12px">${r.sig}</td>`},
+      {k:'rsi',  h:'RSI',      fn:r=>`<td class="${r.rsi<=30?'pos':r.rsi>=70?'neg':''}">${r.rsi}</td>`},
+      ...extraCols,
+      {k:'rs',       h:'RS',        fn:r=>rsCell(r.rs)},
+      {k:'above200', h:'vs 200DMA', fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'w52h',     h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
+      {k:'avol',     h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
+      {k:'date',     h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
+    ];
+  }
+  if(tab==='t2'){
+    const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
+      k:'e2_'+k,h:k,
+      fn:r=>{const v=r.extra?.[k];
+        if(v===undefined||v===null||v==='')return`<td class="mu">—</td>`;
+        if(k==='z20'||k==='z50'||k==='z200'){
+          const fv=parseFloat(v)||0;
+          return`<td class="${fv<=-2?'pos':fv>=2?'neg':''}" style="font-weight:600">${v}</td>`;}
+        return`<td class="mu">${v}</td>`;}
+    })):[];
+    return[
+      {k:'sym',  h:'Symbol',   fn:r=>symCell(r.sym)},
+      {k:'idx',  h:'Index',    fn:r=>idxBadge(r.idx)},
+      {k:'price',h:'Close',    fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
+      {k:'sig',  h:'Signal',   fn:r=>`<td style="color:var(--acc);font-weight:700;font-size:12px">${r.sig}</td>`},
+      ...extraCols,
+      {k:'rs',       h:'RS',        fn:r=>rsCell(r.rs)},
+      {k:'above200', h:'vs 200DMA', fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'w52h',     h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
+      {k:'avol',     h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
+      {k:'date',     h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
+    ];
+  }
+  if(tab==='t3'){
+    const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
+      k:'e3_'+k, h:k,
+      fn:r=>{const v=r.extra?.[k];
+        if(v===undefined||v===null||v==='')return`<td class="mu">—</td>`;
+        if(k==='adx'){const fv=parseFloat(v)||0; return`<td class="${fv>=40?'pos':fv>=25?'':'mu'}" style="font-weight:600">${v}</td>`;}
+        if(k==='k'||k==='d'){const fv=parseFloat(v)||0; return`<td class="${fv<=20?'pos':fv>=80?'neg':''}">${v}</td>`;}
+        if(k==='wr'){const fv=parseFloat(v)||0; return`<td class="${fv<=-80?'pos':fv>=-20?'neg':''}">${v}</td>`;}
+        return`<td class="mu">${v}</td>`;}
+    })):[];
+    return[
+      {k:'sym',  h:'Symbol',   fn:r=>symCell(r.sym)},
+      {k:'idx',  h:'Index',    fn:r=>idxBadge(r.idx)},
+      {k:'price',h:'Close',    fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
+      {k:'sig',  h:'Signal',   fn:r=>`<td style="color:var(--gold);font-weight:700;font-size:12px">${r.sig}</td>`},
+      ...extraCols,
+      {k:'rs',       h:'RS',        fn:r=>rsCell(r.rs)},
+      {k:'above200', h:'vs 200DMA', fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'w52h',     h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
+      {k:'avol',     h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
+      {k:'date',     h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
+    ];
+  }
+  if(tab==='ti'){
+    const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
+      k:'eti_'+k,h:k,fn:r=>`<td class="mu">${r.extra?.[k]??'—'}</td>`
+    })):[];
+    return[
+      {k:'sym',  h:'Symbol',  fn:r=>symCell(r.sym)},
+      {k:'idx',  h:'Index',   fn:r=>idxBadge(r.idx)},
+      {k:'price',h:'Close',   fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
+      {k:'sig',  h:'Pattern / Signal',fn:r=>`<td style="color:#ff9500;font-weight:700;font-size:12px">${r.sig}</td>`},
+      ...extraCols,
+      {k:'rs',      h:'RS',       fn:r=>rsCell(r.rs)},
+      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'w52h',    h:'vs 52WH',  fn:r=>w52Cell(r.price,r.w52h)},
+      {k:'avol',    h:'AvgVol20', fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
+      {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
+    ];
+  }
   return common;
 }
 
@@ -1617,6 +3513,10 @@ function exportCSV(){
     vol:['Symbol','Index','Close','Signal','POC','VAH','VAL','VolRatio','OBV','AD','RS','vs200DMA','AvgVol20','LastDate'],
     mi: ['Symbol','Index','Close','MinerviniScore','WeinStage','StageLabel','RS','vs200DMA','SMA50','SMA150','SMA200','SMA30W','AvgVol20','LastDate'],
     adv:['Symbol','Index','Close','Strategy','Signal',...Object.keys((rows[0]?.extra)||{}).filter(k=>k!=='sig'),'RS','vs200DMA','AvgVol20','LastDate'],
+    t1: ['Symbol','Index','Close','Signal','RSI',...Object.keys((rows[0]?.extra)||{}),'RS','vs200DMA','vs52WH','AvgVol20','LastDate'],
+    t2: ['Symbol','Index','Close','Signal',...Object.keys((rows[0]?.extra)||{}),'RS','vs200DMA','vs52WH','AvgVol20','LastDate'],
+    t3: ['Symbol','Index','Close','Signal',...Object.keys((rows[0]?.extra)||{}),'RS','vs200DMA','vs52WH','AvgVol20','LastDate'],
+    ti: ['Symbol','Index','Close','Pattern/Signal',...Object.keys((rows[0]?.extra)||{}),'RS','vs200DMA','vs52WH','AvgVol20','LastDate'],
   };
   const cells={
     piv:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.lv,`${r.dist>=0?'+':''}${r.dist.toFixed(2)}%`,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.b6,r.b12,r.sh,r.sl2,r.sc2,r.sd,r.avol,r.date],
@@ -1624,6 +3524,10 @@ function exportCSV(){
     vol:r=>[r.sym,r.idx||'Other',r.price,r.vsig,r.poc,r.vah,r.val,r.vr,r.obv,r.ad,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
     mi: r=>[r.sym,r.idx||'Other',r.price,`${r.mts}/8`,r.stg,r.stgl,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.s50,r.s150,r.s200,r.s30w,r.avol,r.date],
     adv:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.strat,r.extra?.sig||'',...Object.keys((rows[0]?.extra)||{}).filter(k=>k!=='sig').map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
+    t1: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rsi,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,`${((r.price-r.w52h)/r.w52h*100).toFixed(1)}%`,r.avol,r.date],
+    t2: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,`${((r.price-r.w52h)/r.w52h*100).toFixed(1)}%`,r.avol,r.date],
+    t3: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,`${((r.price-r.w52h)/r.w52h*100).toFixed(1)}%`,r.avol,r.date],
+    ti: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,`${((r.price-r.w52h)/r.w52h*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
   const a=document.createElement('a');
@@ -1635,9 +3539,19 @@ function exportCSV(){
 document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('st-u').textContent=S.length;
   const p=loadPrefs();applyPrefs(p||DEFAULTS);
-  scan();
+  initAutoScan();
+  switchTab('home');
 });
 </script>
+<div class="hm-overlay" id="hm-overlay" onclick="closeHelpModal()"></div>
+<div class="hm-box" id="hm-box">
+  <div class="hm-hdr">
+    <span class="hm-title" id="hm-title">Strategy Info</span>
+    <button class="hm-close" onclick="closeHelpModal()">✕ Close</button>
+  </div>
+  <div class="hm-body" id="hm-body"></div>
+</div>
+<div class="toast" id="_toast"></div>
 </body>
 </html>
 """
@@ -1662,10 +3576,12 @@ def main():
     ap.add_argument("--n50",   default=N50_FILE); ap.add_argument("--n100", default=N100_FILE)
     ap.add_argument("--n200",  default=N200_FILE); ap.add_argument("--n500", default=N500_FILE)
     ap.add_argument("--n750",  default=N750_FILE); ap.add_argument("--out",  default=OUTPUT_HTML)
+    ap.add_argument("--nifty", default=None,
+                    help="Path to Nifty50 index CSV (enables RS vs Nifty strategy)")
     a = ap.parse_args()
     print(f"[*] Data: {a.data}")
     idx = {50:a.n50, 100:a.n100, 200:a.n200, 500:a.n500, 750:a.n750}
-    stocks = build_dataset(a.data, idx)
+    stocks = build_dataset(a.data, idx, nifty_path=a.nifty)
     if not stocks: print("[!] No stocks loaded"); return
     html = build_html(stocks, a.data)
     with open(a.out, "w", encoding="utf-8") as f: f.write(html)
