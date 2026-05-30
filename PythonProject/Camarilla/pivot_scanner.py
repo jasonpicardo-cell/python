@@ -1153,6 +1153,343 @@ def compute_ma_alignment(df):
                 above_all3=bool(above_all3), all_bull=bool(all_bull))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 📐 NOISELESS — Definedge / TradePoint style (P&F · Renko · 3-Line Break · RRG · EW)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Point & Figure ────────────────────────────────────────────────────────────
+def compute_pnf(df, reversal=3):
+    """Point & Figure (1% auto box, 3-box reversal). Detects 14 P&F signals."""
+    if len(df)<30: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    price=float(C[-1])
+    box=max(price*0.01, 0.01)  # 1% of price, min 0.01
+
+    def snap(p): return int(p/box)*box
+
+    cols=[]  # [{'type':'X'/'O','high':float,'low':float}]
+    prev=snap(C[0])
+    for i in range(1,n):
+        curr=snap(C[i])
+        if not cols:
+            if curr>=prev+box: cols.append({'type':'X','high':curr,'low':prev})
+            elif curr<=prev-box: cols.append({'type':'O','high':prev,'low':curr})
+            else: prev=curr
+            continue
+        last=cols[-1]
+        if last['type']=='X':
+            if curr>=last['high']+box: last['high']=curr
+            elif curr<=last['high']-reversal*box:
+                cols.append({'type':'O','high':last['high']-box,'low':curr})
+        else:
+            if curr<=last['low']-box: last['low']=curr
+            elif curr>=last['low']+reversal*box:
+                cols.append({'type':'X','high':curr,'low':last['low']+box})
+        prev=curr
+
+    if len(cols)<3: return {}
+    xc=[c for c in cols if c['type']=='X']; oc=[c for c in cols if c['type']=='O']
+    cur=cols[-1]; in_x=cur['type']=='X'; in_o=not in_x
+
+    # Double Top/Bottom
+    dbl_top=bool(in_x and len(xc)>=2 and xc[-1]['high']>xc[-2]['high'])
+    dbl_bot=bool(in_o and len(oc)>=2 and oc[-1]['low']<oc[-2]['low'])
+    # Triple Top/Bottom (previous two X/O columns had same high/low)
+    tpl_top=bool(in_x and len(xc)>=3 and xc[-1]['high']>xc[-2]['high']
+                 and abs(xc[-2]['high']-xc[-3]['high'])<=box)
+    tpl_bot=bool(in_o and len(oc)>=3 and oc[-1]['low']<oc[-2]['low']
+                 and abs(oc[-2]['low']-oc[-3]['low'])<=box)
+    # Catapult: 3 consecutive X/O columns each making new extremes
+    bull_cat=bool(in_x and len(xc)>=3 and xc[-1]['high']>xc[-2]['high']>xc[-3]['high'])
+    bear_cat=bool(in_o and len(oc)>=3 and oc[-1]['low']<oc[-2]['low']<oc[-3]['low'])
+    # High Pole: long X column (≥5 boxes) followed by O retracing >50%
+    high_pole=False
+    if in_o and len(cols)>=2:
+        px=[c for c in cols[:-1] if c['type']=='X']
+        if px:
+            xh=px[-1]; xboxes=(xh['high']-xh['low'])/box
+            if xboxes>=5 and (cur['high']-cur['low'])>xboxes*box*0.5: high_pole=True
+    # Low Pole: long O column followed by X recovering >50%
+    low_pole=False
+    if in_x and len(cols)>=2:
+        po=[c for c in cols[:-1] if c['type']=='O']
+        if po:
+            oh=po[-1]; oboxes=(oh['high']-oh['low'])/box
+            if oboxes>=5 and (cur['high']-cur['low'])>oboxes*box*0.5: low_pole=True
+    # Ascending Triangle: X tops same, O bottoms rising
+    asc_tri=bool(len(xc)>=2 and len(oc)>=2
+                 and abs(xc[-1]['high']-xc[-2]['high'])<=box
+                 and oc[-1]['low']>oc[-2]['low'])
+    # Descending Triangle: O bottoms same, X tops falling
+    desc_tri=bool(len(oc)>=2 and len(xc)>=2
+                  and abs(oc[-1]['low']-oc[-2]['low'])<=box
+                  and xc[-1]['high']<xc[-2]['high'])
+    # Long Tail Reversal (column ≥8 boxes then reversal)
+    lt_bull=bool(in_x and len(cols)>=2
+                 and any(c['type']=='O' and (c['high']-c['low'])/box>=8
+                         for c in cols[-3:-1]))
+    lt_bear=bool(in_o and len(cols)>=2
+                 and any(c['type']=='X' and (c['high']-c['low'])/box>=8
+                         for c in cols[-3:-1]))
+    curr_boxes=round((cur['high']-cur['low'])/box)
+    return dict(in_x=bool(in_x),in_o=bool(in_o),
+                dbl_top=bool(dbl_top),dbl_bot=bool(dbl_bot),
+                tpl_top=bool(tpl_top),tpl_bot=bool(tpl_bot),
+                bull_cat=bool(bull_cat),bear_cat=bool(bear_cat),
+                high_pole=bool(high_pole),low_pole=bool(low_pole),
+                asc_tri=bool(asc_tri),desc_tri=bool(desc_tri),
+                lt_bull=bool(lt_bull),lt_bear=bool(lt_bear),
+                curr_boxes=curr_boxes,n_cols=len(cols),box=round(box,2))
+
+# ── Renko ─────────────────────────────────────────────────────────────────────
+def compute_renko(df):
+    """Renko chart (ATR-based brick size, 2-brick reversal). Definedge-style."""
+    if len(df)<20: return {}
+    C=df["Close"].values.astype(float)
+    H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
+    n=len(df); price=float(C[-1])
+    atr14=float(np.mean(H[-15:-1]-L[-15:-1])) if n>=15 else float(np.mean(H-L))
+    brick=max(atr14, price*0.005)
+
+    # bricks: [(direction 1/-1, open, close)]
+    bricks=[]
+    def add_bricks(d, start, end):
+        nb=int(abs(end-start)/brick)
+        for j in range(nb):
+            o=start+d*j*brick; c=start+d*(j+1)*brick
+            bricks.append((d,o,c))
+        return start+d*nb*brick
+
+    curr=round(C[0]/brick)*brick
+    for i in range(1,n):
+        p=C[i]
+        if not bricks:
+            if p>=curr+brick:
+                curr=add_bricks(1,curr,p)
+            elif p<=curr-brick:
+                curr=add_bricks(-1,curr,p)
+            continue
+        ld,lo,lc=bricks[-1]
+        if ld==1:
+            if p>=lc+brick: curr=add_bricks(1,lc,p)
+            elif p<=lc-2*brick: curr=add_bricks(-1,lc,p)
+        else:
+            if p<=lc-brick: curr=add_bricks(-1,lc,p)
+            elif p>=lc+2*brick: curr=add_bricks(1,lc,p)
+
+    if not bricks: return {}
+    ld,lo,lc=bricks[-1]
+    # Consecutive same-direction count
+    consec=0
+    for b in reversed(bricks):
+        if b[0]==ld: consec+=1
+        else: break
+    just_rev=bool(len(bricks)>=2 and bricks[-1][0]!=bricks[-2][0])
+    # Double Top/Bottom on Renko
+    up_closes=[b[2] for b in bricks if b[0]==1]
+    dn_closes=[b[2] for b in bricks if b[0]==-1]
+    renko_dbl_top=bool(len(up_closes)>=2 and abs(up_closes[-1]-up_closes[-2])<=brick*1.5)
+    renko_dbl_bot=bool(len(dn_closes)>=2 and abs(dn_closes[-1]-dn_closes[-2])<=brick*1.5)
+    return dict(bull=bool(ld==1),bear=bool(ld==-1),
+                just_rev=bool(just_rev),consec=consec,
+                punch3=bool(consec>=3),punch5=bool(consec>=5),
+                dbl_top=bool(renko_dbl_top),dbl_bot=bool(renko_dbl_bot),
+                n_bricks=len(bricks),brick=round(brick,2))
+
+# ── 3-Line Break ──────────────────────────────────────────────────────────────
+def compute_3lb(df, n=3):
+    """3-Line Break chart (Japanese noiseless method). Reversal = n lines."""
+    if len(df)<12: return {}
+    C=df["Close"].values.astype(float)
+    # lines: [(dir 1/-1, open_price, close_price)]
+    if C[1]>C[0]: lines=[(1,C[0],C[1])]
+    elif C[1]<C[0]: lines=[(-1,C[0],C[1])]
+    else: lines=[(1,C[0],C[1])]
+    for price in C[2:]:
+        ld,lo,lc=lines[-1]
+        recent=lines[-n:] if len(lines)>=n else lines[:]
+        max_c=max(l[2] for l in recent); min_c=min(l[2] for l in recent)
+        if ld==1:
+            if price>lc: lines.append((1,lc,price))
+            elif price<min_c: lines.append((-1,lc,price))
+        else:
+            if price<lc: lines.append((-1,lc,price))
+            elif price>max_c: lines.append((1,lc,price))
+    if not lines: return {}
+    ld,lo,lc=lines[-1]
+    just_rev=bool(len(lines)>=2 and lines[-1][0]!=lines[-2][0])
+    consec=0
+    for l in reversed(lines):
+        if l[0]==ld: consec+=1
+        else: break
+    return dict(bull=bool(ld==1),bear=bool(ld==-1),
+                just_rev=bool(just_rev),
+                rev_bull=bool(just_rev and ld==1),
+                rev_bear=bool(just_rev and ld==-1),
+                consec=consec,n_lines=len(lines))
+
+# ── Relative Rotation Graph ───────────────────────────────────────────────────
+def compute_rrg(df, nifty_df):
+    """RRG: RS-Ratio and RS-Momentum vs Nifty index.
+    Quadrants: Leading / Weakening / Lagging / Improving."""
+    if nifty_df is None or len(df)<25: return {}
+    merged=pd.merge(df[['Date','Close']].rename(columns={'Close':'s'}),
+                    nifty_df[['Date','Close']].rename(columns={'Close':'n'}),
+                    on='Date',how='inner').sort_values('Date')
+    if len(merged)<20: return {}
+    stk=merged['s'].values.astype(float)
+    nif=np.where(merged['n'].values.astype(float)==0,1,merged['n'].values.astype(float))
+    rs=stk/nif; m=len(rs)
+    # RS-Ratio: normalized around 100 using 10-period SMA
+    if m<12: return {}
+    sma10=np.array([rs[i-10:i].mean() for i in range(10,m+1)])
+    rs_aligned=rs[10:]
+    rs_ratio=rs_aligned/sma10*100 if sma10.any() else rs_aligned
+    if len(rs_ratio)<12: return {}
+    # RS-Momentum: RS-Ratio normalized by its own 10-period SMA
+    sma10b=np.array([rs_ratio[i-10:i].mean() for i in range(10,len(rs_ratio)+1)])
+    rsr_aligned=rs_ratio[10:]
+    rs_mom=rsr_aligned/sma10b*100 if sma10b.any() else rsr_aligned
+    if not len(rs_mom): return {}
+    rr=round(float(rs_ratio[-1]),2); rm=round(float(rs_mom[-1]),2)
+    leading  =rr>100 and rm>100
+    weakening=rr>100 and rm<=100
+    improving=rr<=100 and rm>100
+    lagging  =rr<=100 and rm<=100
+    # Rotation direction (last 3 periods)
+    k=min(3,len(rs_mom)-1)
+    rot_improving=bool(float(rs_mom[-1])>float(rs_mom[-k-1]))
+    quad=('leading' if leading else 'weakening' if weakening
+          else 'improving' if improving else 'lagging')
+    return dict(rr=rr,rm=rm,quad=quad,
+                leading=bool(leading),weakening=bool(weakening),
+                improving=bool(improving),lagging=bool(lagging),
+                rot_improving=bool(rot_improving))
+
+# ── Simplified Elliott Wave (zigzag approximation) ───────────────────────────
+def compute_ew_simple(df, swing_pct=0.05):
+    """Simplified EW: zigzag pivot detection + wave count + Fibonacci check.
+    Approximation only — not equivalent to Strike's proprietary system."""
+    if len(df)<60: return {}
+    C=df["Close"].values.astype(float); n=len(df)
+    # Detect swing pivots via local extrema (5-bar lookback)
+    lb=5; pivots=[]
+    for i in range(lb,n-lb):
+        if all(C[i]>=C[j] for j in range(i-lb,i+lb+1) if j!=i):
+            pivots.append((i,C[i],1))   # swing high
+        elif all(C[i]<=C[j] for j in range(i-lb,i+lb+1) if j!=i):
+            pivots.append((i,C[i],-1))  # swing low
+    # Filter to alternating + min swing size
+    filt=[]
+    for p in pivots:
+        if not filt or filt[-1][2]!=p[2]:
+            filt.append(p)
+        elif p[2]==1 and p[1]>filt[-1][1]: filt[-1]=p
+        elif p[2]==-1 and p[1]<filt[-1][1]: filt[-1]=p
+    # Remove pivots with swing < swing_pct
+    clean=[filt[0]] if filt else []
+    for p in filt[1:]:
+        if abs(p[1]-clean[-1][1])/clean[-1][1]>=swing_pct:
+            clean.append(p)
+    if len(clean)<5: return dict(w5_up=False,w5_dn=False,wave3_ext=False,
+                                  abc_done=False,in_impulse=False,n_pivots=len(clean))
+    p=clean[-5:]
+    # Impulse up: L H L H L (potential 5th wave about to start or just completed)
+    w5_up=bool(p[0][2]==-1 and p[1][2]==1 and p[2][2]==-1 and p[3][2]==1 and p[4][2]==-1
+               and p[1][1]>p[0][1] and p[3][1]>p[1][1]  # HH
+               and p[2][1]>p[0][1]                        # W4 doesn't overlap W1
+               and (p[3][1]-p[2][1])>(p[1][1]-p[0][1]))  # W3 > W1
+    # Impulse down
+    w5_dn=bool(p[0][2]==1 and p[1][2]==-1 and p[2][2]==1 and p[3][2]==-1 and p[4][2]==1
+               and p[1][1]<p[0][1] and p[3][1]<p[1][1]
+               and p[2][1]<p[0][1]
+               and (p[2][1]-p[3][1])>(p[0][1]-p[1][1]))
+    # Wave 3 extension check: W3 > 1.618 × W1
+    wave3_ext=False
+    if len(clean)>=4:
+        q=clean[-4:]
+        if q[0][2]==-1 and q[1][2]==1 and q[2][2]==-1 and q[3][2]==1:
+            w1=q[1][1]-q[0][1]; w3=q[3][1]-q[2][1]
+            if w1>0 and w3>=w1*1.618: wave3_ext=True
+    # ABC correction: 3-pivot A-B-C correction after impulse
+    abc_done=False
+    if len(clean)>=3:
+        q=clean[-3:]
+        if q[0][2]==1 and q[1][2]==-1 and q[2][2]==1:
+            wA=q[0][1]-q[1][1]; wC=q[1][1]-q[2][1] if q[2][1]<q[1][1] else 0
+            if 0<wC<=wA*1.05: abc_done=True  # C ≤ A (typical ABC correction done)
+    in_impulse=bool(w5_up or w5_dn or wave3_ext)
+    return dict(w5_up=bool(w5_up),w5_dn=bool(w5_dn),
+                wave3_ext=bool(wave3_ext),abc_done=bool(abc_done),
+                in_impulse=bool(in_impulse),n_pivots=len(clean))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🧪 EXPERIMENTAL — Volume Spread Analysis (Tom Williams / Wyckoff VSA)
+# ══════════════════════════════════════════════════════════════════════════════
+def compute_vsa(df):
+    """Volume Spread Analysis: interplay of Volume, Spread (H−L), and Close position.
+    The 'Big Volume Candle' strategy is the centrepiece."""
+    if len(df)<25: return {}
+    O=df["Open"].values.astype(float); H=df["High"].values.astype(float)
+    L=df["Low"].values.astype(float); C=df["Close"].values.astype(float)
+    V=df["Volume"].values.astype(float); n=len(df)
+    spread=float(H[-1]-L[-1])
+    if spread<=0: spread=0.0001
+    close_pos=float((C[-1]-L[-1])/spread)        # 0.0(bottom) to 1.0(top)
+    avg_sp=float(np.mean(H[-21:-1]-L[-21:-1])) if n>=21 else float(np.mean(H-L))
+    avg_vol=float(V[-21:-1].mean()) if n>=21 else float(V.mean())
+    sr=spread/max(avg_sp,0.0001); vr=float(V[-1])/max(avg_vol,1)
+    bull=C[-1]>O[-1]; bear=C[-1]<O[-1]
+    wide=sr>1.5; narrow=sr<0.7
+    hi_vol=vr>1.5; ultra_vol=vr>2.5; lo_vol=vr<0.7
+    max20v=float(V[-20:].max()) if n>=20 else float(V.max())
+    # ── Signal Map ──────────────────────────────────────────────────────────
+    # Big Volume Bull: ultra high vol + wide spread + close in upper 60% — institutions buying
+    big_vol_bull=bool(ultra_vol and wide and close_pos>0.6)
+    # Big Volume Bear: ultra high vol + wide spread + close in lower 40% — institutions selling
+    big_vol_bear=bool(ultra_vol and wide and close_pos<0.4)
+    # Big Volume Indecision: ultra high vol + close in middle (40-60%) = battle zone
+    big_vol_indecision=bool(ultra_vol and 0.4<=close_pos<=0.6)
+    # Effort to Rise: wide up bar + high vol + close upper half
+    effort_up=bool(bull and wide and hi_vol and close_pos>0.5)
+    # Effort to Fall: wide down bar + high vol + close lower half
+    effort_dn=bool(bear and wide and hi_vol and close_pos<0.5)
+    # Stopping Volume: ultra high vol + down bar but closes mid/upper = supply being absorbed
+    stopping_vol=bool(ultra_vol and bear and close_pos>0.4)
+    # Upthrust: wide spread, but closes near the LOW (bearish reversal at top)
+    upthrust=bool(wide and bear and hi_vol and close_pos<0.35)
+    # Spring / Shakeout: wide spread bar, close near the HIGH (bullish reversal at bottom)
+    spring=bool(wide and bull and close_pos>0.65 and hi_vol)
+    # Climactic Selling: highest vol in 20 days + wide down bar + close near low
+    climax_sell=bool(V[-1]>=max20v*0.9 and wide and bear and close_pos<0.35)
+    # Climactic Buying (Demand Absorption): highest vol + wide up bar + close near high
+    climax_buy=bool(V[-1]>=max20v*0.9 and wide and bull and close_pos>0.65)
+    # No Demand: narrow up bar + below avg vol (weak bounce, institutions not buying)
+    no_demand=bool(bull and narrow and lo_vol)
+    # No Supply: narrow down bar + below avg vol (sellers dried up, pre-breakout)
+    no_supply=bool(bear and narrow and lo_vol)
+    # Test for Supply: low vol down day after a high vol up day (supply tested & absent)
+    test_supply=bool(lo_vol and bear and close_pos>0.5 and n>=2 and float(V[-2])>avg_vol*1.4)
+    # Volume Trap: high vol but minimal price progress (equal battle, no directional edge)
+    vol_trap=bool(hi_vol and abs(C[-1]-O[-1])/spread<0.2)
+    # Pseudo Upthrust: stock makes new high intraday then closes near the low on high vol
+    pseudo_ut=bool(hi_vol and close_pos<0.3 and H[-1]>float(np.max(H[-6:-1])))
+    return dict(
+        vol_ratio=round(vr,2), spread_ratio=round(sr,2),
+        close_pos=round(close_pos*100,1),
+        big_vol_bull=bool(big_vol_bull), big_vol_bear=bool(big_vol_bear),
+        big_vol_indecision=bool(big_vol_indecision),
+        effort_up=bool(effort_up), effort_dn=bool(effort_dn),
+        stopping_vol=bool(stopping_vol), upthrust=bool(upthrust),
+        spring=bool(spring),
+        climax_sell=bool(climax_sell), climax_buy=bool(climax_buy),
+        no_demand=bool(no_demand), no_supply=bool(no_supply),
+        test_supply=bool(test_supply), vol_trap=bool(vol_trap),
+        pseudo_ut=bool(pseudo_ut),
+    )
+
+
 # ── OHLC timeframe aggregation helpers ───────────────────────────────────────
 def weekly_agg(df):
     """Aggregate daily OHLC to weekly (week ending Friday)."""
@@ -1254,7 +1591,16 @@ def precompute(fp, idx_map, nifty_df=None):
         w = _ti_for(_df_w),
         m = _ti_for(_df_m),
     )
-    # Advanced strategies
+    # 📐 Noiseless (Definedge: P&F, Renko, 3-Line Break, RRG, EW)
+    nl = dict(
+        pnf   = compute_pnf(df),
+        renko = compute_renko(df),
+        lb3   = compute_3lb(df),
+        rrg   = compute_rrg(df, nifty_df),
+        ew    = compute_ew_simple(df),
+    )
+    # 🧪 Experimental (VSA)
+    xp = dict(vsa=compute_vsa(df))
     adv = dict(
         darvas   = compute_darvas(df),
         vcp      = compute_vcp(df),
@@ -1270,7 +1616,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mhist=mh,whist=wh,qhist=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,adv=adv,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,xp=xp,adv=adv,**st,rs=0)
 
 def assign_rs(stocks):
     rets=sorted(s["ret12m"] for s in stocks); n=len(rets)
@@ -1335,6 +1681,8 @@ body{background:var(--bg);color:var(--txt);font-family:var(--sans);overflow-y:sc
 .tab-btn.t-t2.active{color:#00e5a0;border-bottom-color:#00e5a0}
 .tab-btn.t-t3.active{color:#f5c518;border-bottom-color:#f5c518}
 .tab-btn.t-ti.active{color:#ff9500;border-bottom-color:#ff9500}
+.tab-btn.t-nl.active{color:#e879f9;border-bottom-color:#e879f9}
+.tab-btn.t-xp.active{color:#f59e0b;border-bottom-color:#f59e0b}
 
 /* GLOBAL FILTER BAR */
 .global-bar{display:flex;align-items:center;gap:10px;padding:6px 22px;
@@ -1556,6 +1904,8 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-t2"  data-tab="t2"  onclick="switchTab('t2')">🏆 Tier-2</button>
   <button class="tab-btn t-t3"  data-tab="t3"  onclick="switchTab('t3')">🎖 Tier-3</button>
   <button class="tab-btn t-ti"  data-tab="ti"  onclick="switchTab('ti')">🏅 India Pro</button>
+  <button class="tab-btn t-nl"  data-tab="nl"  onclick="switchTab('nl')">📐 Noiseless</button>
+  <button class="tab-btn t-xp"  data-tab="xp"  onclick="switchTab('xp')">🧪 Experimental</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
 <!-- ═══ GLOBAL FILTERS ════════════════════════════════════════════════════ -->
@@ -2070,6 +2420,126 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
 </div>
 
+<!-- ═══ NOISELESS (P&F / Renko / 3-Line Break / RRG / EW) ════════════════ -->
+<div id="ctrl-nl" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center">
+    <select id="nl-strat" style="min-width:330px" onchange="updateNLInfo()">
+      <optgroup label="── 📐 Point & Figure (Definedge TradePoint) ──">
+        <option value="pnf_dbl_top">P&F Double Top Breakout — X column breaks prior X high</option>
+        <option value="pnf_dbl_bot">P&F Double Bottom Breakdown — O column breaks prior O low</option>
+        <option value="pnf_tpl_top">P&F Triple Top Breakout — breaks two prior matching highs</option>
+        <option value="pnf_tpl_bot">P&F Triple Bottom Breakdown — breaks two prior matching lows</option>
+        <option value="pnf_bull_cat">P&F Bullish Catapult — 3 consecutive X cols making higher highs</option>
+        <option value="pnf_bear_cat">P&F Bearish Catapult — 3 consecutive O cols making lower lows</option>
+        <option value="pnf_high_pole">P&F High Pole Warning — long X column, O retraces >50%</option>
+        <option value="pnf_low_pole">P&F Low Pole Warning — long O column, X recovers >50%</option>
+        <option value="pnf_asc_tri">P&F Ascending Triangle — equal X highs, rising O lows</option>
+        <option value="pnf_desc_tri">P&F Descending Triangle — equal O lows, falling X highs</option>
+        <option value="pnf_lt_bull">P&F Long-Tail Bull Reversal — giant O column then X reversal</option>
+        <option value="pnf_lt_bear">P&F Long-Tail Bear Reversal — giant X column then O reversal</option>
+        <option value="pnf_in_x">P&F In X Column (bull trend)</option>
+        <option value="pnf_in_o">P&F In O Column (bear trend)</option>
+      </optgroup>
+      <optgroup label="── 🧱 Renko (ATR-based, Definedge style) ──">
+        <option value="renko_bull">Renko Bull — current brick is UP</option>
+        <option value="renko_bear">Renko Bear — current brick is DOWN</option>
+        <option value="renko_rev_bull">Renko Reversed Bullish — just changed from DOWN to UP</option>
+        <option value="renko_rev_bear">Renko Reversed Bearish — just changed from UP to DOWN</option>
+        <option value="renko_3">Renko 3-Brick Run — 3 consecutive same-direction bricks</option>
+        <option value="renko_5">Renko 5 ka Punch — 5 consecutive bricks (Definedge signature)</option>
+        <option value="renko_dbl_top">Renko Double Top — two up-runs reaching same high level</option>
+        <option value="renko_dbl_bot">Renko Double Bottom — two down-runs reaching same low level</option>
+      </optgroup>
+      <optgroup label="── 📊 3-Line Break (Japanese noiseless chart) ──">
+        <option value="lb3_bull">3-Line Break Bull — current line is white (up)</option>
+        <option value="lb3_bear">3-Line Break Bear — current line is black (down)</option>
+        <option value="lb3_rev_bull">3-Line Break Reversal UP — just switched white after black lines</option>
+        <option value="lb3_rev_bear">3-Line Break Reversal DOWN — just switched black after white lines</option>
+        <option value="lb3_consec">3-Line Break 5+ Consecutive — 5+ lines same direction</option>
+      </optgroup>
+      <optgroup label="── 🔄 Relative Rotation Graph (Strike / RRG) — needs --nifty ──">
+        <option value="rrg_leading">RRG Leading Quadrant — strong RS + improving momentum vs Nifty</option>
+        <option value="rrg_weakening">RRG Weakening — strong RS but momentum fading (exit signal)</option>
+        <option value="rrg_improving">RRG Improving — weak RS but momentum picking up (entry watch)</option>
+        <option value="rrg_lagging">RRG Lagging — weak RS + weak momentum (avoid)</option>
+      </optgroup>
+      <optgroup label="── 🌊 Simplified Elliott Wave (approximation) ──">
+        <option value="ew_w5_up">EW Wave 5 Up — potential 5th wave bullish impulse pattern</option>
+        <option value="ew_w5_dn">EW Wave 5 Down — potential 5th wave bearish impulse pattern</option>
+        <option value="ew_w3_ext">EW Wave 3 Extension — W3 ≥ 161.8% of W1 (strongest wave)</option>
+        <option value="ew_abc">EW ABC Correction Done — 3-wave correction appears complete</option>
+      </optgroup>
+    </select>
+    <button class="info-btn" onclick="showHelp('nl',document.getElementById('nl-strat').value)" title="Strategy info">ℹ</button>
+    </div>
+  </div>
+  <div class="cg"><label>RS Rating ≥</label>
+    <select id="nl-rs">
+      <option value="0" selected>Any</option><option value="50">≥ 50</option>
+      <option value="70">≥ 70</option><option value="80">≥ 80</option>
+    </select>
+  </div>
+  <div class="cg"><label>Price Range ₹</label>
+    <div class="prange">
+      <input type="number" id="nl-pmin" placeholder="Min" min="0">
+      <span>–</span>
+      <input type="number" id="nl-pmax" placeholder="Max" min="0">
+    </div>
+  </div>
+  <button class="btn" style="background:#e879f9;color:#000" onclick="scanNL()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+<!-- ═══ EXPERIMENTAL (VSA) ═══════════════════════════════════════════════ -->
+<div id="ctrl-xp" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center">
+    <select id="xp-strat" style="min-width:330px" onchange="updateXPInfo()">
+      <optgroup label="── 📦 Big Volume Candle Strategy (VSA core) ──">
+        <option value="vsa_big_bull">Big Volume Bull — ultra-high vol + wide spread + close upper 60% (institutional buy)</option>
+        <option value="vsa_big_bear">Big Volume Bear — ultra-high vol + wide spread + close lower 40% (institutional sell)</option>
+        <option value="vsa_big_indecision">Big Volume Indecision — ultra-high vol + close mid-range (battle zone)</option>
+      </optgroup>
+      <optgroup label="── 💪 Effort vs Result (VSA strength/weakness) ──">
+        <option value="vsa_effort_up">Effort to Rise — wide up bar + high vol + upper close (accumulation)</option>
+        <option value="vsa_effort_dn">Effort to Fall — wide down bar + high vol + lower close (distribution)</option>
+        <option value="vsa_stopping">Stopping Volume — ultra-high vol down bar, close in upper half (supply absorbed)</option>
+        <option value="vsa_climax_buy">Climactic Demand — peak vol day, wide up bar, close near high (supply exhausted)</option>
+        <option value="vsa_climax_sell">Climactic Supply — peak vol day, wide down bar, close near low (demand exhausted)</option>
+      </optgroup>
+      <optgroup label="── 🔕 No Demand / No Supply (VSA quietness signals) ──">
+        <option value="vsa_no_demand">No Demand — narrow up bar + below-avg vol (weak bounce, no institutional interest)</option>
+        <option value="vsa_no_supply">No Supply — narrow down bar + below-avg vol (sellers gone, pre-breakout)</option>
+        <option value="vsa_test_supply">Test for Supply — low vol down day after high vol up day (supply confirmed absent)</option>
+      </optgroup>
+      <optgroup label="── ⚡ Traps & Reversals ──">
+        <option value="vsa_upthrust">Upthrust — wide spread, high vol, but closes near the LOW (false breakout up)</option>
+        <option value="vsa_spring">Spring / Shakeout — wide spread, high vol, closes near the HIGH (false break down)</option>
+        <option value="vsa_pseudo_ut">Pseudo Upthrust — new intraday high on high vol but closes in lower 30%</option>
+        <option value="vsa_trap">Volume Trap — high vol, minimal price progress (buyers & sellers equally matched)</option>
+      </optgroup>
+    </select>
+    <button class="info-btn" onclick="showHelp('xp',document.getElementById('xp-strat').value)" title="Strategy info">ℹ</button>
+    </div>
+  </div>
+  <div class="cg"><label>RS Rating ≥</label>
+    <select id="xp-rs">
+      <option value="0" selected>Any</option><option value="50">≥ 50</option>
+      <option value="70">≥ 70</option><option value="80">≥ 80</option>
+    </select>
+  </div>
+  <div class="cg"><label>Price Range ₹</label>
+    <div class="prange">
+      <input type="number" id="xp-pmin" placeholder="Min" min="0">
+      <span>–</span>
+      <input type="number" id="xp-pmax" placeholder="Max" min="0">
+    </div>
+  </div>
+  <button class="btn" style="background:#f59e0b;color:#000" onclick="scanXP()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
 <div class="fbar" id="fbar" onclick="toggleInfo()" title="Click to expand/collapse details">Select a tab and click ▶ SCAN</div>
 <div class="info-panel" id="info-panel"></div>
 
@@ -2157,7 +2627,7 @@ let rows=[],sc=4,sd=1,currentTab='home',lastRows=[];
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -2181,6 +2651,8 @@ function switchTab(tab){
   else if(tab==='t2'){ updateT2Info(); scanT2(); }
   else if(tab==='t3'){ updateT3Info(); scanT3(); }
   else if(tab==='ti'){ updateTIInfo(); scanTI(); }
+  else if(tab==='nl'){ updateNLInfo(); scanNL(); }
+  else if(tab==='xp'){ updateXPInfo(); scanXP(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -3288,6 +3760,8 @@ function triggerAutoScan(){
     else if(t==='t2'){ updateT2Info(); scanT2(); }
     else if(t==='t3'){ updateT3Info(); scanT3(); }
     else if(t==='ti'){ updateTIInfo(); scanTI(); }
+    else if(t==='nl'){ updateNLInfo(); scanNL(); }
+    else if(t==='xp'){ updateXPInfo(); scanXP(); }
   },350);
 }
 function initAutoScan(){
@@ -3472,6 +3946,178 @@ function scanTI(){
     rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
       above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
       sig:sig+tfTag, extra, strat, _tab:'ti'});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ── 📐 NOISELESS (Definedge P&F / Renko / 3-Line Break / RRG / EW) ─────────
+const NL_INFO={
+  pnf_dbl_top:'<b>P&F Double Top Breakout</b> · Current X column rises above the HIGH of the previous X column · The most classic P&F buy signal · Definedge TradePoint default alert · Use 1% box size on NSE stocks',
+  pnf_dbl_bot:'<b>P&F Double Bottom Breakdown</b> · Current O column falls below the LOW of the previous O column · Classic P&F sell signal · Highly reliable in trending markets',
+  pnf_tpl_top:'<b>P&F Triple Top Breakout</b> · Breaks above TWO previous X column highs (all at the same level) · Stronger and rarer than Double Top · Institutional resistance level has been decisively overcome',
+  pnf_tpl_bot:'<b>P&F Triple Bottom Breakdown</b> · Breaks below two previous O column lows at the same level · Very strong sell signal · Often marks the start of a sustained downtrend',
+  pnf_bull_cat:'<b>P&F Bullish Catapult</b> · Three consecutive X columns each making progressively higher highs · The "launch pad" formation — sustained demand overwhelms supply across multiple rallies',
+  pnf_bear_cat:'<b>P&F Bearish Catapult</b> · Three O columns making progressively lower lows · Sustained selling momentum with no support found',
+  pnf_high_pole:'<b>P&F High Pole Warning</b> · Unusually tall X column (≥5 boxes) followed by an O column that retraces more than 50% of it · Warning that bulls are exhausted — proceed with caution on longs',
+  pnf_low_pole:'<b>P&F Low Pole Warning</b> · Unusually tall O column (≥5 boxes) followed by an X column recovering more than 50% · Bears are exhausted — potential bottoming signal',
+  pnf_asc_tri:'<b>P&F Ascending Triangle</b> · X column tops at the same price level (resistance) while O column lows are rising (higher lows) · Classic accumulation pattern — breakout above resistance is likely',
+  pnf_desc_tri:'<b>P&F Descending Triangle</b> · O column lows at the same level (support) while X column highs are falling (lower highs) · Distribution pattern — breakdown below support is likely',
+  pnf_lt_bull:'<b>P&F Long-Tail Bull Reversal</b> · A very long O column (≥8 boxes = heavy selling) followed by an X reversal · The extreme selling was a capitulation event — often marks major lows',
+  pnf_lt_bear:'<b>P&F Long-Tail Bear Reversal</b> · A very long X column (≥8 boxes = extreme buying) followed by an O reversal · Buying climax — often marks major highs',
+  pnf_in_x:'<b>P&F In X Column</b> · Current P&F chart is in an X (rising) column · Bullish trend on noiseless chart basis · Definedge uses this as a primary trend filter',
+  pnf_in_o:'<b>P&F In O Column</b> · Current P&F chart is in an O (falling) column · Bearish noiseless trend · Avoid longs when in O column',
+  renko_bull:'<b>Renko Bull</b> · Most recent Renko brick is UP (green) · Trend is bullish on noiseless basis · ATR-based brick size filters minor price noise',
+  renko_bear:'<b>Renko Bear</b> · Most recent Renko brick is DOWN (red) · Trend is bearish · Avoid longs',
+  renko_rev_bull:'<b>Renko Reversed Bullish</b> · Just changed from DOWN to UP brick · Fresh trend reversal — early entry opportunity · Most reliable when after 3+ consecutive down bricks',
+  renko_rev_bear:'<b>Renko Reversed Bearish</b> · Just switched from UP to DOWN · Trend reversal alert — exit longs',
+  renko_3:'<b>Renko 3-Brick Run</b> · 3 consecutive same-direction bricks · Trend is establishing · Definedge Zone platform highlights 3-brick sequences as minimum trend confirmation',
+  renko_5:'<b>Renko 5 ka Punch</b> · Definedge signature pattern — 5 consecutive same-direction bricks · "The Punch" signals a strong, sustained trend with significant institutional participation · High-conviction momentum signal',
+  renko_dbl_top:'<b>Renko Double Top</b> · Two up-runs reached approximately the same high level · Resistance zone identified on the noiseless chart · Watch for breakdown or breakout',
+  renko_dbl_bot:'<b>Renko Double Bottom</b> · Two down-runs reached the same low level · Support zone on noiseless chart · Potential reversal if held',
+  lb3_bull:'<b>3-Line Break Bull</b> · Current chart is in a white (up) line · Bullish noiseless trend · Requires stronger evidence to reverse than a standard daily chart',
+  lb3_bear:'<b>3-Line Break Bear</b> · Current chart is in a black (down) line · Bearish noiseless trend',
+  lb3_rev_bull:'<b>3-Line Break Reversal UP</b> · Chart just turned white (up) after black lines — requires price to exceed the high of the last 3 black lines · Strong reversal confirmation signal',
+  lb3_rev_bear:'<b>3-Line Break Reversal DOWN</b> · Chart just turned black (down) · Price fell below the low of the last 3 white lines · Strong bearish reversal signal',
+  lb3_consec:'<b>3-Line Break 5+ Consecutive</b> · Five or more consecutive same-direction lines · Very strong noiseless trend with consistent price action',
+  rrg_leading:'<b>RRG Leading Quadrant</b> · RS-Ratio > 100 AND RS-Momentum > 100 · Stock is outperforming Nifty AND accelerating · Top-right quadrant = institutional favorite · Best entry timing',
+  rrg_weakening:'<b>RRG Weakening</b> · RS-Ratio > 100 (still outperforming) but RS-Momentum < 100 (slowing down) · Bottom-right quadrant · Still a leader but losing steam — consider reducing or exit on rotation to lagging',
+  rrg_improving:'<b>RRG Improving</b> · RS-Ratio < 100 (underperforming) but RS-Momentum > 100 (picking up) · Top-left quadrant · Early rotation into this sector/stock — buying opportunity before it enters leading quadrant',
+  rrg_lagging:'<b>RRG Lagging</b> · RS-Ratio < 100 AND RS-Momentum < 100 · Bottom-left quadrant = weakest stocks · Avoid longs; institutional money is leaving this stock',
+  ew_w5_up:'<b>EW Wave 5 Bullish Impulse</b> · Approximation — zigzag pivot analysis shows a completed 5-wave structure with wave 3 strongest · Note: this is a simplified algorithmic detection, not a professional EW count · Use as confluence, not standalone signal',
+  ew_w5_dn:'<b>EW Wave 5 Bearish Impulse</b> · Simplified detection of a 5-wave bearish impulse pattern · Wave 3 is the strongest wave down · Potential completion of a bearish impulse — watch for corrective bounce',
+  ew_w3_ext:'<b>EW Wave 3 Extension</b> · Wave 3 is at least 161.8% of Wave 1 (Golden Ratio extension) · Extended wave 3s are the strongest, fastest moves in Elliott Wave · If wave 3 is still in progress, significant upside potential remains',
+  ew_abc:'<b>EW ABC Correction Done</b> · Three-wave A-B-C correction pattern appears to be completing · C wave ≤ A wave length suggests correction is exhausted · Potential resumption of the primary trend',
+};
+
+function updateNLInfo(){
+  const s=document.getElementById('nl-strat').value;
+  const isRrg=s.startsWith('rrg_');
+  const note=isRrg?' <span style="color:var(--warn);font-size:9px">· Requires --nifty flag</span>':'';
+  const isEw=s.startsWith('ew_');
+  const ewNote=isEw?' <span style="color:var(--mu);font-size:9px">· Simplified approximation</span>':'';
+  setFbar(`<span style="color:#e879f9">📐 Noiseless</span> · ${NL_INFO[s]||s}${note}${ewNote}`);
+}
+
+function scanNL(){
+  const strat=document.getElementById('nl-strat').value;
+  const idxF =parseInt(document.getElementById('global-idx').value);
+  const rsMin=parseInt(document.getElementById('nl-rs').value);
+  const prMin=parseFloat(document.getElementById('nl-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('nl-pmax').value)||Infinity;
+  updateNLInfo(); rows=[];
+  for(const s of S){
+    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if(s.rs<rsMin)continue;
+    if(!s.nl)continue;
+    const pnf=s.nl.pnf||{}; const rk=s.nl.renko||{}; const lb=s.nl.lb3||{};
+    const rrg=s.nl.rrg||{}; const ew=s.nl.ew||{};
+    let matched=false; let sig=''; let extra={};
+    // P&F
+    if(strat==='pnf_dbl_top') {matched=!!pnf.dbl_top;  sig='📈 P&F Dbl Top BO'; extra={cols:pnf.n_cols,box:pnf.box};}
+    if(strat==='pnf_dbl_bot') {matched=!!pnf.dbl_bot;  sig='📉 P&F Dbl Bot BD'; extra={cols:pnf.n_cols,box:pnf.box};}
+    if(strat==='pnf_tpl_top') {matched=!!pnf.tpl_top;  sig='📈📈 P&F Tpl Top';  extra={cols:pnf.n_cols,box:pnf.box};}
+    if(strat==='pnf_tpl_bot') {matched=!!pnf.tpl_bot;  sig='📉📉 P&F Tpl Bot';  extra={cols:pnf.n_cols};}
+    if(strat==='pnf_bull_cat'){matched=!!pnf.bull_cat; sig='🚀 P&F Bull Cat';   extra={cols:pnf.n_cols};}
+    if(strat==='pnf_bear_cat'){matched=!!pnf.bear_cat; sig='⬇ P&F Bear Cat';   extra={cols:pnf.n_cols};}
+    if(strat==='pnf_high_pole'){matched=!!pnf.high_pole;sig='⚠ P&F Hi Pole';   extra={boxes:pnf.curr_boxes};}
+    if(strat==='pnf_low_pole') {matched=!!pnf.low_pole; sig='⚠ P&F Lo Pole';   extra={boxes:pnf.curr_boxes};}
+    if(strat==='pnf_asc_tri') {matched=!!pnf.asc_tri;  sig='△ P&F Asc Tri';   extra={cols:pnf.n_cols};}
+    if(strat==='pnf_desc_tri'){matched=!!pnf.desc_tri; sig='▽ P&F Desc Tri';  extra={cols:pnf.n_cols};}
+    if(strat==='pnf_lt_bull') {matched=!!pnf.lt_bull;  sig='↗ P&F LT Bull';   extra={cols:pnf.n_cols};}
+    if(strat==='pnf_lt_bear') {matched=!!pnf.lt_bear;  sig='↘ P&F LT Bear';   extra={cols:pnf.n_cols};}
+    if(strat==='pnf_in_x')    {matched=!!pnf.in_x;     sig='✗ P&F In X';      extra={boxes:pnf.curr_boxes,cols:pnf.n_cols};}
+    if(strat==='pnf_in_o')    {matched=!!pnf.in_o;     sig='○ P&F In O';      extra={boxes:pnf.curr_boxes,cols:pnf.n_cols};}
+    // Renko
+    if(strat==='renko_bull')    {matched=!!rk.bull;       sig='🟢 Renko Bull';   extra={consec:rk.consec,brick:rk.brick};}
+    if(strat==='renko_bear')    {matched=!!rk.bear;       sig='🔴 Renko Bear';   extra={consec:rk.consec,brick:rk.brick};}
+    if(strat==='renko_rev_bull'){matched=!!rk.just_rev&&!!rk.bull; sig='⚡ Renko Rev↑'; extra={consec:rk.consec};}
+    if(strat==='renko_rev_bear'){matched=!!rk.just_rev&&!!rk.bear; sig='⚡ Renko Rev↓'; extra={consec:rk.consec};}
+    if(strat==='renko_3')       {matched=!!rk.punch3;     sig='🔥 Renko 3';     extra={consec:rk.consec,brick:rk.brick};}
+    if(strat==='renko_5')       {matched=!!rk.punch5;     sig='🥊 5 ka Punch';  extra={consec:rk.consec,brick:rk.brick};}
+    if(strat==='renko_dbl_top') {matched=!!rk.dbl_top;    sig='🔝 Renko Dbl T'; extra={brick:rk.brick};}
+    if(strat==='renko_dbl_bot') {matched=!!rk.dbl_bot;    sig='🔻 Renko Dbl B'; extra={brick:rk.brick};}
+    // 3-Line Break
+    if(strat==='lb3_bull')   {matched=!!lb.bull;       sig='📗 3LB Bull';     extra={lines:lb.n_lines,consec:lb.consec};}
+    if(strat==='lb3_bear')   {matched=!!lb.bear;       sig='📕 3LB Bear';     extra={lines:lb.n_lines,consec:lb.consec};}
+    if(strat==='lb3_rev_bull'){matched=!!lb.rev_bull;  sig='⚡ 3LB Rev↑';    extra={lines:lb.n_lines};}
+    if(strat==='lb3_rev_bear'){matched=!!lb.rev_bear;  sig='⚡ 3LB Rev↓';    extra={lines:lb.n_lines};}
+    if(strat==='lb3_consec') {matched=(lb.consec||0)>=5;sig=`🔁 3LB ${lb.consec||0}+`; extra={consec:lb.consec,lines:lb.n_lines};}
+    // RRG
+    if(strat==='rrg_leading')  {matched=!!rrg.leading;  sig='🌟 RRG Leading';  extra={rr:rrg.rr,rm:rrg.rm};}
+    if(strat==='rrg_weakening'){matched=!!rrg.weakening;sig='⬇ RRG Weaken';   extra={rr:rrg.rr,rm:rrg.rm};}
+    if(strat==='rrg_improving'){matched=!!rrg.improving;sig='↗ RRG Improv';   extra={rr:rrg.rr,rm:rrg.rm};}
+    if(strat==='rrg_lagging')  {matched=!!rrg.lagging;  sig='📉 RRG Lagging'; extra={rr:rrg.rr,rm:rrg.rm};}
+    // Elliott Wave
+    if(strat==='ew_w5_up') {matched=!!ew.w5_up;    sig='🌊 EW W5 Up';    extra={pivots:ew.n_pivots};}
+    if(strat==='ew_w5_dn') {matched=!!ew.w5_dn;    sig='🌊 EW W5 Down';  extra={pivots:ew.n_pivots};}
+    if(strat==='ew_w3_ext'){matched=!!ew.wave3_ext; sig='⚡ EW W3 Ext';   extra={pivots:ew.n_pivots};}
+    if(strat==='ew_abc')   {matched=!!ew.abc_done;  sig='🔁 EW ABC Done'; extra={pivots:ew.n_pivots};}
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'nl'});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ── 🧪 EXPERIMENTAL — Volume Spread Analysis ──────────────────────────────
+const XP_INFO={
+  vsa_big_bull:'<b>Big Volume Bull Candle</b> · Ultra-high volume (≥2.5× avg) + wide spread + close in upper 60% of range · Classic VSA sign of institutional accumulation · Smart money absorbed all available supply AND pushed price up · Tom Williams called this "effort equals result" — the effort was justified',
+  vsa_big_bear:'<b>Big Volume Bear Candle</b> · Ultra-high volume + wide spread + close in lower 40% · Institutional distribution — large players selling while retail buys the headline · Often seen at major tops after sustained rallies · The "smart money exit" signature',
+  vsa_big_indecision:'<b>Big Volume Indecision</b> · Ultra-high volume but close lands in the middle of the range · Equal battle between supply and demand at high activity · Neither side won — next bar direction is critical · Often precedes violent directional resolution',
+  vsa_effort_up:'<b>Effort to Rise</b> · Wide UP bar + high volume + close in upper half · Volume confirms the price rise — institutions are genuinely buying · Reliable bullish continuation signal when appearing in an uptrend · Strong divergence from weak bounces (no demand) in the same stock',
+  vsa_effort_dn:'<b>Effort to Fall</b> · Wide DOWN bar + high volume + close in lower half · Supply is genuine and institutional · Bearish continuation signal in downtrends · Distinct from stopping volume where buyers absorb the selling',
+  vsa_stopping:'<b>Stopping Volume</b> · Ultra-high volume + DOWN bar but close in upper 40-60% of range · Professional buyers stepped in and absorbed all the selling · Classic bottom formation — supply has been "stopped" · Most powerful when it appears at a key support or pivot level',
+  vsa_climax_buy:'<b>Climactic Demand</b> · Highest volume day in last 20 sessions + wide UP bar + close near high · Peak buying intensity — every seller who wanted to sell has sold · Often the final stage of an accumulation · Bullish but watch for exhaustion if at overhead resistance',
+  vsa_climax_sell:'<b>Climactic Supply</b> · Peak volume day + wide DOWN bar + close near low · Panic selling exhaustion · Every buyer who wanted to buy at this level has bought · Often marks a temporary or permanent bottom · Most reliable after an extended decline',
+  vsa_no_demand:'<b>No Demand</b> · Narrow UP bar + below-average volume · The price rose but nobody significant bought · "Weak hands" pushing price up · Extremely bearish in context — usually precedes a decline · Tom Williams: "the market is telling you there is no professional interest at these prices"',
+  vsa_no_supply:'<b>No Supply</b> · Narrow DOWN bar + below-average volume · A down day, but sellers have dried up · "The supply has been absorbed" — institutional buyers have been at work · Pre-breakout condition · One of VSA\'s most reliable pre-rally signals',
+  vsa_test_supply:'<b>Test for Supply</b> · Low volume down day coming AFTER a high volume up day · Market is testing whether sellers return at current price · If this bar closes near its high (which we check), supply is absent · Bullish confirmation that the prior upthrust was genuine',
+  vsa_upthrust:'<b>Upthrust (False Breakout)</b> · Wide spread + high volume + closes near the LOW · Price spiked up, attracted buyers, then reversed into the close · All the buyers who chased the high are now trapped · Classic Wyckoff distribution signal · Often appears at the top of a trading range',
+  vsa_spring:'<b>Spring / Shakeout</b> · Wide spread + high volume + closes near the HIGH after going low · Price fell sharply to trap weak bulls into selling, then immediately recovered · Institutional "shake and bake" to collect stop-loss orders · Followed by the markup phase — one of Wyckoff\'s highest-conviction setups',
+  vsa_pseudo_ut:'<b>Pseudo Upthrust</b> · New intraday high BUT closes in the lower 30% of the day\'s range on high volume · Tests the supply at new highs — finds sellers there · Signals that the breakout to new highs has failed · Exit signal for momentum longs; potential short entry',
+  vsa_trap:'<b>Volume Trap</b> · High volume but price barely moved (close ≈ open, less than 20% of range) · Equal battle — supply exactly met demand · Market "trapped" in indecision · Usually resolves violently one way or the other · Wait for directional clarity before entering',
+};
+
+function updateXPInfo(){
+  const s=document.getElementById('xp-strat').value;
+  setFbar(`<span style="color:#f59e0b">🧪 Experimental</span> · ${XP_INFO[s]||s}`);
+}
+
+function scanXP(){
+  const strat=document.getElementById('xp-strat').value;
+  const idxF =parseInt(document.getElementById('global-idx').value);
+  const rsMin=parseInt(document.getElementById('xp-rs').value);
+  const prMin=parseFloat(document.getElementById('xp-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('xp-pmax').value)||Infinity;
+  updateXPInfo(); rows=[];
+  for(const s of S){
+    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if(s.rs<rsMin)continue;
+    if(!s.xp)continue;
+    const v=s.xp.vsa||{};
+    let matched=false; let sig=''; let extra={};
+    if(strat==='vsa_big_bull')       {matched=!!v.big_vol_bull;    sig='🟢📦 Big Vol Bull'; extra={vr:v.vol_ratio+'×',sr:v.spread_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_big_bear')       {matched=!!v.big_vol_bear;    sig='🔴📦 Big Vol Bear'; extra={vr:v.vol_ratio+'×',sr:v.spread_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_big_indecision') {matched=!!v.big_vol_indecision;sig='⚡📦 Big Vol Ind'; extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_effort_up')      {matched=!!v.effort_up;       sig='💪 Effort Rise';   extra={vr:v.vol_ratio+'×',sr:v.spread_ratio+'×'};}
+    if(strat==='vsa_effort_dn')      {matched=!!v.effort_dn;       sig='⬇ Effort Fall';   extra={vr:v.vol_ratio+'×',sr:v.spread_ratio+'×'};}
+    if(strat==='vsa_stopping')       {matched=!!v.stopping_vol;    sig='🛑 Stopping Vol';  extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_climax_buy')     {matched=!!v.climax_buy;      sig='🌋 Climax Buy';    extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_climax_sell')    {matched=!!v.climax_sell;     sig='🌋 Climax Sell';   extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_no_demand')      {matched=!!v.no_demand;       sig='🔇 No Demand';     extra={vr:v.vol_ratio+'×',sr:v.spread_ratio+'×'};}
+    if(strat==='vsa_no_supply')      {matched=!!v.no_supply;       sig='🔕 No Supply';     extra={vr:v.vol_ratio+'×',sr:v.spread_ratio+'×'};}
+    if(strat==='vsa_test_supply')    {matched=!!v.test_supply;     sig='🔍 Test Supply';   extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_upthrust')       {matched=!!v.upthrust;        sig='⬆🔴 Upthrust';     extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_spring')         {matched=!!v.spring;          sig='⬇🟢 Spring';        extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_pseudo_ut')      {matched=!!v.pseudo_ut;       sig='🔺 Pseudo UT';     extra={vr:v.vol_ratio+'×',pos:v.close_pos+'%'};}
+    if(strat==='vsa_trap')           {matched=!!v.vol_trap;        sig='🪤 Vol Trap';      extra={vr:v.vol_ratio+'×',sr:v.spread_ratio+'×'};}
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'xp'});
   }
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
@@ -3684,6 +4330,24 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
+  if(tab==='nl'||tab==='xp'){
+    const color=tab==='nl'?'#e879f9':'#f59e0b';
+    const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
+      k:'e_'+k,h:k,fn:r=>`<td class="mu">${r.extra?.[k]??'—'}</td>`
+    })):[];
+    return[
+      {k:'sym',  h:'Symbol',  fn:r=>symCell(r.sym)},
+      {k:'idx',  h:'Index',   fn:r=>idxBadge(r.idx)},
+      {k:'price',h:'Close',   fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
+      {k:'sig',  h:'Signal',  fn:r=>`<td style="color:${color};font-weight:700;font-size:12px">${r.sig}</td>`},
+      ...extraCols,
+      {k:'rs',      h:'RS',       fn:r=>rsCell(r.rs)},
+      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'w52h',    h:'vs 52WH',  fn:r=>w52Cell(r.price,r.w52h)},
+      {k:'avol',    h:'AvgVol20', fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
+      {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
+    ];
+  }
   return common;
 }
 
@@ -3734,6 +4398,8 @@ function exportCSV(){
     t2: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,`${((r.price-r.w52h)/r.w52h*100).toFixed(1)}%`,r.avol,r.date],
     t3: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,`${((r.price-r.w52h)/r.w52h*100).toFixed(1)}%`,r.avol,r.date],
     ti: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,`${((r.price-r.w52h)/r.w52h*100).toFixed(1)}%`,r.avol,r.date],
+    nl: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
+    xp: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
   const a=document.createElement('a');

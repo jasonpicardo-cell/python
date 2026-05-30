@@ -1,0 +1,877 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════
+//  NIFTY SCALPER PRO  ·  Single combined script
+//  EMA ribbon | VWAP | Bollinger Bands | Supertrend
+//  Pivot Points + labels | Prev Day H/L | Buy + Sell Zones
+//  Demand + Supply Zones | RSI / Volume info table
+// ═══════════════════════════════════════════════════════════
+indicator("Nifty Scalper Pro", overlay=true, max_bars_back=1000,
+          max_boxes_count=50, max_lines_count=500, max_labels_count=200)
+
+// ─── EMA & RIBBON ───────────────────────────────────────────
+fast_len    = input.int(9,    "Fast EMA length",             minval=1,   maxval=50,  group="EMA & Ribbon")
+fast_col    = input.color(#00BCD4, "Fast EMA color",                                 group="EMA & Ribbon")
+fast_w      = input.int(1,    "Fast EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
+slow_len    = input.int(21,   "Slow EMA length",             minval=1,   maxval=200, group="EMA & Ribbon")
+slow_col    = input.color(#FF7043, "Slow EMA color",                                 group="EMA & Ribbon")
+slow_w      = input.int(1,    "Slow EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
+show_rib    = input.bool(true, "EMA ribbon fill",                                    group="EMA & Ribbon")
+
+// ─── CROSSOVER LINE ─────────────────────────────────────────
+show_cx     = input.bool(true,  "Show crossover line",                               group="Crossover Line")
+cx_col      = input.color(#ECEFF1, "Color",                                          group="Crossover Line")
+cx_style_in = input.string("Dashed", "Style", options=["Solid","Dashed","Dotted"],   group="Crossover Line")
+cx_w        = input.int(2,    "Width",                       minval=1,   maxval=4,   group="Crossover Line")
+
+// ─── VWAP ────────────────────────────────────────────────────
+vwap_col    = input.color(#FFD600, "VWAP color",                                     group="VWAP")
+vwap_w      = input.int(2,    "VWAP width",                  minval=1,   maxval=4,   group="VWAP")
+
+// ─── BOLLINGER BANDS ────────────────────────────────────────
+show_bb     = input.bool(false, "Show Bollinger Bands",                              group="Bollinger Bands")
+bb_len      = input.int(20,   "BB length",                   minval=5,   maxval=50,  group="Bollinger Bands")
+bb_mult     = input.float(2.0, "BB std dev",                 minval=0.5, maxval=4.0, group="Bollinger Bands")
+bb_w        = input.int(1,    "BB line width",               minval=1,   maxval=4,   group="Bollinger Bands")
+
+// ─── SUPERTREND ──────────────────────────────────────────────
+show_st     = input.bool(false, "Show Supertrend",                                   group="Supertrend")
+st_mult     = input.float(3.0, "Multiplier",                 minval=1.0, maxval=6.0, group="Supertrend")
+st_period   = input.int(10,   "ATR period",                  minval=5,   maxval=30,  group="Supertrend")
+st_w        = input.int(2,    "Supertrend width",            minval=1,   maxval=4,   group="Supertrend")
+
+// ─── PIVOT POINTS ───────────────────────────────────────────
+show_piv      = input.bool(true,  "Show pivot lines",                                group="Pivot Points")
+piv_type      = input.string("Fibonacci", "Type", options=["Standard","Fibonacci","Camarilla"], group="Pivot Points")
+piv_tf_auto   = input.bool(true,  "Auto timeframe (mirrors TradingView)",            group="Pivot Points")
+piv_tf_manual = input.timeframe("D", "Manual timeframe override",                   group="Pivot Points")
+piv_w         = input.int(2,    "Pivot line width",            minval=1,   maxval=4, group="Pivot Points")
+show_plbl     = input.bool(true,  "Show labels on right",                            group="Pivot Points")
+show_pval     = input.bool(true,  "Show values in labels",                           group="Pivot Points")
+plbl_size     = input.string("Small", "Label size", options=["Tiny","Small","Normal"], group="Pivot Points")
+
+// ─── PREV DAY LEVELS ────────────────────────────────────────
+show_pdhl   = input.bool(true,  "Show prev day high / low",                          group="Prev Day Levels")
+pdh_col     = input.color(#FF9800, "High line color",                                group="Prev Day Levels")
+pdl_col     = input.color(#2196F3, "Low line color",                                 group="Prev Day Levels")
+pdhl_w      = input.int(2,    "Line width",                  minval=1,   maxval=4,   group="Prev Day Levels")
+
+// ─── ZONES ──────────────────────────────────────────────────
+show_bsz    = input.bool(false, "Show buy / sell zones",                             group="Zones")
+show_dsz    = input.bool(true,  "Show demand / supply zones",                        group="Zones")
+
+// ─── SIGNALS ────────────────────────────────────────────────
+show_sig    = input.bool(true,  "Show entry signals",                                group="Signals")
+show_bg     = input.bool(false, "Trend background",                                  group="Signals")
+
+// ─── INSTITUTIONAL CANDLES ──────────────────────────────────
+show_inst      = input.bool(true,    "Highlight institutional candles",              group="Institutional Candles")
+inst_bull_col  = input.color(#00E676, "Buy candle color",                            group="Institutional Candles")
+inst_bear_col  = input.color(#FF1744, "Sell candle color",                           group="Institutional Candles")
+inst_vol_mult  = input.float(2.0,   "Volume threshold (× avg vol)",  minval=1.1, maxval=10.0, step=0.1, group="Institutional Candles")
+inst_body_mult = input.float(0.5,   "Min body size (× ATR)",         minval=0.1, maxval=3.0,  step=0.1, group="Institutional Candles")
+inst_close_pct = input.float(0.6,   "Min close position (0 – 1)",    minval=0.3, maxval=0.9,  step=0.05, group="Institutional Candles")
+
+// ─── INFO TABLE ─────────────────────────────────────────────
+rsi_len     = input.int(14,   "RSI length",                  minval=2,   maxval=30,  group="Info Table")
+ob          = input.int(70,   "Overbought",                  minval=55,  maxval=90,  group="Info Table")
+os          = input.int(30,   "Oversold",                    minval=10,  maxval=45,  group="Info Table")
+vol_ma      = input.int(20,   "Volume MA",                   minval=5,   maxval=100, group="Info Table")
+show_tbl    = input.bool(true,  "Show info table",                                   group="Info Table")
+
+// ─── SMART TREND LINES & CHANNELS ────────────────────────────
+show_tl      = input.bool(true,  "Show smart trend lines",                        group="Smart Trend & Patterns")
+show_channel = input.bool(false, "Show channel fill",                             group="Smart Trend & Patterns")
+show_cpat    = input.bool(false, "Show chart patterns (Double Top/Bottom, H&S, Triangles, Wedges, Flags)", group="Smart Trend & Patterns")
+sm_piv_len   = input.int(10,     "Pivot sensitivity",    minval=3,  maxval=30,    group="Smart Trend & Patterns")
+tl_res_col   = input.color(#EF5350, "Resistance line color",                      group="Smart Trend & Patterns")
+tl_sup_col   = input.color(#26A69A, "Support line color",                         group="Smart Trend & Patterns")
+tl_w         = input.int(2,      "Trend line width",     minval=1,  maxval=4,     group="Smart Trend & Patterns")
+
+// ─── PRICE ACTION & AI MOMENTUM ─────────────────────────────
+show_patterns  = input.bool(false, "Show candlestick pattern markers",              group="Price Action & AI")
+show_false_brk = input.bool(false, "Show false breakout alerts",                   group="Price Action & AI")
+show_strong    = input.bool(false, "Show strong momentum signals",                 group="Price Action & AI")
+show_bar_score = input.bool(false, "Color bars by momentum score",                 group="Price Action & AI")
+min_momentum   = input.int(6,      "Min score for strong signal (0–10)", minval=1, maxval=10, group="Price Action & AI")
+
+// ─── LEADING INDICATORS ──────────────────────────────────────
+show_lead      = input.bool(true,  "Show unified LEAD signal",                    group="Leading Indicators")
+show_scd       = input.bool(true,  "Synthetic Cumulative Delta (SCD) divergence", group="Leading Indicators")
+show_cmp       = input.bool(true,  "Compression Explosion predictor",             group="Leading Indicators")
+show_spring    = input.bool(true,  "Spring & Upthrust with velocity",             group="Leading Indicators")
+show_ire       = input.bool(true,  "Intraday Rhythm Engine (IRE)",                group="Leading Indicators")
+show_absorb    = input.bool(true,  "Absorption Zone detector",                    group="Leading Indicators")
+show_mva       = input.bool(true,  "Momentum Velocity + Acceleration (MVA)",      group="Leading Indicators")
+show_phantom   = input.bool(true,  "Phantom Divergence (pre-divergence signal)",  group="Leading Indicators")
+show_polarity  = input.bool(true,  "Candle Polarity Drift",                       group="Leading Indicators")
+spring_vel     = input.float(0.7,  "Spring snap-back velocity",   minval=0.3, maxval=1.5, step=0.1, group="Leading Indicators")
+ire_threshold  = input.float(2.0,  "IRE vol anomaly threshold (× avg vol)", minval=1.5, maxval=5.0, step=0.1, group="Leading Indicators")
+min_lead_score = input.int(4,      "Min score for LEAD signal (0–14)", minval=1,  maxval=14,         group="Leading Indicators")
+
+// ─── CORE CALCULATIONS ──────────────────────────────────────
+ema_fast = ta.ema(close, fast_len)
+ema_slow = ta.ema(close, slow_len)
+vwap_val = ta.vwap
+atr_val  = ta.atr(14)
+rsi_val  = ta.rsi(close, rsi_len)
+vol_sma  = ta.sma(volume, vol_ma)
+
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, bb_len, bb_mult)
+[st_line, st_dir]            = ta.supertrend(st_mult, st_period)
+st_bull                      = st_dir < 0
+
+// ─── INSTITUTIONAL CANDLE DETECTION ─────────────────────────
+// Criteria: volume spike + large body + close in strong position
+candle_body  = math.abs(close - open)
+candle_range = high - low + 0.001          // +0.001 avoids div-by-zero on doji
+close_pos    = (close - low) / candle_range // 0 = at low, 1 = at high
+
+inst_buy  = show_inst
+          and volume        > inst_vol_mult  * vol_sma
+          and candle_body   > inst_body_mult * atr_val
+          and close         > open
+          and close_pos     > inst_close_pct
+
+inst_sell = show_inst
+          and volume        > inst_vol_mult  * vol_sma
+          and candle_body   > inst_body_mult * atr_val
+          and close         < open
+          and close_pos     < (1 - inst_close_pct)
+
+// ─── CANDLESTICK PATTERN DETECTION ──────────────────────────
+upper_wick  = high - math.max(close, open)
+lower_wick  = math.min(close, open) - low
+
+// Engulfing
+bull_engulf = close > open and close[1] < open[1] and
+              open < close[1] and close > open[1] and
+              candle_body > atr_val * 0.4
+
+bear_engulf = close < open and close[1] > open[1] and
+              open > close[1] and close < open[1] and
+              candle_body > atr_val * 0.4
+
+// Hammer / Shooting Star
+is_hammer   = lower_wick > candle_body * 2.0 and upper_wick < candle_body * 0.5 and
+              candle_body > atr_val * 0.05   and lower_wick  > atr_val * 0.25
+
+is_shooting = upper_wick > candle_body * 2.0 and lower_wick < candle_body * 0.5 and
+              candle_body > atr_val * 0.05   and upper_wick  > atr_val * 0.25
+
+// Pin Bars
+bull_pin    = lower_wick > candle_range * 0.55 and upper_wick < candle_range * 0.2
+bear_pin    = upper_wick > candle_range * 0.55 and lower_wick < candle_range * 0.2
+
+// Doji & Inside Bar
+is_doji     = candle_body < atr_val * 0.08 and candle_range > atr_val * 0.2
+is_inside   = high < high[1] and low > low[1]
+
+// Morning / Evening Star (3-candle reversals)
+morning_star = close[2] < open[2] and
+               math.abs(close[1] - open[1]) < atr_val * 0.25 and
+               close > open and close > (open[2] + close[2]) / 2
+
+evening_star = close[2] > open[2] and
+               math.abs(close[1] - open[1]) < atr_val * 0.25 and
+               close < open and close < (open[2] + close[2]) / 2
+
+// Marubozu (near-zero wicks — pure momentum candle)
+bull_marubozu = close > open and upper_wick < candle_body * 0.05 and lower_wick < candle_body * 0.05 and candle_body > atr_val * 0.75
+bear_marubozu = close < open and upper_wick < candle_body * 0.05 and lower_wick < candle_body * 0.05 and candle_body > atr_val * 0.75
+
+// map crossover style input → Pine Script line style constant
+cx_style_val = cx_style_in == "Solid" ? line.style_solid :
+               cx_style_in == "Dotted" ? line.style_dotted :
+               line.style_dashed
+
+// map pivot label size input → Pine Script size constant
+plbl_sz = plbl_size == "Normal" ? size.normal :
+          plbl_size == "Tiny"   ? size.tiny   :
+          size.small
+
+// ─── PIVOT TIMEFRAME (exact TradingView Pivot Points Standard mapping) ─
+// Source: TradingView Help → Built-in Indicators → Pivot Points Standard
+//   ≤ 15 min          →  1D   (Daily)
+//   16 min – 4 h      →  1W   (Weekly)
+//   1D                →  1M   (Monthly)
+//   1W and above      →  12M  (Yearly)
+_tf_secs = timeframe.in_seconds()
+_auto_tf = _tf_secs <= 900      ? "D"   :   // ≤ 15 min  → Daily
+           timeframe.isintraday  ? "W"   :   // 16 min–4h → Weekly
+           timeframe.isdaily     ? "M"   :   // 1D        → Monthly
+           "12M"                             // 1W, 1M+   → Yearly
+piv_tf   = piv_tf_auto ? _auto_tf : piv_tf_manual
+
+// Previous period OHLC — gaps_off fills session gaps (essential for NSE/Nifty)
+pdh = request.security(syminfo.tickerid, piv_tf, high[1],  gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, piv_tf, low[1],   gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+pdc = request.security(syminfo.tickerid, piv_tf, close[1], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+
+// ─── PIVOT CALCULATIONS ─────────────────────────────────────
+rng    = pdh - pdl
+// Standard
+std_p  = (pdh + pdl + pdc) / 3
+std_r1 = 2 * std_p - pdl
+std_r2 = std_p + rng
+std_r3 = pdh  + 2 * (std_p - pdl)
+std_s1 = 2 * std_p - pdh
+std_s2 = std_p - rng
+std_s3 = pdl  - 2 * (pdh - std_p)
+// Fibonacci
+fib_p  = std_p
+fib_r1 = fib_p + 0.382 * rng
+fib_r2 = fib_p + 0.618 * rng
+fib_r3 = fib_p + 1.000 * rng
+fib_s1 = fib_p - 0.382 * rng
+fib_s2 = fib_p - 0.618 * rng
+fib_s3 = fib_p - 1.000 * rng
+// Camarilla
+cam_r1 = pdc + 1.1 * rng / 12
+cam_r2 = pdc + 1.1 * rng / 6
+cam_r3 = pdc + 1.1 * rng / 4
+cam_s1 = pdc - 1.1 * rng / 12
+cam_s2 = pdc - 1.1 * rng / 6
+cam_s3 = pdc - 1.1 * rng / 4
+// Select active set
+isFib = piv_type == "Fibonacci"
+isCam = piv_type == "Camarilla"
+p_v   = isCam ? pdc    : std_p
+r1_v  = isFib ? fib_r1 : isCam ? cam_r1 : std_r1
+r2_v  = isFib ? fib_r2 : isCam ? cam_r2 : std_r2
+r3_v  = isFib ? fib_r3 : isCam ? cam_r3 : std_r3
+s1_v  = isFib ? fib_s1 : isCam ? cam_s1 : std_s1
+s2_v  = isFib ? fib_s2 : isCam ? cam_s2 : std_s2
+s3_v  = isFib ? fib_s3 : isCam ? cam_s3 : std_s3
+
+// ─── FALSE BREAKOUT DETECTION ────────────────────────────────
+// Wick rejection: price pierced a key level but closed back through it
+
+// Resistance rejections (upper wick through level, close below = bear trap)
+rej_r1   = show_piv  and high > r1_v     and close < r1_v
+rej_pdh  = show_pdhl and high > pdh      and close < pdh
+rej_bbu  = show_bb   and high > bb_upper and close < bb_upper
+rej_st_r = show_st   and not st_bull and high > st_line and close < st_line
+
+fake_break_up = (rej_r1 or rej_pdh or rej_bbu or rej_st_r) and upper_wick > candle_body
+
+// Support rejections (lower wick through level, close above = bull trap / bounce)
+rej_s1   = show_piv  and low < s1_v      and close > s1_v
+rej_pdl  = show_pdhl and low < pdl       and close > pdl
+rej_bbl  = show_bb   and low < bb_lower  and close > bb_lower
+rej_st_s = show_st   and st_bull and low < st_line and close > st_line
+
+fake_break_dn = (rej_s1 or rej_pdl or rej_bbl or rej_st_s) and lower_wick > candle_body
+
+// ─── MOMENTUM INTELLIGENCE SCORE (0 – 10) ───────────────────
+// Composite multi-factor score — mirrors how an AI would weigh each signal
+
+ms_bull =
+  (close > vwap_val                                     ? 1 : 0) +
+  (ema_fast > ema_slow                                  ? 1 : 0) +
+  (st_bull                                              ? 1 : 0) +
+  (rsi_val > 55 and rsi_val < ob                        ? 1 : 0) +
+  (volume > vol_sma * 1.5                               ? 2 : volume > vol_sma ? 1 : 0) +
+  (bull_engulf or morning_star or bull_marubozu         ? 2 : is_hammer or bull_pin ? 1 : 0) +
+  (close > p_v                                          ? 1 : 0) +
+  (not fake_break_up                                    ? 1 : 0)
+
+ms_bear =
+  (close < vwap_val                                     ? 1 : 0) +
+  (ema_fast < ema_slow                                  ? 1 : 0) +
+  (not st_bull                                          ? 1 : 0) +
+  (rsi_val < 45 and rsi_val > os                        ? 1 : 0) +
+  (volume > vol_sma * 1.5                               ? 2 : volume > vol_sma ? 1 : 0) +
+  (bear_engulf or evening_star or bear_marubozu         ? 2 : is_shooting or bear_pin ? 1 : 0) +
+  (close < p_v                                          ? 1 : 0) +
+  (not fake_break_dn                                    ? 1 : 0)
+
+// ─── DEMAND / SUPPLY ZONE TRACKING ──────────────────────────
+ph_bar = ta.pivothigh(high, 5, 5)
+pl_bar = ta.pivotlow(low,   5, 5)
+
+var float sup_top = na
+var float sup_bot = na
+var float dem_top = na
+var float dem_bot = na
+
+if not na(ph_bar)
+    sup_top := ph_bar + atr_val * 0.15
+    sup_bot := ph_bar - atr_val * 0.30
+if not na(pl_bar)
+    dem_top := pl_bar + atr_val * 0.30
+    dem_bot := pl_bar - atr_val * 0.15
+
+// ─── SMART TREND LINE PIVOT TRACKING ────────────────────────
+// Track 3 most recent pivot highs and lows for trendlines + patterns
+sm_ph = ta.pivothigh(high, sm_piv_len, sm_piv_len)
+sm_pl = ta.pivotlow(low,   sm_piv_len, sm_piv_len)
+
+var float ph1 = na
+var int   phb1 = na
+var float ph2 = na
+var int   phb2 = na
+var float ph3 = na
+var int   phb3 = na
+var float pl1 = na
+var int   plb1 = na
+var float pl2 = na
+var int   plb2 = na
+var float pl3 = na
+var int   plb3 = na
+
+if not na(sm_ph)
+    ph3  := ph2
+    phb3 := phb2
+    ph2  := ph1
+    phb2 := phb1
+    ph1  := sm_ph
+    phb1 := bar_index[sm_piv_len]
+
+if not na(sm_pl)
+    pl3  := pl2
+    plb3 := plb2
+    pl2  := pl1
+    plb2 := plb1
+    pl1  := sm_pl
+    plb1 := bar_index[sm_piv_len]
+
+// ─── CHART PATTERN DETECTION ────────────────────────────────
+// Each signal fires only on the FIRST bar conditions are met (no repaint after)
+
+// Double Top — two highs at same level, close confirms breakdown
+_dt  = not na(ph1) and not na(ph2) and math.abs(ph1-ph2) < atr_val*1.2 and (phb1-phb2) >= sm_piv_len*2 and close < math.min(ph1,ph2) - atr_val*0.3
+dt_sig  = show_cpat and _dt  and not _dt[1]
+
+// Double Bottom — two lows at same level, close confirms breakout
+_db  = not na(pl1) and not na(pl2) and math.abs(pl1-pl2) < atr_val*1.2 and (plb1-plb2) >= sm_piv_len*2 and close > math.max(pl1,pl2) + atr_val*0.3
+db_sig  = show_cpat and _db  and not _db[1]
+
+// Head & Shoulders — 3 highs, middle is highest, shoulders roughly equal
+_hs  = not na(ph1) and not na(ph2) and not na(ph3) and ph2 > ph1 and ph2 > ph3 and math.abs(ph1-ph3) < atr_val*1.5
+hs_sig  = show_cpat and _hs  and not _hs[1]
+
+// Inverse Head & Shoulders — 3 lows, middle is lowest
+_ihs = not na(pl1) and not na(pl2) and not na(pl3) and pl2 < pl1 and pl2 < pl3 and math.abs(pl1-pl3) < atr_val*1.5
+ihs_sig = show_cpat and _ihs and not _ihs[1]
+
+// Ascending Triangle — flat highs, rising lows (bullish)
+_at  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and math.abs(ph1-ph2) < atr_val*0.8 and pl1 > pl2
+at_sig  = show_cpat and _at  and not _at[1]
+
+// Descending Triangle — falling highs, flat lows (bearish)
+_dt2 = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 < ph2 and math.abs(pl1-pl2) < atr_val*0.8
+dt2_sig = show_cpat and _dt2 and not _dt2[1]
+
+// Symmetrical Triangle — converging highs and lows (breakout pending)
+_st  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 < ph2 and pl1 > pl2
+st_sig  = show_cpat and _st  and not _st[1]
+
+// Rising Wedge — both lines rising, support rising faster (bearish)
+_rw  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 > ph2 and pl1 > pl2 and (pl1-pl2) > (ph1-ph2)*1.1
+rw_sig  = show_cpat and _rw  and not _rw[1]
+
+// Falling Wedge — both lines falling, resistance falling faster (bullish)
+_fw  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 < ph2 and pl1 < pl2 and (ph2-ph1) > (pl2-pl1)*1.1
+fw_sig  = show_cpat and _fw  and not _fw[1]
+
+// Bull Flag — strong up move then tight consolidation
+_bf  = (close - ta.lowest(close, 20)) > atr_val*2.5 and (ta.highest(high,5) - ta.lowest(low,5)) < atr_val*1.5
+bf_sig  = show_cpat and _bf  and not _bf[1]
+
+// Bear Flag — strong down move then tight consolidation
+_brf = (ta.highest(close,20) - close) > atr_val*2.5 and (ta.highest(high,5) - ta.lowest(low,5)) < atr_val*1.5
+brf_sig = show_cpat and _brf and not _brf[1]
+
+// Channel direction for info table
+_rsl = not na(ph1) and not na(ph2) and phb1 > phb2 ? (ph1-ph2)/(phb1-phb2) : na
+_ssl = not na(pl1) and not na(pl2) and plb1 > plb2 ? (pl1-pl2)/(plb1-plb2) : na
+_thr = close * 0.00004
+_rd  = not na(_rsl) ? (_rsl > _thr ? 1 : _rsl < -_thr ? -1 : 0) : na
+_sd  = not na(_ssl) ? (_ssl > _thr ? 1 : _ssl < -_thr ? -1 : 0) : na
+ch_type = not na(_rd) and not na(_sd) ? (_rd == _sd ? (_rd == 1 ? "↗ Ascending" : _rd == -1 ? "↘ Descending" : "→ Horizontal") : "Wedge / Triangle") : "—"
+
+// ─── TREND & SIGNAL CONDITIONS ──────────────────────────────
+bull         = ema_fast > ema_slow and close > vwap_val
+bear         = ema_fast < ema_slow and close < vwap_val
+prox         = atr_val * 0.5
+ema_cross_up = ta.crossover(ema_fast, ema_slow)
+ema_cross_dn = ta.crossunder(ema_fast, ema_slow)
+
+long_sig  = ema_cross_up and close > vwap_val and rsi_val < ob and volume > vol_sma
+short_sig = ema_cross_dn and close < vwap_val and rsi_val > os and volume > vol_sma
+
+// Strong signals: crossover confirmed by momentum score + no fake breakout
+strong_long  = long_sig  and ms_bull >= min_momentum and not fake_break_up
+strong_short = short_sig and ms_bear >= min_momentum and not fake_break_dn
+
+// ═══════════════════════════════════════════════════════════
+//  LEADING INDICATOR ENGINE
+// ═══════════════════════════════════════════════════════════
+
+// ── 1. SYNTHETIC CUMULATIVE DELTA (SCD) ─────────────────────
+// Approximates institutional order flow from candle structure.
+// When price is at a pivot but SCD is flowing opposite → reversal forming 3–5 bars early.
+_scd_rng     = high - low + 0.001
+buy_pres     = (close - low)  / _scd_rng * volume
+sell_pres    = (high - close) / _scd_rng * volume
+bar_delta    = buy_pres - sell_pres
+cum_delta    = ta.cum(bar_delta)
+scd_slope    = cum_delta - cum_delta[5]   // 5-bar delta momentum
+
+near_ph = not na(ph1) and close >= ph1 - atr_val       and close <= ph1 + atr_val * 0.5
+near_pl = not na(pl1) and close <= pl1 + atr_val       and close >= pl1 - atr_val * 0.5
+
+scd_bear_div = show_scd and near_ph and scd_slope < 0 and bar_delta < 0
+scd_bull_div = show_scd and near_pl and scd_slope > 0 and bar_delta > 0
+scd_bear_sig = scd_bear_div and not scd_bear_div[1]
+scd_bull_sig = scd_bull_div and not scd_bull_div[1]
+
+// ── 2. COMPRESSION EXPLOSION PREDICTOR ──────────────────────
+// 4 consecutive bars of shrinking range = coiled spring. Signal fires on
+// the LAST compression bar so you pre-position before the explosion candle.
+_cr0 = high - low
+_cr1 = high[1] - low[1]
+_cr2 = high[2] - low[2]
+_cr3 = high[3] - low[3]
+cmp_cond = _cr0 < _cr1 and _cr1 < _cr2 and _cr2 < _cr3 and math.max(_cr0, _cr1, _cr2, _cr3) < atr_val * 0.8
+
+polarity_v   = (close - low) / (high - low + 0.001)  // 0 = full bear, 1 = full bull
+polarity_sma = ta.sma(polarity_v, 5)                  // rolling control score
+
+cmp_bull_sig = show_cmp and cmp_cond and not cmp_cond[1] and bull and polarity_sma > 0.5
+cmp_bear_sig = show_cmp and cmp_cond and not cmp_cond[1] and bear and polarity_sma < 0.5
+
+// ── 3. SPRING & UPTHRUST WITH VELOCITY ──────────────────────
+// Wyckoff's most precise entry. Pierces a key level (stops everyone out),
+// then snaps back with high velocity = institutional absorption complete.
+_at_s1     = low < s1_v    and close > s1_v
+_at_pdl    = low < pdl     and close > pdl
+_at_vwaps  = low < vwap_val and close > vwap_val and close_pos > 0.70
+
+spring_sig = show_spring and (_at_s1 or _at_pdl or _at_vwaps) and close_pos > 0.65 and (close - low) / atr_val > spring_vel and volume > vol_sma
+
+_at_r1     = high > r1_v   and close < r1_v
+_at_pdh    = high > pdh    and close < pdh
+_at_vwapr  = high > vwap_val and close < vwap_val and close_pos < 0.30
+
+upthrust_sig = show_spring and (_at_r1 or _at_pdh or _at_vwapr) and close_pos < 0.35 and (high - close) / atr_val > spring_vel and volume > vol_sma
+
+// ── 4. INTRADAY RHYTHM ENGINE — NSE 9:15–15:30 IST ──────────
+// NSE has a clockwork volume rhythm. An unexpected spike during the
+// normally quiet mid-session = institutional activity. Follow the flow.
+_hr  = hour(time, "Asia/Kolkata")
+_min = minute(time, "Asia/Kolkata")
+_sm  = _hr * 60 + _min
+_nse_open = _sm >= 9 * 60 + 15 and _sm <= 15 * 60 + 30   // within NSE session
+_opening  = _sm >= 9 * 60 + 15 and _sm <  9 * 60 + 45    // opening burst – exclude
+_closing  = _sm >= 14 * 60 + 30                            // closing rush – exclude
+_ire_win  = _nse_open and not _opening and not _closing
+
+ire_bull = show_ire and _ire_win and volume > vol_sma * ire_threshold and close > open and close > vwap_val
+ire_bear = show_ire and _ire_win and volume > vol_sma * ire_threshold and close < open and close < vwap_val
+
+// ── 5. ABSORPTION ZONE DETECTOR ─────────────────────────────
+// High volume + tiny body + decent range = institutions absorbing all supply/demand.
+// Price barely moves despite massive effort → coil before the breakout.
+_effort     = volume / vol_sma
+_result     = candle_body / atr_val
+_absorb_raw = _effort > 1.5 and _result < 0.25 and candle_range > atr_val * 0.5
+
+_near_sup   = math.abs(close - s1_v) < atr_val * 0.5 or math.abs(close - pdl) < atr_val * 0.5 or (math.abs(close - vwap_val) < atr_val * 0.3 and close >= vwap_val)
+_near_res   = math.abs(close - r1_v) < atr_val * 0.5 or math.abs(close - pdh) < atr_val * 0.5 or (math.abs(close - vwap_val) < atr_val * 0.3 and close <= vwap_val)
+
+bull_absorb = show_absorb and _absorb_raw and _near_sup
+bear_absorb = show_absorb and _absorb_raw and _near_res
+
+// ── 6. MOMENTUM VELOCITY + ACCELERATION (MVA) ───────────────
+// 2nd derivative of price. Deceleration at a trend extreme is mathematically
+// inevitable before reversal — detects it 2–4 candles before RSI divergence forms.
+velocity    = ta.roc(close, 3)
+accel       = velocity - velocity[1]
+
+mva_bull_sig = show_mva and close < close[3] and accel > 0 and accel > accel[1] and accel > accel[2]
+mva_bear_sig = show_mva and close > close[3] and accel < 0 and accel < accel[1] and accel < accel[2]
+
+// ── 7. PHANTOM DIVERGENCE ────────────────────────────────────
+// Stores the RSI value at each confirmed pivot. When current RSI has already
+// dropped below that stored level — before price even tests the pivot again —
+// divergence is forming invisibly. 3–5 candles earlier than classical divergence.
+var float rsi_at_ph = na
+var float rsi_at_pl = na
+
+if not na(sm_ph)
+    rsi_at_ph := rsi_val[sm_piv_len]
+if not na(sm_pl)
+    rsi_at_pl := rsi_val[sm_piv_len]
+
+phantom_bear = show_phantom and not na(rsi_at_ph) and not na(ph1) and rsi_val < rsi_at_ph * 0.94 and close < ph1 + atr_val * 0.5 and rsi_val > 45
+phantom_bull = show_phantom and not na(rsi_at_pl) and not na(pl1) and rsi_val > rsi_at_pl * 1.06 and close > pl1 - atr_val * 0.5 and rsi_val < 55
+
+phantom_bear_sig = phantom_bear and not phantom_bear[1]
+phantom_bull_sig = phantom_bull and not phantom_bull[1]
+
+// ── 8. CANDLE POLARITY DRIFT ─────────────────────────────────
+// Rolling close-position average (polarity_sma) crosses 0.5 while price
+// is range-bound at a key level = control shifting from sellers to buyers (or vice
+// versa) before it shows up in price.
+polarity_bull_drift = show_polarity and ta.crossover(polarity_sma, 0.5) and math.abs(close - close[5]) < atr_val * 0.8
+polarity_bear_drift = show_polarity and ta.crossunder(polarity_sma, 0.5) and math.abs(close - close[5]) < atr_val * 0.8
+
+// ── UNIFIED LEADING SCORE (0–14) ─────────────────────────────
+// 8 independent signal sources across 4 lead-time windows:
+// SCD=3–5 bars early · Phantom=3–5 · Compression=1 bar · MVA=2–4 bars · Polarity=1–3 · Absorption=2–4 · IRE=concurrent · Spring/UT=same bar
+leading_bull = (scd_bull_div ? 2 : 0) + (cmp_cond and bull and polarity_sma > 0.5 ? 2 : 0) + (spring_sig ? 3 : 0) + (ire_bull ? 1 : 0) + (bull_absorb ? 2 : 0) + (mva_bull_sig ? 1 : 0) + (phantom_bull ? 2 : 0) + (polarity_bull_drift ? 1 : 0)
+leading_bear = (scd_bear_div ? 2 : 0) + (cmp_cond and bear and polarity_sma < 0.5 ? 2 : 0) + (upthrust_sig ? 3 : 0) + (ire_bear ? 1 : 0) + (bear_absorb ? 2 : 0) + (mva_bear_sig ? 1 : 0) + (phantom_bear ? 2 : 0) + (polarity_bear_drift ? 1 : 0)
+
+unified_bull_on  = show_lead and leading_bull >= min_lead_score
+unified_bear_on  = show_lead and leading_bear >= min_lead_score
+unified_bull_sig = unified_bull_on and not unified_bull_on[1]
+unified_bear_sig = unified_bear_on and not unified_bear_on[1]
+
+bz1 = show_bsz and math.abs(close - s1_v) <= prox
+bz2 = show_bsz and math.abs(close - s2_v) <= prox
+sz1 = show_bsz and math.abs(close - r1_v) <= prox
+sz2 = show_bsz and math.abs(close - r2_v) <= prox
+
+// ─── EMA + RIBBON ───────────────────────────────────────────
+p_fast = plot(ema_fast, "EMA Fast", color=fast_col, linewidth=fast_w)
+p_slow = plot(ema_slow, "EMA Slow", color=slow_col, linewidth=slow_w)
+fill(p_fast, p_slow,
+  color = show_rib ? (ema_fast > ema_slow ? color.new(fast_col, 82) : color.new(slow_col, 82)) : na,
+  title = "EMA ribbon"
+)
+
+// ─── CROSSOVER CONNECTOR LINE ───────────────────────────────
+// Diagonal line connecting each crossover point to the previous one
+var int   cx_bar   = na
+var float cx_price = na
+
+if show_cx and (ema_cross_up or ema_cross_dn)
+    cx_now = math.avg(ema_fast, ema_slow)
+    if not na(cx_bar)
+        line.new(cx_bar, cx_price, bar_index, cx_now,
+                 color  = cx_col,
+                 width  = cx_w,
+                 style  = cx_style_val,
+                 extend = extend.none)
+    cx_bar   := bar_index
+    cx_price := cx_now
+
+// ─── VWAP ───────────────────────────────────────────────────
+plot(vwap_val, "VWAP", color=vwap_col, linewidth=vwap_w)
+
+// ─── BOLLINGER BANDS ────────────────────────────────────────
+p_bbu = plot(show_bb ? bb_upper : na, "BB upper", color=color.new(#7986CB, 50), linewidth=bb_w)
+p_bbl = plot(show_bb ? bb_lower : na, "BB lower", color=color.new(#7986CB, 50), linewidth=bb_w)
+plot(show_bb ? bb_mid : na,           "BB mid",   color=color.new(#7986CB, 75), linewidth=bb_w)
+fill(p_bbu, p_bbl, color=show_bb ? color.new(#7986CB, 92) : na, title="BB fill")
+
+// ─── SUPERTREND ──────────────────────────────────────────────
+plot(show_st ? st_line : na, "Supertrend",
+  color     = st_bull ? color.new(#26A69A, 0) : color.new(#EF5350, 0),
+  linewidth = st_w,
+  style     = plot.style_line
+)
+
+// ─── PREV DAY HIGH / LOW ─────────────────────────────────────
+plot(show_pdhl ? pdh : na, "Prev day high", color=pdh_col, linewidth=pdhl_w, style=plot.style_stepline)
+plot(show_pdhl ? pdl : na, "Prev day low",  color=pdl_col, linewidth=pdhl_w, style=plot.style_stepline)
+
+// ─── PIVOT LINES ─────────────────────────────────────────────
+plot(show_piv ? p_v  : na, "Pivot", color=color.new(#ECEFF1, 40), linewidth=piv_w, style=plot.style_stepline)
+plot(show_piv ? r1_v : na, "R1",    color=color.new(#EF5350, 15), linewidth=piv_w, style=plot.style_stepline)
+plot(show_piv ? r2_v : na, "R2",    color=color.new(#EF5350, 35), linewidth=piv_w, style=plot.style_stepline)
+plot(show_piv ? r3_v : na, "R3",    color=color.new(#EF5350, 55), linewidth=piv_w, style=plot.style_stepline)
+plot(show_piv ? s1_v : na, "S1",    color=color.new(#26A69A, 15), linewidth=piv_w, style=plot.style_stepline)
+plot(show_piv ? s2_v : na, "S2",    color=color.new(#26A69A, 35), linewidth=piv_w, style=plot.style_stepline)
+plot(show_piv ? s3_v : na, "S3",    color=color.new(#26A69A, 55), linewidth=piv_w, style=plot.style_stepline)
+
+// ─── PIVOT LABELS (right-side) ───────────────────────────────
+// Labels sit at the last bar — label.style_label_left flows text rightward
+// into the margin without allocating future bars (prevents zoom desync)
+piv_txt(name, val) =>
+    show_pval ? name + "  " + str.tostring(math.round(val, 1)) : name
+
+var label lbl_p  = na
+var label lbl_r1 = na
+var label lbl_r2 = na
+var label lbl_r3 = na
+var label lbl_s1 = na
+var label lbl_s2 = na
+var label lbl_s3 = na
+
+if show_piv and show_plbl and barstate.islast
+    lx = bar_index
+    label.delete(lbl_p)
+    label.delete(lbl_r1)
+    label.delete(lbl_r2)
+    label.delete(lbl_r3)
+    label.delete(lbl_s1)
+    label.delete(lbl_s2)
+    label.delete(lbl_s3)
+    lbl_p  := label.new(lx, p_v,  piv_txt("P",  p_v),  style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#ECEFF1, 20))
+    lbl_r1 := label.new(lx, r1_v, piv_txt("R1", r1_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#EF5350,  0))
+    lbl_r2 := label.new(lx, r2_v, piv_txt("R2", r2_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#EF5350, 20))
+    lbl_r3 := label.new(lx, r3_v, piv_txt("R3", r3_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#EF5350, 40))
+    lbl_s1 := label.new(lx, s1_v, piv_txt("S1", s1_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#26A69A,  0))
+    lbl_s2 := label.new(lx, s2_v, piv_txt("S2", s2_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#26A69A, 20))
+    lbl_s3 := label.new(lx, s3_v, piv_txt("S3", s3_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#26A69A, 40))
+
+// ─── DEMAND / SUPPLY ZONE FILLS ─────────────────────────────
+p_su_t = plot(show_dsz ? sup_top : na, "Supply zone top",    color=na, display=display.none)
+p_su_b = plot(show_dsz ? sup_bot : na, "Supply zone bottom", color=na, display=display.none)
+p_de_t = plot(show_dsz ? dem_top : na, "Demand zone top",    color=na, display=display.none)
+p_de_b = plot(show_dsz ? dem_bot : na, "Demand zone bottom", color=na, display=display.none)
+fill(p_su_t, p_su_b, color=show_dsz ? color.new(#EF5350, 77) : na, title="Supply zone")
+fill(p_de_t, p_de_b, color=show_dsz ? color.new(#26A69A, 77) : na, title="Demand zone")
+
+// ─── SMART TREND LINES & CHANNEL FILL ───────────────────────
+var line tl_res_line = na
+var line tl_sup_line = na
+var linefill tl_fill = na
+
+if show_tl
+    if not na(ph1) and not na(ph2) and phb1 != phb2
+        line.delete(tl_res_line)
+        tl_res_line := line.new(phb2, ph2, phb1, ph1, extend=extend.right, color=tl_res_col, width=tl_w, style=line.style_solid)
+    if not na(pl1) and not na(pl2) and plb1 != plb2
+        line.delete(tl_sup_line)
+        tl_sup_line := line.new(plb2, pl2, plb1, pl1, extend=extend.right, color=tl_sup_col, width=tl_w, style=line.style_solid)
+    if show_channel and not na(tl_res_line) and not na(tl_sup_line)
+        linefill.delete(tl_fill)
+        tl_fill := linefill.new(tl_res_line, tl_sup_line, color=color.new(color.gray, 92))
+
+// ─── CHART PATTERN LABELS ────────────────────────────────────
+// Bearish patterns — label above the bar
+if dt_sig
+    label.new(bar_index, high + atr_val*0.5, "⊤ Double Top",          style=label.style_label_down, color=color.new(#EF5350, 15), textcolor=color.white, size=size.small)
+if hs_sig
+    label.new(bar_index, high + atr_val*0.5, "◫ H & S",               style=label.style_label_down, color=color.new(#EF5350, 15), textcolor=color.white, size=size.small)
+if dt2_sig
+    label.new(bar_index, high + atr_val*0.5, "▽ Desc Triangle",       style=label.style_label_down, color=color.new(#EF5350, 25), textcolor=color.white, size=size.small)
+if rw_sig
+    label.new(bar_index, high + atr_val*0.5, "⌿ Rising Wedge",        style=label.style_label_down, color=color.new(#EF5350, 25), textcolor=color.white, size=size.small)
+if brf_sig
+    label.new(bar_index, high + atr_val*0.5, "⚑ Bear Flag",           style=label.style_label_down, color=color.new(#EF5350, 25), textcolor=color.white, size=size.small)
+// Bullish patterns — label below the bar
+if db_sig
+    label.new(bar_index, low - atr_val*0.5,  "⊥ Double Bottom",       style=label.style_label_up,   color=color.new(#26A69A, 15), textcolor=color.white, size=size.small)
+if ihs_sig
+    label.new(bar_index, low - atr_val*0.5,  "◨ Inv H & S",           style=label.style_label_up,   color=color.new(#26A69A, 15), textcolor=color.white, size=size.small)
+if at_sig
+    label.new(bar_index, low - atr_val*0.5,  "△ Asc Triangle",        style=label.style_label_up,   color=color.new(#26A69A, 25), textcolor=color.white, size=size.small)
+if fw_sig
+    label.new(bar_index, low - atr_val*0.5,  "⌇ Falling Wedge",       style=label.style_label_up,   color=color.new(#26A69A, 25), textcolor=color.white, size=size.small)
+if bf_sig
+    label.new(bar_index, low - atr_val*0.5,  "⚐ Bull Flag",           style=label.style_label_up,   color=color.new(#26A69A, 25), textcolor=color.white, size=size.small)
+// Neutral patterns — alternate above/below
+if st_sig
+    label.new(bar_index, high + atr_val*0.5, "◇ Sym Triangle",        style=label.style_label_down, color=color.new(#7986CB, 20), textcolor=color.white, size=size.small)
+
+// ─── BUY / SELL ZONES + TREND BACKGROUND ────────────────────
+bgcolor(bz1 ? color.new(#26A69A, 87) : na, title="Buy zone 1 — near S1")
+bgcolor(bz2 ? color.new(#26A69A, 82) : na, title="Buy zone 2 — near S2")
+bgcolor(sz1 ? color.new(#EF5350, 87) : na, title="Sell zone 1 — near R1")
+bgcolor(sz2 ? color.new(#EF5350, 82) : na, title="Sell zone 2 — near R2")
+bgcolor(
+  show_bg and not bz1 and not bz2 and not sz1 and not sz2 and bull ? color.new(color.teal, 95) :
+  show_bg and not bz1 and not bz2 and not sz1 and not sz2 and bear ? color.new(color.red,  95) : na,
+  title="Trend background"
+)
+
+// ─── CANDLE COLOR (priority: institutional > high score > moderate score) ─
+barcolor(
+  inst_buy                        ? inst_bull_col           :
+  inst_sell                       ? inst_bear_col           :
+  show_bar_score and ms_bull >= 8 ? color.new(#00E676,  0)  :
+  show_bar_score and ms_bear >= 8 ? color.new(#FF1744,  0)  :
+  show_bar_score and ms_bull >= 6 ? color.new(#00E676, 45)  :
+  show_bar_score and ms_bear >= 6 ? color.new(#FF1744, 45)  :
+  na,
+  title = "Candle color"
+)
+
+// ─── ENTRY SIGNALS ──────────────────────────────────────────
+plotshape(long_sig  and show_sig, "Long",  shape.labelup,   location.belowbar, color.new(#00E676, 0), text="L", textcolor=color.black, size=size.small)
+plotshape(short_sig and show_sig, "Short", shape.labeldown, location.abovebar, color.new(#EF5350, 0), text="S", textcolor=color.white, size=size.small)
+
+// ─── STRONG MOMENTUM SIGNALS ────────────────────────────────
+plotshape(strong_long  and show_strong, "Strong Long",
+          shape.triangleup, location.belowbar,
+          color.new(#00FF00, 0), text="▲ STRONG", textcolor=color.new(#00FF00, 0), size=size.normal)
+plotshape(strong_short and show_strong, "Strong Short",
+          shape.triangledown, location.abovebar,
+          color.new(#FF0000, 0), text="▼ STRONG", textcolor=color.new(#FF0000, 0), size=size.normal)
+
+// ─── FALSE BREAKOUT ALERTS ───────────────────────────────────
+plotshape(show_false_brk and fake_break_up, "Fake Bullish Break",
+          shape.xcross, location.abovebar, color.new(#FF9800, 0), size=size.small)
+plotshape(show_false_brk and fake_break_dn, "Fake Bearish Break",
+          shape.xcross, location.belowbar, color.new(#FF9800, 0), size=size.small)
+
+// ─── UNIFIED LEADING SIGNAL (fires when 3+ systems agree) ───
+plotshape(unified_bull_sig, "LEAD Bull",
+          shape.triangleup, location.belowbar,
+          color.new(#00E676, 0), text="◉ LEAD", textcolor=color.new(#00FF00, 0), size=size.large)
+plotshape(unified_bear_sig, "LEAD Bear",
+          shape.triangledown, location.abovebar,
+          color.new(#EF5350, 0), text="◉ LEAD", textcolor=color.new(#FF0000, 0), size=size.large)
+
+// ─── INDIVIDUAL LEADING SIGNALS ──────────────────────────────
+// ─── INDIVIDUAL LEADING SIGNALS (labels — do not count toward plot limit) ──
+if scd_bull_sig
+    label.new(bar_index, low  - atr_val*0.4, "Δ SCD",  style=label.style_label_up,   color=color.new(#1D9E75, 50), textcolor=color.new(#1D9E75, 0), size=size.small)
+if scd_bear_sig
+    label.new(bar_index, high + atr_val*0.4, "∇ SCD",  style=label.style_label_down, color=color.new(#EF5350, 50), textcolor=color.new(#EF5350, 0), size=size.small)
+if cmp_bull_sig
+    label.new(bar_index, low  - atr_val*0.4, "◈ CMP",  style=label.style_label_up,   color=color.new(#378ADD, 50), textcolor=color.new(#378ADD, 0), size=size.small)
+if cmp_bear_sig
+    label.new(bar_index, high + atr_val*0.4, "◈ CMP",  style=label.style_label_down, color=color.new(#7986CB, 50), textcolor=color.new(#7986CB, 0), size=size.small)
+if spring_sig
+    label.new(bar_index, low  - atr_val*0.4, "⚡SPR",  style=label.style_label_up,   color=color.new(#00C853, 40), textcolor=color.black,           size=size.small)
+if upthrust_sig
+    label.new(bar_index, high + atr_val*0.4, "⚡UT",   style=label.style_label_down, color=color.new(#D50000, 40), textcolor=color.white,           size=size.small)
+if ire_bull
+    label.new(bar_index, low  - atr_val*0.4, "⏱ IRE",  style=label.style_label_up,   color=color.new(#BA7517, 50), textcolor=color.new(#FFD600, 0), size=size.small)
+if ire_bear
+    label.new(bar_index, high + atr_val*0.4, "⏱ IRE",  style=label.style_label_down, color=color.new(#BA7517, 50), textcolor=color.new(#FFD600, 0), size=size.small)
+if bull_absorb
+    label.new(bar_index, low  - atr_val*0.6, "A",      style=label.style_label_up,   color=color.new(#1D9E75, 65), textcolor=color.new(#1D9E75, 0), size=size.tiny)
+if bear_absorb
+    label.new(bar_index, high + atr_val*0.6, "A",      style=label.style_label_down, color=color.new(#EF5350, 65), textcolor=color.new(#EF5350, 0), size=size.tiny)
+if mva_bull_sig
+    label.new(bar_index, low  - atr_val*0.6, "v↑",     style=label.style_label_up,   color=color.new(#7F77DD, 60), textcolor=color.new(#7F77DD, 0), size=size.tiny)
+if mva_bear_sig
+    label.new(bar_index, high + atr_val*0.6, "v↓",     style=label.style_label_down, color=color.new(#7F77DD, 60), textcolor=color.new(#7F77DD, 0), size=size.tiny)
+if phantom_bull_sig
+    label.new(bar_index, low  - atr_val*0.4, "φ",      style=label.style_label_up,   color=color.new(#CE93D8, 50), textcolor=color.new(#CE93D8, 0), size=size.small)
+if phantom_bear_sig
+    label.new(bar_index, high + atr_val*0.4, "φ",      style=label.style_label_down, color=color.new(#CE93D8, 50), textcolor=color.new(#CE93D8, 0), size=size.small)
+if polarity_bull_drift
+    label.new(bar_index, low  - atr_val*0.6, "P↑",     style=label.style_label_up,   color=color.new(#80CBC4, 65), textcolor=color.new(#80CBC4, 0), size=size.tiny)
+if polarity_bear_drift
+    label.new(bar_index, high + atr_val*0.6, "P↓",     style=label.style_label_down, color=color.new(#FF7043, 65), textcolor=color.new(#FF7043, 0), size=size.tiny)
+
+// Compression active — very subtle background tint
+bgcolor(show_cmp and cmp_cond ? color.new(#7986CB, 96) : na, title="Compression zone")
+
+// ─── CANDLESTICK PATTERN MARKERS ────────────────────────────
+// ─── CANDLESTICK PATTERN MARKERS (labels — do not count toward plot limit) ─
+if show_patterns and bull_engulf
+    label.new(bar_index, low  - atr_val*0.3, "●", style=label.style_label_up,   color=color.new(#00BCD4, 60), textcolor=color.new(#00BCD4, 0), size=size.tiny)
+if show_patterns and bear_engulf
+    label.new(bar_index, high + atr_val*0.3, "●", style=label.style_label_down, color=color.new(#FF7043, 60), textcolor=color.new(#FF7043, 0), size=size.tiny)
+if show_patterns and morning_star
+    label.new(bar_index, low  - atr_val*0.3, "✦", style=label.style_label_up,   color=color.new(#00E676, 50), textcolor=color.white, size=size.small)
+if show_patterns and evening_star
+    label.new(bar_index, high + atr_val*0.3, "✦", style=label.style_label_down, color=color.new(#EF5350, 50), textcolor=color.white, size=size.small)
+if show_patterns and is_hammer
+    label.new(bar_index, low  - atr_val*0.3, "↑", style=label.style_label_up,   color=color.new(#80CBC4, 65), textcolor=color.new(#80CBC4, 0), size=size.tiny)
+if show_patterns and is_shooting
+    label.new(bar_index, high + atr_val*0.3, "↓", style=label.style_label_down, color=color.new(#FFAB40, 65), textcolor=color.new(#FFAB40, 0), size=size.tiny)
+if show_patterns and bull_marubozu
+    label.new(bar_index, low  - atr_val*0.3, "■", style=label.style_label_up,   color=color.new(#00E676, 65), textcolor=color.new(#00E676, 0), size=size.tiny)
+if show_patterns and bear_marubozu
+    label.new(bar_index, high + atr_val*0.3, "■", style=label.style_label_down, color=color.new(#EF5350, 65), textcolor=color.new(#EF5350, 0), size=size.tiny)
+
+// ─── INFO TABLE ─────────────────────────────────────────────
+rsi_col  = rsi_val >= ob ? color.new(#EF5350, 0) : rsi_val <= os ? color.new(#26A69A, 0) : color.new(#90CAF9, 0)
+rsi_lbl  = rsi_val >= ob ? "Overbought" : rsi_val <= os ? "Oversold" : "Neutral"
+vol_col  = volume > vol_sma ? color.new(#26A69A, 0) : color.new(#607D8B, 0)
+vol_lbl  = volume > vol_sma ? "Above avg  ✓" : "Below avg"
+st_col   = st_bull ? color.new(#26A69A, 0) : color.new(#EF5350, 0)
+vwap_col2 = close > vwap_val ? color.new(#26A69A, 0) : color.new(#EF5350, 0)
+
+var tbl = table.new(
+  position.bottom_right, 2, 8,
+  bgcolor      = color.new(#0D1117, 65),
+  frame_color  = color.new(#263238, 55),
+  frame_width  = 1,
+  border_color = color.new(#263238, 55),
+  border_width = 1
+)
+
+if show_tbl and barstate.islast
+    table.cell(tbl, 0, 0, "Indicator",  text_color=color.new(color.white, 35), text_size=size.small, bgcolor=color.new(#1E2A38, 55))
+    table.cell(tbl, 1, 0, "Status",     text_color=color.new(color.white, 35), text_size=size.small, bgcolor=color.new(#1E2A38, 55))
+    table.cell(tbl, 0, 1, "RSI " + str.tostring(rsi_len),
+               text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 1, str.tostring(math.round(rsi_val, 1)) + "  " + rsi_lbl,
+               text_color=rsi_col, text_size=size.small)
+    table.cell(tbl, 0, 2, "Volume",     text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 2, vol_lbl,      text_color=vol_col, text_size=size.small)
+    table.cell(tbl, 0, 3, "Supertrend", text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 3, st_bull ? "Bullish" : "Bearish", text_color=st_col, text_size=size.small)
+    table.cell(tbl, 0, 4, "VWAP bias",  text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 4, close > vwap_val ? "Above" : "Below", text_color=vwap_col2, text_size=size.small)
+    // Momentum score
+    score_col_t = ms_bull > ms_bear ? (ms_bull >= 7 ? color.new(#00E676, 0) : color.new(#80CBC4, 0)) : (ms_bear >= 7 ? color.new(#EF5350, 0) : color.new(#FF7043, 0))
+    table.cell(tbl, 0, 5, "Momentum",   text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 5, "▲ " + str.tostring(ms_bull) + "  /  ▼ " + str.tostring(ms_bear), text_color=score_col_t, text_size=size.small)
+    // Pattern detected
+    pat_lbl = bull_engulf or bull_marubozu ? "Bull Engulf" : bear_engulf or bear_marubozu ? "Bear Engulf" : morning_star ? "Morning Star" : evening_star ? "Evening Star" : is_hammer ? "Hammer" : is_shooting ? "Shooting Star" : bull_pin ? "Bull Pin Bar" : bear_pin ? "Bear Pin Bar" : is_doji ? "Doji" : is_inside ? "Inside Bar" : "—"
+    pat_col_t = bull_engulf or morning_star or is_hammer or bull_pin or bull_marubozu ? color.new(#26A69A, 0) : bear_engulf or evening_star or is_shooting or bear_pin or bear_marubozu ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl, 0, 6, "Pattern",    text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 6, pat_lbl,      text_color=pat_col_t, text_size=size.small)
+    table.cell(tbl, 0, 7, "Channel",    text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 7, ch_type,      text_color=color.new(#90CAF9, 0), text_size=size.small)
+
+// ─── LEADING INDICATOR TABLE (top-right) ─────────────────────
+var tbl_lead = table.new(
+  position.top_right, 2, 10,
+  bgcolor      = color.new(#0D1117, 65),
+  frame_color  = color.new(#263238, 55),
+  frame_width  = 1,
+  border_color = color.new(#263238, 55),
+  border_width = 1
+)
+
+if show_lead and barstate.islast
+    table.cell(tbl_lead, 0, 0, "Leading System", text_color=color.new(color.white, 35), text_size=size.small, bgcolor=color.new(#1E2A38, 55))
+    table.cell(tbl_lead, 1, 0, "State",          text_color=color.new(color.white, 35), text_size=size.small, bgcolor=color.new(#1E2A38, 55))
+
+    _scd_s  = scd_bull_div ? "▲ Bull div" : scd_bear_div ? "▼ Bear div" : "Neutral"
+    _scd_c  = scd_bull_div ? color.new(#26A69A, 0) : scd_bear_div ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 1, "SCD Delta",      text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 1, _scd_s,           text_color=_scd_c, text_size=size.small)
+
+    _cmp_s  = cmp_cond and bull ? "▲ Coiling" : cmp_cond and bear ? "▼ Coiling" : cmp_cond ? "Coiling" : "—"
+    _cmp_c  = cmp_cond and bull ? color.new(#26A69A, 0) : cmp_cond and bear ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 2, "Compression",    text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 2, _cmp_s,           text_color=_cmp_c, text_size=size.small)
+
+    _spr_s  = spring_sig ? "▲ Spring!" : upthrust_sig ? "▼ Upthrust!" : "—"
+    _spr_c  = spring_sig ? color.new(#26A69A, 0) : upthrust_sig ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 3, "Spring / UT",    text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 3, _spr_s,           text_color=_spr_c, text_size=size.small)
+
+    _ire_s  = ire_bull ? "▲ Vol surge" : ire_bear ? "▼ Vol surge" : "Normal"
+    _ire_c  = ire_bull ? color.new(#26A69A, 0) : ire_bear ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 4, "IRE",            text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 4, _ire_s,           text_color=_ire_c, text_size=size.small)
+
+    _abs_s  = bull_absorb ? "▲ Accumulating" : bear_absorb ? "▼ Distributing" : "—"
+    _abs_c  = bull_absorb ? color.new(#26A69A, 0) : bear_absorb ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 5, "Absorption",     text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 5, _abs_s,           text_color=_abs_c, text_size=size.small)
+
+    _mva_s  = mva_bull_sig ? "▲ Re-accel" : mva_bear_sig ? "▼ Decel" : "—"
+    _mva_c  = mva_bull_sig ? color.new(#26A69A, 0) : mva_bear_sig ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 6, "MVA",            text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 6, _mva_s,           text_color=_mva_c, text_size=size.small)
+
+    _pht_s  = phantom_bull ? "▲ Phantom div" : phantom_bear ? "▼ Phantom div" : "—"
+    _pht_c  = phantom_bull ? color.new(#26A69A, 0) : phantom_bear ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 7, "Phantom",        text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 7, _pht_s,           text_color=_pht_c, text_size=size.small)
+
+    _pol_s  = polarity_bull_drift ? "▲ Shift bull" : polarity_bear_drift ? "▼ Shift bear" : "Neutral"
+    _pol_c  = polarity_bull_drift ? color.new(#26A69A, 0) : polarity_bear_drift ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+    table.cell(tbl_lead, 0, 8, "Polarity",       text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 8, _pol_s,           text_color=_pol_c, text_size=size.small)
+
+    _lmax   = math.max(leading_bull, leading_bear)
+    _lbias  = leading_bull > leading_bear ? "BULL " : leading_bear > leading_bull ? "BEAR " : ""
+    _lc     = leading_bull > leading_bear ? color.new(#00E676, 0) : leading_bear > leading_bull ? color.new(#EF5350, 0) : color.new(#90CAF9, 0)
+    table.cell(tbl_lead, 0, 9, "Lead Score",     text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl_lead, 1, 9, _lbias + str.tostring(_lmax) + " / 14", text_color=_lc, text_size=size.small)
