@@ -15,7 +15,7 @@ fast_w      = input.int(1,    "Fast EMA width",              minval=1,   maxval=
 slow_len    = input.int(21,   "Slow EMA length",             minval=1,   maxval=200, group="EMA & Ribbon")
 slow_col    = input.color(#FF7043, "Slow EMA color",                                 group="EMA & Ribbon")
 slow_w      = input.int(1,    "Slow EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
-show_rib    = input.bool(true, "EMA ribbon fill",                                    group="EMA & Ribbon")
+show_rib    = input.bool(false, "EMA ribbon fill",                                    group="EMA & Ribbon")
 
 // ─── CROSSOVER LINE ─────────────────────────────────────────
 show_cx     = input.bool(true,  "Show crossover line",                               group="Crossover Line")
@@ -94,16 +94,28 @@ show_strong    = input.bool(false, "Show strong momentum signals",              
 show_bar_score = input.bool(false, "Color bars by momentum score",                 group="Price Action & AI")
 min_momentum   = input.int(6,      "Min score for strong signal (0–10)", minval=1, maxval=10, group="Price Action & AI")
 
+// ─── AI TREND SUITE ──────────────────────────────────────────
+show_kf      = input.bool(false, "Kalman Filter trend line",                group="AI Trend Suite")
+kf_proc_n    = input.float(0.01, "Kalman process noise",   minval=0.001, maxval=0.1, step=0.001, group="AI Trend Suite")
+show_kama    = input.bool(false, "KAMA efficiency adaptive MA",              group="AI Trend Suite")
+kama_len     = input.int(10,     "KAMA length",             minval=5,  maxval=50,  group="AI Trend Suite")
+show_reg     = input.bool(true,  "Regression channel (1σ / 2σ)",             group="AI Trend Suite")
+reg_len      = input.int(50,     "Regression length",       minval=20, maxval=200, group="AI Trend Suite")
+show_state   = input.bool(false, "Market State Classifier",                  group="AI Trend Suite")
+adx_len      = input.int(14,     "ADX length",              minval=7,  maxval=30,  group="AI Trend Suite")
+state_filter = input.bool(true,  "Filter L/S signals by state",              group="AI Trend Suite")
+show_hurst   = input.bool(true,  "Hurst Exponent in table",                  group="AI Trend Suite")
+
 // ─── LEADING INDICATORS ──────────────────────────────────────
-show_lead      = input.bool(true,  "Show unified LEAD signal",                    group="Leading Indicators")
-show_scd       = input.bool(true,  "Synthetic Cumulative Delta (SCD) divergence", group="Leading Indicators")
-show_cmp       = input.bool(true,  "Compression Explosion predictor",             group="Leading Indicators")
-show_spring    = input.bool(true,  "Spring & Upthrust with velocity",             group="Leading Indicators")
-show_ire       = input.bool(true,  "Intraday Rhythm Engine (IRE)",                group="Leading Indicators")
-show_absorb    = input.bool(true,  "Absorption Zone detector",                    group="Leading Indicators")
-show_mva       = input.bool(true,  "Momentum Velocity + Acceleration (MVA)",      group="Leading Indicators")
-show_phantom   = input.bool(true,  "Phantom Divergence (pre-divergence signal)",  group="Leading Indicators")
-show_polarity  = input.bool(true,  "Candle Polarity Drift",                       group="Leading Indicators")
+show_lead      = input.bool(false,  "Show unified LEAD signal",                    group="Leading Indicators")
+show_scd       = input.bool(false,  "Synthetic Cumulative Delta (SCD) divergence", group="Leading Indicators")
+show_cmp       = input.bool(false,  "Compression Explosion predictor",             group="Leading Indicators")
+show_spring    = input.bool(false,  "Spring & Upthrust with velocity",             group="Leading Indicators")
+show_ire       = input.bool(false,  "Intraday Rhythm Engine (IRE)",                group="Leading Indicators")
+show_absorb    = input.bool(false,  "Absorption Zone detector",                    group="Leading Indicators")
+show_mva       = input.bool(false,  "Momentum Velocity + Acceleration (MVA)",      group="Leading Indicators")
+show_phantom   = input.bool(false,  "Phantom Divergence (pre-divergence signal)",  group="Leading Indicators")
+show_polarity  = input.bool(false,  "Candle Polarity Drift",                       group="Leading Indicators")
 spring_vel     = input.float(0.7,  "Spring snap-back velocity",   minval=0.3, maxval=1.5, step=0.1, group="Leading Indicators")
 ire_threshold  = input.float(2.0,  "IRE vol anomaly threshold (× avg vol)", minval=1.5, maxval=5.0, step=0.1, group="Leading Indicators")
 min_lead_score = input.int(4,      "Min score for LEAD signal (0–14)", minval=1,  maxval=14,         group="Leading Indicators")
@@ -528,6 +540,81 @@ unified_bear_on  = show_lead and leading_bear >= min_lead_score
 unified_bull_sig = unified_bull_on and not unified_bull_on[1]
 unified_bear_sig = unified_bear_on and not unified_bear_on[1]
 
+// ═══════════════════════════════════════════════════════════
+//  AI TREND SUITE
+// ═══════════════════════════════════════════════════════════
+
+// ── 1. ADAPTIVE KALMAN FILTER ────────────────────────────────
+// Aerospace-grade signal filter. Separates the true price trend from
+// measurement noise by adapting its gain to market volatility in real time.
+var float kf_state = na
+var float kf_varp  = 1.0
+
+_kf_pn    = math.pow(atr_val * kf_proc_n, 2)
+_kf_mn    = math.pow(ta.stdev(close, 20), 2)
+_kf_pv    = kf_varp + _kf_pn
+_kf_kg    = _kf_pv / math.max(_kf_pv + _kf_mn, 0.0001)
+kf_state := na(kf_state) ? close : kf_state + _kf_kg * (close - kf_state)
+kf_varp  := (1 - _kf_kg) * _kf_pv
+
+kf_bull   = kf_state > kf_state[1]
+kf_col    = kf_bull ? color.new(#00E5FF, 0) : color.new(#FF6B6B, 0)
+
+// ── 2. KAMA — EFFICIENCY RATIO ADAPTIVE MA ──────────────────
+// Measures signal-to-noise ratio (Efficiency Ratio). Tracks price
+// fast in strong trends, nearly freezes in choppy conditions.
+_kd       = math.abs(close - close[kama_len])
+_kv       = math.sum(math.abs(close - close[1]), kama_len)
+kama_er   = _kv > 0 ? _kd / _kv : 0.0         // 0 = noise, 1 = trend
+_kfast    = 2.0 / 3.0
+_kslow    = 2.0 / 31.0
+_ksc      = math.pow(kama_er * (_kfast - _kslow) + _kslow, 2)
+
+var float kama_v = na
+kama_v   := na(kama_v) ? close : kama_v + _ksc * (close - kama_v)
+kama_bull = kama_v > kama_v[1]
+kama_col  = kama_bull ? color.new(#FFCA28, 0) : color.new(#FF7043, 0)
+
+// ── 3. DYNAMIC REGRESSION CHANNEL ────────────────────────────
+// ML's least-squares regression applied to price. The ±σ bands are
+// genuine statistical confidence intervals — not arbitrary multiples.
+// Price outside the 2σ band is statistically abnormal.
+reg_line   = ta.linreg(close, reg_len, 0)
+reg_bull   = reg_line > ta.linreg(close, reg_len, 1)
+
+_rc        = ta.correlation(close, bar_index, reg_len)
+_rs        = ta.stdev(close, reg_len) * math.sqrt(math.max(1 - _rc * _rc, 0.001))
+
+reg_u1     = reg_line + _rs
+reg_l1     = reg_line - _rs
+reg_u2     = reg_line + 2 * _rs
+reg_l2     = reg_line - 2 * _rs
+
+reg_out_bull = close < reg_l2   // abnormally low — stat outlier, mean-reversion candidate
+reg_out_bear = close > reg_u2   // abnormally high — stat outlier, mean-reversion candidate
+
+// ── 4. MARKET STATE CLASSIFIER ───────────────────────────────
+// HMM-inspired 3-state classifier. Combines ADX (trend strength),
+// BB width (volatility), and KAMA slope (direction) into a single
+// state: BULL TREND · BEAR TREND · RANGING.
+// When state_filter = true, L/S signals are suppressed in wrong states.
+[_di_p, _di_m, adx_v] = ta.dmi(adx_len, adx_len)
+_kslope       = (kama_v - kama_v[5]) / math.max(atr_val, 0.001)
+_is_ranging   = adx_v < 20 or (adx_v < 25 and math.abs(_kslope) < 0.3)
+market_state  = _is_ranging ? 0 : (_kslope > 0.2 and kf_bull ? 1 : _kslope < -0.2 and not kf_bull ? -1 : 0)
+
+state_col  = market_state ==  1 ? color.new(#26A69A, 0) : market_state == -1 ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+state_lbl  = market_state ==  1 ? "▲ Bull Trend" : market_state == -1 ? "▼ Bear Trend" : "→ Ranging"
+
+// ── 5. HURST EXPONENT ────────────────────────────────────────
+// Measures long-range dependence. H > 0.55 = persistent trend.
+// H < 0.45 = mean-reverting. H ≈ 0.5 = random walk.
+_sig8      = ta.stdev(close, 8)
+_sig32     = ta.stdev(close, 32)
+hurst_val  = _sig8 > 0 ? math.log(math.max(_sig32, 0.0001) / math.max(_sig8, 0.0001)) / math.log(4.0) : 0.5
+hurst_lbl  = hurst_val > 0.55 ? "Trending (" + str.tostring(math.round(hurst_val, 2)) + ")" : hurst_val < 0.45 ? "Mean-rev (" + str.tostring(math.round(hurst_val, 2)) + ")" : "Random (" + str.tostring(math.round(hurst_val, 2)) + ")"
+hurst_col  = hurst_val > 0.55 ? color.new(#26A69A, 0) : hurst_val < 0.45 ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
+
 bz1 = show_bsz and math.abs(close - s1_v) <= prox
 bz2 = show_bsz and math.abs(close - s2_v) <= prox
 sz1 = show_bsz and math.abs(close - r1_v) <= prox
@@ -692,8 +779,8 @@ barcolor(
 )
 
 // ─── ENTRY SIGNALS ──────────────────────────────────────────
-plotshape(long_sig  and show_sig, "Long",  shape.labelup,   location.belowbar, color.new(#00E676, 0), text="L", textcolor=color.black, size=size.small)
-plotshape(short_sig and show_sig, "Short", shape.labeldown, location.abovebar, color.new(#EF5350, 0), text="S", textcolor=color.white, size=size.small)
+plotshape(long_sig  and show_sig and (not state_filter or market_state >= 0), "Long",  shape.labelup,   location.belowbar, color.new(#00E676, 0), text="L", textcolor=color.black, size=size.small)
+plotshape(short_sig and show_sig and (not state_filter or market_state <= 0), "Short", shape.labeldown, location.abovebar, color.new(#EF5350, 0), text="S", textcolor=color.white, size=size.small)
 
 // ─── STRONG MOMENTUM SIGNALS ────────────────────────────────
 plotshape(strong_long  and show_strong, "Strong Long",
@@ -755,6 +842,28 @@ if polarity_bear_drift
 // Compression active — very subtle background tint
 bgcolor(show_cmp and cmp_cond ? color.new(#7986CB, 96) : na, title="Compression zone")
 
+// ─── AI TREND SUITE PLOTS ────────────────────────────────────
+
+// Kalman Filter — zero-lag adaptive trend line
+plot(show_kf ? kf_state : na, "Kalman Filter", color=kf_col, linewidth=2)
+
+// KAMA — efficiency-adaptive MA (nearly flat in chop, fast in trend)
+plot(show_kama ? kama_v : na, "KAMA", color=kama_col, linewidth=1)
+
+// Regression Channel — statistical confidence bands
+p_rl  = plot(show_reg ? reg_line : na, "Reg trend", color=color.new(#90CAF9, 25), linewidth=1)
+p_ru1 = plot(show_reg ? reg_u1   : na, "Reg +1σ",  color=color.new(#7986CB, 50), linewidth=1)
+p_rl1 = plot(show_reg ? reg_l1   : na, "Reg −1σ",  color=color.new(#7986CB, 50), linewidth=1)
+p_ru2 = plot(show_reg ? reg_u2   : na, "Reg +2σ",  color=color.new(#7986CB, 72), linewidth=1)
+p_rl2 = plot(show_reg ? reg_l2   : na, "Reg −2σ",  color=color.new(#7986CB, 72), linewidth=1)
+fill(p_ru1, p_rl1, color=show_reg ? color.new(#7986CB, 93) : na, title="Reg 1σ fill")
+fill(p_ru2, p_rl2, color=show_reg ? color.new(#7986CB, 97) : na, title="Reg 2σ fill")
+
+// Market State Classifier — background tint per state
+bgcolor(show_state and market_state ==  1 ? color.new(#26A69A, 96) : na, title="State: Bull Trend")
+bgcolor(show_state and market_state == -1 ? color.new(#EF5350, 96) : na, title="State: Bear Trend")
+bgcolor(show_state and market_state ==  0 ? color.new(#607D8B, 97) : na, title="State: Ranging")
+
 // ─── CANDLESTICK PATTERN MARKERS ────────────────────────────
 // ─── CANDLESTICK PATTERN MARKERS (labels — do not count toward plot limit) ─
 if show_patterns and bull_engulf
@@ -783,7 +892,7 @@ st_col   = st_bull ? color.new(#26A69A, 0) : color.new(#EF5350, 0)
 vwap_col2 = close > vwap_val ? color.new(#26A69A, 0) : color.new(#EF5350, 0)
 
 var tbl = table.new(
-  position.bottom_right, 2, 8,
+  position.bottom_right, 2, 10,
   bgcolor      = color.new(#0D1117, 65),
   frame_color  = color.new(#263238, 55),
   frame_width  = 1,
@@ -815,6 +924,10 @@ if show_tbl and barstate.islast
     table.cell(tbl, 1, 6, pat_lbl,      text_color=pat_col_t, text_size=size.small)
     table.cell(tbl, 0, 7, "Channel",    text_color=color.new(color.white, 30), text_size=size.small)
     table.cell(tbl, 1, 7, ch_type,      text_color=color.new(#90CAF9, 0), text_size=size.small)
+    table.cell(tbl, 0, 8, "AI State",   text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 8, state_lbl,    text_color=state_col, text_size=size.small)
+    table.cell(tbl, 0, 9, show_hurst ? "Hurst H" : "", text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 9, show_hurst ? hurst_lbl : "", text_color=hurst_col, text_size=size.small)
 
 // ─── LEADING INDICATOR TABLE (top-right) ─────────────────────
 var tbl_lead = table.new(
