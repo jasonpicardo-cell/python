@@ -11,10 +11,10 @@ indicator("Nifty Scalper Pro", overlay=true, max_bars_back=1000,
 // ─── EMA & RIBBON ───────────────────────────────────────────
 fast_len    = input.int(9,    "Fast EMA length",             minval=1,   maxval=50,  group="EMA & Ribbon")
 fast_col    = input.color(#00BCD4, "Fast EMA color",                                 group="EMA & Ribbon")
-fast_w      = input.int(1,    "Fast EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
+fast_w      = input.int(2,    "Fast EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
 slow_len    = input.int(21,   "Slow EMA length",             minval=1,   maxval=200, group="EMA & Ribbon")
 slow_col    = input.color(#FF7043, "Slow EMA color",                                 group="EMA & Ribbon")
-slow_w      = input.int(1,    "Slow EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
+slow_w      = input.int(2,    "Slow EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
 show_rib    = input.bool(false, "EMA ribbon fill",                                    group="EMA & Ribbon")
 
 // ─── CROSSOVER LINE ─────────────────────────────────────────
@@ -105,6 +105,21 @@ show_state   = input.bool(false, "Market State Classifier",                  gro
 adx_len      = input.int(14,     "ADX length",              minval=7,  maxval=30,  group="AI Trend Suite")
 state_filter = input.bool(true,  "Filter L/S signals by state",              group="AI Trend Suite")
 show_hurst   = input.bool(true,  "Hurst Exponent in table",                  group="AI Trend Suite")
+
+// ─── AUTO-ADAPTIVE FIBONACCI ─────────────────────────────────
+show_fib     = input.bool(false,  "Auto-Adaptive Fibonacci zones",            group="Auto-Fibonacci")
+fib_piv_len  = input.int(20,     "Swing sensitivity",    minval=5, maxval=50, group="Auto-Fibonacci")
+show_fib_ext = input.bool(false,  "Show extensions (127% / 161%)",            group="Auto-Fibonacci")
+show_fib_lbl = input.bool(false,  "Show labels on right",                     group="Auto-Fibonacci")
+
+// ─── MARKET STRUCTURE ENGINE ─────────────────────────────────
+show_mse     = input.bool(true,  "Market Structure (BOS / CHoCH / HH·HL·LH·LL)", group="Market Structure")
+mse_piv_len  = input.int(7,      "Structure sensitivity", minval=3, maxval=20,    group="Market Structure")
+
+// ─── NEURAL CONFLUENCE SCORE ─────────────────────────────────
+show_ncs     = input.bool(true,  "Neural Confluence Score (NCS 0–100)",      group="Neural Score")
+ncs_high_t   = input.int(70,     "Strong bull threshold",  minval=55, maxval=90,  group="Neural Score")
+ncs_low_t    = input.int(30,     "Strong bear threshold",  minval=10, maxval=45,  group="Neural Score")
 
 // ─── LEADING INDICATORS ──────────────────────────────────────
 show_lead      = input.bool(false,  "Show unified LEAD signal",                    group="Leading Indicators")
@@ -615,6 +630,128 @@ hurst_val  = _sig8 > 0 ? math.log(math.max(_sig32, 0.0001) / math.max(_sig8, 0.0
 hurst_lbl  = hurst_val > 0.55 ? "Trending (" + str.tostring(math.round(hurst_val, 2)) + ")" : hurst_val < 0.45 ? "Mean-rev (" + str.tostring(math.round(hurst_val, 2)) + ")" : "Random (" + str.tostring(math.round(hurst_val, 2)) + ")"
 hurst_col  = hurst_val > 0.55 ? color.new(#26A69A, 0) : hurst_val < 0.45 ? color.new(#EF5350, 0) : color.new(#607D8B, 0)
 
+// ═══════════════════════════════════════════════════════════
+//  AI PREMIUM SUITE
+// ═══════════════════════════════════════════════════════════
+
+// ── AUTO-ADAPTIVE FIBONACCI ──────────────────────────────────
+// Automatically finds the dominant swing, plots retracements + extensions,
+// and highlights the Golden Zone (38.2%–61.8%) — the highest-probability
+// reversal area on any timeframe.
+fib_ph_s = ta.pivothigh(high, fib_piv_len, fib_piv_len)
+fib_pl_s = ta.pivotlow(low,   fib_piv_len, fib_piv_len)
+
+var float fib_hi = na
+var float fib_lo = na
+
+if not na(fib_ph_s)
+    fib_hi := fib_ph_s
+if not na(fib_pl_s)
+    fib_lo := fib_pl_s
+
+fib_ok  = not na(fib_hi) and not na(fib_lo) and fib_hi > fib_lo
+fib_rng = fib_ok ? fib_hi - fib_lo : na
+
+// Retracements (from high downward)
+f_236 = fib_ok ? fib_hi - 0.236 * fib_rng : na
+f_382 = fib_ok ? fib_hi - 0.382 * fib_rng : na
+f_50  = fib_ok ? fib_hi - 0.500 * fib_rng : na
+f_618 = fib_ok ? fib_hi - 0.618 * fib_rng : na
+f_786 = fib_ok ? fib_hi - 0.786 * fib_rng : na
+
+// Extensions above high (upside targets)
+f_ext_1272 = fib_ok ? fib_hi + 0.272 * fib_rng : na
+f_ext_1618 = fib_ok ? fib_hi + 0.618 * fib_rng : na
+
+// Extensions below low (downside targets)
+f_dn_1272  = fib_ok ? fib_lo - 0.272 * fib_rng : na
+f_dn_1618  = fib_ok ? fib_lo - 0.618 * fib_rng : na
+
+// ── MARKET STRUCTURE ENGINE ───────────────────────────────────
+// Continuously tracks HH/HL/LH/LL structure.
+// BOS = trend continues · CHoCH = structure reversing (earliest warning)
+mse_ph_s = ta.pivothigh(high, mse_piv_len, mse_piv_len)
+mse_pl_s = ta.pivotlow(low,   mse_piv_len, mse_piv_len)
+
+var float mse_last_ph = na
+var float mse_prev_ph = na
+var int   mse_ph_bar  = na
+var float mse_last_pl = na
+var float mse_prev_pl = na
+var int   mse_pl_bar  = na
+
+if not na(mse_ph_s)
+    mse_prev_ph := mse_last_ph
+    mse_last_ph := mse_ph_s
+    mse_ph_bar  := bar_index[mse_piv_len]
+
+if not na(mse_pl_s)
+    mse_prev_pl := mse_last_pl
+    mse_last_pl := mse_pl_s
+    mse_pl_bar  := bar_index[mse_piv_len]
+
+// Structure state
+mse_is_bull = not na(mse_last_ph) and not na(mse_prev_ph) and mse_last_ph >= mse_prev_ph
+mse_is_bear = not na(mse_last_ph) and not na(mse_prev_ph) and mse_last_ph <  mse_prev_ph
+
+// BOS: break in the direction of structure (continuation)
+bull_bos   = show_mse and mse_is_bull and not na(mse_last_ph) and high > mse_last_ph and high[1] <= mse_last_ph
+bear_bos   = show_mse and mse_is_bear and not na(mse_last_pl) and low  < mse_last_pl and low[1]  >= mse_last_pl
+
+// CHoCH: first break against structure (earliest reversal warning)
+bear_choch = show_mse and mse_is_bull and not na(mse_last_pl) and low  < mse_last_pl and low[1]  >= mse_last_pl
+bull_choch = show_mse and mse_is_bear and not na(mse_last_ph) and high > mse_last_ph and high[1] <= mse_last_ph
+
+// Structure labels at each swing pivot
+mse_hh = not na(mse_ph_s) and not na(mse_prev_ph) and mse_last_ph > mse_prev_ph
+mse_lh = not na(mse_ph_s) and not na(mse_prev_ph) and mse_last_ph < mse_prev_ph
+mse_hl = not na(mse_pl_s) and not na(mse_prev_pl) and mse_last_pl > mse_prev_pl
+mse_ll = not na(mse_pl_s) and not na(mse_prev_pl) and mse_last_pl < mse_prev_pl
+
+// ── NEURAL CONFLUENCE SCORE (NCS) ────────────────────────────
+// A 10-input neural network layer: normalised inputs → weighted sum →
+// sigmoid activation → 0–100 score. VWAP and SCD carry highest weights
+// (most important for Nifty intraday). Output updates every bar.
+
+// Sigmoid activation (same as every neural network layer)
+sigmoid(x) => 1.0 / (1.0 + math.exp(-x))
+
+// Normalise each input to approximately -1 to +1
+_nf1  = kf_bull  ? 1.0 : -1.0                                                // Kalman direction
+_nf2  = kama_bull ? 0.8 : -0.8                                               // KAMA direction
+_nf3  = close > vwap_val ? 1.0 : -1.0                                        // VWAP position
+_nf4  = math.max(math.min((rsi_val - 50.0) / 25.0, 2.0), -2.0)             // RSI -2→+2
+_nf5  = math.max(math.min((volume / math.max(vol_sma,1) - 1.0) * 1.5, 1.5), -1.5) // Volume
+_nf6  = math.max(math.min((hurst_val - 0.5) * 4.0, 2.0), -2.0)            // Hurst
+_nf7  = math.max(math.min(scd_slope / math.max(atr_val * 5.0, 0.001), 1.5), -1.5) // SCD delta
+_nf8  = float(market_state)                                                   // State -1,0,1
+_nf9  = (kama_er - 0.5) * 2.0                                               // Efficiency ratio
+_nf10 = reg_bull ? 0.8 : -0.8                                                // Regression slope
+
+// Weights (tuned for Nifty scalping)
+_nw1=2.0
+_nw2=1.5
+_nw3=2.5
+_nw4=1.0
+_nw5=1.5
+_nw6=1.5
+_nw7=2.0
+_nw8=2.0
+_nw9=1.0
+_nw10=1.0
+
+_nwsum = _nw1*_nf1 + _nw2*_nf2 + _nw3*_nf3 + _nw4*_nf4 + _nw5*_nf5 + _nw6*_nf6 + _nw7*_nf7 + _nw8*_nf8 + _nw9*_nf9 + _nw10*_nf10
+_nwtot = _nw1 + _nw2 + _nw3 + _nw4 + _nw5 + _nw6 + _nw7 + _nw8 + _nw9 + _nw10
+
+ncs_val  = sigmoid(_nwsum / _nwtot * 4.0) * 100.0
+ncs_bull = ncs_val >= ncs_high_t
+ncs_bear = ncs_val <= ncs_low_t
+ncs_col  = ncs_bull ? color.new(#00E676, 0) : ncs_bear ? color.new(#EF5350, 0) : color.new(#90CAF9, 0)
+
+// Visual progress bar for table (Unicode blocks)
+_nb = math.round(ncs_val / 10)
+ncs_bar = (_nb>=1?"█":"░") + (_nb>=2?"█":"░") + (_nb>=3?"█":"░") + (_nb>=4?"█":"░") + (_nb>=5?"█":"░") + (_nb>=6?"█":"░") + (_nb>=7?"█":"░") + (_nb>=8?"█":"░") + (_nb>=9?"█":"░") + (_nb>=10?"█":"░")
+
 bz1 = show_bsz and math.abs(close - s1_v) <= prox
 bz2 = show_bsz and math.abs(close - s2_v) <= prox
 sz1 = show_bsz and math.abs(close - r1_v) <= prox
@@ -668,10 +805,9 @@ plot(show_pdhl ? pdl : na, "Prev day low",  color=pdl_col, linewidth=pdhl_w, sty
 plot(show_piv ? p_v  : na, "Pivot", color=color.new(#ECEFF1, 40), linewidth=piv_w, style=plot.style_stepline)
 plot(show_piv ? r1_v : na, "R1",    color=color.new(#EF5350, 15), linewidth=piv_w, style=plot.style_stepline)
 plot(show_piv ? r2_v : na, "R2",    color=color.new(#EF5350, 35), linewidth=piv_w, style=plot.style_stepline)
-plot(show_piv ? r3_v : na, "R3",    color=color.new(#EF5350, 55), linewidth=piv_w, style=plot.style_stepline)
 plot(show_piv ? s1_v : na, "S1",    color=color.new(#26A69A, 15), linewidth=piv_w, style=plot.style_stepline)
 plot(show_piv ? s2_v : na, "S2",    color=color.new(#26A69A, 35), linewidth=piv_w, style=plot.style_stepline)
-plot(show_piv ? s3_v : na, "S3",    color=color.new(#26A69A, 55), linewidth=piv_w, style=plot.style_stepline)
+// R3/S3 shown in right-side labels only (removed plots to stay under 64-plot limit)
 
 // ─── PIVOT LABELS (right-side) ───────────────────────────────
 // Labels sit at the last bar — label.style_label_left flows text rightward
@@ -704,13 +840,22 @@ if show_piv and show_plbl and barstate.islast
     lbl_s2 := label.new(lx, s2_v, piv_txt("S2", s2_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#26A69A, 20))
     lbl_s3 := label.new(lx, s3_v, piv_txt("S3", s3_v), style=label.style_label_left, size=plbl_sz, color=color.new(#263238, 80), textcolor=color.new(#26A69A, 40))
 
-// ─── DEMAND / SUPPLY ZONE FILLS ─────────────────────────────
-p_su_t = plot(show_dsz ? sup_top : na, "Supply zone top",    color=na, display=display.none)
-p_su_b = plot(show_dsz ? sup_bot : na, "Supply zone bottom", color=na, display=display.none)
-p_de_t = plot(show_dsz ? dem_top : na, "Demand zone top",    color=na, display=display.none)
-p_de_b = plot(show_dsz ? dem_bot : na, "Demand zone bottom", color=na, display=display.none)
-fill(p_su_t, p_su_b, color=show_dsz ? color.new(#EF5350, 77) : na, title="Supply zone")
-fill(p_de_t, p_de_b, color=show_dsz ? color.new(#26A69A, 77) : na, title="Demand zone")
+// ─── DEMAND / SUPPLY ZONE BOXES ─────────────────────────────
+// Converted from plot()+fill() to box.new() to stay under 64-plot limit
+var box supply_box = na
+var box demand_box = na
+var float _prev_sup = na
+var float _prev_dem = na
+
+if show_dsz and not na(sup_top) and sup_top != _prev_sup
+    box.delete(supply_box)
+    supply_box := box.new(bar_index - 200, sup_top, bar_index, sup_bot, extend=extend.right, bgcolor=color.new(#EF5350, 77), border_color=color.new(#EF5350, 55), border_width=1)
+    _prev_sup := sup_top
+
+if show_dsz and not na(dem_top) and dem_top != _prev_dem
+    box.delete(demand_box)
+    demand_box := box.new(bar_index - 200, dem_top, bar_index, dem_bot, extend=extend.right, bgcolor=color.new(#26A69A, 77), border_color=color.new(#26A69A, 55), border_width=1)
+    _prev_dem := dem_top
 
 // ─── SMART TREND LINES & CHANNEL FILL ───────────────────────
 var line tl_res_line = na
@@ -864,6 +1009,94 @@ bgcolor(show_state and market_state ==  1 ? color.new(#26A69A, 96) : na, title="
 bgcolor(show_state and market_state == -1 ? color.new(#EF5350, 96) : na, title="State: Bear Trend")
 bgcolor(show_state and market_state ==  0 ? color.new(#607D8B, 97) : na, title="State: Ranging")
 
+// ─── AUTO-ADAPTIVE FIBONACCI — line.new() (no plot limit cost) ──
+var line fib_l236  = na
+var line fib_l382  = na
+var line fib_l50   = na
+var line fib_l618  = na
+var line fib_l786  = na
+var line fib_lx1   = na
+var line fib_lx2   = na
+var line fib_lx3   = na
+var line fib_lx4   = na
+var box  fib_gz    = na
+
+if show_fib and fib_ok and (not na(fib_ph_s) or not na(fib_pl_s))
+    line.delete(fib_l236)
+    line.delete(fib_l382)
+    line.delete(fib_l50)
+    line.delete(fib_l618)
+    line.delete(fib_l786)
+    box.delete(fib_gz)
+    fib_l236 := line.new(bar_index - 1, f_236, bar_index, f_236, extend=extend.both, color=color.new(#FFD600, 60), width=1)
+    fib_l382 := line.new(bar_index - 1, f_382, bar_index, f_382, extend=extend.both, color=color.new(#FFD600, 35), width=1)
+    fib_l50  := line.new(bar_index - 1, f_50,  bar_index, f_50,  extend=extend.both, color=color.new(#FFD600, 15), width=2)
+    fib_l618 := line.new(bar_index - 1, f_618, bar_index, f_618, extend=extend.both, color=color.new(#FFD600, 35), width=1)
+    fib_l786 := line.new(bar_index - 1, f_786, bar_index, f_786, extend=extend.both, color=color.new(#FFD600, 60), width=1)
+    fib_gz   := box.new(bar_index - 200, f_382, bar_index, f_618, extend=extend.right, bgcolor=color.new(#FFD600, 90), border_color=color.new(#FFD600, 65), border_width=1)
+    if show_fib_ext
+        line.delete(fib_lx1)
+        line.delete(fib_lx2)
+        line.delete(fib_lx3)
+        line.delete(fib_lx4)
+        fib_lx1 := line.new(bar_index - 1, f_ext_1272, bar_index, f_ext_1272, extend=extend.both, color=color.new(#FFD600, 72), width=1)
+        fib_lx2 := line.new(bar_index - 1, f_ext_1618, bar_index, f_ext_1618, extend=extend.both, color=color.new(#FFD600, 78), width=1)
+        fib_lx3 := line.new(bar_index - 1, f_dn_1272,  bar_index, f_dn_1272,  extend=extend.both, color=color.new(#FFD600, 72), width=1)
+        fib_lx4 := line.new(bar_index - 1, f_dn_1618,  bar_index, f_dn_1618,  extend=extend.both, color=color.new(#FFD600, 78), width=1)
+
+// ─── FIBONACCI RIGHT-SIDE LABELS ─────────────────────────────
+var label lf236=na, var label lf382=na, var label lf50=na
+var label lf618=na, var label lf786=na
+var label lf127u=na, var label lf161u=na, var label lf127d=na, var label lf161d=na
+
+if show_fib and show_fib_lbl and fib_ok and barstate.islast
+    label.delete(lf236)
+    label.delete(lf382)
+    label.delete(lf50)
+    label.delete(lf618)
+    label.delete(lf786)
+    lf236 := label.new(bar_index, f_236, "23.6%  " + str.tostring(math.round(f_236, 1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600, 25))
+    lf382 := label.new(bar_index, f_382, "38.2%  " + str.tostring(math.round(f_382, 1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600,  0))
+    lf50  := label.new(bar_index, f_50,  "50.0%  " + str.tostring(math.round(f_50,  1)), style=label.style_label_left, size=size.small, color=color.new(#FFD600, 50), textcolor=color.white)
+    lf618 := label.new(bar_index, f_618, "61.8%  " + str.tostring(math.round(f_618, 1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600,  0))
+    lf786 := label.new(bar_index, f_786, "78.6%  " + str.tostring(math.round(f_786, 1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600, 25))
+    if show_fib_ext
+        label.delete(lf127u)
+        label.delete(lf161u)
+        label.delete(lf127d)
+        label.delete(lf161d)
+        lf127u := label.new(bar_index, f_ext_1272, "127.2%↑  " + str.tostring(math.round(f_ext_1272, 1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600, 45))
+        lf161u := label.new(bar_index, f_ext_1618, "161.8%↑  " + str.tostring(math.round(f_ext_1618, 1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600, 55))
+        lf127d := label.new(bar_index, f_dn_1272,  "127.2%↓  " + str.tostring(math.round(f_dn_1272,  1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600, 45))
+        lf161d := label.new(bar_index, f_dn_1618,  "161.8%↓  " + str.tostring(math.round(f_dn_1618,  1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600, 55))
+
+// ─── MARKET STRUCTURE ENGINE LABELS ──────────────────────────
+// Structure labels at each pivot (HH / HL / LH / LL)
+if show_mse and mse_hh
+    label.new(mse_ph_bar, mse_last_ph + atr_val*0.25, "HH", style=label.style_label_down, color=color.new(#26A69A, 40), textcolor=color.white, size=size.tiny)
+if show_mse and mse_lh
+    label.new(mse_ph_bar, mse_last_ph + atr_val*0.25, "LH", style=label.style_label_down, color=color.new(#EF5350, 40), textcolor=color.white, size=size.tiny)
+if show_mse and mse_hl
+    label.new(mse_pl_bar, mse_last_pl - atr_val*0.25, "HL", style=label.style_label_up, color=color.new(#26A69A, 40), textcolor=color.white, size=size.tiny)
+if show_mse and mse_ll
+    label.new(mse_pl_bar, mse_last_pl - atr_val*0.25, "LL", style=label.style_label_up, color=color.new(#EF5350, 40), textcolor=color.white, size=size.tiny)
+
+// BOS and CHoCH labels at breakout bar
+if bull_bos
+    label.new(bar_index, high + atr_val*0.5, "BOS ▲", style=label.style_label_down, color=color.new(#26A69A, 20), textcolor=color.white, size=size.small)
+if bear_bos
+    label.new(bar_index, low  - atr_val*0.5, "BOS ▼", style=label.style_label_up,   color=color.new(#EF5350, 20), textcolor=color.white, size=size.small)
+if bull_choch
+    label.new(bar_index, high + atr_val*0.5, "CHoCH ▲", style=label.style_label_down, color=color.new(#FF9800, 20), textcolor=color.white, size=size.small)
+if bear_choch
+    label.new(bar_index, low  - atr_val*0.5, "CHoCH ▼", style=label.style_label_up,   color=color.new(#FF9800, 20), textcolor=color.white, size=size.small)
+
+// ─── NCS SCORE ON LEAD SIGNALS ───────────────────────────────
+if show_ncs and unified_bull_sig
+    label.new(bar_index, low - atr_val * 1.1, "NCS " + str.tostring(math.round(ncs_val)) + "/100", style=label.style_label_up, color=color.new(#7F77DD, 35), textcolor=color.white, size=size.tiny)
+if show_ncs and unified_bear_sig
+    label.new(bar_index, high + atr_val * 1.1, "NCS " + str.tostring(math.round(ncs_val)) + "/100", style=label.style_label_down, color=color.new(#7F77DD, 35), textcolor=color.white, size=size.tiny)
+
 // ─── CANDLESTICK PATTERN MARKERS ────────────────────────────
 // ─── CANDLESTICK PATTERN MARKERS (labels — do not count toward plot limit) ─
 if show_patterns and bull_engulf
@@ -892,7 +1125,7 @@ st_col   = st_bull ? color.new(#26A69A, 0) : color.new(#EF5350, 0)
 vwap_col2 = close > vwap_val ? color.new(#26A69A, 0) : color.new(#EF5350, 0)
 
 var tbl = table.new(
-  position.bottom_right, 2, 10,
+  position.bottom_right, 2, 12,
   bgcolor      = color.new(#0D1117, 65),
   frame_color  = color.new(#263238, 55),
   frame_width  = 1,
@@ -928,6 +1161,10 @@ if show_tbl and barstate.islast
     table.cell(tbl, 1, 8, state_lbl,    text_color=state_col, text_size=size.small)
     table.cell(tbl, 0, 9, show_hurst ? "Hurst H" : "", text_color=color.new(color.white, 30), text_size=size.small)
     table.cell(tbl, 1, 9, show_hurst ? hurst_lbl : "", text_color=hurst_col, text_size=size.small)
+    table.cell(tbl, 0, 10, show_ncs ? "NCS" : "",    text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 10, show_ncs ? ncs_bar + " " + str.tostring(math.round(ncs_val)) : "", text_color=ncs_col, text_size=size.small)
+    table.cell(tbl, 0, 11, show_mse ? "Structure" : "", text_color=color.new(color.white, 30), text_size=size.small)
+    table.cell(tbl, 1, 11, show_mse ? (mse_is_bull ? "▲ Bull struct" : mse_is_bear ? "▼ Bear struct" : "—") : "", text_color=show_mse ? (mse_is_bull ? color.new(#26A69A,0) : mse_is_bear ? color.new(#EF5350,0) : color.new(#607D8B,0)) : color.new(#607D8B,0), text_size=size.small)
 
 // ─── LEADING INDICATOR TABLE (top-right) ─────────────────────
 var tbl_lead = table.new(
