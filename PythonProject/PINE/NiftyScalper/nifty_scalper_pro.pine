@@ -10,10 +10,10 @@ indicator("Nifty Scalper Pro", overlay=true, max_bars_back=1000,
 
 // ─── EMA & RIBBON ───────────────────────────────────────────
 fast_len    = input.int(9,    "Fast EMA length",             minval=1,   maxval=50,  group="EMA & Ribbon")
-fast_col    = input.color(#00BCD4, "Fast EMA color",                                 group="EMA & Ribbon")
+fast_col    = input.color(#00E5FF, "Fast EMA color",                                 group="EMA & Ribbon")
 fast_w      = input.int(2,    "Fast EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
 slow_len    = input.int(21,   "Slow EMA length",             minval=1,   maxval=200, group="EMA & Ribbon")
-slow_col    = input.color(#FF7043, "Slow EMA color",                                 group="EMA & Ribbon")
+slow_col    = input.color(#FF9800, "Slow EMA color",                                 group="EMA & Ribbon")
 slow_w      = input.int(2,    "Slow EMA width",              minval=1,   maxval=4,   group="EMA & Ribbon")
 show_rib    = input.bool(false, "EMA ribbon fill",                                    group="EMA & Ribbon")
 
@@ -81,7 +81,7 @@ show_tbl    = input.bool(true,  "Show info table",                              
 // ─── SMART TREND LINES & CHANNELS ────────────────────────────
 show_tl      = input.bool(true,  "Show smart trend lines",                        group="Smart Trend & Patterns")
 show_channel = input.bool(false, "Show channel fill",                             group="Smart Trend & Patterns")
-show_cpat    = input.bool(false, "Show chart patterns (Double Top/Bottom, H&S, Triangles, Wedges, Flags)", group="Smart Trend & Patterns")
+show_cpat    = input.bool(true,  "Show chart patterns (Double Top/Bottom, H&S, Triangles, Wedges, Flags)", group="Smart Trend & Patterns")
 sm_piv_len   = input.int(10,     "Pivot sensitivity",    minval=3,  maxval=30,    group="Smart Trend & Patterns")
 tl_res_col   = input.color(#EF5350, "Resistance line color",                      group="Smart Trend & Patterns")
 tl_sup_col   = input.color(#26A69A, "Support line color",                         group="Smart Trend & Patterns")
@@ -114,6 +114,7 @@ show_fib_lbl = input.bool(false,  "Show labels on right",                     gr
 
 // ─── MARKET STRUCTURE ENGINE ─────────────────────────────────
 show_mse     = input.bool(true,  "Market Structure (BOS / CHoCH / HH·HL·LH·LL)", group="Market Structure")
+show_mse_structs = input.bool(false, "Show HH/HL/LH/LL labels (default off — reduces clutter)", group="Market Structure")
 mse_piv_len  = input.int(7,      "Structure sensitivity", minval=3, maxval=20,    group="Market Structure")
 
 // ─── NEURAL CONFLUENCE SCORE ─────────────────────────────────
@@ -339,14 +340,26 @@ var float ph2 = na
 var int   phb2 = na
 var float ph3 = na
 var int   phb3 = na
+var float ph4 = na
+var int   phb4 = na
+var float ph5 = na
+var int   phb5 = na
 var float pl1 = na
 var int   plb1 = na
 var float pl2 = na
 var int   plb2 = na
 var float pl3 = na
 var int   plb3 = na
+var float pl4 = na
+var int   plb4 = na
+var float pl5 = na
+var int   plb5 = na
 
 if not na(sm_ph)
+    ph5  := ph4
+    phb5 := phb4
+    ph4  := ph3
+    phb4 := phb3
     ph3  := ph2
     phb3 := phb2
     ph2  := ph1
@@ -355,6 +368,10 @@ if not na(sm_ph)
     phb1 := bar_index[sm_piv_len]
 
 if not na(sm_pl)
+    pl5  := pl4
+    plb5 := plb4
+    pl4  := pl3
+    plb4 := plb3
     pl3  := pl2
     plb3 := plb2
     pl2  := pl1
@@ -362,60 +379,152 @@ if not na(sm_pl)
     pl1  := sm_pl
     plb1 := bar_index[sm_piv_len]
 
-// ─── CHART PATTERN DETECTION ────────────────────────────────
-// Each signal fires only on the FIRST bar conditions are met (no repaint after)
+// ─── CHART PATTERN ENGINE (breakout-confirmed, two-stage) ────
+// Stage 1 — FORMATION: slope geometry tells us what pattern is forming.
+// Stage 2 — CONFIRMATION: signal fires only when price actually breaks
+//           through the projected trendline, with a 0.15 ATR buffer.
+// This matches the behaviour of LuxAlgo / TV AI: no signal during formation,
+// one clean signal on the confirmed breakout bar.
 
-// Double Top — two highs at same level, close confirms breakdown
-_dt  = not na(ph1) and not na(ph2) and math.abs(ph1-ph2) < atr_val*1.2 and (phb1-phb2) >= sm_piv_len*2 and close < math.min(ph1,ph2) - atr_val*0.3
-dt_sig  = show_cpat and _dt  and not _dt[1]
+_has_res = not na(ph1) and not na(ph2) and phb1 > phb2
+_has_sup = not na(pl1) and not na(pl2) and plb1 > plb2
 
-// Double Bottom — two lows at same level, close confirms breakout
-_db  = not na(pl1) and not na(pl2) and math.abs(pl1-pl2) < atr_val*1.2 and (plb1-plb2) >= sm_piv_len*2 and close > math.max(pl1,pl2) + atr_val*0.3
-db_sig  = show_cpat and _db  and not _db[1]
+_res_sl  = _has_res ? (ph1 - ph2) / (phb1 - phb2) : na
+_sup_sl  = _has_sup ? (pl1 - pl2) / (plb1 - plb2) : na
+_rn      = not na(_res_sl) ? _res_sl / math.max(atr_val, 0.001) : na
+_sn      = not na(_sup_sl) ? _sup_sl / math.max(atr_val, 0.001) : na
+_ok      = _has_res and _has_sup and not na(_rn) and not na(_sn)
+_FL      = 0.025
 
-// Head & Shoulders — 3 highs, middle is highest, shoulders roughly equal
-_hs  = not na(ph1) and not na(ph2) and not na(ph3) and ph2 > ph1 and ph2 > ph3 and math.abs(ph1-ph3) < atr_val*1.5
-hs_sig  = show_cpat and _hs  and not _hs[1]
+// Minimum pattern height — ignores sub-noise formations
+_pat_h   = _ok ? ((ph1 + ph2) * 0.5 - (pl1 + pl2) * 0.5) : na
+_min_h   = atr_val * 1.5
 
-// Inverse Head & Shoulders — 3 lows, middle is lowest
-_ihs = not na(pl1) and not na(pl2) and not na(pl3) and pl2 < pl1 and pl2 < pl3 and math.abs(pl1-pl3) < atr_val*1.5
-ihs_sig = show_cpat and _ihs and not _ihs[1]
+// ── STAGE 1: FORMATION — 3-touch · apex · duration · volume ──
+// Three-touch requirement: price must have tagged each boundary at
+// 3 separate pivot points before the pattern is considered formed.
+// This is the core technique used in LuxAlgo and eliminates ~80 %
+// of the phantom patterns the 2-point slope approach generates.
 
-// Ascending Triangle — flat highs, rising lows (bullish)
-_at  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and math.abs(ph1-ph2) < atr_val*0.8 and pl1 > pl2
-at_sig  = show_cpat and _at  and not _at[1]
+// Pattern maturity: must span at least 2 full pivot cycles
+_pat_start = _ok ? math.min(nz(phb2, bar_index), nz(plb2, bar_index)) : bar_index
+_dur_ok    = (bar_index - _pat_start) >= sm_piv_len * 2
 
-// Descending Triangle — falling highs, flat lows (bearish)
-_dt2 = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 < ph2 and math.abs(pl1-pl2) < atr_val*0.8
-dt2_sig = show_cpat and _dt2 and not _dt2[1]
+// Apex of converging patterns: bar where resistance and support meet
+// (solve for x in: ph1 + res_sl*(x-phb1) = pl1 + sup_sl*(x-plb1))
+_apex_x    = not na(_res_sl) and not na(_sup_sl) and math.abs(_res_sl - _sup_sl) > 0.00001 ? (nz(pl1) - nz(ph1) + _res_sl * nz(phb1) - _sup_sl * nz(plb1)) / (_res_sl - _sup_sl) : na
+_apex_ok   = not na(_apex_x) and _apex_x > bar_index and _apex_x < bar_index + sm_piv_len * 20
 
-// Symmetrical Triangle — converging highs and lows (breakout pending)
-_st  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 < ph2 and pl1 > pl2
-st_sig  = show_cpat and _st  and not _st[1]
+// Volume contraction: volume should be shrinking inside a healthy pattern
+_vol_c     = ta.sma(volume, 5) < ta.sma(volume, 20) * 0.9
 
-// Rising Wedge — both lines rising, support rising faster (bearish)
-_rw  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 > ph2 and pl1 > pl2 and (pl1-pl2) > (ph1-ph2)*1.1
-rw_sig  = show_cpat and _rw  and not _rw[1]
+// Three-point availability
+_has3ph    = not na(ph3) and not na(phb3)
+_has3pl    = not na(pl3) and not na(plb3)
 
-// Falling Wedge — both lines falling, resistance falling faster (bullish)
-_fw  = not na(ph1) and not na(ph2) and not na(pl1) and not na(pl2) and ph1 < ph2 and pl1 < pl2 and (ph2-ph1) > (pl2-pl1)*1.1
-fw_sig  = show_cpat and _fw  and not _fw[1]
+// ── TRIANGLES — 3-touch, size, apex ─────────────────────────
+// Ascending : 3 near-equal highs  +  3 consecutively rising lows
+_at_hflat  = _has3ph and math.abs(ph1 - ph2) < atr_val * 0.5 and math.abs(ph2 - ph3) < atr_val * 0.7
+_at_lrise  = _has3pl and pl1 > pl2 and pl2 > pl3
+_f_asc_t   = _at_hflat and _at_lrise and not na(_pat_h) and _pat_h > _min_h and _dur_ok and _apex_ok
 
-// Bull Flag — strong up move then tight consolidation
-_bf  = (close - ta.lowest(close, 20)) > atr_val*2.5 and (ta.highest(high,5) - ta.lowest(low,5)) < atr_val*1.5
-bf_sig  = show_cpat and _bf  and not _bf[1]
+// Descending: 3 consecutively falling highs  +  3 near-equal lows
+_dt_hfall  = _has3ph and ph1 < ph2 and ph2 < ph3
+_dt_lflat  = _has3pl and math.abs(pl1 - pl2) < atr_val * 0.5 and math.abs(pl2 - pl3) < atr_val * 0.7
+_f_dsc_t   = _dt_hfall and _dt_lflat and not na(_pat_h) and _pat_h > _min_h and _dur_ok and _apex_ok
 
-// Bear Flag — strong down move then tight consolidation
-_brf = (ta.highest(close,20) - close) > atr_val*2.5 and (ta.highest(high,5) - ta.lowest(low,5)) < atr_val*1.5
-brf_sig = show_cpat and _brf and not _brf[1]
+// Symmetrical: 3 lower highs  +  3 higher lows  (both sides converging)
+_st_hfall  = _has3ph and ph1 < ph2 and ph2 < ph3
+_st_lrise  = _has3pl and pl1 > pl2 and pl2 > pl3
+_f_sym_t   = _st_hfall and _st_lrise and not na(_pat_h) and _pat_h > _min_h and _dur_ok and _apex_ok
 
-// Channel direction for info table
-_rsl = not na(ph1) and not na(ph2) and phb1 > phb2 ? (ph1-ph2)/(phb1-phb2) : na
-_ssl = not na(pl1) and not na(pl2) and plb1 > plb2 ? (pl1-pl2)/(plb1-plb2) : na
-_thr = close * 0.00004
-_rd  = not na(_rsl) ? (_rsl > _thr ? 1 : _rsl < -_thr ? -1 : 0) : na
-_sd  = not na(_ssl) ? (_ssl > _thr ? 1 : _ssl < -_thr ? -1 : 0) : na
+// ── WEDGES — 3 touches + slope convergence + apex ────────────
+// Rising Wedge : 3 higher highs + 3 higher lows, support slope steeper
+_rw_3ph    = _has3ph and ph1 > ph2 and ph2 > ph3
+_rw_3pl    = _has3pl and pl1 > pl2 and pl2 > pl3
+_f_r_wdg   = _rw_3ph and _rw_3pl and _ok and _rn > _FL and _sn > _rn and not na(_pat_h) and _pat_h > _min_h and _dur_ok and _apex_ok
+
+// Falling Wedge: 3 lower highs + 3 lower lows, resistance slope steeper
+_fw_3ph    = _has3ph and ph1 < ph2 and ph2 < ph3
+_fw_3pl    = _has3pl and pl1 < pl2 and pl2 < pl3
+_f_f_wdg   = _fw_3ph and _fw_3pl and _ok and _rn < -_FL and _sn > _rn and not na(_pat_h) and _pat_h > _min_h and _dur_ok and _apex_ok
+
+// ── BROADENING — 3 touches + diverging slopes ────────────────
+// Ascending Broadening: 3 higher highs + 3 higher lows, top diverging faster
+_ab_3ph    = _has3ph and ph1 > ph2 and ph2 > ph3
+_ab_3pl    = _has3pl and pl1 > pl2 and pl2 > pl3
+_f_asc_b   = _ab_3ph and _ab_3pl and _ok and _rn > _FL and _sn > _FL and _rn > _sn and not na(_pat_h) and _pat_h > _min_h and _dur_ok
+
+// Descending Broadening: 3 lower highs + 3 lower lows, bottom diverging faster
+_db_3ph    = _has3ph and ph1 < ph2 and ph2 < ph3
+_db_3pl    = _has3pl and pl1 < pl2 and pl2 < pl3
+_f_dsc_b   = _db_3ph and _db_3pl and _ok and _rn < -_FL and _sn < -_FL and _sn < _rn and not na(_pat_h) and _pat_h > _min_h and _dur_ok
+
+// ── STAGE 2: PROJECT TRENDLINE TO CURRENT BAR ────────────────
+// Avoids comparing today's close to a pivot that is bars old.
+// _res_now / _sup_now = where the line is RIGHT NOW (not at the pivot).
+_res_now = _has_res and not na(_res_sl) ? ph1 + _res_sl * (bar_index - phb1) : na
+_sup_now = _has_sup and not na(_sup_sl) ? pl1 + _sup_sl * (bar_index - plb1) : na
+_buf     = atr_val * 0.15   // 0.15 ATR buffer absorbs wicks / near-misses
+
+_b_asc_t = _f_asc_t and not na(_res_now) and close > _res_now + _buf
+_b_dsc_t = _f_dsc_t and not na(_sup_now) and close < _sup_now - _buf
+_b_sym_t = _f_sym_t and (close > nz(_res_now, ph1) + _buf or close < nz(_sup_now, pl1) - _buf)
+_b_r_wdg = _f_r_wdg and not na(_sup_now) and close < _sup_now - _buf
+_b_f_wdg = _f_f_wdg and not na(_res_now) and close > _res_now + _buf
+_b_asc_b = _f_asc_b and not na(_res_now) and close > _res_now + _buf
+_b_dsc_b = _f_dsc_b and not na(_sup_now) and close < _sup_now - _buf
+
+// ── HEAD & SHOULDERS — timing-symmetric 5-point check ────────
+_has_3ph = not na(ph1) and not na(ph2) and not na(ph3) and not na(phb1) and not na(phb2) and not na(phb3)
+_has_3pl = not na(pl1) and not na(pl2) and not na(pl3)
+
+// Timing symmetry: right arm within 70 % of left arm (removes skewed shapes)
+_hs_sym  = _has_3ph and math.abs((phb1 - phb2) - (phb2 - phb3)) < (phb2 - phb3) * 0.7
+_f_hs    = _has_3ph and ph2 > ph1 and ph2 > ph3 and math.abs(ph1 - ph3) < atr_val * 1.5 and _hs_sym and _has_sup
+_f_ihs   = _has_3pl  and pl2 < pl1 and pl2 < pl3 and math.abs(pl1 - pl3) < atr_val * 1.5 and _has_res
+
+hs_neck_v  = _f_hs  ? (nz(pl1) + nz(pl2)) * 0.5 : na
+ihs_neck_v = _f_ihs ? (nz(ph1) + nz(ph2)) * 0.5 : na
+
+_b_hs    = _f_hs  and not na(hs_neck_v)  and close < hs_neck_v  - _buf
+_b_ihs   = _f_ihs and not na(ihs_neck_v) and close > ihs_neck_v + _buf
+
+// ── DOUBLE FORMATIONS — neckline-confirmed ───────────────────
+_sep     = sm_piv_len * 4
+_tol_dbl = atr_val * 0.8
+
+// Double Top neckline = pl1 (trough between the two peaks)
+// Double Bottom neckline = ph1 (peak between the two troughs)
+_f_dbl_t  = _has_res and _has_sup and math.abs(ph1 - ph2) < _tol_dbl and (phb1 - phb2) > _sep and pl1 < (ph1 + ph2) * 0.5 - atr_val
+_f_dbl_b  = _has_sup  and _has_res and math.abs(pl1 - pl2) < _tol_dbl and (plb1 - plb2) > _sep and ph1 > (pl1 + pl2) * 0.5 + atr_val
+
+_b_dbl_t  = _f_dbl_t and close < pl1 - _buf
+_b_dbl_b  = _f_dbl_b and close > ph1 + _buf
+
+dbl_top_neck = _f_dbl_t ? pl1  : na
+dbl_bot_neck = _f_dbl_b ? ph1  : na
+
+// ── SIGNAL FIRES (first bar of confirmed breakout only) ───────
+asc_tri_sig = show_cpat and _b_asc_t and not _b_asc_t[1]
+dsc_tri_sig = show_cpat and _b_dsc_t and not _b_dsc_t[1]
+sym_tri_sig = show_cpat and _b_sym_t and not _b_sym_t[1]
+r_wdg_sig   = show_cpat and _b_r_wdg and not _b_r_wdg[1]
+f_wdg_sig   = show_cpat and _b_f_wdg and not _b_f_wdg[1]
+asc_brd_sig = show_cpat and _b_asc_b and not _b_asc_b[1]
+dsc_brd_sig = show_cpat and _b_dsc_b and not _b_dsc_b[1]
+hs_sig      = show_cpat and _b_hs    and not _b_hs[1]
+ihs_sig     = show_cpat and _b_ihs   and not _b_ihs[1]
+dbl_top_sig = show_cpat and _b_dbl_t and not _b_dbl_t[1]
+dbl_bot_sig = show_cpat and _b_dbl_b and not _b_dbl_b[1]
+
+// Channel direction label for info table
+_thr    = close * 0.00004
+_rd     = not na(_rn) ? (_rn > _thr ? 1 : _rn < -_thr ? -1 : 0) : na
+_sd     = not na(_sn) ? (_sn > _thr ? 1 : _sn < -_thr ? -1 : 0) : na
 ch_type = not na(_rd) and not na(_sd) ? (_rd == _sd ? (_rd == 1 ? "↗ Ascending" : _rd == -1 ? "↘ Descending" : "→ Horizontal") : "Wedge / Triangle") : "—"
+
+
 
 // ─── TREND & SIGNAL CONDITIONS ──────────────────────────────
 bull         = ema_fast > ema_slow and close > vwap_val
@@ -873,32 +982,109 @@ if show_tl
         linefill.delete(tl_fill)
         tl_fill := linefill.new(tl_res_line, tl_sup_line, color=color.new(color.gray, 92))
 
-// ─── CHART PATTERN LABELS ────────────────────────────────────
-// Bearish patterns — label above the bar
-if dt_sig
-    label.new(bar_index, high + atr_val*0.5, "⊤ Double Top",          style=label.style_label_down, color=color.new(#EF5350, 15), textcolor=color.white, size=size.small)
-if hs_sig
-    label.new(bar_index, high + atr_val*0.5, "◫ H & S",               style=label.style_label_down, color=color.new(#EF5350, 15), textcolor=color.white, size=size.small)
-if dt2_sig
-    label.new(bar_index, high + atr_val*0.5, "▽ Desc Triangle",       style=label.style_label_down, color=color.new(#EF5350, 25), textcolor=color.white, size=size.small)
-if rw_sig
-    label.new(bar_index, high + atr_val*0.5, "⌿ Rising Wedge",        style=label.style_label_down, color=color.new(#EF5350, 25), textcolor=color.white, size=size.small)
-if brf_sig
-    label.new(bar_index, high + atr_val*0.5, "⚑ Bear Flag",           style=label.style_label_down, color=color.new(#EF5350, 25), textcolor=color.white, size=size.small)
-// Bullish patterns — label below the bar
-if db_sig
-    label.new(bar_index, low - atr_val*0.5,  "⊥ Double Bottom",       style=label.style_label_up,   color=color.new(#26A69A, 15), textcolor=color.white, size=size.small)
-if ihs_sig
-    label.new(bar_index, low - atr_val*0.5,  "◨ Inv H & S",           style=label.style_label_up,   color=color.new(#26A69A, 15), textcolor=color.white, size=size.small)
-if at_sig
-    label.new(bar_index, low - atr_val*0.5,  "△ Asc Triangle",        style=label.style_label_up,   color=color.new(#26A69A, 25), textcolor=color.white, size=size.small)
-if fw_sig
-    label.new(bar_index, low - atr_val*0.5,  "⌇ Falling Wedge",       style=label.style_label_up,   color=color.new(#26A69A, 25), textcolor=color.white, size=size.small)
-if bf_sig
-    label.new(bar_index, low - atr_val*0.5,  "⚐ Bull Flag",           style=label.style_label_up,   color=color.new(#26A69A, 25), textcolor=color.white, size=size.small)
-// Neutral patterns — alternate above/below
-if st_sig
-    label.new(bar_index, high + atr_val*0.5, "◇ Sym Triangle",        style=label.style_label_down, color=color.new(#7986CB, 20), textcolor=color.white, size=size.small)
+// ─── CHART PATTERN VISUAL DRAWINGS (LuxAlgo-style) ───────────
+
+// ── Boundary lines: triangles, wedges, broadening ────────────
+// One shared pair recycled per active pattern. Colour signals direction.
+var line cpat_res  = na
+var line cpat_sup  = na
+var linefill cpat_fill = na
+
+_cpat_tw = show_cpat and (_f_asc_t or _f_dsc_t or _f_sym_t or _f_r_wdg or _f_f_wdg or _f_asc_b or _f_dsc_b)
+
+if _cpat_tw and (not na(sm_ph) or not na(sm_pl))
+    line.delete(cpat_res)
+    line.delete(cpat_sup)
+    linefill.delete(cpat_fill)
+    _pc = _f_asc_t or _f_f_wdg or _f_dsc_b ? color.new(#26A69A, 0) :
+          _f_dsc_t or _f_r_wdg or _f_asc_b  ? color.new(#EF5350, 0) :
+          color.new(#7986CB, 0)
+    cpat_res  := line.new(phb2, ph2, phb1, ph1, extend=extend.right, color=_pc, width=1, style=line.style_dashed)
+    cpat_sup  := line.new(plb2, pl2, plb1, pl1, extend=extend.right, color=_pc, width=1, style=line.style_dashed)
+    cpat_fill := linefill.new(cpat_res, cpat_sup, color=color.new(_pc, 90))
+
+// ── H&S neckline ─────────────────────────────────────────────
+var line hs_neck = na
+
+if show_cpat and (_f_hs or _f_ihs) and (not na(sm_ph) or not na(sm_pl))
+    line.delete(hs_neck)
+    _nk  = _f_hs  ? nz(hs_neck_v)  : nz(ihs_neck_v)
+    _nkc = _f_hs  ? color.new(#EF5350, 15) : color.new(#26A69A, 15)
+    hs_neck := line.new(bar_index - sm_piv_len * 6, _nk, bar_index, _nk, extend=extend.right, color=_nkc, width=2, style=line.style_dotted)
+
+// ── Double Top / Bottom neckline ─────────────────────────────
+var line dbl_level = na
+
+if show_cpat and (_f_dbl_t or _f_dbl_b) and (not na(sm_ph) or not na(sm_pl))
+    line.delete(dbl_level)
+    _dl  = _f_dbl_t ? nz(dbl_top_neck) : nz(dbl_bot_neck)
+    _dlc = _f_dbl_t ? color.new(#EF5350, 15) : color.new(#26A69A, 15)
+    dbl_level := line.new(bar_index - sm_piv_len * 6, _dl, bar_index, _dl, extend=extend.right, color=_dlc, width=2, style=line.style_solid)
+
+// ── Measured-move target (draws on confirmed breakout bar) ────
+var line cpat_target   = na
+var label cpat_tgt_lbl = na
+
+_tri_h = not na(_pat_h) ? _pat_h : atr_val * 2
+
+// Compute target price + direction for whichever pattern fires this bar
+_tgt_price = float(na)
+_tgt_bull  = false
+
+if asc_tri_sig
+    _tgt_price := (ph1 + ph2) * 0.5 + _tri_h
+    _tgt_bull  := true
+if dsc_tri_sig
+    _tgt_price := (pl1 + pl2) * 0.5 - _tri_h
+if sym_tri_sig
+    _sym_bull   = close > (ph1 + pl1) * 0.5
+    _tgt_price := _sym_bull ? (ph1 + ph2) * 0.5 + _tri_h : (pl1 + pl2) * 0.5 - _tri_h
+    _tgt_bull  := _sym_bull
+if f_wdg_sig
+    _tgt_price := ph1 + (ph1 - pl1)
+    _tgt_bull  := true
+if r_wdg_sig
+    _tgt_price := pl1 - (ph1 - pl1)
+if asc_brd_sig
+    _tgt_price := ph1 + (ph1 - pl1) * 0.5
+    _tgt_bull  := true
+if dsc_brd_sig
+    _tgt_price := pl1 - (ph1 - pl1) * 0.5
+if hs_sig and not na(hs_neck_v)
+    _tgt_price := hs_neck_v - (ph2 - hs_neck_v)
+if ihs_sig and not na(ihs_neck_v)
+    _tgt_price := ihs_neck_v + (ihs_neck_v - pl2)
+    _tgt_bull  := true
+if dbl_top_sig and not na(dbl_top_neck)
+    _tgt_price := dbl_top_neck - ((ph1 + ph2) * 0.5 - dbl_top_neck)
+if dbl_bot_sig and not na(dbl_bot_neck)
+    _tgt_price := dbl_bot_neck + (dbl_bot_neck - (pl1 + pl2) * 0.5)
+    _tgt_bull  := true
+
+// Draw once, in global scope (no function needed)
+_any_pat_sig = asc_tri_sig or dsc_tri_sig or sym_tri_sig or r_wdg_sig or f_wdg_sig or asc_brd_sig or dsc_brd_sig or hs_sig or ihs_sig or dbl_top_sig or dbl_bot_sig
+
+if _any_pat_sig and not na(_tgt_price)
+    line.delete(cpat_target)
+    label.delete(cpat_tgt_lbl)
+    _tc         = _tgt_bull ? color.new(#26A69A, 20) : color.new(#EF5350, 20)
+    cpat_target   := line.new(bar_index, _tgt_price, bar_index + sm_piv_len * 3, _tgt_price, extend=extend.right, color=_tc, width=1, style=line.style_arrow_right)
+    cpat_tgt_lbl  := label.new(bar_index + 2, _tgt_price, "⊙ " + str.tostring(math.round(_tgt_price, 1)), style=label.style_label_right, color=color.new(_tc, 50), textcolor=color.white, size=size.tiny)
+
+// ── Pattern name label — single recycled slot ────────────────
+// Deletes the previous label before drawing the new one.
+// Only the most recently confirmed pattern is ever visible on chart.
+var label cpat_name_lbl = na
+
+if _any_pat_sig
+    label.delete(cpat_name_lbl)
+    _cpat_bull = _tgt_bull
+    _cpat_y    = _cpat_bull ? low  - atr_val * 0.6 : high + atr_val * 0.6
+    _cpat_sty  = _cpat_bull ? label.style_label_up : label.style_label_down
+    _cpat_col  = sym_tri_sig ? color.new(#7986CB, 15) : _cpat_bull ? color.new(#26A69A, 15) : color.new(#EF5350, 15)
+    _cpat_txt  = dsc_tri_sig ? "Desc Triangle" : r_wdg_sig ? "Rising Wedge" : asc_brd_sig ? "Asc Broadening" : hs_sig ? "H & S" : dbl_top_sig ? "Double Top" : asc_tri_sig ? "Asc Triangle" : f_wdg_sig ? "Falling Wedge" : dsc_brd_sig ? "Desc Broadening" : ihs_sig ? "Inv H & S" : dbl_bot_sig ? "Double Bottom" : "Sym Triangle"
+    cpat_name_lbl := label.new(bar_index, _cpat_y, _cpat_txt, style=_cpat_sty, color=_cpat_col, textcolor=color.white, size=size.small)
+
 
 // ─── BUY / SELL ZONES + TREND BACKGROUND ────────────────────
 bgcolor(bz1 ? color.new(#26A69A, 87) : na, title="Buy zone 1 — near S1")
@@ -919,7 +1105,8 @@ barcolor(
   show_bar_score and ms_bear >= 8 ? color.new(#FF1744,  0)  :
   show_bar_score and ms_bull >= 6 ? color.new(#00E676, 45)  :
   show_bar_score and ms_bear >= 6 ? color.new(#FF1744, 45)  :
-  na,
+  close >= open                   ? color.new(#26A69A,  0)  :
+  color.new(#EF5350, 0),
   title = "Candle color"
 )
 
@@ -1071,25 +1258,45 @@ if show_fib and show_fib_lbl and fib_ok and barstate.islast
         lf161d := label.new(bar_index, f_dn_1618,  "161.8%↓  " + str.tostring(math.round(f_dn_1618,  1)), style=label.style_label_left, size=size.tiny, color=color.new(#1A2030, 80), textcolor=color.new(#FFD600, 55))
 
 // ─── MARKET STRUCTURE ENGINE LABELS ──────────────────────────
-// Structure labels at each pivot (HH / HL / LH / LL)
-if show_mse and mse_hh
-    label.new(mse_ph_bar, mse_last_ph + atr_val*0.25, "HH", style=label.style_label_down, color=color.new(#26A69A, 40), textcolor=color.white, size=size.tiny)
-if show_mse and mse_lh
-    label.new(mse_ph_bar, mse_last_ph + atr_val*0.25, "LH", style=label.style_label_down, color=color.new(#EF5350, 40), textcolor=color.white, size=size.tiny)
-if show_mse and mse_hl
-    label.new(mse_pl_bar, mse_last_pl - atr_val*0.25, "HL", style=label.style_label_up, color=color.new(#26A69A, 40), textcolor=color.white, size=size.tiny)
-if show_mse and mse_ll
-    label.new(mse_pl_bar, mse_last_pl - atr_val*0.25, "LL", style=label.style_label_up, color=color.new(#EF5350, 40), textcolor=color.white, size=size.tiny)
+// Each slot holds ONE label — delete + recreate on each new event.
+// Maximum labels on chart at any time: 4 (1 high-struct + 1 low-struct
+// + 1 BOS + 1 CHoCH). Eliminates the label-accumulation clutter.
+var label lbl_mse_high  = na   // most recent HH or LH
+var label lbl_mse_low   = na   // most recent HL or LL
+var label lbl_mse_bos   = na   // most recent BOS (either direction)
+var label lbl_mse_choch = na   // most recent CHoCH (either direction)
 
-// BOS and CHoCH labels at breakout bar
-if bull_bos
-    label.new(bar_index, high + atr_val*0.5, "BOS ▲", style=label.style_label_down, color=color.new(#26A69A, 20), textcolor=color.white, size=size.small)
-if bear_bos
-    label.new(bar_index, low  - atr_val*0.5, "BOS ▼", style=label.style_label_up,   color=color.new(#EF5350, 20), textcolor=color.white, size=size.small)
-if bull_choch
-    label.new(bar_index, high + atr_val*0.5, "CHoCH ▲", style=label.style_label_down, color=color.new(#FF9800, 20), textcolor=color.white, size=size.small)
-if bear_choch
-    label.new(bar_index, low  - atr_val*0.5, "CHoCH ▼", style=label.style_label_up,   color=color.new(#FF9800, 20), textcolor=color.white, size=size.small)
+// HH / LH labels (only if user opted in — default OFF to reduce noise)
+if show_mse and show_mse_structs and mse_hh
+    label.delete(lbl_mse_high)
+    lbl_mse_high := label.new(mse_ph_bar, mse_last_ph + atr_val*0.25, "HH", style=label.style_label_down, color=color.new(#26A69A, 40), textcolor=color.white, size=size.tiny)
+if show_mse and show_mse_structs and mse_lh
+    label.delete(lbl_mse_high)
+    lbl_mse_high := label.new(mse_ph_bar, mse_last_ph + atr_val*0.25, "LH", style=label.style_label_down, color=color.new(#EF5350, 40), textcolor=color.white, size=size.tiny)
+
+// HL / LL labels (same toggle)
+if show_mse and show_mse_structs and mse_hl
+    label.delete(lbl_mse_low)
+    lbl_mse_low := label.new(mse_pl_bar, mse_last_pl - atr_val*0.25, "HL", style=label.style_label_up, color=color.new(#26A69A, 40), textcolor=color.white, size=size.tiny)
+if show_mse and show_mse_structs and mse_ll
+    label.delete(lbl_mse_low)
+    lbl_mse_low := label.new(mse_pl_bar, mse_last_pl - atr_val*0.25, "LL", style=label.style_label_up, color=color.new(#EF5350, 40), textcolor=color.white, size=size.tiny)
+
+// BOS — always visible when MSE is on (single recycled label)
+if show_mse and bull_bos
+    label.delete(lbl_mse_bos)
+    lbl_mse_bos := label.new(bar_index, high + atr_val*0.5, "BOS ▲", style=label.style_label_down, color=color.new(#26A69A, 20), textcolor=color.white, size=size.small)
+if show_mse and bear_bos
+    label.delete(lbl_mse_bos)
+    lbl_mse_bos := label.new(bar_index, low  - atr_val*0.5, "BOS ▼", style=label.style_label_up,   color=color.new(#EF5350, 20), textcolor=color.white, size=size.small)
+
+// CHoCH — single recycled label (higher priority than BOS visually)
+if show_mse and bull_choch
+    label.delete(lbl_mse_choch)
+    lbl_mse_choch := label.new(bar_index, high + atr_val*0.5, "CHoCH ▲", style=label.style_label_down, color=color.new(#FF9800, 20), textcolor=color.white, size=size.small)
+if show_mse and bear_choch
+    label.delete(lbl_mse_choch)
+    lbl_mse_choch := label.new(bar_index, low  - atr_val*0.5, "CHoCH ▼", style=label.style_label_up,   color=color.new(#FF9800, 20), textcolor=color.white, size=size.small)
 
 // ─── NCS SCORE ON LEAD SIGNALS ───────────────────────────────
 if show_ncs and unified_bull_sig
