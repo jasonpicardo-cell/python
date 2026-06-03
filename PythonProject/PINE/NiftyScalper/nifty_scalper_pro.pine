@@ -983,9 +983,17 @@ if show_tl
         tl_fill := linefill.new(tl_res_line, tl_sup_line, color=color.new(color.gray, 92))
 
 // ─── CHART PATTERN VISUAL DRAWINGS (LuxAlgo-style) ───────────
+// Triangles/Wedges : solid lines from oldest pivot → apex point (lines meet)
+// Broadening       : solid lines from oldest pivot, diverging rightward
+// H&S / iH&S       : left arm + right arm (dashed) + sloped neckline
+// Double           : connecting line between the two peaks/troughs + neckline
 
-// ── Boundary lines: triangles, wedges, broadening ────────────
-// One shared pair recycled per active pattern. Colour signals direction.
+// ── TRIANGLES · WEDGES · BROADENING ─────────────────────────
+// Pattern-specific drawing rules (matches LuxAlgo geometry):
+//   Ascending Triangle  → horizontal ceiling + rising floor
+//   Descending Triangle → falling ceiling + horizontal floor
+//   Sym / Wedges        → both lines through actual pivots → apex
+//   Broadening          → both lines through actual pivots → extend right
 var line cpat_res  = na
 var line cpat_sup  = na
 var linefill cpat_fill = na
@@ -996,30 +1004,84 @@ if _cpat_tw and (not na(sm_ph) or not na(sm_pl))
     line.delete(cpat_res)
     line.delete(cpat_sup)
     linefill.delete(cpat_fill)
-    _pc = _f_asc_t or _f_f_wdg or _f_dsc_b ? color.new(#26A69A, 0) :
-          _f_dsc_t or _f_r_wdg or _f_asc_b  ? color.new(#EF5350, 0) :
-          color.new(#7986CB, 0)
-    cpat_res  := line.new(phb2, ph2, phb1, ph1, extend=extend.right, color=_pc, width=1, style=line.style_dashed)
-    cpat_sup  := line.new(plb2, pl2, plb1, pl1, extend=extend.right, color=_pc, width=1, style=line.style_dashed)
-    cpat_fill := linefill.new(cpat_res, cpat_sup, color=color.new(_pc, 90))
 
-// ── H&S neckline ─────────────────────────────────────────────
-var line hs_neck = na
+    _pc  = _f_asc_t or _f_f_wdg or _f_dsc_b ? color.new(#26A69A, 0) : _f_dsc_t or _f_r_wdg or _f_asc_b ? color.new(#EF5350, 0) : color.new(#7986CB, 0)
+
+    // 3-point slope (ph3 → ph1) gives a better-fit line than 2-point (ph2 → ph1)
+    _rds = _has3ph and phb1 != phb3 ? (ph1 - ph3) / (phb1 - phb3) : _res_sl
+    _sds = _has3pl and plb1 != plb3 ? (pl1 - pl3) / (plb1 - plb3) : _sup_sl
+
+    // Apex of the drawn lines (intersection of res + sup through actual pivots)
+    _dax = math.abs(_rds - _sds) > 0.00001 ? (nz(pl3,pl1) - nz(ph3,ph1) + _rds * nz(phb3,phb1) - _sds * nz(plb3,plb1)) / (_rds - _sds) : na
+    _ax  = not na(_dax) and _dax > bar_index and _dax < bar_index + sm_piv_len * 25 ? math.round(_dax) : bar_index + sm_piv_len * 10
+
+    if _f_asc_t
+        // True horizontal ceiling (average of the 3 flat highs) + rising floor
+        _rl    = (ph1 + ph2 + ph3) / 3.0
+        _ax_at = _sds > 0.00001 ? math.round(plb3 + (_rl - pl3) / _sds) : _ax
+        cpat_res := line.new(phb3, _rl, _ax_at, _rl, color=_pc, width=2)
+        cpat_sup := line.new(plb3, pl3, _ax_at, pl3 + _sds * (_ax_at - plb3), color=_pc, width=2)
+
+    else if _f_dsc_t
+        // Falling ceiling + true horizontal floor (average of the 3 flat lows)
+        _sl    = (pl1 + pl2 + pl3) / 3.0
+        _ax_dt = math.abs(_rds) > 0.00001 ? math.round(phb3 + (_sl - ph3) / _rds) : _ax
+        cpat_res := line.new(phb3, ph3, _ax_dt, ph3 + _rds * (_ax_dt - phb3), color=_pc, width=2)
+        cpat_sup := line.new(plb3, _sl, _ax_dt, _sl, color=_pc, width=2)
+
+    else if _f_sym_t or _f_r_wdg or _f_f_wdg
+        // Both lines converge: connect actual pivot coords and meet at apex
+        cpat_res := line.new(phb3, ph3, _ax, ph3 + _rds * (_ax - phb3), color=_pc, width=2)
+        cpat_sup := line.new(plb3, pl3, _ax, pl3 + _sds * (_ax - plb3), color=_pc, width=2)
+
+    else
+        // Broadening: connect actual pivots, extend right to show expansion
+        cpat_res := line.new(phb3, ph3, phb1, ph1, extend=extend.right, color=_pc, width=2)
+        cpat_sup := line.new(plb3, pl3, plb1, pl1, extend=extend.right, color=_pc, width=2)
+
+    cpat_fill := linefill.new(cpat_res, cpat_sup, color=color.new(_pc, 88))
+
+// ── HEAD & SHOULDERS — arm lines + sloped neckline ───────────
+var line hs_l_arm = na
+var line hs_r_arm = na
+var line hs_neck  = na
 
 if show_cpat and (_f_hs or _f_ihs) and (not na(sm_ph) or not na(sm_pl))
+    line.delete(hs_l_arm)
+    line.delete(hs_r_arm)
     line.delete(hs_neck)
-    _nk  = _f_hs  ? nz(hs_neck_v)  : nz(ihs_neck_v)
-    _nkc = _f_hs  ? color.new(#EF5350, 15) : color.new(#26A69A, 15)
-    hs_neck := line.new(bar_index - sm_piv_len * 6, _nk, bar_index, _nk, extend=extend.right, color=_nkc, width=2, style=line.style_dotted)
 
-// ── Double Top / Bottom neckline ─────────────────────────────
-var line dbl_level = na
+    if _f_hs
+        // Dashed arm lines: left shoulder→head and head→right shoulder
+        hs_l_arm := line.new(phb3, ph3, phb2, ph2, color=color.new(#EF5350, 30), width=1, style=line.style_dashed)
+        hs_r_arm := line.new(phb2, ph2, phb1, ph1, color=color.new(#EF5350, 30), width=1, style=line.style_dashed)
+        // Sloped neckline through both troughs flanking the head
+        hs_neck  := line.new(nz(plb2, plb1), nz(pl2, pl1), plb1, pl1, extend=extend.right, color=color.new(#EF5350, 10), width=2)
+
+    if _f_ihs
+        hs_l_arm := line.new(plb3, pl3, plb2, pl2, color=color.new(#26A69A, 30), width=1, style=line.style_dashed)
+        hs_r_arm := line.new(plb2, pl2, plb1, pl1, color=color.new(#26A69A, 30), width=1, style=line.style_dashed)
+        hs_neck  := line.new(nz(phb2, phb1), nz(ph2, ph1), phb1, ph1, extend=extend.right, color=color.new(#26A69A, 10), width=2)
+
+// ── DOUBLE FORMATIONS — connecting line + neckline ───────────
+var line dbl_link  = na   // connects the two peaks / troughs
+var line dbl_level = na   // neckline at the trough / peak between them
 
 if show_cpat and (_f_dbl_t or _f_dbl_b) and (not na(sm_ph) or not na(sm_pl))
+    line.delete(dbl_link)
     line.delete(dbl_level)
-    _dl  = _f_dbl_t ? nz(dbl_top_neck) : nz(dbl_bot_neck)
-    _dlc = _f_dbl_t ? color.new(#EF5350, 15) : color.new(#26A69A, 15)
-    dbl_level := line.new(bar_index - sm_piv_len * 6, _dl, bar_index, _dl, extend=extend.right, color=_dlc, width=2, style=line.style_solid)
+
+    if _f_dbl_t
+        // Line connecting the two tops (shows the double-top ceiling)
+        dbl_link  := line.new(phb2, ph2, phb1, ph1, color=color.new(#EF5350, 20), width=2)
+        // Horizontal neckline at the trough between the two tops
+        dbl_level := line.new(plb1 - sm_piv_len * 2, nz(dbl_top_neck, pl1), plb1, nz(dbl_top_neck, pl1), extend=extend.right, color=color.new(#EF5350, 10), width=2)
+
+    if _f_dbl_b
+        // Line connecting the two bottoms
+        dbl_link  := line.new(plb2, pl2, plb1, pl1, color=color.new(#26A69A, 20), width=2)
+        // Horizontal neckline at the peak between the two bottoms
+        dbl_level := line.new(phb1 - sm_piv_len * 2, nz(dbl_bot_neck, ph1), phb1, nz(dbl_bot_neck, ph1), extend=extend.right, color=color.new(#26A69A, 10), width=2)
 
 // ── Measured-move target (draws on confirmed breakout bar) ────
 var line cpat_target   = na
