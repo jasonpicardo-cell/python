@@ -13,6 +13,7 @@ import numpy as np
 DATA_DIR    = "../nse_data_cache"
 N50_FILE    = "../nifty50.txt"; N100_FILE = "../nifty100.txt"
 N200_FILE   = "../nifty200.txt"; N500_FILE = "../nifty500.txt"; N750_FILE = "../nifty750.txt"
+NFNO_FILE   = "../niftyfno.txt"   # Nifty F&O eligible stocks
 OUTPUT_HTML = "index.html"
 HIST_MONTHS = 25
 
@@ -2008,8 +2009,9 @@ def assign_rs(stocks):
             s["mi"]["mt"][7] = int(s["rs"]>=70)
             s["mi"]["mts"]   = sum(s["mi"]["mt"])
 
-def build_dataset(data_dir, index_files, nifty_path=None):
+def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None):
     idx_map = load_index_map(index_files)
+    fno_set = load_set(fno_path) if fno_path else set()
     files   = sorted(glob.glob(os.path.join(data_dir,"*.csv")))
     # Load Nifty index data (optional — for RS vs Nifty)
     nifty_df = None
@@ -2023,7 +2025,9 @@ def build_dataset(data_dir, index_files, nifty_path=None):
     for i,fp in enumerate(files,1):
         if i%100==0 or i==len(files): print(f"  [{i}/{len(files)}]…",end="\r")
         rec = precompute(fp, idx_map, nifty_df)
-        if rec: stocks.append(rec)
+        if rec:
+            rec['fno']=rec['sym'] in fno_set
+            stocks.append(rec)
     print(f"\n  Done — {len(stocks)} stocks"); assign_rs(stocks); assign_breadth(stocks); return stocks
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -2320,6 +2324,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
     <option value="200">Nifty 200</option>
     <option value="500">Nifty 500</option>
     <option value="750">Nifty 750</option>
+    <option value="fno">Nifty F&amp;O</option>
   </select>
   <div class="gb-sep"></div>
   <span class="gb-hint">Applies to all scanners ↓</span>
@@ -3337,12 +3342,21 @@ function lvelsForKey(type,key){
   return[key];
 }
 
+
+// ── Index filter helper (handles numeric N50/N100/... AND 'fno' filter) ──
+function passesIdx(s){
+  var idxV=document.getElementById('global-idx').value;
+  if(idxV==='fno') return !!s.fno;
+  var idxN=parseInt(idxV)||0;
+  if(idxN===0) return true;
+  return s.idx>0 && s.idx<=idxN;
+}
 function scan(){
   const type=document.getElementById('sp-type').value;
   const lvKey=document.getElementById('sp-lvl').value;
   const tf=document.getElementById('sp-tf').value;
   const prox=parseFloat(document.getElementById('sp-pr').value);
-  const idxF=parseInt(document.getElementById('global-idx').value);
+  
   const dmaF=document.getElementById('dma-flt').value;
   const rsF=parseInt(document.getElementById('rs-flt').value);
   const bcF=parseInt(document.getElementById('bc-flt').value);
@@ -3353,7 +3367,7 @@ function scan(){
   updateFbar();savePrefs();
   rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(dmaF==='above'&&!s.above200)continue;
     if(dmaF==='below'&&s.above200)continue;
@@ -3378,7 +3392,7 @@ function scan(){
 function scanSMC(){
   const sig=document.getElementById('smc-sig').value;
   const prox=parseFloat(document.getElementById('smc-prox').value)/100;
-  const idxF=parseInt(document.getElementById('global-idx').value);
+  
   const prMin=parseFloat(document.getElementById('smc-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('smc-pmax').value)||Infinity;
 
@@ -3397,7 +3411,7 @@ function scanSMC(){
   rows=[];
   for(const s of S){
     if(!s.smc||Object.keys(s.smc).length===0)continue;
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     const smc=s.smc;
     let matched=false,signal='',zone_h=0,zone_l=0;
@@ -3444,7 +3458,7 @@ function scanVol(){
   const sig=document.getElementById('vol-sig').value;
   const prox=parseFloat(document.getElementById('vol-prox').value)/100;
   const spk=parseFloat(document.getElementById('vol-spike').value);
-  const idxF=parseInt(document.getElementById('global-idx').value);
+  
   const prMin=parseFloat(document.getElementById('vol-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('vol-pmax').value)||Infinity;
 
@@ -3462,7 +3476,7 @@ function scanVol(){
   rows=[];
   for(const s of S){
     if(!s.vol||Object.keys(s.vol).length===0)continue;
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     const v=s.vol;
     const near=(ref)=>Math.abs(s.price-ref)/ref<=prox;
@@ -3490,7 +3504,7 @@ function scanMI(){
   const minScore=parseInt(document.getElementById('mi-score').value);
   const stgReq=parseInt(document.getElementById('mi-stg').value);
   const rsMin=parseInt(document.getElementById('mi-rs').value);
-  const idxF=parseInt(document.getElementById('global-idx').value);
+  
   const prMin=parseFloat(document.getElementById('mi-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('mi-pmax').value)||Infinity;
 
@@ -3501,7 +3515,7 @@ function scanMI(){
   rows=[];
   for(const s of S){
     if(!s.mi||Object.keys(s.mi).length===0)continue;
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     const mi=s.mi;
@@ -3548,13 +3562,13 @@ function updateAdvInfo(){
 
 function scanAdv(){
   const strat=document.getElementById('adv-strat').value;
-  const idxF =parseInt(document.getElementById('global-idx').value);
+  
   const prMin=parseFloat(document.getElementById('adv-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('adv-pmax').value)||Infinity;
   updateAdvInfo();
   rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(!s.adv)continue;
     const a=s.adv; let matched=false; let extra={};
@@ -3624,7 +3638,7 @@ function scanT1(){
   updateT1Info();
   rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.t1)continue;
@@ -3690,14 +3704,14 @@ function updateT2Info(){
 
 function scanT2(){
   const strat=document.getElementById('t2-strat').value;
-  const idxF =parseInt(document.getElementById('global-idx').value);
+  
   const rsMin=parseInt(document.getElementById('t2-rs').value);
   const prMin=parseFloat(document.getElementById('t2-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('t2-pmax').value)||Infinity;
   updateT2Info();
   rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.t2)continue;
@@ -3778,14 +3792,14 @@ function updateT3Info(){
 
 function scanT3(){
   const strat=document.getElementById('t3-strat').value;
-  const idxF =parseInt(document.getElementById('global-idx').value);
+  
   const rsMin=parseInt(document.getElementById('t3-rs').value);
   const prMin=parseFloat(document.getElementById('t3-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('t3-pmax').value)||Infinity;
   updateT3Info();
   rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.t3)continue;
@@ -4595,14 +4609,14 @@ function updateTIInfo(){
 
 function scanTI(){
   const strat=document.getElementById('ti-strat').value;
-  const idxF =parseInt(document.getElementById('global-idx').value);
+  
   const rsMin=parseInt(document.getElementById('ti-rs').value);
   const prMin=parseFloat(document.getElementById('ti-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('ti-pmax').value)||Infinity;
   updateTIInfo();
   rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.ti)continue;
@@ -4794,13 +4808,13 @@ function updateNLInfo(){
 
 function scanNL(){
   const strat=document.getElementById('nl-strat').value;
-  const idxF =parseInt(document.getElementById('global-idx').value);
+  
   const rsMin=parseInt(document.getElementById('nl-rs').value);
   const prMin=parseFloat(document.getElementById('nl-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('nl-pmax').value)||Infinity;
   updateNLInfo(); rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.nl)continue;
@@ -4891,13 +4905,13 @@ function updateXPInfo(){
 
 function scanXP(){
   const strat=document.getElementById('xp-strat').value;
-  const idxF =parseInt(document.getElementById('global-idx').value);
+  
   const rsMin=parseInt(document.getElementById('xp-rs').value);
   const prMin=parseFloat(document.getElementById('xp-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('xp-pmax').value)||Infinity;
   updateXPInfo(); rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.xp)continue;
@@ -4956,13 +4970,13 @@ function updatePATTInfo(){
 }
 function scanPATT(){
   const strat=document.getElementById('patt-strat').value;
-  const idxF =parseInt(document.getElementById('global-idx').value);
+  
   const rsMin=parseInt(document.getElementById('patt-rs').value);
   const prMin=parseFloat(document.getElementById('patt-pmin').value)||0;
   const prMax=parseFloat(document.getElementById('patt-pmax').value)||Infinity;
   updatePATTInfo(); rows=[];
   for(const s of S){
-    if(idxF>0&&(s.idx===0||s.idx>idxF))continue;
+    if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
     if(!s.patt)continue;
@@ -5051,9 +5065,9 @@ function renderBreadth(){
     ema_fan:  s=>s.ti&&s.ti.d&&s.ti.d.ema&&s.ti.d.ema.fan_bull,
     rs80:     s=>s.rs>=80,
   };
-  const idxF=parseInt(document.getElementById('global-idx').value);
+  
   rows=S.filter(s=>{
-    if(idxF>0&&(s.idx===0||s.idx>idxF))return false;
+    if(!passesIdx(s))return false;
     return conds[filter]?conds[filter](s):true;
   }).map(s=>({
     sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
@@ -5423,10 +5437,12 @@ def main():
     ap.add_argument("--n750",  default=N750_FILE); ap.add_argument("--out",  default=OUTPUT_HTML)
     ap.add_argument("--nifty", default=None,
                     help="Path to Nifty50 index CSV (enables RS vs Nifty strategy)")
+    ap.add_argument("--nfno",  default=NFNO_FILE,
+                    help="Path to Nifty F&O eligible symbols file (default: ../niftyfno.txt)")
     a = ap.parse_args()
     print(f"[*] Data: {a.data}")
     idx = {50:a.n50, 100:a.n100, 200:a.n200, 500:a.n500, 750:a.n750}
-    stocks = build_dataset(a.data, idx, nifty_path=a.nifty)
+    stocks = build_dataset(a.data, idx, nifty_path=a.nifty, fno_path=a.nfno)
     if not stocks: print("[!] No stocks loaded"); return
     html = build_html(stocks, a.data)
     with open(a.out, "w", encoding="utf-8") as f: f.write(html)
