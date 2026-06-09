@@ -460,8 +460,17 @@ def compute_supertrend(df, period=10, mult=3.0):
         if C[i]>st[i-1]: st[i]=max(lb[i],st[i-1]) if d[i-1]==1 else lb[i]; d[i]=1
         else: st[i]=min(ub[i],st[i-1]) if d[i-1]==-1 else ub[i]; d[i]=-1
     flipped=bool(d[-1]!=d[-2]) if n>=2 else False
-    return dict(value=r2(st[-1]), direction="up" if d[-1]==1 else "down",
-                flipped=flipped, atr=r2(atr[-1]))
+    bull=bool(d[-1]==1); bear=bool(d[-1]==-1)
+    flip_bull=bool(flipped and bull); flip_bear=bool(flipped and bear)
+    consec=1
+    for _i in range(len(d)-2,-1,-1):
+        if d[_i]==d[-1]: consec+=1
+        else: break
+    return dict(value=r2(st[-1]),direction="up" if d[-1]==1 else "down",
+                flipped=flipped,atr=r2(atr[-1]),
+                bull=bull,bear=bear,flip_bull=flip_bull,flip_bear=flip_bear,
+                st=r2(st[-1]),dist=round((C[-1]-st[-1])/st[-1]*100,2) if st[-1] else 0.0,
+                consec=int(consec))
 
 # ── 8. Elder Triple Screen ────────────────────────────────────────────────────
 def compute_elder(df):
@@ -1893,6 +1902,26 @@ def monthly_agg(df):
             continue
     return df.tail(1).copy()
 
+
+def compute_gaps(df):
+    """Gap scanner — overnight gap vs prior close, fill status, continuation."""
+    if len(df)<3: return {}
+    C=df["Close"].values.astype(float); O=df["Open"].values.astype(float)
+    H=df["High"].values.astype(float);  L=df["Low"].values.astype(float)
+    gap_pct=round((O[-1]-C[-2])/max(C[-2],0.01)*100,2)
+    gap_up=bool(gap_pct>=0.5); gap_dn=bool(gap_pct<=-0.5)
+    filled=False
+    if gap_up: filled=bool(L[-1]<=C[-2])
+    elif gap_dn: filled=bool(H[-1]>=C[-2])
+    cont=bool(gap_up and C[-1]>O[-1]); reject=bool(gap_up and C[-1]<O[-1])
+    dn_cont=bool(gap_dn and C[-1]<O[-1])
+    g3=len(df)>=4 and all((O[-(i+1)]-C[-(i+2)])/max(C[-(i+2)],0.01)*100>0.3 for i in range(2))
+    return dict(pct=gap_pct,
+                up1=bool(gap_pct>=1),up2=bool(gap_pct>=2),up3=bool(gap_pct>=3),
+                dn1=bool(gap_pct<=-1),dn2=bool(gap_pct<=-2),dn3=bool(gap_pct<=-3),
+                up=gap_up,dn=gap_dn,filled=filled,
+                cont=cont,reject=reject,dn_cont=dn_cont,consec3=bool(g3))
+
 def _ti_for(data_df):
     """Run all India Pro compute functions on any OHLC DataFrame."""
     return dict(
@@ -1949,6 +1978,7 @@ def precompute(fp, idx_map, nifty_df=None):
         bb  = compute_bb_squeeze(df),
         w52 = compute_w52_breakout(df),
         nr  = compute_nr7(df),
+        stt = compute_supertrend(df),   # SuperTrend in Tier-1
     )
     # Tier-2 strategies
     t2 = dict(
@@ -1984,6 +2014,12 @@ def precompute(fp, idx_map, nifty_df=None):
     )
     # 🧪 Experimental (VSA)
     xp = dict(vsa=compute_vsa(df))
+    # ③ Gap Scanner
+    gap = compute_gaps(df)
+    # ⑧ Sparkline — last 60 closes normalised to first=100
+    _cl=df['Close'].values[-60:].astype(float)
+    _base=float(_cl[0]) if len(_cl) and _cl[0] else 1.0
+    spark=[round(c/_base*100,1) for c in _cl]
     adv = dict(
         darvas   = compute_darvas(df),
         vcp      = compute_vcp(df),
@@ -1999,7 +2035,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,**st,rs=0)
 
 def assign_rs(stocks):
     rets=sorted(s["ret12m"] for s in stocks); n=len(rets)
@@ -2009,9 +2045,20 @@ def assign_rs(stocks):
             s["mi"]["mt"][7] = int(s["rs"]>=70)
             s["mi"]["mts"]   = sum(s["mi"]["mt"])
 
-def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None):
+def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None, sector_path=None):
     idx_map = load_index_map(index_files)
     fno_set = load_set(fno_path) if fno_path else set()
+    sector_map = {}
+    if sector_path:
+        try:
+            import csv as _csv
+            with open(sector_path,'r',encoding='utf-8') as f:
+                for row in _csv.DictReader(f):
+                    sym=(row.get('Symbol') or row.get('symbol') or '').strip().upper()
+                    sec=(row.get('Sector') or row.get('Industry') or 'Other').strip()
+                    if sym: sector_map[sym]=sec
+            print(f"  Sector map: {len(sector_map)} stocks")
+        except Exception as e: print(f"  Sector skipped: {e}")
     files   = sorted(glob.glob(os.path.join(data_dir,"*.csv")))
     # Load Nifty index data (optional — for RS vs Nifty)
     nifty_df = None
@@ -2027,6 +2074,7 @@ def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None):
         rec = precompute(fp, idx_map, nifty_df)
         if rec:
             rec['fno']=rec['sym'] in fno_set
+            rec['sector']=sector_map.get(rec['sym'],'Other')
             stocks.append(rec)
     print(f"\n  Done — {len(stocks)} stocks"); assign_rs(stocks); assign_breadth(stocks); return stocks
 
@@ -2052,8 +2100,8 @@ body{background:var(--bg);color:var(--txt);font-family:var(--sans);overflow-y:sc
 /* ── Tab nav ── */
 .tabnav{background:var(--hdr);border-bottom:1px solid var(--brd);
   padding:0 22px;display:flex;align-items:flex-end;gap:2px;position:sticky;top:0;z-index:300;
-  overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;flex-shrink:0}
-.tabnav::-webkit-scrollbar{display:none}
+  flex-wrap:wrap;flex-shrink:0}
+@media(max-width:1100px){.tabnav{padding:0 10px}}
 .logo{font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--acc);
   text-transform:uppercase;white-space:nowrap;padding:14px 14px 14px 0;margin-right:10px;
   border-right:1px solid var(--brd)}
@@ -2077,7 +2125,13 @@ body{background:var(--bg);color:var(--txt);font-family:var(--sans);overflow-y:sc
 /* GLOBAL FILTER BAR */
 .global-bar{display:flex;align-items:center;gap:10px;padding:6px 22px;
   background:rgba(0,229,160,.04);border-bottom:1px solid rgba(0,229,160,.12);
-  flex-wrap:wrap}
+  flex-wrap:wrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media(max-width:680px){
+  .global-bar{flex-wrap:nowrap;padding:6px 12px}
+  .gb-sep{display:none}
+  .gb-hint{display:none}
+  .gb-label{display:none}
+}
 .gb-label{font-family:var(--mono);font-size:9px;letter-spacing:2px;
   text-transform:uppercase;color:var(--acc);font-weight:700}
 .gb-sep{width:1px;height:18px;background:var(--brd)}
@@ -2278,6 +2332,27 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .ref-link{font-size:9px;font-family:var(--mono);color:var(--a2);text-decoration:none;padding:2px 7px;border:1px solid rgba(59,158,255,.2);border-radius:3px;background:rgba(59,158,255,.04)}
 .ref-link:hover{background:rgba(59,158,255,.14);color:#fff}
 @keyframes ldpulse{from{opacity:.5}to{opacity:1}}
+
+/* ④ Stock detail modal */
+#sd-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9990;display:none}
+#sd-box{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg);border:1px solid var(--brd);border-radius:12px;z-index:9991;width:min(94vw,840px);max-height:86vh;display:none;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.7)}
+#sd-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--brd);flex-shrink:0}
+#sd-body{overflow-y:auto;padding:16px 18px;flex:1}
+/* gap + combo tabs */
+.tab-btn.t-gap.active{color:#ff8c42;border-bottom-color:#ff8c42}
+.tab-btn.t-combo.active{color:#c47aff;border-bottom-color:#c47aff}
+/* ⑥ sector grouping */
+.gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
+.gb-chk input{accent-color:var(--acc)}
+.sec-hdr{background:rgba(59,158,255,.07);color:var(--a2);font-size:10px;font-weight:700;padding:5px 12px;letter-spacing:1px;text-transform:uppercase}
+/* ⑩ mobile */
+@media(max-width:820px){
+  .tab-btn{font-size:10px;padding:7px 6px;white-space:nowrap}
+  .home-grid{grid-template-columns:repeat(2,1fr)}
+  .hcard-desc{display:none}
+  #sd-box{width:96vw;max-height:90vh}
+}
+
 </style>
 </head>
 <body>
@@ -2310,6 +2385,8 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-xp"  data-tab="xp"  onclick="switchTab('xp')">🧪 Experimental</button>
   <button class="tab-btn t-patt" data-tab="patt" onclick="switchTab('patt')">🎨 Patterns</button>
   <button class="tab-btn t-br"  data-tab="br"  onclick="switchTab('br')">📡 Breadth</button>
+  <button class="tab-btn t-gap" data-tab="gap" onclick="switchTab('gap')">⚡ Gaps</button>
+  <button class="tab-btn t-combo" data-tab="combo" onclick="switchTab('combo')">⚗️ Combiner</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
 <!-- ═══ GLOBAL FILTERS ════════════════════════════════════════════════════ -->
@@ -2328,6 +2405,8 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   </select>
   <div class="gb-sep"></div>
   <span class="gb-hint">Applies to all scanners ↓</span>
+  <div class="gb-sep"></div>
+  <label class="gb-chk" title="Group results by sector"><input type="checkbox" id="global-sector-grp" onchange="render()"> Sector groups</label>
 </div>
 
 <!-- ═══ PIVOT CONTROLS ════════════════════════════════════════════════════ -->
@@ -2341,6 +2420,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="woodie">Woodie</option>
       <option value="dm">DeMark (DM)</option>
       <option value="floor">Floor</option>
+      <option value="cpr">CPR — Central Pivot Range</option>
     </select><button class="info-btn" onclick="showHelp('piv_type',document.getElementById('sp-type').value)" title="Show strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Level</label><select id="sp-lvl" style="min-width:190px"></select></div>
@@ -2576,6 +2656,14 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="nr4">NR4 — Narrowest of 4 bars (shorter compression)</option>
         <option value="inside_bar">Inside Bar — price coiling inside previous bar's range</option>
         <option value="nr7_inside">NR7 + Inside Bar — double compression signal</option>
+      </optgroup>
+      <optgroup label="── 📈 SuperTrend (Chartink #1 most-used indicator) ──">
+        <option value="st_bull">SuperTrend Bull — price above rising ST line (7×3)</option>
+        <option value="st_bear">SuperTrend Bear — price below ST line</option>
+        <option value="st_flip_bull">SuperTrend Flip Bull — fresh bull signal today</option>
+        <option value="st_flip_bear">SuperTrend Flip Bear — fresh bear signal today</option>
+        <option value="st_consec5">SuperTrend 5+ Bull bars — sustained momentum</option>
+        <option value="st_tight">SuperTrend Tight (&lt;1% dist) — near support</option>
       </optgroup>
     </select><button class="info-btn" onclick="showHelp('t1',document.getElementById('t1-strat').value)" title="Show strategy info">ℹ</button></div>
   </div>
@@ -3066,6 +3154,51 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="btn" style="background:#84cc16;color:#000" onclick="renderBreadth()">▶ SHOW</button>
 </div>
 
+<!-- ═══ GAP SCANNER ════════════════════════════════════════════════════ -->
+<div id="ctrl-gap" class="ctrl" style="display:none">
+  <div class="cg"><label>Gap Type</label>
+    <select id="gap-strat" style="min-width:310px" onchange="updateGapInfo()">
+      <optgroup label="── 🟢 Gap Up ──">
+        <option value="up1">Gap Up ≥1%</option>
+        <option value="up2">Gap Up ≥2%</option>
+        <option value="up3">Gap Up ≥3%</option>
+        <option value="up_cont">Gap Up + Continuation (close > open)</option>
+        <option value="up_reject">Gap Up Rejection (close &lt; open)</option>
+        <option value="up_unfilled">Gap Up Unfilled</option>
+      </optgroup>
+      <optgroup label="── 🔴 Gap Down ──">
+        <option value="dn1">Gap Down ≥1%</option>
+        <option value="dn2">Gap Down ≥2%</option>
+        <option value="dn3">Gap Down ≥3%</option>
+        <option value="dn_cont">Gap Down + Continuation</option>
+        <option value="dn_unfilled">Gap Down Unfilled</option>
+      </optgroup>
+      <optgroup label="── 📊 Multi-day ──">
+        <option value="consec3">3 Consecutive Gap Ups</option>
+      </optgroup>
+    </select>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="gap-rs"><option value="0" selected>Any</option><option value="50">≥50</option><option value="70">≥70</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="gap-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="gap-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#ff8c42;color:#000" onclick="scanGap()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+<!-- ═══ AND COMBINER ══════════════════════════════════════════════════════ -->
+<div id="ctrl-combo" class="ctrl" style="display:none">
+  <div style="font-family:var(--mono);font-size:10px;color:var(--mu);padding:0 0 8px;width:100%">⚗️ AND-combine up to 5 signals — only stocks matching ALL selected conditions appear</div>
+  <div style="display:flex;flex-direction:column;gap:5px;width:100%">
+    <div class="cg" style="flex-direction:row;align-items:center;gap:8px"><label style="min-width:24px;color:var(--mu);font-size:10px">C1</label><select id="combo-c1" style="min-width:280px" onchange="renderComboSummary()"><option value="">— skip —</option></select></div>
+    <div class="cg" style="flex-direction:row;align-items:center;gap:8px"><label style="min-width:24px;color:var(--mu);font-size:10px">C2</label><select id="combo-c2" style="min-width:280px" onchange="renderComboSummary()"><option value="">— skip —</option></select></div>
+    <div class="cg" style="flex-direction:row;align-items:center;gap:8px"><label style="min-width:24px;color:var(--mu);font-size:10px">C3</label><select id="combo-c3" style="min-width:280px" onchange="renderComboSummary()"><option value="">— skip —</option></select></div>
+    <div class="cg" style="flex-direction:row;align-items:center;gap:8px"><label style="min-width:24px;color:var(--mu);font-size:10px">C4</label><select id="combo-c4" style="min-width:280px" onchange="renderComboSummary()"><option value="">— skip —</option></select></div>
+    <div class="cg" style="flex-direction:row;align-items:center;gap:8px"><label style="min-width:24px;color:var(--mu);font-size:10px">C5</label><select id="combo-c5" style="min-width:280px" onchange="renderComboSummary()"><option value="">— skip —</option></select></div>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="combo-rs"><option value="0" selected>Any</option><option value="50">≥50</option><option value="70">≥70</option><option value="80">≥80</option></select></div>
+  <button class="btn" style="background:#c47aff;color:#000" onclick="scanCombo()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
 <div class="fbar" id="fbar" onclick="toggleInfo()" title="Click to expand/collapse details">Select a tab and click ▶ SCAN</div>
 <div class="info-panel" id="info-panel"></div>
 
@@ -3154,7 +3287,7 @@ let rows=[],sc=4,sd=1,currentTab='home',lastRows=[];
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -3182,6 +3315,8 @@ function switchTab(tab){
   else if(tab==='xp'){ updateXPInfo(); scanXP(); }
   else if(tab==='patt'){ updatePATTInfo(); scanPATT(); }
   else if(tab==='br'){ renderBreadth(); }
+  else if(tab==='gap'){ updateGapInfo(); scanGap(); }
+  else if(tab==='combo'){ renderComboSummary(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -3665,7 +3800,15 @@ function scanT1(){
     if(strat==='nr7_bear')   { matched=!!nr.is_nr7&&nr.bias==='bear'; sig='📦 NR7 ↓'; extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,nr4:nr.is_nr4?'Yes':'No'}; }
     if(strat==='nr4')        { matched=!!nr.is_nr4;                   sig='📦 NR4';   extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,bias:nr.bias}; }
     if(strat==='inside_bar') { matched=!!nr.is_inside;                sig='📦 Inside'; extra={rng:nr.rng,atr14:nr.atr14,bias:nr.bias,comp:nr.compression+'%'}; }
-    if(strat==='nr7_inside') { matched=!!nr.is_nr7&&!!nr.is_inside;  sig='🎯 NR7+IB'; extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,bias:nr.bias}; }
+    if(strat==='nr7_inside') { matched=!!nr.is_nr7&&!!nr.is_inside;
+    // ① SuperTrend
+    const stt_=s.t1&&(s.t1.stt||s.t1.st)||{};
+    if(strat==='st_bull')    {matched=!!stt_.bull;  sig='📈 ST Bull';    extra={st:stt_.st,dist:(stt_.dist||0)+'%',consec:stt_.consec};}
+    if(strat==='st_bear')    {matched=!!stt_.bear;  sig='📉 ST Bear';    extra={st:stt_.st};}
+    if(strat==='st_flip_bull'){matched=!!stt_.flip_bull; sig='⚡ ST Flip↑'; extra={st:stt_.st};}
+    if(strat==='st_flip_bear'){matched=!!stt_.flip_bear; sig='⚡ ST Flip↓'; extra={st:stt_.st};}
+    if(strat==='st_consec5') {matched=(stt_.consec||0)>=5; sig='🔥 ST '+(stt_.consec||0)+'× Bull'; extra={consec:stt_.consec};}
+    if(strat==='st_tight')   {matched=!!stt_.bull&&Math.abs(stt_.dist||99)<1; sig='🎯 ST Tight'; extra={dist:(stt_.dist||0)+'%'};}  sig='🎯 NR7+IB'; extra={comp:nr.compression+'%',rng:nr.rng,atr14:nr.atr14,bias:nr.bias}; }
 
     if(!matched)continue;
     rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
@@ -3910,7 +4053,7 @@ const SECTIONS=[
   '📡 MARKET BREADTH & UNIVERSE SIGNALS',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo'};
 
 function renderHome(){
   let html=`<div class="home-wrap">`;
@@ -4526,6 +4669,8 @@ function triggerAutoScan(){
     else if(t==='xp'){ updateXPInfo(); scanXP(); }
     else if(t==='patt'){ updatePATTInfo(); scanPATT(); }
     else if(t==='br'){ renderBreadth(); }
+    else if(t==='gap'){ scanGap(); }
+    else if(t==='combo'){ scanCombo(); }
   },350);
 }
 function initAutoScan(){
@@ -5057,7 +5202,7 @@ function renderBreadth(){
   // Filter stocks matching the breadth condition
   const conds={
     above200: s=>s.above200,
-    stage2:   s=>s.mi&&s.mi.stg2,
+    stage2:   s=>s.mi&&s.mi.stg===2,
     near52wh: s=>s.w52h&&(s.w52h-s.price)/s.w52h<=0.05,
     pnf_x:    s=>s.nl&&s.nl.pnf&&s.nl.pnf.in_x,
     renko_bull:s=>s.nl&&s.nl.renko&&s.nl.renko.bull,
@@ -5077,23 +5222,236 @@ function renderBreadth(){
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑦ CPR in computePivots
+// ════════════════════════════════════════════════════════════════════════════
+// patched in the existing function via separate override:
+(function(){
+  var _orig=computePivots;
+  computePivots=function(type,pH,pL,pC,pO,cO){
+    if(type==='cpr'){
+      var P=(pH+pL+pC)/3,BC=(pH+pL)/2,TC=2*P-BC,w=Math.abs(TC-BC);
+      return{P:+P.toFixed(2),TC:+TC.toFixed(2),BC:+BC.toFixed(2),W:+w.toFixed(2),Wpct:+(w/P*100).toFixed(2),
+             R1:+(TC+w).toFixed(2),R2:+(TC+2*w).toFixed(2),R3:+(TC+3*w).toFixed(2),
+             S1:+(BC-w).toFixed(2),S2:+(BC-2*w).toFixed(2),S3:+(BC-3*w).toFixed(2)};
+    }
+    return _orig(type,pH,pL,pC,pO,cO);
+  };
+})();
+// Add CPR to TYPE_META
+if(window.TYPE_META) TYPE_META['cpr']={label:'CPR',levels:['TC','BC','P','R1','R2','S1','S2'],hasP:true};
+
+// ════════════════════════════════════════════════════════════════════════════
+// ① SuperTrend in scanT1 (patched after existing nr7_inside)
+// ════════════════════════════════════════════════════════════════════════════
+// handled inline in scanT1 via evalSignal approach
+
+// ════════════════════════════════════════════════════════════════════════════
+// ③ GAP SCANNER
+// ════════════════════════════════════════════════════════════════════════════
+function updateGapInfo(){setFbar('⚡ <b>Gap Scanner</b> — overnight gap vs prior close');}
+function scanGap(){
+  var strat=document.getElementById('gap-strat').value;
+  var rsMin=parseInt(document.getElementById('gap-rs').value)||0;
+  var prMin=parseFloat(document.getElementById('gap-pmin').value)||0;
+  var prMax=parseFloat(document.getElementById('gap-pmax').value)||Infinity;
+  updateGapInfo(); rows=[];
+  for(var i=0;i<S.length;i++){
+    var s=S[i];
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    var g=s.gap; if(!g)continue;
+    var matched=false,sig='',extra={};
+    if(strat==='up1')       {matched=!!g.up1;   sig='🟢 Gap+'+g.pct+'%'; extra={gap:g.pct+'%'};}
+    if(strat==='up2')       {matched=!!g.up2;   sig='🟢 Gap+'+g.pct+'%'; extra={gap:g.pct+'%'};}
+    if(strat==='up3')       {matched=!!g.up3;   sig='🚀 Gap+'+g.pct+'%'; extra={gap:g.pct+'%'};}
+    if(strat==='up_cont')   {matched=!!g.up&&!!g.cont;    sig='🟢↑ Gap+Cont';    extra={gap:g.pct+'%'};}
+    if(strat==='up_reject') {matched=!!g.up&&!!g.reject;  sig='🔴 Gap Reject';   extra={gap:g.pct+'%'};}
+    if(strat==='up_unfilled'){matched=!!g.up&&!g.filled;  sig='🟢 Unfilled';     extra={gap:g.pct+'%'};}
+    if(strat==='dn1')       {matched=!!g.dn1;   sig='🔴 Gap'+g.pct+'%'; extra={gap:g.pct+'%'};}
+    if(strat==='dn2')       {matched=!!g.dn2;   sig='🔴 Gap'+g.pct+'%'; extra={gap:g.pct+'%'};}
+    if(strat==='dn3')       {matched=!!g.dn3;   sig='💥 Gap'+g.pct+'%'; extra={gap:g.pct+'%'};}
+    if(strat==='dn_cont')   {matched=!!g.dn&&!!g.dn_cont; sig='🔴↓ Gap+Cont';    extra={gap:g.pct+'%'};}
+    if(strat==='dn_unfilled'){matched=!!g.dn&&!g.filled;  sig='🔴 Unfilled';     extra={gap:g.pct+'%'};}
+    if(strat==='consec3')   {matched=!!g.consec3&&!!g.up; sig='🚀 3×Gap↑';       extra={gap:g.pct+'%'};}
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig:sig,extra:extra,strat:strat,_tab:'gap',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort(function(a,b){return a.sym.localeCompare(b.sym);}); render();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ② MULTI-SIGNAL AND COMBINER
+// ════════════════════════════════════════════════════════════════════════════
+var COMBO_SIGNALS=(function(){
+  var G=[
+    {g:'⭐ Tier-1',tab:'t1',ss:[['Golden Cross Bull Zone','gc_bull_zone'],['Fresh Golden Cross','gc_fresh_golden'],['RSI Bull Div','rsi_bull_div'],['RSI Oversold','rsi_oversold'],['BB Squeeze Bull','bb_squeeze_bull'],['52W Breakout','w52_breakout'],['52W Near High','w52_near'],['NR7 Bull','nr7_bull'],['ST Bull','st_bull'],['ST Flip Bull','st_flip_bull'],['ST Tight','st_tight']]},
+    {g:'🏆 Tier-2',tab:'t2',ss:[['Cup&Handle BO','ch_breakout'],['MACD Bull Div','macd_bull_div'],['MACD Flip Bull','macd_flip_bull'],['Z-Score OS','zs_oversold'],['RS Outperform','rsn_outperform']]},
+    {g:'🎖 Tier-3',tab:'t3',ss:[['Fib 61.8% Support','fib_near_618'],['ADX Strong Bull','adx_strong_bull'],['Stoch Bull Cross','stoch_bull_cross'],['Williams %R OS','wr_oversold'],['ParSAR Bull','psar_bull']]},
+    {g:'⚡ Multi-Ind',tab:'mi',ss:[['Minervini+Weinstein','both'],['Minervini','minervini'],['Weinstein Stage 2','weinstein']]},
+    {g:'🏅 India Pro',tab:'ti',ss:[['HA Strong Bull','ha_strong_bull'],['HA Bull','ha_bull'],['HMA Bull','hma_bull'],['HMA Flip Bull','hma_flip_bull'],['EMA Fan Bull','ema_fan_bull'],['MA Stack','ma_all_bull'],['Keltner Cross Up','kelt_cross_up'],['MFI Oversold','mfi_os'],['MFI Bull Div','mfi_bull_div'],['CCI OS Exit','cci_os_exit'],['LR Slope Bull','lr_slope_bull']]},
+    {g:'📐 Noiseless',tab:'nl',ss:[['P&F X-Column','pnf_in_x'],['P&F Dbl Top','pnf_dbl_top'],['Renko Bull','renko_bull'],['Renko 5 Punch','renko_5'],['Kagi Shoulder','kagi_shoulder'],['3LB Bull Rev','lb3_rev_bull'],['RRG Leading','rrg_leading']]},
+    {g:'🎨 Patterns',tab:'patt',ss:[['Inv H&S','cp_inv_hs'],['Bull Flag','cp_bull_flag'],['Falling Wedge','cp_fall_wedge'],['Gartley Bull','harm_gartley_bull'],['AB=CD Bull','harm_abcd_bull']]},
+    {g:'⚡ Gaps',tab:'gap',ss:[['Gap Up ≥1%','up1'],['Gap Up Cont','up_cont'],['Gap Down ≥1%','dn1']]},
+    {g:'📊 Meta',tab:'_meta',ss:[['Above 200 DMA','above200'],['RS ≥ 70','rs70'],['RS ≥ 80','rs80'],['Near 52W High','near52wh'],['FNO Stock','is_fno']]},
+  ];
+  var out=[];
+  for(var gi=0;gi<G.length;gi++){var grp=G[gi]; for(var si=0;si<grp.ss.length;si++) out.push({label:grp.g+' › '+grp.ss[si][0],tab:grp.tab,strat:grp.ss[si][1]});}
+  return out;
+})();
+
+function _populateComboDropdowns(){
+  ['combo-c1','combo-c2','combo-c3','combo-c4','combo-c5'].forEach(function(id){
+    var el=document.getElementById(id); if(!el)return;
+    var cur=el.value;
+    while(el.options.length>1) el.remove(1);
+    COMBO_SIGNALS.forEach(function(sig){
+      var o=document.createElement('option');
+      o.value=sig.tab+':'+sig.strat; o.textContent=sig.label;
+      el.appendChild(o);
+    });
+    if(cur) el.value=cur;
+  });
+}
+function renderComboSummary(){
+  var ids=['combo-c1','combo-c2','combo-c3','combo-c4','combo-c5'];
+  var active=[];
+  ids.forEach(function(id){var el=document.getElementById(id); if(el&&el.value){var s=COMBO_SIGNALS.find(function(x){return x.tab+':'+x.strat===el.value;}); if(s)active.push(s.label.split(' › ')[1]);}});
+  setFbar('⚗️ <b>Combiner</b>'+(active.length?': '+active.join(' AND '):'— pick conditions above'));
+}
+function evalCondition(s,tab,strat){
+  if(!strat)return true;
+  if(tab==='_meta'){if(strat==='above200')return !!s.above200;if(strat==='rs70')return (s.rs||0)>=70;if(strat==='rs80')return (s.rs||0)>=80;if(strat==='near52wh')return s.w52h&&(s.w52h-s.price)/s.w52h<=0.05;if(strat==='is_fno')return !!s.fno;return false;}
+  if(tab==='gap'){var g=s.gap||{};if(strat==='up1')return !!g.up1;if(strat==='up_cont')return !!g.up&&!!g.cont;if(strat==='dn1')return !!g.dn1;return false;}
+  if(tab==='mi'){var m=s.mi||{};if(strat==='both')return (m.mts||0)>=6&&m.stg===2;if(strat==='minervini')return (m.mts||0)>=6;if(strat==='weinstein')return m.stg===2;return false;}
+  if(tab==='t1'){var t=s.t1||{},gc=t.gc||{},rsi=t.rsi||{},bb=t.bb||{},w52=t.w52||{},nr=t.nr||{},stt=t.stt||t.st||{};
+    var map={gc_bull_zone:gc.bull_zone,gc_fresh_golden:gc.fresh_golden,rsi_bull_div:rsi.bull_div,rsi_oversold:rsi.oversold,bb_squeeze_bull:bb.squeeze_bull,w52_breakout:w52.breakout,w52_near:w52.near,nr7_bull:nr.bias_bull,st_bull:stt.bull,st_flip_bull:stt.flip_bull,st_tight:stt.bull&&Math.abs(stt.dist||99)<1};
+    return !!map[strat];}
+  if(tab==='t2'){var t2=s.t2||{},ch=t2.ch||{},macd=t2.macd||{},zs=t2.zs||{},rsn=t2.rsn||{};
+    var m2={ch_breakout:ch.breakout,macd_bull_div:macd.bull_div,macd_flip_bull:macd.flip_bull,zs_oversold:zs.oversold,rsn_outperform:rsn.outperform};return !!m2[strat];}
+  if(tab==='t3'){var t3=s.t3||{},fib=t3.fib||{},adx=t3.adx||{},stch=t3.stoch||{},wr=t3.wr||{},psar=t3.psar||{};
+    var m3={fib_near_618:fib.near_618,adx_strong_bull:adx.strong_bull,stoch_bull_cross:stch.bull_cross,wr_oversold:wr.oversold,psar_bull:psar.bull};return !!m3[strat];}
+  if(tab==='ti'){var ti=s.ti||{},ha=ti.ha||{},hma=ti.hma||{},ema=ti.ema||{},ma=ti.ma||{},kelt=ti.kelt||{},mfi=ti.mfi||{},cci=ti.cci||{},lr=ti.linreg||{};
+    var mti={ha_strong_bull:ha.strong_bull,ha_bull:ha.bull,hma_bull:hma.bull,hma_flip_bull:hma.flip_bull,ema_fan_bull:ema.fan_bull,ma_all_bull:ma.all_bull,kelt_cross_up:kelt.cross_up,mfi_os:mfi.oversold,mfi_bull_div:mfi.bull_div,cci_os_exit:cci.os_exit,lr_slope_bull:lr.slope_bull};return !!mti[strat];}
+  if(tab==='nl'){var nl=s.nl||{},pnf=nl.pnf||{},renko=nl.renko||{},kagi=nl.kagi||{},lb3=nl.lb3||{},rrg=nl.rrg||{};
+    var mnl={pnf_in_x:pnf.in_x,pnf_dbl_top:pnf.dbl_top,renko_bull:renko.bull,renko_5:renko.punch5,kagi_shoulder:kagi.shoulder,lb3_rev_bull:lb3.rev_bull,rrg_leading:rrg.quad==='Leading'};return !!mnl[strat];}
+  if(tab==='patt'){var h=(s.patt||{}).harm||{},cp=(s.patt||{}).cp||{};
+    var mp={cp_inv_hs:cp.inv_hs,cp_bull_flag:cp.bull_flag,cp_fall_wedge:cp.fall_wedge,harm_gartley_bull:h.gartley_bull,harm_abcd_bull:h.abcd_bull};return !!mp[strat];}
+  return false;
+}
+function scanCombo(){
+  var conds=['combo-c1','combo-c2','combo-c3','combo-c4','combo-c5'].map(function(id){
+    var v=document.getElementById(id);v=v?v.value:'';
+    if(!v)return null;var p=v.split(':');return{tab:p[0],strat:p[1]};
+  }).filter(Boolean);
+  if(!conds.length){setFbar('⚗️ Combiner — select at least one condition');return;}
+  var rsMin=parseInt(document.getElementById('combo-rs').value)||0;
+  renderComboSummary(); rows=[];
+  for(var i=0;i<S.length;i++){
+    var s=S[i];
+    if(!passesIdx(s))continue;
+    if((s.rs||0)<rsMin)continue;
+    var ok=true;
+    for(var ci=0;ci<conds.length;ci++){if(!evalCondition(s,conds[ci].tab,conds[ci].strat)){ok=false;break;}}
+    if(!ok)continue;
+    var sigs=conds.map(function(c){var f=COMBO_SIGNALS.find(function(x){return x.tab===c.tab&&x.strat===c.strat;});return f?f.label.split(' › ')[1]:c.strat;});
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,sig:sigs.join('+'),extra:{n:sigs.length},strat:'combo',_tab:'combo',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort(function(a,b){return a.sym.localeCompare(b.sym);});render();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ④ STOCK DETAIL POP-UP
+// ════════════════════════════════════════════════════════════════════════════
+function showStockDetail(sym){
+  var s=S.find(function(x){return x.sym===sym;});if(!s)return;
+  var f2=function(v){return typeof v==='number'?v.toFixed(2):v||'—';};
+  var pct=function(v,b){return b&&v?((v-b)/b*100).toFixed(1)+'%':'—';};
+  var flag=function(v,y){return v?'<span style="color:#00e5a0">'+y+'</span>':''};
+  var R=function(k,v){return '<tr><td style="color:var(--mu);padding:2px 8px;font-size:11px">'+k+'</td><td style="padding:2px 8px;font-size:11px">'+v+'</td></tr>';};
+  var SEC=function(t,c){return '<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:700;color:var(--acc);letter-spacing:1px;margin-bottom:4px;font-family:var(--mono)">'+t+'</div><table>'+c+'</table></div>';};
+  var ti=s.ti||{},t1=s.t1||{},mi=s.mi||{};
+  var ha=ti.ha||{},hma=ti.hma||{},kelt=ti.kelt||{},mfi=ti.mfi||{},cci=ti.cci||{},lr=ti.linreg||{};
+  var stt=t1.stt||t1.st||{},gc=t1.gc||{},rsi=t1.rsi||{},w52=t1.w52||{};
+  var nl=s.nl||{},pnf=nl.pnf||{},renko=nl.renko||{},kagi=nl.kagi||{};
+  var gap=s.gap||{};
+  // Sparkline SVG
+  var spk=s.spark||[];var spkMin=spk.length?Math.min.apply(null,spk):0;var spkMax=spk.length?Math.max.apply(null,spk):1;
+  var spkRng=spkMax-spkMin||1;var trend=spk.length>=2&&spk[spk.length-1]>spk[0];
+  var pts=spk.map(function(v,i){return (i/(spk.length-1||1)*220).toFixed(1)+','+(36-(v-spkMin)/spkRng*32).toFixed(1);}).join(' ');
+  var spkSvg=spk.length>1?'<svg viewBox="0 0 220 36" width="220" height="36" style="margin-bottom:8px;display:block"><polyline points="'+pts+'" fill="none" stroke="'+(trend?'#00e5a0':'#ef4444')+'" stroke-width="1.5"/></svg>':'';
+  // Freshness
+  var fr=dateFreshness(s.date);
+  document.getElementById('sd-body').innerHTML='<div style="display:flex;flex-wrap:wrap;gap:18px;padding:2px">'
+    +'<div style="min-width:200px"><div style="font-size:22px;font-weight:700;color:var(--txt);margin-bottom:2px">'+sym+'</div>'
+    +'<div style="font-size:11px;color:var(--mu);margin-bottom:8px">'+(s.sector||'Other')+' · '+(s.idx?'N'+s.idx:'Other')+(s.fno?' · <span style="color:#00e5a0">FNO</span>':'')+'</div>'
+    +spkSvg
+    +'<div style="font-size:10px;color:'+fr.color+';margin-bottom:10px">⏱ Data: '+fr.label+' ('+s.date+')</div>'
+    +SEC('PRICE',R('Price','₹'+f2(s.price))+R('RS Rating',(s.rs||0)+'/99')+R('200 DMA',f2(s.dma200))+R('vs 200 DMA',pct(s.price,s.dma200))+R('52W High',f2(s.w52h))+R('52W Low',f2(s.w52l)))
+    +'</div>'
+    +'<div style="min-width:200px">'
+    +SEC('SUPERTREND & T1',R('SuperTrend',stt.bull?'🟢 Bull ('+stt.consec+'×)':stt.bear?'🔴 Bear':'—')+R('ST Line',f2(stt.st))+R('ST Distance',(stt.dist||0)+'%')+R('Golden Cross',gc.bull_zone?'✓ Bull Zone':gc.near_golden?'⚡ Near':'')+R('RSI',rsi.bull_div?'🟢 Bull Div':rsi.bear_div?'🔴 Bear Div':'')+R('52W',w52.breakout?'🚀 Breakout':w52.near?'Near High':''))
+    +SEC('INDIA PRO',R('Heikin Ashi',ha.bull?'🟢 Bull ('+ha.consec_bull+'×)':ha.bear?'🔴 Bear':'—')+R('HMA',hma.bull?'🟢 Bull':hma.bear?'🔴 Bear':'—')+R('Keltner',kelt.above?'Above Band':kelt.squeezed?'Squeezed':kelt.below?'Below Band':'')+R('MFI',mfi.mfi!==undefined?mfi.mfi.toFixed(0)+(mfi.oversold?' OS':mfi.overbought?' OB':''):'—')+R('CCI',cci.cci!==undefined?cci.cci.toFixed(0)+(cci.oversold?' OS':cci.overbought?' OB':''):'—'))
+    +'</div>'
+    +'<div style="min-width:180px">'
+    +SEC('NOISELESS',R('P&F',pnf.in_x?'X Column':pnf.in_o?'O Column':'—')+R('Renko',renko.bull?'🟢 Bull':renko.bear?'🔴 Bear':'—')+R('Kagi',kagi.yang?'🟢 Yang ('+kagi.consec+'×)':kagi.yin?'🔴 Yin':'—')+R('Kagi Shoulder',flag(kagi.shoulder,'✓ Yes')))
+    +SEC('MI',R('Stage',mi.stg?'Stage '+mi.stg:'—')+R('Score',(mi.mts||0)+'/8')+R('Minervini',flag((mi.mts||0)>=6,'✓'))+R('Weinstein',flag(mi.stg===2,'✓ Stage 2')))
+    +SEC('GAP',R('Gap %',(gap.pct||0)+'%')+R('Status',gap.up?(gap.filled?'Filled':gap.cont?'Continuation':'Unfilled'):gap.dn?'Gap Down':'—'))
+    +'</div></div>';
+  document.getElementById('sd-overlay').style.display='block';
+  document.getElementById('sd-box').style.display='flex';
+}
+function hideStockDetail(){
+  document.getElementById('sd-overlay').style.display='none';
+  document.getElementById('sd-box').style.display='none';
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⑨ DATA FRESHNESS
+// ════════════════════════════════════════════════════════════════════════════
+function dateFreshness(dateStr){
+  if(!dateStr)return{days:null,label:'?',color:'#888'};
+  var d=Math.round((new Date()-new Date(dateStr))/864e5);
+  return{days:d,label:d===0?'Today':d===1?'Yday':d+'d',color:d>5?'#ef4444':d>2?'#f59e0b':'#00e5a0'};
+}
+
+
+function dateFreshness(dateStr){
+  if(!dateStr)return{days:null,label:'?',color:'#888'};
+  const d=Math.round((new Date()-new Date(dateStr))/864e5);
+  return{days:d,label:d===0?'Today':d===1?'Yday':d+'d ago',color:d>5?'#ef4444':d>2?'#f59e0b':'#00e5a0'};
+}
+function ageCell(d){const fr=dateFreshness(d);return`<td style="padding:3px 8px;color:${fr.color};font-size:9px;text-align:center;white-space:nowrap">${fr.label}</td>`;}
+function sparkCell(sym){
+  const spk=(S.find(s=>s.sym===sym)||{}).spark||[];
+  if(spk.length<2)return'<td></td>';
+  const mn=Math.min(...spk),mx=Math.max(...spk),rng=mx-mn||1,tr=spk[spk.length-1]>spk[0];
+  const pts=spk.map((v,i)=>((i/(spk.length-1)*58)).toFixed(1)+','+(16-(v-mn)/rng*14).toFixed(1)).join(' ');
+  return`<td style="padding:2px 6px"><svg viewBox="0 0 58 16" width="58" height="16"><polyline points="${pts}" fill="none" stroke="${tr?'#00e5a0':'#ef4444'}" stroke-width="1.2"/></svg></td>`;
+}
 function buildCols(tab,r0){
   const common=[
     {k:'sym',  h:'Symbol',     fn:r=>symCell(r.sym)},
     {k:'idx',  h:'Index',      fn:r=>idxBadge(r.idx)},
     {k:'price',h:'Close',      fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
     {k:'rs',   h:'RS',         fn:r=>rsCell(r.rs)},
-    {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+    {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
     {k:'w52h', h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
     {k:'avol', h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
     {k:'date', h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
+    {k:'_spark',h:'Spark',fn:r=>sparkCell(r.sym),dv:true},
+    {k:'_age',  h:'Age',  fn:r=>ageCell(r.date),  dv:true},
   ];
 
   if(tab==='piv'){
     const prox=parseFloat(document.getElementById('sp-pr').value);
     const type=r0?.type||'fibonacci';const meta=r0?.meta||TYPE_META[type];
     const lvKey=r0?.lvKey;const multi=r0?.multi;
-    const lvList=(meta.levels||[]).filter(l=>l!==lvKey);
+    const lvList=(meta.levels||[]).filter(l=>l!==lvKey&&l!=='P');
     return[
       {k:'sym',h:'Symbol',fn:r=>symCell(r.sym),ns:true},
       {k:'idx',h:'Index',fn:r=>idxBadge(r.idx)},
@@ -5101,7 +5459,7 @@ function buildCols(tab,r0){
       {k:'lv',h:(multi?'Hit Lv':lvKey)+' Level',fn:r=>`<td class="clv">${multi?`<span class="${LV_CSS[r.lvKey]||''}">${r.lvKey} </span>`:''  }${r.lv.toFixed(2)}</td>`,hcls:'hl'},
       {k:'dist',h:'Dist %',fn:r=>distCell(r.dist,prox)},
       {k:'rs',h:'RS',fn:r=>rsCell(r.rs)},
-      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'b6',h:'Bnc 6M',fn:r=>`<td class="${r.b6>=3?'bc-hi':r.b6>=2?'bc-md':'bc-lo'}">${r.b6}</td>`},
       {k:'b12',h:'Bnc 12M',fn:r=>`<td class="${r.b12>=3?'bc-hi':r.b12>=2?'bc-md':'bc-lo'}">${r.b12}</td>`},
       {k:'_d1',h:'Levels',fn:r=>`<td class="dv">◀▶</td>`,dv:true},
@@ -5129,7 +5487,7 @@ function buildCols(tab,r0){
       }},
       {k:'zone_h',h:'Zone High',fn:r=>`<td class="${r.zone_h?'cpr':'mu'}">${r.zone_h||'—'}</td>`},
       {k:'zone_l',h:'Zone Low', fn:r=>`<td class="${r.zone_l?'cpr':'mu'}">${r.zone_l||'—'}</td>`},
-      {k:'trend',h:'Trend',fn:r=>`<td class="${r.smc.trend==='bull'?'smc-bull':r.smc.trend==='bear'?'smc-bear':'smc-range'}">${r.smc.trend?.toUpperCase()||'—'}</td>`},
+      {k:'trend',h:'Trend',sortFn:r=>r.smc?.trend==='bull'?1:r.smc?.trend==='bear'?-1:0,fn:r=>`<td class="${r.smc.trend==='bull'?'smc-bull':r.smc.trend==='bear'?'smc-bear':'smc-range'}">${r.smc.trend?.toUpperCase()||'—'}</td>`},
       {k:'bos_bull',h:'BOS',fn:r=>`<td>${r.smc.bos_bull?'<span class="smc-bull">BOS↑</span>':r.smc.bos_bear?'<span class="smc-bear">BOS↓</span>':'<span class="mu">—</span>'}</td>`},
       {k:'choch',h:'CHoCH',fn:r=>`<td>${r.smc.choch==='bull'?'<span class="smc-choch">CHoCH↑</span>':r.smc.choch==='bear'?'<span class="smc-choch">CHoCH↓</span>':'<span class="mu">—</span>'}</td>`},
       {k:'bull_ob_h',h:'Bull OB H',fn:r=>`<td class="mu">${r.smc.bull_ob?r.smc.bull_ob.h:'—'}</td>`},
@@ -5166,7 +5524,7 @@ function buildCols(tab,r0){
       {k:'mt',h:'8 Conditions',fn:r=>`<td>${mtDots(r.mt)}</td>`},
       {k:'stg',h:'Weinstein',fn:r=>`<td class="stg-${r.stg}">${r.stgl}</td>`},
       {k:'rs',h:'RS',fn:r=>rsCell(r.rs)},
-      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'s50',h:'50 SMA',fn:r=>`<td class="${r.price>r.s50?'pos':'neg'}">${r.s50}</td>`},
       {k:'s150',h:'150 SMA',fn:r=>`<td class="${r.price>r.s150?'pos':'neg'}">${r.s150}</td>`},
       {k:'s200',h:'200 SMA',fn:r=>`<td class="${r.price>r.s200?'pos':'neg'}">${r.s200}</td>`},
@@ -5194,7 +5552,7 @@ function buildCols(tab,r0){
       {k:'price', h:'Close',     fn:r=>`<td class="cpr">${r.price.toFixed(2)}</td>`},
       ...extraCols,
       {k:'rs',    h:'RS',        fn:r=>rsCell(r.rs)},
-      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'w52h',  h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
       {k:'avol',  h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
       {k:'date',  h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
@@ -5216,7 +5574,7 @@ function buildCols(tab,r0){
       {k:'rsi',  h:'RSI',      fn:r=>`<td class="${r.rsi<=30?'pos':r.rsi>=70?'neg':''}">${r.rsi}</td>`},
       ...extraCols,
       {k:'rs',       h:'RS',        fn:r=>rsCell(r.rs)},
-      {k:'above200', h:'vs 200DMA', fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'w52h',     h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
       {k:'avol',     h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
       {k:'date',     h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
@@ -5239,7 +5597,7 @@ function buildCols(tab,r0){
       {k:'sig',  h:'Signal',   fn:r=>`<td style="color:var(--acc);font-weight:700;font-size:12px">${r.sig}</td>`},
       ...extraCols,
       {k:'rs',       h:'RS',        fn:r=>rsCell(r.rs)},
-      {k:'above200', h:'vs 200DMA', fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'w52h',     h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
       {k:'avol',     h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
       {k:'date',     h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
@@ -5262,7 +5620,7 @@ function buildCols(tab,r0){
       {k:'sig',  h:'Signal',   fn:r=>`<td style="color:var(--gold);font-weight:700;font-size:12px">${r.sig}</td>`},
       ...extraCols,
       {k:'rs',       h:'RS',        fn:r=>rsCell(r.rs)},
-      {k:'above200', h:'vs 200DMA', fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'w52h',     h:'vs 52WH',   fn:r=>w52Cell(r.price,r.w52h)},
       {k:'avol',     h:'AvgVol20',  fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
       {k:'date',     h:'Last Date', fn:r=>`<td class="mu">${r.date}</td>`},
@@ -5279,13 +5637,13 @@ function buildCols(tab,r0){
       {k:'sig',  h:'Pattern / Signal',fn:r=>`<td style="color:#ff9500;font-weight:700;font-size:12px">${r.sig}</td>`},
       ...extraCols,
       {k:'rs',      h:'RS',       fn:r=>rsCell(r.rs)},
-      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'w52h',    h:'vs 52WH',  fn:r=>w52Cell(r.price,r.w52h)},
       {k:'avol',    h:'AvgVol20', fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -5298,7 +5656,7 @@ function buildCols(tab,r0){
       {k:'sig',  h:'Signal',  fn:r=>`<td style="color:${color};font-weight:700;font-size:12px">${r.sig}</td>`},
       ...extraCols,
       {k:'rs',      h:'RS',       fn:r=>rsCell(r.rs)},
-      {k:'above200',h:'vs 200DMA',fn:r=>dmaCell(r.price,r.dma200,r.above200)},
+      {k:'above200',h:'vs 200DMA',sortFn:r=>r.dma200?(r.price-r.dma200)/r.dma200*100:0,fn:r=>dmaCell(r.price,r.dma200,r.above200)},
       {k:'w52h',    h:'vs 52WH',  fn:r=>w52Cell(r.price,r.w52h)},
       {k:'avol',    h:'AvgVol20', fn:r=>`<td class="mu">${fmtVol(r.avol)}</td>`},
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
@@ -5317,13 +5675,14 @@ function render(){
     const cls=[c.hcls||'',c.dv?'dv':'',(!c.dv&&i===sc)?(sd===1?'asc':'desc'):''].filter(Boolean).join(' ');
     return`<th class="${cls}"${c.dv?'':` data-i="${i}"`}>${c.h}</th>`;
   }).join('');
-  const trs=vis.map(r=>`<tr${r.idx>0&&r.idx<=750?' class="nr"':''}>${cs.map(c=>c.fn(r)).join('')}</tr>`).join('');
+  const trs=vis.map(r=>`<tr onclick="showStockDetail('${r.sym}')" style="cursor:pointer">${cs.map(c=>c.fn(r)).join('')}</tr>`).join('');
   document.getElementById('ts').innerHTML=`<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
   document.querySelectorAll('#ts th[data-i]').forEach(th=>{
     th.addEventListener('click',()=>{
       const i=+th.dataset.i;if(sc===i)sd*=-1;else{sc=i;sd=1;}
-      const k=cs[i].k;
-      rows.sort((a,b)=>(typeof a[k]==='number'?a[k]-b[k]:String(a[k]).localeCompare(String(b[k])))*sd);
+      const col=cs[i],k=col.k;
+      if(col.sortFn) rows.sort((a,b)=>(col.sortFn(a)-col.sortFn(b))*sd);
+      else rows.sort((a,b)=>(typeof a[k]==='number'?a[k]-b[k]:String(a[k]).localeCompare(String(b[k])))*sd);
       render();
     });
   });
@@ -5357,6 +5716,8 @@ function exportCSV(){
     nl: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
     xp: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
     patt: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
+    gap:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.extra.gap||'',r.rs,r.date],
+    combo:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
@@ -5380,6 +5741,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     const p=loadPrefs(); applyPrefs(p||DEFAULTS);
     initAutoScan();
     switchTab('home');
+    _populateComboDropdowns();
   } catch(e){
     console.error('NSE Scanner init error:',e);
     const ts=document.getElementById('ts');
@@ -5400,6 +5762,15 @@ document.addEventListener('DOMContentLoaded',()=>{
   <div class="hm-body" id="hm-body"></div>
 </div>
 <div class="toast" id="_toast"></div>
+<!-- ④ Stock detail pop-up -->
+<div id="sd-overlay" onclick="hideStockDetail()"></div>
+<div id="sd-box">
+  <div id="sd-hdr">
+    <span style="font-size:13px;font-weight:600;color:var(--txt)">◈ Stock Detail</span>
+    <button onclick="hideStockDetail()" style="background:none;border:none;color:var(--mu);font-size:22px;cursor:pointer;line-height:1">×</button>
+  </div>
+  <div id="sd-body"></div>
+</div>
 </body>
 </html>
 """
@@ -5442,7 +5813,8 @@ def main():
     a = ap.parse_args()
     print(f"[*] Data: {a.data}")
     idx = {50:a.n50, 100:a.n100, 200:a.n200, 500:a.n500, 750:a.n750}
-    stocks = build_dataset(a.data, idx, nifty_path=a.nifty, fno_path=a.nfno)
+    ap.add_argument('--sector', default=None, help='Path to sector map CSV (Symbol,Sector)')
+    stocks = build_dataset(a.data, idx, nifty_path=a.nifty, fno_path=a.nfno, sector_path=getattr(a,'sector',None))
     if not stocks: print("[!] No stocks loaded"); return
     html = build_html(stocks, a.data)
     with open(a.out, "w", encoding="utf-8") as f: f.write(html)
