@@ -1437,6 +1437,322 @@ def compute_ew_simple(df, swing_pct=0.05):
 # ══════════════════════════════════════════════════════════════════════════════
 # 🧪 EXPERIMENTAL — Volume Spread Analysis (Tom Williams / Wyckoff VSA)
 # ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# BREAKOUT PRO — 10 paid-scanner compute functions
+# ═══════════════════════════════════════════════════════════════════════════
+
+def compute_vcp(df):
+    """VCP — Mark Minervini's Volatility Contraction Pattern.
+    Successive weekly range contractions with drying volume near 52W high."""
+    if len(df)<60: return {}
+    import pandas as _pd
+    df2=df.copy(); df2['Date']=_pd.to_datetime(df2['Date']); df2=df2.set_index('Date')
+    w=df2.resample('W').agg({'High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
+    if len(w)<6: return {}
+    H=w['High'].values; L=w['Low'].values; C=w['Close'].values; V=w['Volume'].values
+    rngs=[(H[i]-L[i])/(H[i]+L[i])*200 for i in range(len(w))]
+    # Count consecutive range contractions in last 8 weeks
+    seg=rngs[-8:]; cons=0
+    for i in range(1,len(seg)):
+        if seg[i]<seg[i-1]: cons+=1
+        else: cons=0
+    contractions=cons
+    avg_v=float(np.mean(V[:-3])) if len(V)>3 else float(np.mean(V))
+    recent_v=float(np.mean(V[-3:]))
+    vol_dry=bool(avg_v>0 and recent_v<avg_v*0.75)
+    high52=float(max(H[-52:])) if len(H)>=52 else float(max(H))
+    near_hi=bool(C[-1]>=high52*0.85)
+    return dict(
+        is_vcp=bool(contractions>=2 and vol_dry and near_hi),
+        is_vcp3=bool(contractions>=3 and vol_dry and near_hi),
+        contractions=int(contractions),
+        vol_dry=vol_dry, near_hi=near_hi,
+        tight_pct=round(rngs[-1],2) if rngs else 0
+    )
+
+def compute_pocket_pivot(df):
+    """Pocket Pivot — Gil Morales / Chris Kacher.
+    Up-day volume exceeds highest down-day volume in prior 10 sessions."""
+    if len(df)<14: return {}
+    C=df['Close'].values.astype(float); V=df['Volume'].values.astype(float)
+    is_up=bool(C[-1]>C[-2])
+    max_dn=max((V[i] for i in range(-11,-1) if C[i]<C[i-1]),default=0)
+    vol=float(V[-1])
+    return dict(
+        is_pp=bool(is_up and max_dn>0 and vol>max_dn),
+        is_pp_strong=bool(is_up and max_dn>0 and vol>max_dn*1.5),
+        vol_ratio=round(vol/max_dn,2) if max_dn else 0
+    )
+
+def compute_3week_tight(df):
+    """3-Week Tight — O'Neil. Weekly closes within ±1.5% for 3+ consecutive weeks."""
+    if len(df)<20: return {}
+    import pandas as _pd
+    df2=df.copy(); df2['Date']=_pd.to_datetime(df2['Date']); df2=df2.set_index('Date')
+    wc=df2.resample('W').agg({'Close':'last'}).dropna()['Close'].values
+    if len(wc)<5: return {}
+    def _rng(arr): m=min(arr); return (max(arr)-m)/m*100 if m else 999
+    r3=_rng(wc[-3:]); r4=_rng(wc[-4:]); r5=_rng(wc[-5:])
+    return dict(
+        is_3wt=bool(r3<=1.5), is_4wt=bool(r4<=1.5), is_5wt=bool(r5<=1.5),
+        tight_pct=round(r3,2),
+        tight_weeks=5 if r5<=1.5 else 4 if r4<=1.5 else 3 if r3<=1.5 else 0
+    )
+
+def compute_rs_new_high(df, nifty_df):
+    """RS Line New High — IBD/MarketSmith concept.
+    Stock's RS line (price/Nifty50) making a 52-week high."""
+    if nifty_df is None or len(df)<252 or len(nifty_df)<252: return {}
+    try:
+        import pandas as _pd
+        sd=df.copy(); sd.index=_pd.to_datetime(sd['Datetime'])
+        nd=nifty_df.copy(); nd.index=_pd.to_datetime(nd['Datetime'])
+        common=sd.index.intersection(nd.index)
+        if len(common)<60: return {}
+        sc=sd.loc[common,'Close'].values[-252:].astype(float)
+        nc=nd.loc[common,'Close'].values[-252:].astype(float)
+        if nc[-1]==0: return {}
+        rs=sc/nc
+        curr=float(rs[-1]); hi=float(max(rs))
+        vs_hi=round((curr/hi-1)*100,2) if hi else 0
+        rs_trend=bool(len(rs)>=65 and rs[-1]>rs[-65])
+        rs_bo=bool(len(rs)>=65 and curr>float(max(rs[-65:-5])))
+        return dict(
+            is_rs_new_high=bool(curr>=hi*0.99),
+            rs_trending=rs_trend,
+            rs_breakout=rs_bo,
+            vs_52w_hi=vs_hi
+        )
+    except: return {}
+
+def compute_ad_score(df, periods=65):
+    """IBD A/D Rating — institutional accumulation vs distribution over 13 weeks."""
+    if len(df)<periods+2: return {}
+    C=df['Close'].values[-periods:].astype(float)
+    V=df['Volume'].values[-periods:].astype(float)
+    avg_v=float(np.mean(V))
+    score=0
+    for i in range(1,len(C)):
+        if V[i]>=avg_v:
+            score += (1 if C[i]>C[i-1] else -1 if C[i]<C[i-1] else 0)
+    mx=periods-1
+    n=score/mx if mx else 0
+    rating='A' if n>0.35 else 'B' if n>0.1 else 'C' if n>-0.1 else 'D' if n>-0.35 else 'E'
+    return dict(
+        score=int(score), rating=rating,
+        is_accum=bool(rating in('A','B')),
+        is_distrib=bool(rating in('D','E')),
+        rating_val=dict(A=5,B=4,C=3,D=2,E=1).get(rating,3)
+    )
+
+def compute_hvb(df):
+    """High Volume Breakout — 52W high close + 2× average volume."""
+    if len(df)<55: return {}
+    C=df['Close'].values.astype(float); H=df['High'].values.astype(float)
+    V=df['Volume'].values.astype(float)
+    hi52=float(max(H[-252:-1])) if len(H)>=252 else float(max(H[:-1]))
+    avg50=float(np.mean(V[-51:-1]))
+    vr=round(float(V[-1])/avg50,2) if avg50 else 0
+    new_hi=bool(C[-1]>hi52)
+    return dict(
+        hvb=bool(new_hi and vr>=2.0),
+        hvb_strong=bool(new_hi and vr>=3.0),
+        near_hvb=bool(C[-1]>=hi52*0.98 and vr>=2.0),
+        new_hi=new_hi, vol_ratio=vr, hi52=round(hi52,2)
+    )
+
+def compute_vdu(df):
+    """Volume Dry-Up — volume contracting below 50% of avg while price holds."""
+    if len(df)<25: return {}
+    V=df['Volume'].values.astype(float); C=df['Close'].values.astype(float)
+    avg20=float(np.mean(V[-21:-1])); rec5=float(np.mean(V[-5:]))
+    vr=round(rec5/avg20,2) if avg20 else 1.0
+    hold=bool(C[-1]>=float(max(C[-20:]))*0.97)
+    min40=float(min(V[-41:-1])) if len(V)>=41 else float(min(V[:-1]))
+    return dict(
+        vdu=bool(vr<0.5),
+        vdu_bullish=bool(vr<0.5 and hold),
+        vol_40d_low=bool(V[-1]<=min40*1.1),
+        price_hold=hold, vol_ratio=vr
+    )
+
+def compute_ema_stack(df):
+    """EMA Power Stack — 9/21/50/200 EMA bullishly aligned with rising slopes."""
+    if len(df)<205: return {}
+    C=df['Close'].values.astype(float)
+    def ema(d,n):
+        e=np.empty(len(d)); e[0]=d[0]; k=2/(n+1)
+        for i in range(1,len(d)): e[i]=d[i]*k+e[i-1]*(1-k)
+        return e
+    e9=ema(C,9); e21=ema(C,21); e50=ema(C,50); e200=ema(C,200)
+    p=C[-1]
+    full=bool(p>e9[-1]>e21[-1]>e50[-1]>e200[-1])
+    partial=bool(p>e21[-1]>e50[-1]>e200[-1])
+    sl=bool(e9[-1]>e9[-5] and e21[-1]>e21[-5] and e50[-1]>e50[-5])
+    return dict(
+        full_stack=full, partial_stack=partial, power_stack=bool(full and sl),
+        slopes_bull=sl,
+        e9=r2(e9[-1]), e21=r2(e21[-1]), e50=r2(e50[-1]), e200=r2(e200[-1])
+    )
+
+def compute_inside_week(df):
+    """Inside Week — weekly bar fully contained inside prior week. Compression signal."""
+    if len(df)<15: return {}
+    import pandas as _pd
+    df2=df.copy(); df2['Date']=_pd.to_datetime(df2['Date']); df2=df2.set_index('Date')
+    w=df2.resample('W').agg({'High':'max','Low':'min','Close':'last'}).dropna()
+    if len(w)<5: return {}
+    H=w['High'].values; L=w['Low'].values; C=w['Close'].values
+    iw1=bool(H[-1]<H[-2] and L[-1]>L[-2])
+    iw2=bool(iw1 and len(H)>=3 and H[-2]<H[-3] and L[-2]>L[-3])
+    avg10c=float(np.mean(C[-10:])) if len(C)>=10 else float(C[-1])
+    return dict(
+        iw1=iw1, iw2=iw2,
+        iw_uptrend=bool(iw1 and C[-1]>avg10c)
+    )
+
+def compute_trendline_bo(df, lb=60):
+    """Descending trendline breakout — price crosses above falling peak line."""
+    if len(df)<lb: return {}
+    H=df['High'].values[-lb:].astype(float)
+    C=df['Close'].values[-lb:].astype(float)
+    peaks=[(i,H[i]) for i in range(2,len(H)-2) if H[i]==max(H[i-2:i+3])]
+    if len(peaks)<3: return dict(tl_breakout=False,is_desc=False,tl_val=0,dist=0)
+    p3=peaks[-3:]
+    xs=np.array([p[0] for p in p3],dtype=float)
+    ys=np.array([p[1] for p in p3],dtype=float)
+    slope=float(np.polyfit(xs,ys,1)[0])
+    n=len(H)-1
+    tl=float(ys[-1]+slope*(n-xs[-1]))
+    desc=bool(slope<-0.001)
+    bo=bool(desc and C[-1]>tl)
+    return dict(
+        tl_breakout=bo, is_desc=desc,
+        tl_val=r2(tl),
+        dist=round((C[-1]-tl)/tl*100,2) if tl else 0
+    )
+
+
+
+# ══ Smart Rank compute functions ══════════════════════════════
+import numpy as np
+
+def compute_seasonality(df):
+    """Historical monthly performance — Definedge Seasonality Scanner equivalent."""
+    if len(df)<200: return {}
+    try:
+        import pandas as _pd, datetime as _dt
+        df2=df.copy(); df2['Date']=_pd.to_datetime(df2['Date'])
+        df2=df2.set_index('Date')
+        mc=df2['Close'].resample('ME').last().dropna()
+        if len(mc)<13: return {}
+        mr=(mc.pct_change()*100).dropna()
+        months={}
+        for m in range(1,13):
+            v=mr[mr.index.month==m]
+            if len(v)>=3:
+                months[m]=dict(avg=round(float(v.mean()),2),
+                               hit=round(float((v>0).mean()*100),0),
+                               n=int(len(v)))
+            else:
+                months[m]=dict(avg=0,hit=50,n=0)
+        cm=_dt.date.today().month
+        cm_data=months.get(cm,{})
+        bm=max(range(1,13),key=lambda x:months.get(x,{}).get('avg',-999))
+        wm=min(range(1,13),key=lambda x:months.get(x,{}).get('avg',999))
+        return dict(months=months,cm=cm,
+                    cm_avg=cm_data.get('avg',0),cm_hit=cm_data.get('hit',50),
+                    bm=bm,bm_avg=months.get(bm,{}).get('avg',0),
+                    wm=wm,wm_avg=months.get(wm,{}).get('avg',0))
+    except: return {}
+
+def compute_mtf_matrix(df):
+    """MTF Matrix Score — Definedge concept. D/W/M trend checks, 1=bull 0=bear.
+    Checks per timeframe: price>MA50, MA50>MA200, price makes HH, RSI>50, positive slope."""
+    if len(df)<210: return {}
+    try:
+        import pandas as _pd
+        df2=df.copy(); df2['Date']=_pd.to_datetime(df2['Date'])
+        df2=df2.set_index('Date')
+        def _ma(s,n): return s.rolling(n).mean()
+        def _ema(s,n): return s.ewm(span=n,adjust=False).mean()
+        def _rsi(s,n=14):
+            d=s.diff(); g=d.clip(lower=0).rolling(n).mean(); l=(-d.clip(upper=0)).rolling(n).mean()
+            return 100-100/(1+g/(l+1e-10))
+        def _score(close,hi,lo):
+            ma50=_ma(close,50).iloc[-1]; ma200=_ma(close,200).iloc[-1]
+            ema21=_ema(close,21).iloc[-1]; rsi=_rsi(close).iloc[-1]
+            c=float(close.iloc[-1]); p5=float(close.iloc[-6]) if len(close)>=6 else c
+            s=0
+            if c>ma50: s+=1
+            if ma50>ma200: s+=1
+            if c>ema21: s+=1
+            if rsi>50: s+=1
+            if c>p5: s+=1
+            return int(s)
+        # Daily
+        d_score=_score(df2['Close'],df2['High'],df2['Low'])
+        # Weekly
+        wdf=df2.resample('W-FRI').agg({'Close':'last','High':'max','Low':'min'}).dropna()
+        w_score=_score(wdf['Close'],wdf['High'],wdf['Low']) if len(wdf)>=210 else 0
+        # Monthly
+        mdf=df2.resample('ME').agg({'Close':'last','High':'max','Low':'min'}).dropna()
+        m_score=_score(mdf['Close'],mdf['High'],mdf['Low']) if len(mdf)>=25 else 0
+        total=d_score+w_score+m_score
+        return dict(d=d_score,w=w_score,m=m_score,total=total,
+                    pct=round(total/15*100))
+    except: return {}
+
+def compute_ath(df):
+    """All-Time High scanner — price at ATH or approaching ATH."""
+    if len(df)<5: return {}
+    C=df['Close'].values.astype(float); H=df['High'].values.astype(float)
+    ath=float(max(H[:-1])) if len(H)>1 else float(H[0])
+    c=float(C[-1])
+    dist=round((c-ath)/ath*100,2) if ath else 0
+    return dict(
+        is_ath=bool(c>ath),
+        near_ath=bool(c>=ath*0.98),
+        ath=round(ath,2),
+        dist_pct=dist,
+        consec_hi=int(sum(1 for i in range(len(C)-1,-1,-1) if C[i]>=C[i-1]*0.998) if len(C)>1 else 0)
+    )
+
+def compute_triple_compress(df):
+    """Triple Compression — VDU + NR7 + BB Squeeze simultaneously.
+    Pre-breakout setup: 3 independent compression signals firing together."""
+    if len(df)<22: return {}
+    C=df['Close'].values.astype(float); V=df['Volume'].values.astype(float)
+    H=df['High'].values.astype(float); L=df['Low'].values.astype(float)
+    # NR7: narrowest range in 7 bars
+    rng=[H[i]-L[i] for i in range(len(H))]
+    nr7=bool(rng[-1]==min(rng[-7:]))
+    # Volume Dry-Up: recent 5-day avg < 60% of 20-day avg
+    avg20=float(np.mean(V[-21:-1])); rec5=float(np.mean(V[-5:]))
+    vdu=bool(avg20>0 and rec5<avg20*0.6)
+    # BB Squeeze: bandwidth < 20th percentile of last 60 bars
+    def bband(c,n=20,k=2):
+        mn=np.array([np.mean(c[max(0,i-n):i]) for i in range(n,len(c)+1)])
+        sd=np.array([np.std(c[max(0,i-n):i]) for i in range(n,len(c)+1)])
+        return 2*k*sd/(mn+1e-10)*100  # bandwidth %
+    if len(C)>=80:
+        bw=bband(C)
+        bb_sq=bool(bw[-1]<=np.percentile(bw[-60:],20))
+    else:
+        bb_sq=False
+    count=sum([nr7,vdu,bb_sq])
+    return dict(nr7=nr7,vdu=vdu,bb_sq=bb_sq,
+                tc2=bool(count>=2),tc3=bool(count==3),count=int(count))
+
+def compute_raw_returns(df):
+    """Raw multi-period returns for momentum score normalization (universe-wide)."""
+    if len(df)<5: return dict(r1m=0,r3m=0,r6m=0,r12m=0)
+    C=df['Close'].values.astype(float)
+    def ret(n): return round((C[-1]-C[-n-1])/C[-n-1]*100,2) if len(C)>n else 0.0
+    return dict(r1m=ret(21),r3m=ret(63),r6m=ret(126),r12m=ret(252))
+
+
+
 def compute_vsa(df):
     """Volume Spread Analysis: interplay of Volume, Spread (H−L), and Close position.
     The 'Big Volume Candle' strategy is the centrepiece."""
@@ -2014,6 +2330,27 @@ def precompute(fp, idx_map, nifty_df=None):
     )
     # 🧪 Experimental (VSA)
     xp = dict(vsa=compute_vsa(df))
+    # 🔢 Smart Rank raw data
+    sr = dict(
+        season=compute_seasonality(df),
+        mtf   =compute_mtf_matrix(df),
+        ath   =compute_ath(df),
+        tc    =compute_triple_compress(df),
+        raw   =compute_raw_returns(df),
+    )
+    # 🏹 Breakout Pro
+    bp = dict(
+        vcp=compute_vcp(df),
+        pp =compute_pocket_pivot(df),
+        twt=compute_3week_tight(df),
+        rsh=compute_rs_new_high(df,nifty_df),
+        ads=compute_ad_score(df),
+        hvb=compute_hvb(df),
+        vdu=compute_vdu(df),
+        ems=compute_ema_stack(df),
+        iw =compute_inside_week(df),
+        tlb=compute_trendline_bo(df),
+    )
     # ③ Gap Scanner
     gap = compute_gaps(df)
     # ⑧ Sparkline — last 60 closes normalised to first=100
@@ -2035,7 +2372,33 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,**st,rs=0)
+
+
+def assign_smart_ranks(stocks):
+    """Normalize multi-period momentum across the universe (0-100 score)."""
+    if not stocks: return
+    import math as _math
+    fields=['r1m','r3m','r6m','r12m']
+    # Collect raw returns
+    vals={f:[s.get('sr',{}).get('raw',{}).get(f,0) for s in stocks] for f in fields}
+    n=len(stocks)
+    def _pct(arr,v):
+        return round(sum(1 for x in arr if x<v)/n*100) if n else 50
+    for s in stocks:
+        raw=s.get('sr',{}).get('raw',{})
+        # Multi-period momentum score: percentile rank in each period, weighted avg
+        p1=_pct(vals['r1m'],raw.get('r1m',0))
+        p3=_pct(vals['r3m'],raw.get('r3m',0))
+        p6=_pct(vals['r6m'],raw.get('r6m',0))
+        p12=_pct(vals['r12m'],raw.get('r12m',0))
+        ms=round(p1*0.15+p3*0.20+p6*0.25+p12*0.30+s.get('rs',0)*0.10)
+        if 'sr' not in s: s['sr']={}
+        s['sr']['ms']=ms          # Momentum Score 0-100
+        s['sr']['r1m']=raw.get('r1m',0)
+        s['sr']['r3m']=raw.get('r3m',0)
+        s['sr']['r6m']=raw.get('r6m',0)
+        s['sr']['r12m']=raw.get('r12m',0)
 
 def assign_rs(stocks):
     rets=sorted(s["ret12m"] for s in stocks); n=len(rets)
@@ -2076,7 +2439,7 @@ def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None, sector_
             rec['fno']=rec['sym'] in fno_set
             rec['sector']=sector_map.get(rec['sym'],'Other')
             stocks.append(rec)
-    print(f"\n  Done — {len(stocks)} stocks"); assign_rs(stocks); assign_breadth(stocks); return stocks
+    print(f"\n  Done — {len(stocks)} stocks"); assign_rs(stocks); assign_smart_ranks(stocks); assign_breadth(stocks); return stocks
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 HTML = r"""<!DOCTYPE html>
@@ -2332,6 +2695,12 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .ref-link{font-size:9px;font-family:var(--mono);color:var(--a2);text-decoration:none;padding:2px 7px;border:1px solid rgba(59,158,255,.2);border-radius:3px;background:rgba(59,158,255,.04)}
 .ref-link:hover{background:rgba(59,158,255,.14);color:#fff}
 @keyframes ldpulse{from{opacity:.5}to{opacity:1}}
+.sd-ico{display:inline-flex;align-items:center;justify-content:center;
+  width:13px;height:13px;border-radius:50%;font-size:8px;font-weight:700;font-style:italic;
+  background:rgba(59,158,255,.12);color:var(--a2);border:1px solid rgba(59,158,255,.25);
+  cursor:pointer;margin-right:5px;flex-shrink:0;transition:background .15s;
+  user-select:none;vertical-align:middle;line-height:1}
+.sd-ico:hover{background:rgba(59,158,255,.35);border-color:var(--a2)}
 
 /* ④ Stock detail modal */
 #sd-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9990;display:none}
@@ -2341,6 +2710,8 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 /* gap + combo tabs */
 .tab-btn.t-gap.active{color:#ff8c42;border-bottom-color:#ff8c42}
 .tab-btn.t-combo.active{color:#c47aff;border-bottom-color:#c47aff}
+.tab-btn.t-bp.active{color:#ff6b35;border-bottom-color:#ff6b35}
+.tab-btn.t-sr.active{color:#00d4ff;border-bottom-color:#00d4ff}
 /* ⑥ sector grouping */
 .gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
 .gb-chk input{accent-color:var(--acc)}
@@ -2387,6 +2758,8 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-br"  data-tab="br"  onclick="switchTab('br')">📡 Breadth</button>
   <button class="tab-btn t-gap" data-tab="gap" onclick="switchTab('gap')">⚡ Gaps</button>
   <button class="tab-btn t-combo" data-tab="combo" onclick="switchTab('combo')">⚗️ Combiner</button>
+  <button class="tab-btn t-bp" data-tab="bp" onclick="switchTab('bp')">🏹 Breakout Pro</button>
+  <button class="tab-btn t-sr" data-tab="sr" onclick="switchTab('sr')">🔢 Smart Rank</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
 <!-- ═══ GLOBAL FILTERS ════════════════════════════════════════════════════ -->
@@ -3154,6 +3527,109 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="btn" style="background:#84cc16;color:#000" onclick="renderBreadth()">▶ SHOW</button>
 </div>
 
+<!-- ═══ BREAKOUT PRO ═══════════════════════════════════════════════════════ -->
+<div id="ctrl-bp" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <select id="bp-strat" style="min-width:340px" onchange="updateBPInfo()">
+      <optgroup label="── 🔄 VCP — Mark Minervini ──">
+        <option value="vcp">VCP — 2+ contractions + volume dry-up + near 52W high</option>
+        <option value="vcp3">VCP Tight — 3+ contractions (higher conviction)</option>
+      </optgroup>
+      <optgroup label="── 🎯 Pocket Pivot — Gil Morales ──">
+        <option value="pp">Pocket Pivot — up-day volume &gt; highest down-day vol (10d)</option>
+        <option value="pp_strong">Strong Pocket Pivot — 1.5× highest down-day volume</option>
+      </optgroup>
+      <optgroup label="── 📏 Tight Pattern — O'Neil ──">
+        <option value="twt3">3-Week Tight — weekly closes within ±1.5%</option>
+        <option value="twt4">4-Week Tight</option>
+        <option value="twt5">5-Week Tight — strongest consolidation</option>
+      </optgroup>
+      <optgroup label="── 📈 RS Line — IBD / MarketSmith ──">
+        <option value="rsh">RS New 52W High — strength line at yearly peak</option>
+        <option value="rs_bo">RS Line Breakout — exits 3-month consolidation</option>
+        <option value="rs_trend">RS Line Trending Up — 13-week positive slope</option>
+      </optgroup>
+      <optgroup label="── 🏆 A/D Score — IBD Rating ──">
+        <option value="ads_a">A-Rating — heavy institutional accumulation (13W)</option>
+        <option value="ads_ab">A or B — net accumulation phase</option>
+        <option value="ads_de">D or E — distribution (short / avoid)</option>
+      </optgroup>
+      <optgroup label="── ⚡ High Volume Breakout ──">
+        <option value="hvb">HVB — 52W high close + 2× average volume</option>
+        <option value="hvb_strong">HVB Strong — 52W high + 3× average volume</option>
+        <option value="near_hvb">Near-High HVB — within 2% of 52W high + 2× vol</option>
+      </optgroup>
+      <optgroup label="── 💧 Volume Dry-Up ──">
+        <option value="vdu_bull">VDU Bullish — vol &lt;50% avg while price holds</option>
+        <option value="vdu_40d">Vol at 40-Session Low — extreme drying</option>
+      </optgroup>
+      <optgroup label="── 💪 EMA Power Stack ──">
+        <option value="ems_full">Full Stack — price &gt; 9 &gt; 21 &gt; 50 &gt; 200 EMA</option>
+        <option value="ems_power">Power Stack — full stack + all EMAs rising</option>
+        <option value="ems_part">Partial Stack — price &gt; 21 &gt; 50 &gt; 200 EMA</option>
+      </optgroup>
+      <optgroup label="── 📅 Inside Week ──">
+        <option value="iw1">Inside Week — week fully inside prior week</option>
+        <option value="iw2">Double Inside Week — 2 consecutive inside weeks</option>
+        <option value="iw_up">Inside Week in Uptrend</option>
+      </optgroup>
+      <optgroup label="── 📐 Trendline ──">
+        <option value="tlb">Descending Trendline Breakout</option>
+      </optgroup>
+    </select>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="bp-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="bp-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="bp-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#ff6b35;color:#000" onclick="scanBP()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
+<!-- ═══ SMART RANK ══════════════════════════════════════════════════════════ -->
+<div id="ctrl-sr" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <select id="sr-strat" style="min-width:360px" onchange="updateSRInfo()">
+      <optgroup label="── 🔢 Composite Momentum Score ──">
+        <option value="ms_90">Momentum Score ≥ 90 — top 10% universe</option>
+        <option value="ms_75">Momentum Score ≥ 75 — top quartile</option>
+        <option value="ms_50">Momentum Score ≥ 50 — above average</option>
+        <option value="ms_rising">Momentum Score Rising — outperforming universe</option>
+      </optgroup>
+      <optgroup label="── 📅 Seasonality (Definedge-style) ──">
+        <option value="season_bull">Current Month Historically Bullish — avg return &gt;2%</option>
+        <option value="season_strong">Current Month Strong — avg &gt;3% + hit rate &gt;65%</option>
+        <option value="season_best">Best Month of Year for this stock</option>
+        <option value="season_avoid">Current Month Historically Bearish — avg &lt;-1%</option>
+      </optgroup>
+      <optgroup label="── 📊 MTF Matrix (Definedge Matrix) ──">
+        <option value="mtf_perfect">MTF Perfect — all 15 conditions bullish (D+W+M)</option>
+        <option value="mtf_strong">MTF Strong — 12+ of 15 conditions bullish</option>
+        <option value="mtf_7">MTF Aligned — 7+ conditions bullish</option>
+        <option value="mtf_daily_max">Daily Max Score (5/5) — all daily checks pass</option>
+      </optgroup>
+      <optgroup label="── 🏔 All-Time High ──">
+        <option value="ath">All-Time High Breakout — new ATH close</option>
+        <option value="near_ath">Near ATH — within 2% of all-time high</option>
+      </optgroup>
+      <optgroup label="── 🗜 Triple Compression ──">
+        <option value="tc3">Triple Compression — NR7 + VDU + BB Squeeze simultaneously</option>
+        <option value="tc2">Double Compression — any 2 of 3 compression signals</option>
+      </optgroup>
+      <optgroup label="── 📦 Multi-Period RS (Definedge Smart RS) ──">
+        <option value="mtfrs_90">Consistent RS Leader — top 10% in all 4 periods</option>
+        <option value="mtfrs_75">Consistent RS Strong — top 25% across 1M/3M/6M/12M</option>
+        <option value="r1m_top">1-Month Return Top 10%</option>
+        <option value="r3m_top">3-Month Return Top 10%</option>
+      </optgroup>
+    </select>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="sr-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="sr-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="sr-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#00d4ff;color:#000" onclick="scanSR()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
 <!-- ═══ GAP SCANNER ════════════════════════════════════════════════════ -->
 <div id="ctrl-gap" class="ctrl" style="display:none">
   <div class="cg"><label>Gap Type</label>
@@ -3287,7 +3763,7 @@ let rows=[],sc=4,sd=1,currentTab='home',lastRows=[];
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -3317,6 +3793,8 @@ function switchTab(tab){
   else if(tab==='br'){ renderBreadth(); }
   else if(tab==='gap'){ updateGapInfo(); scanGap(); }
   else if(tab==='combo'){ renderComboSummary(); }
+  else if(tab==='bp'){ updateBPInfo(); scanBP(); }
+  else if(tab==='sr'){ updateSRInfo(); scanSR(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -3442,7 +3920,11 @@ function shareLink(){
 }
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
-function symCell(sym){return`<td class="csym"><a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${sym}" target="_blank" rel="noopener"><svg class="tvi" width="12" height="12" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#131722"/><path d="M4 20h4v-8H4v8zm6 0h4V8h-4v12zm6 0h4v-5h-4v5z" fill="#2962FF"/></svg>${sym}</a></td>`;}
+function symCell(sym){
+  const ico=`<span class="sd-ico" onmouseenter="_sdHover('${sym}')" title="Stock detail">i</span>`;
+  const lnk=`<a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${sym}" target="_blank" rel="noopener">${sym}</a>`;
+  return`<td class="csym" style="white-space:nowrap">${ico}${lnk}</td>`;
+}
 function idxBadge(idx){const m={50:['ix50','N50'],100:['ix100','N100'],200:['ix200','N200'],500:['ix500','N500'],750:['ix750','N750'],0:['ix0','—']};const[c,l]=m[idx]||m[0];return`<td class="${c}">${l}</td>`;}
 function rsCell(rs){const c=rs>=80?'rs-hi':rs>=60?'rs-md':rs>=40?'rs-lo':'rs-vl';return`<td class="${c}">${rs}</td>`;}
 function dmaCell(price,dma,above){const p=((price-dma)/dma*100).toFixed(1);return`<td class="${above?'dma-up':'dma-dn'}">${above?'▲':'▼'} ${p}%</td>`;}
@@ -4042,6 +4524,28 @@ const HOME_CARDS=[
   {tab:'br', strat:'stage2',            emoji:'📈', badge:'br',   label:'All Stage 2 Stocks',     desc:'Weinstein Stage 2 confirmed across the full universe — the only stocks to be long', stars:'★★★★', section:5},
   {tab:'br', strat:'near52wh',          emoji:'🎯', badge:'br',   label:'Near 52W High',          desc:'Stocks within 5% of annual high — potential breakout candidates universe-wide',  stars:'★★★',  section:5},
   {tab:'br', strat:'rs80',              emoji:'🌟', badge:'br',   label:'RS ≥ 80 Leaders',        desc:'Top 20% relative strength — the leaders institutions are accumulating right now', stars:'★★★★', section:5},
+  // 🏹 Breakout Pro
+  {tab:'bp',strat:'vcp',     emoji:'🔄',badge:'bp',label:'VCP (Minervini)',     desc:'Volatility Contraction Pattern — 2+ weekly contractions + vol dry-up near 52W high. MarketSmith #1',stars:'★★★★★',section:6},
+  {tab:'bp',strat:'pp',      emoji:'🎯',badge:'bp',label:'Pocket Pivot',        desc:'Up-day volume > highest down-day vol in 10 sessions. Gil Morales early-entry before breakout',       stars:'★★★★★',section:6},
+  {tab:'bp',strat:'twt3',    emoji:'📏',badge:'bp',label:'3-Week Tight',        desc:"O\'Neil: weekly closes within ±1.5% for 3 weeks — institutional absorption before breakout",          stars:'★★★★', section:6},
+  {tab:'bp',strat:'rsh',     emoji:'📈',badge:'bp',label:'RS New 52W High',     desc:'RS line (stock/Nifty) at 52W peak — outperforming market. IBD #1 leading indicator',                stars:'★★★★★',section:6},
+  {tab:'bp',strat:'ads_ab',  emoji:'🏆',badge:'bp',label:'A/D Accumulation',   desc:'IBD A/D rating A or B — institutional accumulation over 13 weeks. StockEdge premium equivalent',    stars:'★★★★', section:6},
+  {tab:'bp',strat:'hvb',     emoji:'⚡',badge:'bp',label:'High Volume BO',      desc:'52W high close + 2× avg volume — institutions confirm the breakout. Volume removes ambiguity',       stars:'★★★★', section:6},
+  {tab:'bp',strat:'vdu_bull',emoji:'💧',badge:'bp',label:'Volume Dry-Up',       desc:'Volume < 50% of avg while price holds — supply exhausted, coiled for expansion. Chartink paid filter',stars:'★★★★',section:6},
+  {tab:'bp',strat:'ems_power',emoji:'💪',badge:'bp',label:'EMA Power Stack',   desc:'Price > 9 > 21 > 50 > 200 EMA, all rising. Perfect bull alignment — TradePoint semi-algo signal',   stars:'★★★★', section:6},
+  {tab:'bp',strat:'iw1',     emoji:'📅',badge:'bp',label:'Inside Week',         desc:'Weekly range inside prior week — weekly compression before directional expansion move',              stars:'★★★',  section:6},
+  {tab:'bp',strat:'tlb',     emoji:'📐',badge:'bp',label:'Trendline Breakout',  desc:'Price closes above descending trendline across 3 peaks — bearish structure broken',                  stars:'★★★',  section:6},
+  // 🔢 Smart Rank
+  {tab:'sr',strat:'ms_90',      emoji:'🔢',badge:'sr',label:'Momentum Score ≥90', desc:'Top 10% of universe by composite momentum: 1M+3M+6M+12M returns weighted + RS rank. Trendlyne Momentum Score equivalent',stars:'★★★★★',section:7},
+  {tab:'sr',strat:'ms_75',      emoji:'📊',badge:'sr',label:'Momentum Score ≥75', desc:'Top quartile of momentum universe — sustained multi-period outperformance vs all NSE stocks',               stars:'★★★★', section:7},
+  {tab:'sr',strat:'season_bull',emoji:'📅',badge:'sr',label:'Seasonality Bullish', desc:'Current month historically positive for this stock (avg > 2%, 5+ years of data). Definedge Seasonality equivalent', stars:'★★★★',section:7},
+  {tab:'sr',strat:'season_strong',emoji:'📅',badge:'sr',label:'Seasonality Strong', desc:'Current month avg > 3% + hit rate > 65% — most reliable seasonal setup. Only available on Definedge (\u20B92,499/mo)',stars:'★★★★★',section:7},
+  {tab:'sr',strat:'mtf_perfect',emoji:'💯',badge:'sr',label:'MTF Perfect (15/15)', desc:'All daily + weekly + monthly trend conditions bullish simultaneously. Definedge Matrix equivalent — highest conviction',stars:'★★★★★',section:7},
+  {tab:'sr',strat:'mtf_strong', emoji:'💪',badge:'sr',label:'MTF Strong (12+/15)', desc:'12+ of 15 multi-timeframe checks pass. Strong structural alignment across all 3 timeframes',               stars:'★★★★', section:7},
+  {tab:'sr',strat:'ath',        emoji:'🏔',badge:'sr',label:'All-Time High',        desc:'New all-time high close — ATH breakouts with volume have the highest 6-month forward returns of any pattern',  stars:'★★★★★',section:7},
+  {tab:'sr',strat:'tc3',        emoji:'🗜',badge:'sr',label:'Triple Compression',   desc:'NR7 + Volume Dry-Up + BB Squeeze all firing simultaneously — three-dimensional maximum coiling',            stars:'★★★★★',section:7},
+  {tab:'sr',strat:'mtfrs_90',   emoji:'🌟',badge:'sr',label:'Consistent RS Leader', desc:'Top 10% by 1M, 3M, 6M AND 12M returns simultaneously. Definedge Smart RS Scanner equivalent',             stars:'★★★★★',section:7},
+  {tab:'sr',strat:'tc2',        emoji:'🗜',badge:'sr',label:'Double Compression',   desc:'Any 2 of NR7/VDU/BB Squeeze — strong pre-breakout coiling signal',                                         stars:'★★★★', section:7},
 ];
 
 const SECTIONS=[
@@ -4051,9 +4555,11 @@ const SECTIONS=[
   '🏅 INDIA PRO — CHARTINK · STOCKEDGE · TRENDLYNE',
   '🎨 PATTERNS — HARMONIC & CHART PATTERNS',
   '📡 MARKET BREADTH & UNIVERSE SIGNALS',
+  '🏹 BREAKOUT PRO — PAID SCANNER STRATEGIES',
+  '🔢 SMART RANK — AI COMPOSITE SCORING',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank'};
 
 function renderHome(){
   let html=`<div class="home-wrap">`;
@@ -4229,6 +4735,10 @@ const STRAT_HELP_KEY={
     cp_rise_wedge:1,cp_fall_wedge:1,cp_bull_flag:1,cp_bear_flag:1,
   },
   br:{all:0,above200:0,stage2:0,near52wh:0,pnf_x:0,renko_bull:0,ha_bull:0,ema_fan:0,rs80:0},
+  gap:{up1:0,up2:0,up3:0,up_cont:0,dn1:0,dn_cont:0},
+  combo:{},
+  bp:{vcp:0,vcp3:0,pp:0,pp_strong:0,twt3:0,rsh:0,ads_ab:0,hvb:0,vdu_bull:0,ems_power:0,iw1:0,tlb:0},
+  sr:{ms_90:0,ms_75:0,ms_50:0,season_bull:0,season_strong:0,mtf_perfect:0,mtf_strong:0,ath:0,tc3:0,mtfrs_90:0},
 };
 // Map tab → section index in Help H array
 const TAB_SEC={
@@ -4238,6 +4748,7 @@ const TAB_SEC={
   xp:11,  // Experimental / VSA
   patt:12,// Patterns
   br:13,  // Market Breadth
+  gap:14, combo:14, bp:15, sr:16,
 };
 
 function showHelp(tab,stratVal){
@@ -4269,7 +4780,21 @@ function closeHelpModal(){
   document.getElementById('hm-overlay')?.classList.remove('open');
   document.getElementById('hm-box')?.classList.remove('open');
 }
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeHelpModal();});
+// ── Stock detail hover ──────────────────────────────────────────────────────
+// Show on hover, close only via ESC or overlay click — no auto-close on leave
+let _sdT=null;
+function _sdHover(sym){
+  clearTimeout(_sdT);
+  // If already open just update; otherwise 150ms delay on first open
+  if(document.getElementById('sd-box').style.display==='flex'){
+    showStockDetail(sym);
+  } else {
+    _sdT=setTimeout(()=>showStockDetail(sym),150);
+  }
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeHelpModal();hideStockDetail();}
+});
 
 
 function renderHelp(){
@@ -4592,9 +5117,136 @@ function renderHelp(){
     {icon:'📡', title:'Market Breadth — Universe-Wide Signals', items:[
       { n:'Market Breadth Dashboard — % Above MA, Stage 2, RS Leaders',
         f:'Health Score = %AboveMA200×0.25 + %Stage2×0.20 + %RS70×0.20 + %PnfX×0.10 + %RenkoBull×0.10 + %HaBull×0.08 + %Near52WH×0.07',
-        d:'Market breadth analysis measures the health of the overall market by looking at how many individual stocks are participating in a trend, rather than just watching the index. A rising Nifty 50 on broad participation (70%+ stocks above MA200) is very different from a rising index driven by just 5-10 large-cap stocks dragging the index higher. This scanner computes breadth metrics across the full stock universe loaded from your data directory — a unique advantage that requires a full dataset. The "Percentage of stocks above MA200" is the classic breadth indicator: above 60% = healthy bull market; below 40% = bear market territory; below 20% = deep bear, potential generational buying opportunity. The Weinstein Stage 2 participation rate shows what fraction of stocks are in the primary advancing phase — this is the most actionable breadth metric for position traders. The RS ≥ 70 percentile count identifies how many stocks are in leadership territory. The Market Health Score is a proprietary composite of all breadth metrics weighted by their empirical reliability for NSE markets. In bull markets, this score typically ranges 55-80; below 40 signals broad deterioration; above 75 signals a strong participation bull phase. The filter buttons allow scanning for stocks passing each breadth condition — e.g., showing all stocks in Renko Bull state to identify the universe\'s strongest trending names. This tab is unique to this scanner — no cloud-based screener can offer this because it requires computing across your specific loaded universe.',
-        links:[['MarketBreadth.com','https://www.marketbreadth.com'],['Investopedia Breadth','https://www.investopedia.com/terms/m/market_breadth.asp'],['Lowry Research','https://www.lowrysresearch.com']],
-        ai:'Explain market breadth analysis for NSE trading. How does % stocks above MA200 indicate market health? What breadth level distinguishes a healthy bull market from a top-heavy market driven by few stocks? How should the Weinstein Stage 2 participation rate be used as a market phase indicator? What is a Breadth Thrust and what does it signal? How do market breadth indicators compare to Nifty VIX for identifying market reversals? Provide historical analysis of NSE market breadth levels at major Nifty 50 bull and bear market transitions.'
+        d:'Market breadth analysis measures the health of the overall market by looking at how many individual stocks are participating in a trend, rather than just watching the index. A rising Nifty 50 on broad participation (70%+ stocks above MA200) is very different from a rising index driven by just 5-10 large-cap stocks dragging the index higher. This scanner computes breadth metrics across the full stock universe loaded from your data directory — a unique advantage that requires a full dataset. The "Percentage of stocks above MA200" is the classic breadth indicator: above 60% = healthy bull market; below 40% = bear market territory; below 20% = deep bear, potential generational buying opportunity. The Weinstein Stage 2 participation rate shows what fraction of stocks are in the primary advancing phase — this is the most actionable breadth metric for position traders. The RS ≥ 70 percentile count identifies how many stocks are in leadership territory. The Market Health Score is a proprietary composite of all breadth metrics weighted by their empirical reliability for NSE markets.',
+        links:[['MarketBreadth.com','https://www.marketbreadth.com'],['Investopedia Breadth','https://www.investopedia.com/terms/m/market_breadth.asp']],
+        ai:'Explain market breadth analysis for NSE trading. How does % stocks above MA200 indicate market health? What breadth level distinguishes a healthy bull market from a top-heavy market? How should Stage 2 participation rate be used as a market phase indicator?'
+      },
+    ]},
+    {icon:'⚡', title:'Gap Scanner — Overnight Gap Signals', items:[
+      { n:'Gap Up ≥1% / ≥2% / ≥3% — Significant opening gaps',
+        f:'Gap% = (Open₀ − Close₋₁) / Close₋₁ × 100. Gap Up ≥1% | ≥2% | ≥3%',
+        d:'An overnight gap occurs when the opening price is significantly different from the prior day\'s closing price due to news, earnings, block deals, or broad market moves. Gap Up ≥1% captures stocks that opened at least 1% above yesterday\'s close — these are among the most actively traded setups in NSE. Gaps on high-volume indices like Nifty FNO stocks tend to have stronger follow-through. The Gap Up ≥2% and ≥3% filters progressively narrow to higher-conviction moves. Gaps driven by institutional block deals before market open are especially powerful.',
+        links:[['Chartink Gap Screener','https://chartink.com'],['NSE Bhav Copy','https://www.nseindia.com/market-data/live-equity-market']],
+        ai:'Explain gap trading strategies for NSE. What gap sizes have the best follow-through on NSE? How does gap continuation differ from gap rejection? What is the difference between an exhaustion gap and a breakaway gap?'
+      },
+      { n:'Gap Up Continuation vs Rejection',
+        f:'Continuation: Close > Open after gap up. Rejection: Close < Open after gap up.',
+        d:'Not all gaps behave the same way. A Gap Up Continuation (close > open) means buyers held the gap and continued pushing prices higher intraday — this confirms institutional demand. A Gap Up Rejection (close < open after gap up) means sellers took control after the gap — the price could not sustain the opening euphoria. Gap rejections on stocks in distribution (IBD D/E rating) are strong shorting setups. Gap continuations on stocks with A/D accumulation ratings and strong RS are the highest-probability setups in NSE.',
+        links:[],
+        ai:'How do I trade gap up continuation vs gap up rejection patterns on NSE? What volume pattern confirms each? Which sectors gap up most reliably on NSE?'
+      },
+      { n:'Gap Unfilled — Demand Zone Confirmation',
+        f:'Unfilled Gap: Low₀ > Close₋₁ (gap up) or High₀ < Close₋₁ (gap down) with no intraday fill',
+        d:'An unfilled gap means price never returned to the prior close\'s level during the day. This confirms strong one-sided demand (for gap ups) — sellers at the prior close\'s price level were overwhelmed. Unfilled gaps on stocks at 52-week highs with volume 2× average are among the most powerful continuation signals. This is a paid Chartink filter — our scanner computes it natively from daily OHLC.',
+        links:[], ai:'What is the significance of an unfilled gap in NSE trading? How long do gaps typically stay unfilled on NSE stocks? At what price levels do gap fills most commonly occur?'
+      },
+    ]},
+    {icon:'⚗️', title:'AND Combiner — Multi-Signal Custom Scanner', items:[
+      { n:'AND Combiner — Up to 5 Signals Simultaneously',
+        f:'Result = Stock passes Condition1 AND Condition2 AND ... AND Condition5',
+        d:'The AND Combiner is the most powerful tool in this scanner — equivalent to Chartink\'s premium paid plan and StockEdge\'s Combination Scans (₹999–2,499/month). Instead of scanning for a single signal, it finds stocks that simultaneously pass 2-5 independent conditions from ANY tab. For example: "SuperTrend Bull + Heikin Ashi Strong Bull + Volume Spike + Near 52W High + RS ≥ 70" — this combination would find stocks that are confirmed by five independent methods simultaneously. Each additional condition dramatically reduces the result set and increases the probability of follow-through. In a universe of 2,000 stocks: a single condition may return 100-150 results; combining 3 conditions returns 15-30; combining 5 conditions returns 3-8 highest-conviction setups. The combiner draws from all 19 tabs — Tier-1, Tier-2, Tier-3, India Pro, Noiseless, Patterns, Gap, Multi-Indicator, Breakout Pro, and Smart Rank signals.',
+        links:[['StockEdge Combo','https://stockedge.com'],['Chartink Premium','https://chartink.com']],
+        ai:'What are the most powerful AND combinations for NSE swing trading? Which combinations of indicators have the highest historical win rates? How many conditions should I combine to balance quality vs quantity of results?'
+      },
+    ]},
+    {icon:'🏹', title:'Breakout Pro — Paid Scanner Strategies (Minervini · IBD · O\'Neil)', items:[
+      { n:'VCP — Volatility Contraction Pattern (Mark Minervini)',
+        f:'2+ successive weekly range contractions (each < prior) + volume declining + price within 15% of 52W high',
+        d:'The Volatility Contraction Pattern is Mark Minervini\'s most powerful setup — the one he used to win the US Investing Championship with 220%+ annual returns. The stock forms successive contractions in its weekly price range: the first swing might be 8% wide, the second 5%, the third 3%. Each contraction should have lower volume than the previous, indicating that supply (selling pressure) is drying up. The final pivot before the breakout should be the tightest, with the lowest volume — this is the "T" (pivot point). A VCP breakout above the pivot on 2×+ average volume is the entry. This is only available on MarketSmith India (₹2,999/month). Our scanner detects VCPs from weekly OHLC — 2+ contractions with volume dry-up near the 52W high.',
+        links:[['Minervini.com','https://www.minervini.com'],['MarketSmith India','https://marketsmithindia.com']],
+        ai:'Explain Mark Minervini\'s VCP pattern in detail. What are the specific contraction ratios that define a valid VCP? How do you identify the pivot point? What volume patterns validate a VCP breakout on NSE stocks?'
+      },
+      { n:'Pocket Pivot (Gil Morales / Chris Kacher)',
+        f:'Up-day Volume₀ > MAX(Volume of all down-days in prior 10 sessions)',
+        d:'Developed by Gil Morales and Chris Kacher (former William O\'Neil portfolio managers). A pocket pivot occurs on an up-day when the volume exceeds the highest volume of any down-day in the prior 10 trading sessions. This signals that institutional accumulation is occurring BEFORE the formal price breakout — giving earlier, lower-risk entry. The stop loss is placed just below the pivot low, creating a very tight risk. Pocket pivots are especially powerful when they occur while the stock is still forming a base (not extended) and have strong RS. MarketSmith India exclusively provides pocket pivot detection. Our scanner computes it natively.',
+        links:[['Gil Morales Book','https://www.amazon.com/Trade-Like-O-Neil-Disciples']],
+        ai:'How does a pocket pivot differ from a regular volume surge? What is the success rate of pocket pivots on NSE compared to formal breakouts? Can pocket pivots occur in downtrends?'
+      },
+      { n:'3-Week Tight / 4-Week Tight / 5-Week Tight (O\'Neil)',
+        f:'Weekly closing range: (MAX(closes₋₁..₋₃) − MIN) / MIN × 100 < 1.5%',
+        d:'William O\'Neil identified that stocks in strong uptrends occasionally pause for 2-5 weeks in an extremely tight price range — weekly closes within ±1.5% of each other. This pattern forms when institutional holders refuse to sell (keeping supply off the market), while new buyers accumulate quietly. The result: price goes essentially nowhere for several weeks. The longer the tight area holds (5-week tight > 3-week tight), the stronger the eventual breakout. Available on StockEdge Premium and MarketSmith. The volume during tight weeks should also decline, confirming that sellers have stepped back.',
+        links:[['O\'Neil How to Make Money','https://www.amazon.com/How-Make-Money-Stocks-William'],['MarketSmith India','https://marketsmithindia.com']],
+        ai:'What is the difference between a 3-week tight and a flat base pattern? How tight should weekly closes be for a valid tight area? What breakout characteristics confirm a tight area pattern on NSE?'
+      },
+      { n:'RS Line New 52W High (IBD / MarketSmith)',
+        f:'RS_line = Stock_Price / Nifty50_Price. is_new_high = RS_line[-1] >= MAX(RS_line[-252:]) × 0.99',
+        d:'The Relative Strength line plots the ratio of the stock\'s price to the Nifty 50 index. When this line makes a NEW 52-week high — even before the stock price itself breaks out — it signals that the stock has been outperforming the broad market to reach a new relative peak. IBD research (William O\'Neil company) identifies this as the single most reliable LEADING indicator for monster stock moves. Stocks whose RS line makes new highs while the price is still forming a base are the ideal candidates for the next big move. Exclusive to MarketSmith India and IBD. Our scanner requires the Nifty50 CSV (--nifty flag) to compute RS lines.',
+        links:[['IBD RS Rating','https://www.investors.com/how-to-invest/investors-corner/relative-strength-rating-stock-chart-analysis-picks-best-stocks-sp500-macd-deflect'],['MarketSmith India','https://marketsmithindia.com']],
+        ai:'What is the RS Line (relative strength line) and how is it different from the RSI indicator? Why is the RS line making new highs before the stock price considered a leading indicator? How do I use the RS line to confirm a base breakout?'
+      },
+      { n:'IBD A/D Rating (Accumulation/Distribution Score)',
+        f:'Score = Σ(+1 if up-day with volume≥avg, -1 if down-day with volume≥avg) over 65 trading days. A>35%, B>10%, C neutral, D<-10%, E<-35%',
+        d:'IBD\'s Accumulation/Distribution rating grades stocks from A to E based on the net balance of buying vs selling pressure over the past 13 weeks. An A-rated stock has seen heavy institutional accumulation — more up-days on above-average volume than down-days. A B-rated stock shows moderate net buying. C is neutral. D and E indicate distribution (institutional selling). Stocks with A or B ratings before a breakout are significantly more likely to follow through. This rating is a paid feature on StockEdge and IBD. Our scanner computes the equivalent from daily OHLCV data.',
+        links:[['IBD A/D Explained','https://www.investors.com/how-to-invest/investors-corner/accumulation-distribution-rating-stock-chart-analysis-picks'],['StockEdge','https://stockedge.com']],
+        ai:'How is IBD\'s A/D rating different from the Accumulation/Distribution oscillator (Chaikin)? What A/D rating is required for a valid base breakout? How do I use A/D ratings to filter stocks before earnings?'
+      },
+      { n:'High Volume Breakout (HVB)',
+        f:'HVB = Close > MAX(High[-252:-1]) AND Volume[-1] ≥ 2 × AVG(Volume[-51:-1])',
+        d:'A High Volume Breakout is a 52-week high close accompanied by volume at least twice the 50-day average. Volume confirmation is the critical filter that separates institutional breakouts from retail noise. IBD studies show that low-volume new highs (below average volume) fail 60-70% of the time, while high-volume new highs (2×+ average) have a significantly better success rate as institutions are providing the buying power. The Strong HVB filter (3×+) further narrows to explosive institutional entries — these are often driven by block deals or mutual fund quarterly rebalancing.',
+        links:[['O\'Neil Volume Rules','https://www.investors.com']],
+        ai:'What volume threshold confirms a genuine 52-week breakout vs a false breakout on NSE? How does the 50-day average volume calculation work? Should I use absolute volume or relative volume for breakout confirmation?'
+      },
+      { n:'Volume Dry-Up (VDU) at Pivot',
+        f:'VDU = AVG(Volume[-5:]) < 0.50 × AVG(Volume[-20:-1]) AND Close[-1] ≥ MAX(Close[-20:]) × 0.97',
+        d:'Volume Dry-Up is a Chartink paid filter that identifies stocks where volume has contracted to below 50% of the 20-day average while price holds near recent highs. This signals that sellers have completely exhausted themselves — no one wants to sell at current prices — creating a potential energy situation for the next move. VDU combined with NR7 and BB Squeeze (Triple Compression) is one of the most reliable pre-breakout signals available from OHLCV data.',
+        links:[['Chartink Premium','https://chartink.com']],
+        ai:'Why does volume drying up at a pivot indicate accumulation rather than distribution? How long should volume dry-up last before a breakout? What is the typical volume expansion ratio at the breakout after a VDU setup?'
+      },
+      { n:'EMA Power Stack',
+        f:'Full Stack: Price > EMA9 > EMA21 > EMA50 > EMA200. Power Stack: Full Stack + all 4 EMAs have positive 5-day slope',
+        d:'The EMA Power Stack describes perfect bullish alignment across all major moving averages. Each EMA represents a different group of market participants: EMA9 (very short-term speculators), EMA21 (3-week swing traders), EMA50 (medium-term investors), EMA200 (long-term investors). When price is above all four AND all four are rising, every group is simultaneously profitable and bullish — there is no overhead resistance from any timeframe. TradePoint uses this as a core semi-algorithmic scanner signal.',
+        links:[['TradePoint','https://www.definedgesecurities.com/products/tradepoint/']],
+        ai:'What is the significance of all EMAs rising simultaneously vs just price being above all EMAs? How does the EMA Power Stack perform in trending vs ranging markets? What is the failure rate when only the partial stack (price > EMA21 > 50 > 200) is present?'
+      },
+      { n:'Inside Week',
+        f:'Inside Week: High[-1W] < High[-2W] AND Low[-1W] > Low[-2W]',
+        d:'An inside week occurs when the current week\'s entire price range (high to low) is contained within the prior week\'s range. This weekly compression signals a period of equilibrium between buyers and sellers — the market is coiling energy for a directional move. The direction of the eventual breakout (above the prior week\'s high or below its low) typically aligns with the prior trend. Double inside weeks (two consecutive weeks each inside the prior) are rarer and stronger compression signals. TradePoint\'s Pattern Finder identifies inside weeks across all NSE stocks.',
+        links:[['TradePoint','https://www.definedgesecurities.com/products/tradepoint/']],
+        ai:'What is the probability of an upward breakout from an inside week when it occurs in an uptrend? How does an inside week differ from a NR7 pattern? What is the typical breakout timing (days to weeks) after an inside week?'
+      },
+      { n:'Descending Trendline Breakout',
+        f:'Trendline through last 3 peaks (linear regression on peak prices). Breakout: Close > trendline_value',
+        d:'A descending trendline connects a series of lower highs — the bearish structure that defines a downtrend or consolidation. When price closes ABOVE this falling trendline, the sequence of lower highs is broken: the trend structure has changed. TradePoint\'s Pattern Finder scans for this across all stocks and timeframes. Our approximation uses the last 3 significant price peaks (local highs within ±2 bars) and fits a linear regression line through them to find the trendline value at today\'s date.',
+        links:[['TradePoint Pattern Finder','https://www.definedgesecurities.com/products/tradepoint/']],
+        ai:'How reliable is a descending trendline breakout as a trading signal? What volume is needed to confirm a trendline break? How do I draw valid trendlines — which highs to connect?'
+      },
+    ]},
+    {icon:'🔢', title:'Smart Rank — AI Composite Scoring (Definedge · Trendlyne · IBD)', items:[
+      { n:'Composite Momentum Score (0–100)',
+        f:'MS = Rank(1M_return)×0.15 + Rank(3M_return)×0.20 + Rank(6M_return)×0.25 + Rank(12M_return)×0.30 + Rank(RS)×0.10',
+        d:'The Composite Momentum Score is our implementation of Trendlyne\'s Momentum Score — computed purely from OHLCV data. Every stock in the universe is ranked by its return over 1 month, 3 months, 6 months, and 12 months separately. These percentile ranks are then weighted (shorter periods get lower weights, longer periods get higher weights) and combined with the RS percentile rank into a single 0–100 score. A score of 90 means the stock is in the top 10% of the universe by composite momentum. This is calculated in assign_smart_ranks() after all stocks are processed — it is a TRUE relative ranking, not an absolute indicator.',
+        links:[['Trendlyne Momentum Score','https://trendlyne.com/score-details/']],
+        ai:'How does a multi-period momentum score compare to single-period momentum for predicting future returns? What score threshold has been shown to have the best risk-adjusted returns? How does momentum score decay over time after initial computation?'
+      },
+      { n:'Seasonality Scanner (Historical Monthly Performance)',
+        f:'Monthly avg return = MEAN(monthly_returns[month==current_month, years=5+]). Hit rate = % of years positive in that month',
+        d:'The Seasonality Scanner is our implementation of Definedge\'s Seasonality Scanner (exclusive to their ₹2,499/month plan). For each stock and each calendar month, we compute the average percentage return across all instances of that month in the historical data. A stock that gains 4% on average in October with an 80% hit rate (8 of 10 years positive) is showing a strong seasonal pattern. The best seasonal setups combine: avg return > 3%, hit rate > 70%, and the current month is the stock\'s single best month of the year. Seasonal patterns are especially strong in NSE due to quarterly earnings cycles, FII rebalancing, F&O expiry effects, and budget season.',
+        links:[['Definedge Seasonality','https://www.definedge.com/seasonality-scanner/']],
+        ai:'Why do seasonal patterns exist in stock markets? Which months are historically strongest for NSE Nifty 50? How reliable are individual stock seasonal patterns compared to index seasonality? How many years of data are needed for reliable seasonal analysis?'
+      },
+      { n:'MTF Matrix Score (Daily + Weekly + Monthly, 0–15)',
+        f:'5 checks × 3 timeframes: price>MA50 (+1), MA50>MA200 (+1), price>EMA21 (+1), RSI>50 (+1), price>5-period-ago (+1). Max=15.',
+        d:'The MTF Matrix is our implementation of Definedge\'s Matrix feature — exclusive to RZone and TradePoint. For each timeframe (daily, weekly, monthly), five trend conditions are checked: is price above the 50-period MA? Is the 50-period MA above the 200-period MA? Is price above the 21-period EMA? Is RSI above 50? Is price higher than 5 periods ago? Each check scores +1. Maximum total = 15 (5 checks × 3 timeframes). A score of 15 means perfect bullish alignment on ALL three timeframes simultaneously — this is an extremely strong signal that every major group of market participants is bullish. Definedge extends this concept to 120 parameters across more chart types.',
+        links:[['Definedge Matrix','https://www.definedgesecurities.com/user-manuals/rzone-user-guide/'],['RZone','https://www.definedgesecurities.com/faqs/rzone/']],
+        ai:'Why is multi-timeframe analysis more reliable than single-timeframe analysis? What MTF Matrix score threshold has the best predictive power? How do daily, weekly, and monthly alignments contribute differently to trade outcomes?'
+      },
+      { n:'All-Time High Breakout',
+        f:'ATH = Close[-1] > MAX(High[:-1]) — price exceeds entire price history in the loaded dataset',
+        d:'An All-Time High breakout is conceptually the most powerful breakout type. There is NO overhead resistance — every single buyer who ever owned this stock at any price is in profit. This creates a pure momentum environment where the only question is how fast new buyers push the price higher before it finds new equilibrium. IBD research and StockTrendz AI backtesting on NSE data show ATH breakouts on above-average volume have the highest 6-month forward return probability of any technical pattern. The key condition is volume — ATH on low volume is a red flag; ATH on 2×+ average volume with strong RS confirms institutional involvement.',
+        links:[['IBD ATH Research','https://www.investors.com']],
+        ai:'What is the average 6-month return after an ATH breakout on NSE Nifty 500 stocks? How does volume at the ATH breakout affect subsequent performance? What is the psychological significance of an ATH breakout for market participants?'
+      },
+      { n:'Triple Compression (NR7 + VDU + BB Squeeze)',
+        f:'NR7: range[-1] < MIN(ranges[-7:]). VDU: AVG(vol[-5:])<0.6×AVG(vol[-20:]). BB Squeeze: bandwidth[-1] < P20(bandwidth[-60:])',
+        d:'Triple Compression identifies stocks where three independent compression mechanisms are simultaneously active: NR7 (the narrowest price range in 7 days), Volume Dry-Up (volume below 60% of 20-day average), and Bollinger Band Squeeze (bandwidth in the lowest 20th percentile of the last 60 sessions). Each of these alone signals potential energy; all three together represent maximum coiling in price range, volume, and volatility simultaneously. This combination has very few false signals and typically precedes explosive directional moves. The direction of the breakout usually aligns with the prior trend.',
+        links:[],
+        ai:'What is the typical magnitude of a move following a triple compression on NSE stocks? How many days after triple compression does the breakout typically occur? Should I trade in the direction of the prior trend or wait for the breakout direction to confirm?'
+      },
+      { n:'Consistent RS Leader (1M + 3M + 6M + 12M Top Quartile)',
+        f:'Passes if: return_1M > P75(all_1M) AND return_3M > P75(all_3M) AND return_6M > P75(all_6M) AND return_12M > P75(all_12M)',
+        d:'This is our implementation of Definedge\'s Smart RS Scanner. A "Consistent RS Leader" is a stock that ranks in the top 25% of the entire universe by return over ALL four time periods simultaneously: 1-month, 3-month, 6-month, and 12-month. This is a much stricter test than a single-period RS rank — it ensures the stock has been outperforming consistently across all timeframes, not just having a recent spike. Definedge charges for their multi-timeframe RS scanner; our version is computed natively. The Top 10% version (all four periods in top 10%) is even more restrictive and identifies the market\'s true sustained leaders.',
+        links:[['Definedge Smart RS','https://www.definedgesecurities.com/blog/products/stock-selection-using-the-smart-rs-scanner/']],
+        ai:'How does consistent multi-period RS leadership predict future performance? What percentage of stocks that are top-10% across all four periods maintain their leadership over the next 6 months? How does multi-period RS leadership compare to single-period RS rating?'
       },
     ]},
   ];
@@ -4671,6 +5323,8 @@ function triggerAutoScan(){
     else if(t==='br'){ renderBreadth(); }
     else if(t==='gap'){ scanGap(); }
     else if(t==='combo'){ scanCombo(); }
+    else if(t==='bp'){ scanBP(); }
+    else if(t==='sr'){ scanSR(); }
   },350);
 }
 function initAutoScan(){
@@ -5386,6 +6040,8 @@ function showStockDetail(sym){
   var spkSvg=spk.length>1?'<svg viewBox="0 0 220 36" width="220" height="36" style="margin-bottom:8px;display:block"><polyline points="'+pts+'" fill="none" stroke="'+(trend?'#00e5a0':'#ef4444')+'" stroke-width="1.5"/></svg>':'';
   // Freshness
   var fr=dateFreshness(s.date);
+  document.getElementById('sd-body').dataset.sym=sym;
+  document.getElementById('ai-output').innerHTML='';
   document.getElementById('sd-body').innerHTML='<div style="display:flex;flex-wrap:wrap;gap:18px;padding:2px">'
     +'<div style="min-width:200px"><div style="font-size:22px;font-weight:700;color:var(--txt);margin-bottom:2px">'+sym+'</div>'
     +'<div style="font-size:11px;color:var(--mu);margin-bottom:8px">'+(s.sector||'Other')+' · '+(s.idx?'N'+s.idx:'Other')+(s.fno?' · <span style="color:#00e5a0">FNO</span>':'')+'</div>'
@@ -5433,6 +6089,237 @@ function sparkCell(sym){
   const pts=spk.map((v,i)=>((i/(spk.length-1)*58)).toFixed(1)+','+(16-(v-mn)/rng*14).toFixed(1)).join(' ');
   return`<td style="padding:2px 6px"><svg viewBox="0 0 58 16" width="58" height="16"><polyline points="${pts}" fill="none" stroke="${tr?'#00e5a0':'#ef4444'}" stroke-width="1.2"/></svg></td>`;
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🏹 BREAKOUT PRO — 10 paid-scanner strategies
+// ════════════════════════════════════════════════════════════════════════════
+const BP_INFO={
+  vcp:'<b>VCP</b> · Mark Minervini · Volatility Contraction Pattern · 2+ weekly range contractions with drying volume, price near 52W high · MarketSmith India\'s #1 setup',
+  vcp3:'<b>VCP Tight</b> · 3+ contractions · Higher conviction setup — 3 successive range compressions with declining volume · Breakout imminent',
+  pp:'<b>Pocket Pivot</b> · Gil Morales\/Chris Kacher · Today\'s up-day volume exceeds highest down-day volume in prior 10 sessions · Early entry before breakout',
+  pp_strong:'<b>Strong Pocket Pivot</b> · Volume 1.5× highest down-day vol · Institutional accumulation signal · High-conviction early entry',
+  twt3:'<b>3-Week Tight</b> · O\'Neil · Weekly closes within ±1.5% for 3 weeks · Institutional absorption — supply being locked up',
+  twt4:'<b>4-Week Tight</b> · Stronger version of 3-week tight · More weeks of tight action = stronger coiling',
+  twt5:'<b>5-Week Tight</b> · Strongest tight-area pattern · Price coiled for 5 weeks — significant expansion potential',
+  rsh:'<b>RS Line New 52W High</b> · IBD/MarketSmith · Stock\'s relative strength vs Nifty at yearly peak — outperforming the market at a new high · Most powerful leading indicator',
+  rs_bo:'<b>RS Line Breakout</b> · RS line exiting 3-month consolidation — strength returning before price breaks out',
+  rs_trend:'<b>RS Line Trending</b> · RS line slope positive over 13 weeks — sustained outperformance',
+  ads_a:'<b>A-Rating (IBD A/D)</b> · Heavy institutional accumulation over 13 weeks · More up-volume days than down · Institutions quietly buying',
+  ads_ab:'<b>A or B Rating</b> · Net accumulation phase · Institutional money flowing in · StockEdge premium equivalent',
+  ads_de:'<b>D or E Rating</b> · Distribution phase · Institutional selling · Avoid or short candidates',
+  hvb:'<b>High Volume Breakout</b> · 52W high close + 2× avg volume · Volume confirms the breakout — not a fake-out',
+  hvb_strong:'<b>HVB Strong</b> · 52W high + 3× avg volume · Explosive breakout with massive institutional participation',
+  near_hvb:'<b>Near-High HVB</b> · Within 2% of 52W high + 2× volume · Setting up for breakout — buy before the breakout',
+  vdu_bull:'<b>Volume Dry-Up Bullish</b> · Volume < 50% of 20-day avg while price holds · Supply exhausted — fuel for next move · Chartink paid filter',
+  vdu_40d:'<b>Vol 40-Session Low</b> · Volume at multi-month lows · Extreme drying — maximum coiling before expansion',
+  ems_full:'<b>Full EMA Stack</b> · Price > 9 > 21 > 50 > 200 EMA · Perfect bull alignment · TradePoint semi-algo signal',
+  ems_power:'<b>Power Stack</b> · Full stack + all EMAs rising · EMAs trending up and price above all — strongest bull configuration',
+  ems_part:'<b>Partial EMA Stack</b> · Price > 21 > 50 > 200 EMA · Strong but not perfect alignment',
+  iw1:'<b>Inside Week</b> · Current week\'s range inside prior week · Weekly compression before expansion — classic setup',
+  iw2:'<b>Double Inside Week</b> · 2 consecutive inside weeks · Extreme compression — strong expansion signal',
+  iw_up:'<b>Inside Week in Uptrend</b> · Inside week occurring in established uptrend · Lower risk entry',
+  tlb:'<b>Descending Trendline Breakout</b> · Price closes above falling trendline drawn across last 3 peaks · Trend reversal signal',
+};
+function updateBPInfo(){const s=document.getElementById('bp-strat').value;setFbar('🏹 <b>Breakout Pro</b> · '+(BP_INFO[s]||s));}
+function scanBP(){
+  const strat=document.getElementById('bp-strat').value;
+  const rsMin=parseInt(document.getElementById('bp-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('bp-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('bp-pmax').value)||Infinity;
+  updateBPInfo(); rows=[];
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const bp=s.bp||{};
+    const vcp=bp.vcp||{},pp=bp.pp||{},twt=bp.twt||{},rsh=bp.rsh||{};
+    const ads=bp.ads||{},hvb=bp.hvb||{},vdu=bp.vdu||{};
+    const ems=bp.ems||{},iw=bp.iw||{},tlb=bp.tlb||{};
+    let matched=false,sig='',extra={};
+    if(strat==='vcp')      {matched=!!vcp.is_vcp;    sig='🔄 VCP';          extra={contractions:vcp.contractions,tight:vcp.tight_pct+'%'};}
+    if(strat==='vcp3')     {matched=!!vcp.is_vcp3;   sig='🔄 VCP×3';        extra={contractions:vcp.contractions};}
+    if(strat==='pp')       {matched=!!pp.is_pp;      sig='🎯 PktPiv';       extra={vol_ratio:pp.vol_ratio+'×'};}
+    if(strat==='pp_strong'){matched=!!pp.is_pp_strong;sig='🎯💪 PktPiv+';   extra={vol_ratio:pp.vol_ratio+'×'};}
+    if(strat==='twt3')     {matched=!!twt.is_3wt;    sig='📏 3W Tight';     extra={tight:twt.tight_pct+'%'};}
+    if(strat==='twt4')     {matched=!!twt.is_4wt;    sig='📏 4W Tight';     extra={tight:twt.tight_pct+'%',weeks:twt.tight_weeks};}
+    if(strat==='twt5')     {matched=!!twt.is_5wt;    sig='📏 5W Tight';     extra={tight:twt.tight_pct+'%',weeks:twt.tight_weeks};}
+    if(strat==='rsh')      {matched=!!rsh.is_rs_new_high; sig='📈 RS High'; extra={vs_52w:rsh.vs_52w_hi+'%'};}
+    if(strat==='rs_bo')    {matched=!!rsh.rs_breakout;    sig='📈 RS BO';   extra={};}
+    if(strat==='rs_trend') {matched=!!rsh.rs_trending;    sig='📈 RS↑';     extra={};}
+    if(strat==='ads_a')    {matched=ads.rating==='A';      sig='🏆 A-Rating'; extra={score:ads.score};}
+    if(strat==='ads_ab')   {matched=!!ads.is_accum;        sig='🏆 '+(ads.rating||'?')+'-Rating'; extra={score:ads.score};}
+    if(strat==='ads_de')   {matched=!!ads.is_distrib;      sig='🔴 '+(ads.rating||'?')+'-Rating'; extra={score:ads.score};}
+    if(strat==='hvb')      {matched=!!hvb.hvb;         sig='⚡ HVB';       extra={vol:hvb.vol_ratio+'×'};}
+    if(strat==='hvb_strong'){matched=!!hvb.hvb_strong; sig='⚡⚡ HVB×3';   extra={vol:hvb.vol_ratio+'×'};}
+    if(strat==='near_hvb') {matched=!!hvb.near_hvb;    sig='⚡ Near HVB';  extra={vol:hvb.vol_ratio+'×'};}
+    if(strat==='vdu_bull') {matched=!!vdu.vdu_bullish; sig='💧 VDU Bull';  extra={vol:vdu.vol_ratio+'×avg'};}
+    if(strat==='vdu_40d')  {matched=!!vdu.vol_40d_low; sig='💧 40d Low';   extra={vol:vdu.vol_ratio+'×avg'};}
+    if(strat==='ems_full') {matched=!!ems.full_stack;   sig='💪 EMA Full'; extra={e9:ems.e9,e21:ems.e21};}
+    if(strat==='ems_power'){matched=!!ems.power_stack;  sig='💪💪 Power';  extra={e9:ems.e9,e50:ems.e50};}
+    if(strat==='ems_part') {matched=!!ems.partial_stack;sig='💪 EMA Part'; extra={e21:ems.e21};}
+    if(strat==='iw1')      {matched=!!iw.iw1;           sig='📅 IW';       extra={};}
+    if(strat==='iw2')      {matched=!!iw.iw2;           sig='📅 IW×2';     extra={};}
+    if(strat==='iw_up')    {matched=!!iw.iw_uptrend;    sig='📅 IW↑';      extra={};}
+    if(strat==='tlb')      {matched=!!tlb.tl_breakout;  sig='📐 TL BO';    extra={dist:tlb.dist+'%',tl:tlb.tl_val};}
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'bp',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🔢 SMART RANK — composite scoring (Definedge/Trendlyne equivalents)
+// ════════════════════════════════════════════════════════════════════════════
+const MONTH_NAMES=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const SR_INFO={
+  ms_90:'<b>Momentum Score ≥ 90</b> · Top 10% of universe by composite momentum · Weighted: 1M(15%) + 3M(20%) + 6M(25%) + 12M(30%) + RS(10%) · Trendlyne Momentum Score equivalent built from OHLCV',
+  ms_75:'<b>Momentum Score ≥ 75</b> · Top quartile · Stocks showing sustained multi-timeframe outperformance vs the full universe',
+  ms_50:'<b>Momentum Score ≥ 50</b> · Above-average momentum · Good for early-stage breakout candidates before they reach top decile',
+  ms_rising:'<b>Momentum Rising</b> · 1-month return rank improving vs 6-month rank · Stock accelerating vs universe',
+  season_bull:'<b>Seasonality Bullish</b> · Historical avg return in current month &gt; 2% across 5+ years · Definedge Seasonality Scanner equivalent',
+  season_strong:'<b>Seasonality Strong</b> · Avg &gt; 3% AND hit rate &gt; 65% in current month · Most reliable seasonal setups',
+  season_best:'<b>Best Month</b> · Current month is this stock\'s best-performing calendar month historically',
+  season_avoid:'<b>Seasonality Bearish</b> · Historically negative in current month — avoid longs, consider hedges',
+  mtf_perfect:'<b>MTF Perfect (15/15)</b> · All daily + weekly + monthly conditions simultaneously bullish · Definedge Matrix equivalent — highest-conviction multi-timeframe setup',
+  mtf_strong:'<b>MTF Strong (12+/15)</b> · 12 or more of 15 trend conditions bullish across 3 timeframes · Strong structural alignment',
+  mtf_7:'<b>MTF Aligned (7+/15)</b> · Majority of multi-timeframe checks pass · Emerging alignment',
+  mtf_daily_max:'<b>Daily Max (5/5)</b> · All 5 daily trend checks pass: above MA50, MA50>MA200, above EMA21, RSI>50, higher than 5d ago',
+  ath:'<b>All-Time High Breakout</b> · Price closes above ALL prior history · ATH breakouts on volume have the highest 6-month forward returns of any pattern (IBD/StockTrendz data)',
+  near_ath:'<b>Near All-Time High</b> · Within 2% of ATH · Loading zone before potential ATH breakout',
+  tc3:'<b>Triple Compression</b> · NR7 + Volume Dry-Up + BB Squeeze firing simultaneously · Three independent compression signals = maximum coiling, smallest range in all three dimensions',
+  tc2:'<b>Double Compression</b> · Any two of NR7/VDU/BB Squeeze active · Still powerful pre-breakout signal',
+  mtfrs_90:'<b>Consistent RS Leader</b> · Top 10% of universe by 1M, 3M, 6M, AND 12M returns simultaneously · Definedge Smart RS equivalent — the market\'s true leaders',
+  mtfrs_75:'<b>Consistent RS Strong</b> · Top quartile across all four return periods · Sustained outperformance, not a 1-day wonder',
+  r1m_top:'<b>1M Return Top 10%</b> · Highest 1-month momentum in the universe · Short-term leaders',
+  r3m_top:'<b>3M Return Top 10%</b> · Strongest 3-month performers · Intermediate momentum leaders',
+};
+function updateSRInfo(){const s=document.getElementById('sr-strat').value;setFbar('🔢 <b>Smart Rank</b> · '+(SR_INFO[s]||s));}
+
+function scanSR(){
+  const strat=document.getElementById('sr-strat').value;
+  const rsMin=parseInt(document.getElementById('sr-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('sr-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('sr-pmax').value)||Infinity;
+  updateSRInfo(); rows=[];
+  // Pre-sort by momentum score for top% calculations
+  const all_ms=S.map(s=>s.sr?.ms||0);
+  const n=all_ms.length;
+  const pct=(val)=>Math.round(S.filter(s=>(s.sr?.ms||0)<val).length/n*100);
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const sr=s.sr||{};
+    const ms=sr.ms||0;
+    const season=sr.season||{};
+    const mtf=sr.mtf||{};
+    const ath=sr.ath||{};
+    const tc=sr.tc||{};
+    const r1m=sr.r1m||0; const r3m=sr.r3m||0;
+    const r6m=sr.r6m||0; const r12m=sr.r12m||0;
+    let matched=false,sig='',extra={};
+    // Momentum Score
+    if(strat==='ms_90') {matched=ms>=90; sig='🔢 MS:'+ms; extra={ms,r3m:r3m+'%',r12m:r12m+'%'};}
+    if(strat==='ms_75') {matched=ms>=75; sig='🔢 MS:'+ms; extra={ms,r6m:r6m+'%'};}
+    if(strat==='ms_50') {matched=ms>=50; sig='🔢 MS:'+ms; extra={ms};}
+    if(strat==='ms_rising'){
+      const sr_r1=S.filter(x=>(x.sr?.r1m||0)<r1m).length/n*100;
+      const sr_r6=S.filter(x=>(x.sr?.r6m||0)<r6m).length/n*100;
+      matched=sr_r1>sr_r6+10;
+      sig='📈 Accel '+r1m.toFixed(1)+'%'; extra={r1m:r1m.toFixed(1)+'%',r6m:r6m.toFixed(1)+'%'};
+    }
+    // Seasonality
+    const cm=season.cm||new Date().getMonth()+1;
+    const cm_data=season.months?season.months[cm]:{};
+    if(strat==='season_bull') {matched=(cm_data.avg||0)>2; sig='📅 '+MONTH_NAMES[cm]+' avg '+(cm_data.avg||0)+'%'; extra={avg:(cm_data.avg||0)+'%',hit:(cm_data.hit||0)+'%',n:cm_data.n||0};}
+    if(strat==='season_strong'){matched=(cm_data.avg||0)>3&&(cm_data.hit||0)>65; sig='📅💪 '+(cm_data.avg||0)+'% hit '+(cm_data.hit||0)+'%'; extra={avg:(cm_data.avg||0)+'%',hit:(cm_data.hit||0)+'%'};}
+    if(strat==='season_best') {matched=season.bm===cm; sig='📅★ Best month ('+MONTH_NAMES[cm]+')'; extra={avg:(season.bm_avg||0)+'%'};}
+    if(strat==='season_avoid'){matched=(cm_data.avg||0)<-1; sig='📅🔴 '+(cm_data.avg||0)+'%'; extra={avg:(cm_data.avg||0)+'%',hit:(cm_data.hit||0)+'%'};}
+    // MTF Matrix
+    if(strat==='mtf_perfect') {matched=mtf.total===15; sig='💯 MTF 15/15'; extra={d:mtf.d+'/5',w:mtf.w+'/5',m:mtf.m+'/5'};}
+    if(strat==='mtf_strong')  {matched=(mtf.total||0)>=12; sig='💪 MTF '+(mtf.total||0)+'/15'; extra={d:mtf.d+'/5',w:mtf.w+'/5',m:mtf.m+'/5'};}
+    if(strat==='mtf_7')       {matched=(mtf.total||0)>=7; sig='📊 MTF '+(mtf.total||0)+'/15'; extra={d:mtf.d||0,w:mtf.w||0,m:mtf.m||0};}
+    if(strat==='mtf_daily_max'){matched=(mtf.d||0)===5; sig='📊 D:5/5 MTF:'+(mtf.total||0); extra={w:mtf.w||0,m:mtf.m||0};}
+    // ATH
+    if(strat==='ath')      {matched=!!ath.is_ath;  sig='🏔 ATH'; extra={dist:ath.dist_pct+'%'};}
+    if(strat==='near_ath') {matched=!!ath.near_ath&&!ath.is_ath; sig='🏔 Near ATH '+ath.dist_pct+'%'; extra={ath:ath.ath};}
+    // Triple Compression
+    if(strat==='tc3'){matched=!!tc.tc3; sig='🗜×3 '+(tc.nr7?'NR7 ':'')+( tc.vdu?'VDU ':'')+( tc.bb_sq?'BBS':''); extra={nr7:tc.nr7?'✓':'—',vdu:tc.vdu?'✓':'—',bbs:tc.bb_sq?'✓':'—'};}
+    if(strat==='tc2'){matched=!!tc.tc2; sig='🗜×'+tc.count+' '+(tc.nr7?'NR7 ':'')+(tc.vdu?'VDU ':'')+(tc.bb_sq?'BBS':''); extra={count:tc.count};}
+    // MTF RS
+    const topPct10=n>0?all_ms.sort((a,b)=>a-b)[Math.floor(n*0.9)]:99;
+    const r1m_all=S.map(s=>s.sr?.r1m||0).sort((a,b)=>a-b);
+    const r3m_all=S.map(s=>s.sr?.r3m||0).sort((a,b)=>a-b);
+    const top10_r1=r1m_all[Math.floor(n*0.9)]||0;
+    const top10_r3=r3m_all[Math.floor(n*0.9)]||0;
+    const r6m_all=S.map(s=>s.sr?.r6m||0).sort((a,b)=>a-b);
+    const r12m_all=S.map(s=>s.sr?.r12m||0).sort((a,b)=>a-b);
+    const top25_r1=r1m_all[Math.floor(n*0.75)]||0;
+    const top25_r3=r3m_all[Math.floor(n*0.75)]||0;
+    const top25_r6=r6m_all[Math.floor(n*0.75)]||0;
+    const top25_r12=r12m_all[Math.floor(n*0.75)]||0;
+    if(strat==='mtfrs_90') {matched=r1m>=top10_r1&&r3m>=top10_r3&&r6m>=r6m_all[Math.floor(n*0.9)]&&r12m>=r12m_all[Math.floor(n*0.9)]; sig='🌟 RS Leader'; extra={r1m:r1m.toFixed(1)+'%',r3m:r3m.toFixed(1)+'%'};}
+    if(strat==='mtfrs_75') {matched=r1m>=top25_r1&&r3m>=top25_r3&&r6m>=top25_r6&&r12m>=top25_r12; sig='⭐ RS Consistent'; extra={r1m:r1m.toFixed(1)+'%',r12m:r12m.toFixed(1)+'%'};}
+    if(strat==='r1m_top')  {matched=r1m>=top10_r1; sig='⚡ 1M '+r1m.toFixed(1)+'%'; extra={r1m:r1m.toFixed(1)+'%'};}
+    if(strat==='r3m_top')  {matched=r3m>=top10_r3; sig='⚡ 3M '+r3m.toFixed(1)+'%'; extra={r3m:r3m.toFixed(1)+'%'};}
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'sr',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🤖 AI STOCK ANALYSIS — Claude API in the stock detail modal
+// ════════════════════════════════════════════════════════════════════════════
+async function aiAnalyzeStock(sym){
+  const s=S.find(x=>x.sym===sym); if(!s)return;
+  const btn=document.getElementById('ai-btn');
+  const out=document.getElementById('ai-output');
+  if(!btn||!out)return;
+  btn.disabled=true; btn.textContent='⏳ Analysing...';
+  out.innerHTML='<div style="color:var(--mu);font-size:11px;padding:8px">🤖 Claude is analysing this stock...</div>';
+  const mi=s.mi||{}; const t1=s.t1||{}; const stt=t1.stt||t1.st||{};
+  const bp=s.bp||{}; const sr=s.sr||{};
+  const prompt=`You are a professional NSE equity analyst. Analyse this stock and give a concise 3-paragraph technical assessment.
+
+Stock: ${sym}
+Price: ₹${s.price} | RS Rating: ${s.rs}/99 | Index: ${s.idx?'Nifty '+s.idx:'Other'} | FNO: ${s.fno?'Yes':'No'}
+Sector: ${s.sector||'Unknown'}
+
+KEY SIGNALS:
+- vs 200 DMA: ${s.dma200?((s.price-s.dma200)/s.dma200*100).toFixed(1)+'%':'N/A'}
+- 52W High: ₹${s.w52h||'N/A'} (${s.w52h?((s.price-s.w52h)/s.w52h*100).toFixed(1)+'%':'N/A'})
+- SuperTrend: ${stt.bull?'Bullish ('+stt.consec+'× bars, dist '+stt.dist+'%)':stt.bear?'Bearish':'N/A'}
+- MI Score: ${mi.mts||0}/8 | Stage: ${mi.stg||'N/A'}
+- Momentum Score: ${sr.ms||0}/100
+- MTF Matrix: ${sr.mtf?.total||0}/15 (D:${sr.mtf?.d||0} W:${sr.mtf?.w||0} M:${sr.mtf?.m||0})
+- Returns: 1M=${(sr.r1m||0).toFixed(1)}% 3M=${(sr.r3m||0).toFixed(1)}% 6M=${(sr.r6m||0).toFixed(1)}% 12M=${(sr.r12m||0).toFixed(1)}%
+- VCP: ${bp.vcp?.is_vcp?'Yes ('+bp.vcp.contractions+' contractions)':'No'}
+- Gap: ${s.gap?.pct||0}% ${s.gap?.up?'(up)':s.gap?.dn?'(down)':''}
+- Seasonality: ${sr.season?.cm_avg||0}% avg this month, ${sr.season?.cm_hit||0}% hit rate
+- ATH: ${sr.ath?.is_ath?'YES — at all-time high':sr.ath?.near_ath?'Near ATH ('+sr.ath?.dist_pct+'%)':'No'}
+
+Format as 3 short paragraphs: (1) Overall assessment, (2) Key bullish/bearish signals, (3) Risk and setup quality. Be direct. Use ₹ for prices. Max 150 words total.`;
+  try{
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:300,
+        messages:[{role:'user',content:prompt}]})
+    });
+    const data=await resp.json();
+    const txt=data.content?.map(b=>b.text||'').join('')||'No response';
+    out.innerHTML='<div style="font-size:11px;line-height:1.6;padding:8px;color:var(--txt);white-space:pre-wrap">'+txt+'</div>';
+  }catch(e){
+    out.innerHTML='<div style="color:var(--red);font-size:11px;padding:8px">⚠️ API error: '+e.message+'</div>';
+  }
+  btn.disabled=false; btn.textContent='🤖 AI Analysis';
+}
+
 function buildCols(tab,r0){
   const common=[
     {k:'sym',  h:'Symbol',     fn:r=>symCell(r.sym)},
@@ -5643,7 +6530,7 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -5675,7 +6562,7 @@ function render(){
     const cls=[c.hcls||'',c.dv?'dv':'',(!c.dv&&i===sc)?(sd===1?'asc':'desc'):''].filter(Boolean).join(' ');
     return`<th class="${cls}"${c.dv?'':` data-i="${i}"`}>${c.h}</th>`;
   }).join('');
-  const trs=vis.map(r=>`<tr onclick="showStockDetail('${r.sym}')" style="cursor:pointer">${cs.map(c=>c.fn(r)).join('')}</tr>`).join('');
+  const trs=vis.map(r=>`<tr>${cs.map(c=>c.fn(r)).join('')}</tr>`).join('');
   document.getElementById('ts').innerHTML=`<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
   document.querySelectorAll('#ts th[data-i]').forEach(th=>{
     th.addEventListener('click',()=>{
@@ -5718,6 +6605,8 @@ function exportCSV(){
     patt: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.keys((rows[0]?.extra)||{}).map(k=>r.extra?.[k]??''),r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
     gap:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.extra.gap||'',r.rs,r.date],
     combo:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,r.date],
+    bp:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
+    sr:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
@@ -5767,8 +6656,13 @@ document.addEventListener('DOMContentLoaded',()=>{
 <div id="sd-box">
   <div id="sd-hdr">
     <span style="font-size:13px;font-weight:600;color:var(--txt)">◈ Stock Detail</span>
-    <button onclick="hideStockDetail()" style="background:none;border:none;color:var(--mu);font-size:22px;cursor:pointer;line-height:1">×</button>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="ai-btn" onclick="aiAnalyzeStock(document.getElementById('sd-body').dataset.sym)"
+        style="background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.3);color:#00d4ff;font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer">🤖 AI Analysis</button>
+      <button onclick="hideStockDetail()" style="background:none;border:none;color:var(--mu);font-size:22px;cursor:pointer;line-height:1">×</button>
+    </div>
   </div>
+  <div id="ai-output" style="border-bottom:1px solid var(--brd);min-height:0;max-height:140px;overflow-y:auto"></div>
   <div id="sd-body"></div>
 </div>
 </body>
@@ -5813,7 +6707,8 @@ def main():
     a = ap.parse_args()
     print(f"[*] Data: {a.data}")
     idx = {50:a.n50, 100:a.n100, 200:a.n200, 500:a.n500, 750:a.n750}
-    ap.add_argument('--sector', default=None, help='Path to sector map CSV (Symbol,Sector)')
+    ap.add_argument('--sector',   default=None, help='Path to sector map CSV (Symbol,Sector)')
+    ap.add_argument('--delivery', default=None, help='Path to NSE bhav copy CSV with delivery volume (columns: Symbol, Deliverable_Vol, Total_Vol)')
     stocks = build_dataset(a.data, idx, nifty_path=a.nifty, fno_path=a.nfno, sector_path=getattr(a,'sector',None))
     if not stocks: print("[!] No stocks loaded"); return
     html = build_html(stocks, a.data)
