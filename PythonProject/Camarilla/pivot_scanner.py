@@ -617,7 +617,7 @@ def compute_nr7(df):
 
 # ── 1. Cup & Handle ───────────────────────────────────────────────────────────
 def compute_cup_handle(df):
-    """William O\'Neil Cup & Handle: U-shaped base + tight handle + volume breakout."""
+    """William O'Neil Cup & Handle: U-shaped base + tight handle + volume breakout."""
     if len(df) < 80: return {}
     H=df["High"].values.astype(float); L=df["Low"].values.astype(float)
     C=df["Close"].values.astype(float); V=df["Volume"].values.astype(float)
@@ -994,7 +994,7 @@ def compute_candles(df):
         tol = 0.003
         tweezer_top    = bool(abs(H[-1]-H[-2])/max(H[-2],0.01)<tol and bear(-1))
         tweezer_bottom = bool(abs(L[-1]-L[-2])/max(L[-2],0.01)<tol and bull(-1))
-        # Gap: today\'s open vs yesterday\'s close (true price gap)
+        # Gap: today's open vs yesterday's close (true price gap)
         gap_pct   = float((O[-1]-C[-2])/max(C[-2],0.01)*100)
         gap_up    = bool(gap_pct > 1.0)    # gap up > 1%
         gap_down  = bool(gap_pct < -1.0)   # gap down < -1%
@@ -1500,8 +1500,8 @@ def compute_pocket_pivot(df):
         vol_ratio=round(vol/max_dn,2) if max_dn else 0
     )
 
-def compute_3week_tight(df, _wdf=None):
-    """3-Week Tight — O\'Neil. Weekly closes within ±1.5% for 3+ consecutive weeks."""
+def compute_3week_tight(df):
+    """3-Week Tight — O'Neil. Weekly closes within ±1.5% for 3+ consecutive weeks."""
     if len(df)<20: return {}
     import pandas as _pd
     df2=df.copy(); df2['Date']=_pd.to_datetime(df2['Date']); df2=df2.set_index('Date')
@@ -1611,7 +1611,7 @@ def compute_ema_stack(df):
         e9=r2(e9[-1]), e21=r2(e21[-1]), e50=r2(e50[-1]), e200=r2(e200[-1])
     )
 
-def compute_inside_week(df, _wdf=None):
+def compute_inside_week(df):
     """Inside Week — weekly bar fully contained inside prior week. Compression signal."""
     if len(df)<15: return {}
     import pandas as _pd
@@ -1653,7 +1653,7 @@ def compute_trendline_bo(df, lb=60):
 # ══ Smart Rank compute functions ══════════════════════════════
 import numpy as np
 
-def compute_seasonality(df, _wdf=None):
+def compute_seasonality(df):
     """Historical monthly performance — Definedge Seasonality Scanner equivalent."""
     if len(df)<200: return {}
     try:
@@ -1682,7 +1682,7 @@ def compute_seasonality(df, _wdf=None):
                     wm=wm,wm_avg=months.get(wm,{}).get('avg',0))
     except: return {}
 
-def compute_mtf_matrix(df, _wdf=None, _mdf=None):
+def compute_mtf_matrix(df):
     """MTF Matrix Score — Definedge concept. D/W/M trend checks, 1=bull 0=bear.
     Checks per timeframe: price>MA50, MA50>MA200, price makes HH, RSI>50, positive slope."""
     if len(df)<210: return {}
@@ -1833,6 +1833,81 @@ def compute_pivot_bounce(df):
                 above_P=bool(price>P), above_R1=bool(price>R1), above_R2=bool(price>R2),
                 below_S1=bool(price<S1), below_S2=bool(price<S2),
                 at_sup=bool(near(S1) or near(S2)), at_res=bool(near(R1) or near(R2)))
+
+
+
+def _ema_series(arr, period):
+    """Simple EMA over a numpy array."""
+    e=np.empty(len(arr)); e[0]=arr[0]; k=2/(period+1)
+    for i in range(1,len(arr)): e[i]=arr[i]*k+e[i-1]*(1-k)
+    return e
+
+def _ema_squeeze_tf(closes, periods):
+    """Compute EMA squeeze for one timeframe given close array + list of EMA periods.
+    Returns dict with squeeze flag, tightness %, individual EMA values, and stack direction."""
+    n=len(closes)
+    valid=[p for p in periods if n>=max(p,5)]
+    if len(valid)<3: return {}
+    emas={p:float(_ema_series(closes,p)[-1]) for p in valid}
+    vals=list(emas.values())
+    avg=sum(vals)/len(vals)
+    if avg==0: return {}
+    tight_pct=round((max(vals)-min(vals))/avg*100,2)
+    c=float(closes[-1])
+    # Bull stack: shorter EMAs above longer EMAs (sorted by period ascending)
+    sorted_periods=sorted(valid)
+    sorted_vals=[emas[p] for p in sorted_periods]
+    bull_stack=bool(all(sorted_vals[i]>=sorted_vals[i+1] for i in range(len(sorted_vals)-1)))
+    bear_stack=bool(all(sorted_vals[i]<=sorted_vals[i+1] for i in range(len(sorted_vals)-1)))
+    return dict(
+        emas={str(p):r2(v) for p,v in emas.items()},
+        tight_pct=tight_pct,
+        squeeze=bool(tight_pct<=2.5),       # all EMAs within 2.5% of each other
+        squeeze_tight=bool(tight_pct<=1.0), # ultra-tight
+        bull_stack=bull_stack, bear_stack=bear_stack,
+        price_above_all=bool(c>max(vals)),
+        price_below_all=bool(c<min(vals)),
+        n_emas=len(valid),
+    )
+
+def compute_ema_squeeze(df, _wdf=None, _mdf=None):
+    """10/20/50/100/150/200 EMA squeeze — daily/weekly/monthly.
+    Squeeze = all loaded EMAs within 2.5% of each other (tight coil before expansion)."""
+    out={}
+    C=df['Close'].values.astype(float)
+    out['d']=_ema_squeeze_tf(C,[10,20,50,100,150,200])
+    if _wdf is not None and len(_wdf)>=15:
+        out['w']=_ema_squeeze_tf(_wdf['Close'].values.astype(float),[10,20,50,100])
+    if _mdf is not None and len(_mdf)>=15:
+        out['m']=_ema_squeeze_tf(_mdf['Close'].values.astype(float),[10,20,50])
+    return out
+
+def _macd_5_35_tf(closes):
+    """MACD(5,35,5) — fast scalper variant. Returns cross signals for one timeframe."""
+    n=len(closes)
+    if n<40: return {}
+    e5=_ema_series(closes,5); e35=_ema_series(closes,35)
+    macd=e5-e35; sig=_ema_series(macd,5); hist=macd-sig
+    cur_m=float(macd[-1]); cur_s=float(sig[-1]); cur_h=float(hist[-1])
+    prev_m=float(macd[-2]); prev_s=float(sig[-2])
+    cross_bull=bool(cur_m>cur_s and prev_m<=prev_s)
+    cross_bear=bool(cur_m<cur_s and prev_m>=prev_s)
+    return dict(macd=round(cur_m,3), signal=round(cur_s,3), hist=round(cur_h,3),
+                 bull=bool(cur_m>cur_s), bear=bool(cur_m<cur_s),
+                 cross_bull=cross_bull, cross_bear=cross_bear,
+                 zero_bull=bool(cur_m>0 and prev_m<=0),
+                 zero_bear=bool(cur_m<0 and prev_m>=0))
+
+def compute_macd_5_35(df, _wdf=None, _mdf=None):
+    """MACD 5/35/5 crossover — daily/weekly/monthly. Faster variant for swing entries."""
+    out={}
+    out['d']=_macd_5_35_tf(df['Close'].values.astype(float))
+    if _wdf is not None and len(_wdf)>=40:
+        out['w']=_macd_5_35_tf(_wdf['Close'].values.astype(float))
+    if _mdf is not None and len(_mdf)>=40:
+        out['m']=_macd_5_35_tf(_mdf['Close'].values.astype(float))
+    return out
+
 
 
 def compute_vsa(df):
@@ -2185,6 +2260,59 @@ def compute_harmonics(df, tol=0.10):
                     else: results['cypher_bear']=True
     return results
 
+
+def _detect_wm(H, L, C, kind, tol=0.04, lb=4, swing_pct=0.03):
+    """Detect Double Bottom (W) or Double Top (M) pattern from OHLC arrays.
+    kind: 'W' for double bottom, 'M' for double top.
+    Returns dict with pattern flag, neckline level, breakout confirmation, depth %."""
+    n=len(C)
+    if n<20: return {}
+    clean=_zigzag_pivots(H,L,C,lb=lb,swing_pct=swing_pct)
+    c=float(C[-1])
+    if kind=='W':
+        lows=[(p[0],p[1]) for p in clean if p[2]==-1]
+        highs=[(p[0],p[1]) for p in clean if p[2]==1]
+        if len(lows)<2 or len(highs)<1: return dict(found=False)
+        l1,l2=lows[-2],lows[-1]
+        # Two lows at a similar level
+        if abs(l1[1]-l2[1])/max(l1[1],0.01)>tol: return dict(found=False)
+        # Middle peak between the two lows (the "neckline")
+        mids=[h for h in highs if l1[0]<h[0]<l2[0]]
+        if not mids: return dict(found=False)
+        neck=max(m[1] for m in mids)
+        depth=(neck-min(l1[1],l2[1]))/neck*100 if neck else 0
+        if depth<3: return dict(found=False)  # too shallow to be meaningful
+        return dict(found=True, neckline=r2(neck),
+                     breakout=bool(c>neck), near_breakout=bool(c>=neck*0.98),
+                     depth_pct=round(depth,2))
+    else:  # 'M'
+        highs=[(p[0],p[1]) for p in clean if p[2]==1]
+        lows=[(p[0],p[1]) for p in clean if p[2]==-1]
+        if len(highs)<2 or len(lows)<1: return dict(found=False)
+        h1,h2=highs[-2],highs[-1]
+        if abs(h1[1]-h2[1])/max(h1[1],0.01)>tol: return dict(found=False)
+        mids=[l for l in lows if h1[0]<l[0]<h2[0]]
+        if not mids: return dict(found=False)
+        neck=min(m[1] for m in mids)
+        depth=(max(h1[1],h2[1])-neck)/max(h1[1],h2[1])*100 if max(h1[1],h2[1]) else 0
+        if depth<3: return dict(found=False)
+        return dict(found=True, neckline=r2(neck),
+                     breakdown=bool(c<neck), near_breakdown=bool(c<=neck*1.02),
+                     depth_pct=round(depth,2))
+
+def compute_double_patterns(df, _wdf=None, _mdf=None):
+    """Double Bottom (W) and Double Top (M) — Daily / Weekly / Monthly."""
+    H=df['High'].values.astype(float); L=df['Low'].values.astype(float); C=df['Close'].values.astype(float)
+    out={'d':{'w':_detect_wm(H,L,C,'W'), 'm':_detect_wm(H,L,C,'M')}}
+    if _wdf is not None and len(_wdf)>=20:
+        wH=_wdf['High'].values.astype(float); wL=_wdf['Low'].values.astype(float); wC=_wdf['Close'].values.astype(float)
+        out['w']={'w':_detect_wm(wH,wL,wC,'W',lb=2,swing_pct=0.04), 'm':_detect_wm(wH,wL,wC,'M',lb=2,swing_pct=0.04)}
+    if _mdf is not None and len(_mdf)>=20:
+        mH=_mdf['High'].values.astype(float); mL=_mdf['Low'].values.astype(float); mC=_mdf['Close'].values.astype(float)
+        out['m']={'w':_detect_wm(mH,mL,mC,'W',lb=2,swing_pct=0.05), 'm':_detect_wm(mH,mL,mC,'M',lb=2,swing_pct=0.05)}
+    return out
+
+
 def compute_chart_patterns(df, tol=0.05):
     """Chart pattern detection: H&S, Inv H&S, Wedges, Flags, Double Top/Bottom."""
     if len(df)<50: return {}
@@ -2405,40 +2533,46 @@ def precompute(fp, idx_map, nifty_df=None):
         ew    = compute_ew_simple(df),
         kagi  = compute_kagi(df),
     )
-    # 🎨 Patterns (Harmonic + Chart Patterns)
-    patt = dict(
-        harm = compute_harmonics(df),
-        cp   = compute_chart_patterns(df),
-    )
-    # 🧪 Experimental (VSA)
-    xp = dict(vsa=compute_vsa(df))
-    # ── Pre-compute shared weekly/monthly DFs ──────────────────────────────
-    _wdf = None; _mdf = None
+    # ── Pre-compute shared weekly/monthly DFs (used by patt.dbl, sr.season, sr.mtf, swing) ──
+    _wdf=None; _mdf=None
     try:
         import pandas as _pdx
         _dft=df.copy(); _dft['Date']=_pdx.to_datetime(_dft['Date']); _dft=_dft.set_index('Date')
         _wdf=_dft.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
-        _mdf=_dft.resample('ME').agg({'Close':'last','Volume':'sum'}).dropna()
+        _mdf=_dft.resample('ME').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
     except: pass
+    # 🎨 Patterns (Harmonic + Chart Patterns)
+    patt = dict(
+        harm = compute_harmonics(df),
+        cp   = compute_chart_patterns(df),
+        dbl  = compute_double_patterns(df,_wdf=_wdf,_mdf=_mdf),
+    )
+    # 🧪 Experimental (VSA)
+    xp = dict(vsa=compute_vsa(df))
     # 🔢 Smart Rank raw data
     sr = dict(
-        season=compute_seasonality(df, _wdf=_mdf),
-        mtf   =compute_mtf_matrix(df, _wdf=_wdf, _mdf=_mdf),
+        season=compute_seasonality(df),
+        mtf   =compute_mtf_matrix(df),
         ath   =compute_ath(df),
         tc    =compute_triple_compress(df),
         raw   =compute_raw_returns(df),
+    )
+    # 🎯 Swing Setup — EMA Squeeze + MACD 5/35 (D/W/M)
+    swing = dict(
+        ema_sq = compute_ema_squeeze(df,_wdf=_wdf,_mdf=_mdf),
+        macd535= compute_macd_5_35(df,_wdf=_wdf,_mdf=_mdf),
     )
     # 🏹 Breakout Pro
     bp = dict(
         vcp=compute_vcp(df),
         pp =compute_pocket_pivot(df),
-        twt=compute_3week_tight(df, _wdf=_wdf),
+        twt=compute_3week_tight(df),
         rsh=compute_rs_new_high(df,nifty_df),
         ads=compute_ad_score(df),
         hvb=compute_hvb(df),
         vdu=compute_vdu(df),
         ems=compute_ema_stack(df),
-        iw =compute_inside_week(df, _wdf=_wdf),
+        iw =compute_inside_week(df),
         tlb=compute_trendline_bo(df),
     )
     # ③ Gap Scanner
@@ -2465,7 +2599,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,**st,rs=0)
 
 
 def assign_smart_ranks(stocks):
@@ -2805,6 +2939,10 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .tab-btn.t-combo.active{color:#c47aff;border-bottom-color:#c47aff}
 .tab-btn.t-bp.active{color:#ff6b35;border-bottom-color:#ff6b35}
 .tab-btn.t-sr.active{color:#00d4ff;border-bottom-color:#00d4ff}
+.tab-btn.t-lookup.active{color:#a78bfa;border-bottom-color:#a78bfa}
+.tab-btn.t-iview.active{color:#fbbf24;border-bottom-color:#fbbf24}
+.tab-btn.t-toppicks.active{color:#34d399;border-bottom-color:#34d399}
+.tab-btn.t-swing.active{color:#fb923c;border-bottom-color:#fb923c}
 /* ⑥ sector grouping */
 .gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
 .gb-chk input{accent-color:var(--acc)}
@@ -2853,6 +2991,10 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-combo" data-tab="combo" onclick="switchTab('combo')">⚗️ Combiner</button>
   <button class="tab-btn t-bp" data-tab="bp" onclick="switchTab('bp')">🏹 Breakout Pro</button>
   <button class="tab-btn t-sr" data-tab="sr" onclick="switchTab('sr')">🔢 Smart Rank</button>
+  <button class="tab-btn t-lookup" data-tab="lookup" onclick="switchTab('lookup')">🔍 Stock Lookup</button>
+  <button class="tab-btn t-iview" data-tab="iview" onclick="switchTab('iview')">📋 Index View</button>
+  <button class="tab-btn t-toppicks" data-tab="toppicks" onclick="switchTab('toppicks')">🏆 Top Picks</button>
+  <button class="tab-btn t-swing" data-tab="swing" onclick="switchTab('swing')">🎯 Swing Setup</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
 <!-- ═══ GLOBAL FILTERS ════════════════════════════════════════════════════ -->
@@ -2862,12 +3004,12 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <label class="gb-lbl">Index</label>
   <select id="global-idx" class="gb-sel">
     <option value="0" selected>All Stocks</option>
+    <option value="fno">Nifty F&amp;O</option>
     <option value="50">Nifty 50</option>
     <option value="100">Nifty 100</option>
     <option value="200">Nifty 200</option>
     <option value="500">Nifty 500</option>
     <option value="750">Nifty 750</option>
-    <option value="fno">Nifty F&amp;O</option>
   </select>
   <div class="gb-sep"></div>
   <span class="gb-hint">Applies to all scanners ↓</span>
@@ -2922,14 +3064,6 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
     </select>
   </div>
   <div class="ctrl-sep"></div>
-  <div class="cg"><label>Index</label>
-    <select id="idx-flt">
-      <option value="0" selected>All stocks</option>
-      <option value="50">Nifty 50</option><option value="100">Nifty 100</option>
-      <option value="200">Nifty 200</option><option value="500">Nifty 500</option>
-      <option value="750">Nifty 750</option>
-    </select>
-  </div>
   <div class="cg"><label>Trend (200 DMA)</label>
     <select id="dma-flt"><option value="any">Any</option>
       <option value="above">Above 200 DMA ↑</option><option value="below">Below 200 DMA ↓</option>
@@ -3203,7 +3337,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <div id="ctrl-t2" class="ctrl" style="display:none">
   <div class="cg"><label>Strategy</label>
     <div style="display:flex;gap:6px;align-items:center"><select id="t2-strat" style="min-width:300px" onchange="updateT2Info()">
-      <optgroup label="── Cup & Handle (O\'Neil) ──">
+      <optgroup label="── Cup & Handle (O'Neil) ──">
         <option value="ch_breakout">Cup & Handle — Breakout + Volume</option>
         <option value="ch_near">Cup & Handle — Near breakout (within 3%)</option>
         <option value="ch_handle">Cup & Handle — In handle (watch zone)</option>
@@ -3352,9 +3486,9 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="candle_outside_bear">Bearish Outside Bar — engulfs prior bar range, closes down</option>
       </optgroup>
       <optgroup label="── 🚀 Gap Scans (Chartink most-used) ──">
-        <option value="candle_gap_up">Gap Up &gt;1% — opened above yesterday\'s close by 1%+</option>
+        <option value="candle_gap_up">Gap Up &gt;1% — opened above yesterday's close by 1%+</option>
         <option value="candle_gap_up3">Gap Up &gt;3% — strong gap (Chartink style: 3%+)</option>
-        <option value="candle_gap_down">Gap Down &lt;-1% — opened below yesterday\'s close by 1%+</option>
+        <option value="candle_gap_down">Gap Down &lt;-1% — opened below yesterday's close by 1%+</option>
         <option value="candle_gap_down3">Gap Down &lt;-3% — strong gap down (Chartink style: 3%+)</option>
       </optgroup>
       <optgroup label="── 📈 EMA Crossovers (Chartink paid alerts) ──">
@@ -3625,6 +3759,22 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="cp_bull_flag">Bull Flag — strong pole + tight downward consolidation</option>
         <option value="cp_bear_flag">Bear Flag — strong drop + tight upward consolidation</option>
       </optgroup>
+      <optgroup label="── 〔W〕 Double Bottom — Daily/Weekly/Monthly (Neckline-Confirmed) ──">
+        <option value="dbl_bot_d">Double Bottom (W) — Daily</option>
+        <option value="dbl_bot_d_bo">Double Bottom (W) — Daily, Neckline Breakout</option>
+        <option value="dbl_bot_w">Double Bottom (W) — Weekly</option>
+        <option value="dbl_bot_w_bo">Double Bottom (W) — Weekly, Neckline Breakout</option>
+        <option value="dbl_bot_m">Double Bottom (W) — Monthly</option>
+        <option value="dbl_bot_m_bo">Double Bottom (W) — Monthly, Neckline Breakout</option>
+      </optgroup>
+      <optgroup label="── 〔M〕 Double Top — Daily/Weekly/Monthly (Neckline-Confirmed) ──">
+        <option value="dbl_top_d">Double Top (M) — Daily</option>
+        <option value="dbl_top_d_bo">Double Top (M) — Daily, Neckline Breakdown</option>
+        <option value="dbl_top_w">Double Top (M) — Weekly</option>
+        <option value="dbl_top_w_bo">Double Top (M) — Weekly, Neckline Breakdown</option>
+        <option value="dbl_top_m">Double Top (M) — Monthly</option>
+        <option value="dbl_top_m_bo">Double Top (M) — Monthly, Neckline Breakdown</option>
+      </optgroup>
     </select>
     <button class="info-btn" onclick="showHelp('patt',document.getElementById('patt-strat').value)" title="Strategy info">ℹ</button>
     </div>
@@ -3676,7 +3826,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="pp">Pocket Pivot — up-day volume &gt; highest down-day vol (10d)</option>
         <option value="pp_strong">Strong Pocket Pivot — 1.5× highest down-day volume</option>
       </optgroup>
-      <optgroup label="── 📏 Tight Pattern — O\'Neil ──">
+      <optgroup label="── 📏 Tight Pattern — O'Neil ──">
         <option value="twt3">3-Week Tight — weekly closes within ±1.5%</option>
         <option value="twt4">4-Week Tight</option>
         <option value="twt5">5-Week Tight — strongest consolidation</option>
@@ -3763,6 +3913,42 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <div class="cg"><label>Min RS</label><select id="sr-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
   <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="sr-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="sr-pmax" placeholder="Max" min="0"></div></div>
   <button class="btn" style="background:#00d4ff;color:#000" onclick="scanSR()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
+<!-- ═══ SWING SETUP ═══════════════════════════════════════════════════════════ -->
+<div id="ctrl-swing" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <select id="swing-strat" style="min-width:380px" onchange="updateSwingInfo()">
+      <optgroup label="── 🗜 EMA Squeeze — 10/20/50/100/150/200 EMA Tight Coil ──">
+        <option value="ema_sq_d">Daily EMA Squeeze — all EMAs within 2.5% (10-200)</option>
+        <option value="ema_sq_d_tight">Daily Ultra-Tight (within 1%) — imminent breakout</option>
+        <option value="ema_sq_w">Weekly EMA Squeeze — 10/20/50/100 EMA tight coil</option>
+        <option value="ema_sq_m">Monthly EMA Squeeze — 10/20/50 EMA tight coil (long-term)</option>
+        <option value="ema_sq_d_bull">Daily Squeeze + Bull Stack (coiling to break up)</option>
+        <option value="ema_sq_w_bull">Weekly Squeeze + Bull Stack</option>
+      </optgroup>
+      <optgroup label="── 📊 MACD 5/35/5 Crossover — Fast Swing Variant ──">
+        <option value="macd535_d_bull">Daily MACD 5/35 Bullish Cross — fresh today</option>
+        <option value="macd535_d_bear">Daily MACD 5/35 Bearish Cross</option>
+        <option value="macd535_w_bull">Weekly MACD 5/35 Bullish Cross — multi-week swing</option>
+        <option value="macd535_w_bear">Weekly MACD 5/35 Bearish Cross</option>
+        <option value="macd535_m_bull">Monthly MACD 5/35 Bullish Cross — positional</option>
+        <option value="macd535_m_bear">Monthly MACD 5/35 Bearish Cross</option>
+        <option value="macd535_d_zero_bull">Daily MACD 5/35 Zero-Line Cross Up</option>
+        <option value="macd535_align">All Timeframes Aligned Bull (D+W+M MACD 5/35 bullish)</option>
+      </optgroup>
+      <optgroup label="── 🎯 Swing Trade Suggestion (1 Week – 3 Months) ──">
+        <option value="swing_buy">Swing Buy Candidates — Score ≥60 + entry/stop/target</option>
+        <option value="swing_strong">Strong Swing Buy — Score ≥75 + confluence</option>
+        <option value="swing_breakout_ready">Breakout-Ready — EMA squeeze + MACD bull cross</option>
+      </optgroup>
+    </select>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="swing-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="swing-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="swing-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#fb923c;color:#000" onclick="scanSwing()">▶ SCAN</button>
   <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
 </div>
 
@@ -3900,13 +4086,31 @@ let rows=[],sc=4,sd=1,currentTab='home',lastRows=[];
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
   if(tab==='home'){
     document.getElementById('ts').innerHTML=renderHome();
     setFbar('🏠 <b>Quick Launch</b> · Click any card to instantly run the scan · Strategies ranked by professional success rate','');
+    updateStats([]); return;
+  }
+  if(tab==='lookup'){
+    document.getElementById('ts').innerHTML=renderLookup();
+    setFbar('🔍 <b>Stock Lookup</b> · Enter a stock symbol to see every scanner signal it matches and a composite Buy/Sell score','');
+    updateStats([]); return;
+  }
+  if(tab==='iview'){
+    document.getElementById('ts').innerHTML=renderIndexView();
+    document.getElementById('iv-idx').value=document.getElementById('global-idx').value||'0';
+    scanIndexView();
+    setFbar('📋 <b>Index View</b> · All stocks ranked by composite Buy/Sell score · Click ⓘ or row for signal breakdown','');
+    updateStats([]); return;
+  }
+  if(tab==='toppicks'){
+    document.getElementById('ts').innerHTML=renderTopPicks();
+    scanTopPicks();
+    setFbar('🏆 <b>Top Picks</b> · Universe-wide ranked board · Confluence-weighted score rewards stocks confirmed by multiple independent signal categories','');
     updateStats([]); return;
   }
   if(tab==='help'){
@@ -3932,6 +4136,7 @@ function switchTab(tab){
   else if(tab==='combo'){ renderComboSummary(); }
   else if(tab==='bp'){ updateBPInfo(); scanBP(); }
   else if(tab==='sr'){ updateSRInfo(); scanSR(); }
+  else if(tab==='swing'){ updateSwingInfo(); scanSwing(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -4172,7 +4377,6 @@ function scanSMC(){
     let matched=false,signal='',zone_h=0,zone_l=0;
 
     const near=(ref,prx=prox)=>Math.abs(s.price-ref)/ref<=prx;
-    if(bounceF&&s.pb&&!s.pb[bounceF])continue;
     const nearZone=(h,l,prx=prox)=>{
       const mid=(h+l)/2;return Math.abs(s.price-mid)/mid<=prx||
         (s.price>=l*(1-prx)&&s.price<=h*(1+prx));
@@ -4645,49 +4849,22 @@ function scanT3(){
 // ── HOME PAGE ─────────────────────────────────────────────────────────────────
 const HOME_CARDS=[
   // Highest edge — trend following
-  // ── Pivot Points ──
-  {tab:'piv', strat:null,              emoji:'🎯',badge:'piv', label:'Fibonacci Pivot BO',    desc:'Price breaking above R1/R2 Fibonacci pivot resistance — floor trader levels used by thousands of NSE prop desks daily',         stars:'★★★★', section:0},
-  {tab:'piv', strat:null,              emoji:'🔵',badge:'piv', label:'Pivot Near Support',     desc:'Price testing S1/S2 pivot support — highest-probability intraday bounce setup, Chartink\' most-searched scan',               stars:'★★★★', section:1},
-  // ── Smart Money Concepts ──
-  {tab:'smc', strat:'bos_bull',        emoji:'💎',badge:'smc', label:'Break of Structure Bull',desc:'Price breaks above the last significant swing high — SMC/ICT concept confirming bullish trend structure shift',                stars:'★★★★', section:0},
-  {tab:'smc', strat:'choch_bull',      emoji:'🔄',badge:'smc', label:'ChoCh Bullish',          desc:'Change of Character — first break above a swing high after a downtrend. The earliest SMC reversal signal. ICT methodology',    stars:'★★★★★',section:1},
-  {tab:'smc', strat:'fvg_bull',        emoji:'💠',badge:'smc', label:'Fair Value Gap (Bull)',   desc:'Bullish Fair Value Gap — unfilled imbalance zone acting as support. Price entering FVG = institutional re-entry opportunity',  stars:'★★★★', section:1},
-  {tab:'smc', strat:'ote_bull',        emoji:'🎯',badge:'smc', label:'OTE Zone (0.62–0.79)',    desc:'Optimal Trade Entry — price in the 61.8-78.6% Fibonacci retracement zone of a bullish swing. ICT\' highest-probability entry',stars:'★★★★★',section:1},
-  // ── Volume ──
-  {tab:'vol', strat:'vol_spike',       emoji:'🔊',badge:'vol', label:'Volume Shocker 3×',       desc:'Today\' volume exceeds 3× the 10-day average — institutional breakout signal, not retail noise',                            stars:'★★★★', section:1},
-  {tab:'vol', strat:'vol_acc3',        emoji:'📈',badge:'vol', label:'Accumulation Streak',     desc:'3+ consecutive days of rising price on above-average volume — institutional accumulation pattern',                           stars:'★★★★', section:1},
-  {tab:'vol', strat:'vol_dist',        emoji:'📉',badge:'vol', label:'Distribution Alert',      desc:'3+ consecutive down-days on above-average volume — institutional selling, avoid longs',                                     stars:'★★★',  section:2},
-  // ── Noiseless Charts ──
-  {tab:'nl',  strat:'pnf_dbl_top',     emoji:'📊',badge:'nl',  label:'P&F Double Top BO',       desc:'Point & Figure double-top breakout — removes all time noise, only price matters. Definedge\' most powerful noiseless signal',stars:'★★★★★',section:0},
-  {tab:'nl',  strat:'renko_bull',      emoji:'🧱',badge:'nl',  label:'Renko Bull',               desc:'Renko chart in bull mode — fixed-size bricks filter all time noise, only capturing significant price moves',                 stars:'★★★★', section:0},
-  {tab:'nl',  strat:'kagi_yang',       emoji:'🎴',badge:'nl',  label:'Kagi Yang Line',           desc:'Kagi chart in Yang (bull) phase — reversal-based chart, only prints when price exceeds prior reversal level',               stars:'★★★★', section:1},
-  {tab:'nl',  strat:'rrg_leading',     emoji:'🔵',badge:'nl',  label:'RRG Leading Quadrant',     desc:'Relative Rotation Graph — stock in Leading quadrant = strong RS + improving momentum. Used by Bloomberg and institutional desks',stars:'★★★★★',section:1},
-  {tab:'nl',  strat:'lb3_rev_bull',    emoji:'📈',badge:'nl',  label:'3-Line Break Bull Rev',    desc:'Three-Line Break chart reversed to bull — requires 3 consecutive bullish lines to form, filters most false signals',         stars:'★★★★', section:1},
-  // ── VSA Experimental ──
-  {tab:'xp',  strat:'vsa_climax_buy',  emoji:'🔬',badge:'xp',  label:'VSA Climax Buy',           desc:'Volume Spread Analysis — selling climax with ultra-high volume, wide spread, close on high. Tom Williams concept',          stars:'★★★',  section:2},
-  {tab:'xp',  strat:'vsa_effort_up',   emoji:'📊',badge:'xp',  label:'VSA Effort vs Result',     desc:'High-effort up bar (high volume + narrow spread) = smart money absorbing supply — precedes markup phase',                  stars:'★★★',  section:2},
-  // ── Gap Scanner ──
-  {tab:'gap', strat:'up1',             emoji:'⚡',badge:'gap', label:'Gap Up ≥1%',               desc:'Price opened 1%+ above prior close — institutional order imbalance at open, momentum follow-through typical',               stars:'★★★★', section:1},
-  {tab:'gap', strat:'up_cont',         emoji:'🟢',badge:'gap', label:'Gap Up Continuation',      desc:'Gapped up AND continued intraday (close > open) — institutions held the gap and kept buying. Highest-probability gap setup', stars:'★★★★★',section:1},
-  {tab:'gap', strat:'up_unfilled',     emoji:'🔵',badge:'gap', label:'Gap Up Unfilled',          desc:'Gap above prior close not filled intraday — complete demand absorption, no sellers at prior close level',                   stars:'★★★★', section:1},
-  // ── AND Combiner ──
-  {tab:'combo',strat:null,             emoji:'⚗️',badge:'combo',label:'AND Combiner',            desc:'Find stocks matching 2-5 conditions simultaneously from ANY tab. The most powerful filter in this scanner — equivalent to Chartink premium',stars:'★★★★★',section:0},
   {tab:'mi',  strat:null,           emoji:'⚡', badge:'mi',  label:'Minervini + Stage 2',  desc:'All 8 Minervini conditions + Weinstein Stage 2 advancing',         stars:'★★★★★', section:0},
   // RSI>50, GMMA, Donchian, MACD Hist — most important additions
   {tab:'t1',  strat:'rsi_cross50_bull',  emoji:'📊',badge:'t1',  label:'RSI Cross Above 50',   desc:'RSI just crossed above 50 — earliest momentum shift to bull phase. Combines with Golden Cross for high-probability entry',       stars:'★★★★', section:0},
   {tab:'adv', strat:'gmma_cross_bull',   emoji:'🌈',badge:'adv', label:'GMMA Cross Bull',       desc:'All 6 short-term EMAs just crossed above all 6 long-term EMAs — Guppy trend confirmation. Zerodha Kite standard indicator',       stars:'★★★★★',section:0},
-  {tab:'adv', strat:'dc55_bull',         emoji:'🐢',badge:'adv', label:'Donchian 55-Day Bull',  desc:'Price close above 55-day upper band — Richard Donchian\' original Turtle System entry. Highest win-rate breakout system backtest',stars:'★★★★', section:0},
+  {tab:'adv', strat:'dc55_bull',         emoji:'🐢',badge:'adv', label:'Donchian 55-Day Bull',  desc:'Price close above 55-day upper band — Richard Donchian\'s original Turtle System entry. Highest win-rate breakout system backtest',stars:'★★★★', section:0},
   {tab:'t2',  strat:'macd_hist_neg_inc', emoji:'⚡',badge:'t2',  label:'MACD Histogram Rising', desc:'Histogram negative but increasing — early bull divergence before the crossover. Earlier entry, same setup. Chartink paid filter',  stars:'★★★★', section:1},
   {tab:'t2',  strat:'macd_zero_bull',    emoji:'🟢',badge:'t2',  label:'MACD Zero-Line Cross',  desc:'MACD line crossed above zero — stronger than signal-line cross, confirms trend momentum has genuinely shifted to bull',             stars:'★★★★', section:1},
-  {tab:'adv', strat:'dc20_bull',         emoji:'📐',badge:'adv', label:'Donchian 20-Day Breakout',desc:'Close above 20-day Donchian upper band — Chartink\' most-used breakout filter. New 20-day high close = momentum confirmed',    stars:'★★★★', section:1},
-  {tab:'adv', strat:'gmma_all_bull',     emoji:'🌈',badge:'adv', label:'GMMA All-Bull',         desc:'All 6 short-term EMAs above all 6 long-term EMAs — perfect alignment, Daryl Guppy\' strongest bull signal. TradePoint standard', stars:'★★★★★',section:1},
+  {tab:'adv', strat:'dc20_bull',         emoji:'📐',badge:'adv', label:'Donchian 20-Day Breakout',desc:'Close above 20-day Donchian upper band — Chartink\'s most-used breakout filter. New 20-day high close = momentum confirmed',    stars:'★★★★', section:1},
+  {tab:'adv', strat:'gmma_all_bull',     emoji:'🌈',badge:'adv', label:'GMMA All-Bull',         desc:'All 6 short-term EMAs above all 6 long-term EMAs — perfect alignment, Daryl Guppy\'s strongest bull signal. TradePoint standard', stars:'★★★★★',section:1},
   {tab:'t1',  strat:'rsi_above50',       emoji:'📊',badge:'t1',  label:'RSI Above 50',          desc:'RSI in bull momentum zone — simplest trend filter. Combine with any other signal to eliminate bear-phase noise',                  stars:'★★★',  section:1},
   {tab:'adv', strat:'dc_squeeze',        emoji:'🗜',badge:'adv', label:'Donchian Squeeze',       desc:'Donchian bandwidth at 6-month low — channel contracting to minimum before inevitable expansion. Turtle trading pre-breakout setup', stars:'★★★★', section:1},
   {tab:'t1',  strat:'gc_fresh_golden',emoji:'🟡',badge:'t1', label:'Golden Cross (Fresh)',  desc:'50 SMA just crossed above 200 SMA — most-watched institutional signal',stars:'★★★★★', section:0},
   {tab:'t1',  strat:'rsi_bull_div',  emoji:'📗', badge:'t1', label:'RSI Bull Divergence',   desc:'Price lower low + RSI higher low = hidden institutional accumulation',  stars:'★★★★★', section:0},
   {tab:'t1',  strat:'w52_breakout',  emoji:'🚀', badge:'t1', label:'52W High + Volume',     desc:'New 52-week high with volume surge — most winners break out this way',    stars:'★★★★★', section:0},
   {tab:'t1',  strat:'bb_squeeze_bull',emoji:'🔵',badge:'t1', label:'BB Squeeze Bull',       desc:'Bollinger bands at tightest 25% + bullish momentum = explosion up',       stars:'★★★★', section:0},
-  {tab:'t2',  strat:'ch_breakout',   emoji:'🏆', badge:'t2', label:'Cup & Handle Breakout', desc:"O\'Neil's U-shaped base + tight handle + price breaks lip with volume",     stars:'★★★★', section:0},
+  {tab:'t2',  strat:'ch_breakout',   emoji:'🏆', badge:'t2', label:'Cup & Handle Breakout', desc:"O'Neil's U-shaped base + tight handle + price breaks lip with volume",     stars:'★★★★', section:0},
   {tab:'t1',  strat:'nr7_inside',    emoji:'🎯', badge:'t1', label:'NR7 + Inside Bar',      desc:'Double compression — narrowest range in 7 bars AND inside prev bar',       stars:'★★★★', section:0},
   {tab:'adv', strat:'vcp',           emoji:'📐', badge:'adv', label:'VCP Pattern',          desc:'Volatility contraction with declining volume — Minervini setup',           stars:'★★★★', section:0},
   // Momentum / timing
@@ -4702,7 +4879,7 @@ const HOME_CARDS=[
   {tab:'t3',  strat:'wr_bull_exit',  emoji:'↗', badge:'t3', label:'Williams %R Exit OS',   desc:'Was at extreme oversold −80, now recovering — timing mean reversion',       stars:'★★★', section:2},
   // 🏅 India Pro — original 6 cards
   {tab:'ti', strat:'candle_bull_eng',    emoji:'📗', badge:'ti', label:'Bullish Engulfing',      desc:'Current bull body engulfs prior bear — institutional buyers overwhelm sellers', stars:'★★★★', section:3},
-  {tab:'ti', strat:'candle_morning_star',emoji:'🌅', badge:'ti', label:'Morning Star',            desc:"3-bar reversal: bear→star→bull — O\'Neil's most reliable candlestick bottom",   stars:'★★★★', section:3},
+  {tab:'ti', strat:'candle_morning_star',emoji:'🌅', badge:'ti', label:'Morning Star',            desc:"3-bar reversal: bear→star→bull — O'Neil's most reliable candlestick bottom",   stars:'★★★★', section:3},
   {tab:'ti', strat:'ema_fan_bull',       emoji:'🔥', badge:'ti', label:'EMA Fan Bullish',         desc:'Price > EMA9 > EMA21 > EMA50 — Chartink momentum leader alignment',            stars:'★★★★', section:3},
   {tab:'ti', strat:'ma_all_bull',        emoji:'🏆', badge:'ti', label:'Full MA Stack',           desc:'MA20>MA50>MA100>MA200 — StockEdge maximum bullish alignment',                  stars:'★★★★', section:3},
   {tab:'ti', strat:'consol_10',          emoji:'🎯', badge:'ti', label:'52W Tight Coil',          desc:'Within 5% of 52W high, 10-day range <5% — pre-breakout coil',                 stars:'★★★★', section:3},
@@ -4724,6 +4901,10 @@ const HOME_CARDS=[
   {tab:'br', strat:'stage2',            emoji:'📈', badge:'br',   label:'All Stage 2 Stocks',     desc:'Weinstein Stage 2 confirmed across the full universe — the only stocks to be long', stars:'★★★★', section:5},
   {tab:'br', strat:'near52wh',          emoji:'🎯', badge:'br',   label:'Near 52W High',          desc:'Stocks within 5% of annual high — potential breakout candidates universe-wide',  stars:'★★★',  section:5},
   {tab:'br', strat:'rs80',              emoji:'🌟', badge:'br',   label:'RS ≥ 80 Leaders',        desc:'Top 20% relative strength — the leaders institutions are accumulating right now', stars:'★★★★', section:5},
+  {tab:'patt',strat:'dbl_bot_w_bo',  emoji:'〔W〕',badge:'patt',label:'Double Bottom Weekly BO', desc:'Weekly W pattern confirmed - price closed above neckline. Multi-month base breakout, highest-conviction swing/position entry', stars:'★★★★★',section:4},
+  {tab:'patt',strat:'dbl_top_w_bo',  emoji:'〔M〕',badge:'patt',label:'Double Top Weekly BD',     desc:'Weekly M pattern confirmed - price closed below neckline. Multi-month topping process, high-conviction bearish signal', stars:'★★★★', section:4},
+  {tab:'patt',strat:'dbl_bot_d_bo',  emoji:'〔W〕',badge:'patt',label:'Double Bottom Daily BO',   desc:'Daily W pattern confirmed with neckline breakout - validated short-term reversal entry', stars:'★★★★', section:4},
+  {tab:'patt',strat:'dbl_bot_m_bo',  emoji:'〔W〕',badge:'patt',label:'Double Bottom Monthly BO', desc:'Monthly W pattern confirmed - rare multi-year base breakout, holding period often measured in years', stars:'★★★★★',section:4},
   // 🏹 Breakout Pro
   {tab:'bp',strat:'vcp',     emoji:'🔄',badge:'bp',label:'VCP (Minervini)',     desc:'Volatility Contraction Pattern — 2+ weekly contractions + vol dry-up near 52W high. MarketSmith #1',stars:'★★★★★',section:6},
   {tab:'bp',strat:'pp',      emoji:'🎯',badge:'bp',label:'Pocket Pivot',        desc:'Up-day volume > highest down-day vol in 10 sessions. Gil Morales early-entry before breakout',       stars:'★★★★★',section:6},
@@ -4746,6 +4927,15 @@ const HOME_CARDS=[
   {tab:'sr',strat:'tc3',        emoji:'🗜',badge:'sr',label:'Triple Compression',   desc:'NR7 + Volume Dry-Up + BB Squeeze all firing simultaneously — three-dimensional maximum coiling',            stars:'★★★★★',section:7},
   {tab:'sr',strat:'mtfrs_90',   emoji:'🌟',badge:'sr',label:'Consistent RS Leader', desc:'Top 10% by 1M, 3M, 6M AND 12M returns simultaneously. Definedge Smart RS Scanner equivalent',             stars:'★★★★★',section:7},
   {tab:'sr',strat:'tc2',        emoji:'🗜',badge:'sr',label:'Double Compression',   desc:'Any 2 of NR7/VDU/BB Squeeze — strong pre-breakout coiling signal',                                         stars:'★★★★', section:7},
+  // 🎯 Swing Setup
+  {tab:'swing',strat:'ema_sq_d_bull',  emoji:'🗜',badge:'swing',label:'Daily EMA Squeeze + Bull',  desc:'10/20/50/100/150/200 EMA all within 2.5%% AND bullishly stacked — coiling inside an uptrend, highest-probability continuation', stars:'★★★★★',section:8},
+  {tab:'swing',strat:'macd535_d_bull', emoji:'📊',badge:'swing',label:'MACD 5/35 Bull Cross (D)', desc:'Fast 5-EMA crossed above slow 35-EMA on daily — faster swing-entry variant of standard MACD, catches moves 1-2 days earlier', stars:'★★★★', section:8},
+  {tab:'swing',strat:'macd535_w_bull', emoji:'📊',badge:'swing',label:'MACD 5/35 Bull Cross (W)', desc:'Weekly MACD 5/35 bullish cross — signals a multi-week swing move beginning, ideal for 1-3 month holding periods', stars:'★★★★★',section:8},
+  {tab:'swing',strat:'macd535_align',  emoji:'📊',badge:'swing',label:'D+W+M MACD 5/35 Aligned', desc:'Daily, Weekly AND Monthly MACD(5,35,5) all bullish simultaneously — full timeframe alignment, the strongest momentum confirmation', stars:'★★★★★',section:8},
+  {tab:'swing',strat:'ema_sq_w',       emoji:'🗜',badge:'swing',label:'Weekly EMA Squeeze',       desc:'10/20/50/100-week EMAs converged within 2.5%% — multi-month consolidation resolving, breakouts tend to run for weeks', stars:'★★★★', section:8},
+  {tab:'swing',strat:'swing_strong',   emoji:'🎯',badge:'swing',label:'Strong Swing Buy',          desc:'Score ≥75 with confluence across 4+ categories — highest-conviction swing setups with full Entry/Stop/Target plan for 1W-3M', stars:'★★★★★',section:8},
+  {tab:'swing',strat:'swing_breakout_ready',emoji:'🎯',badge:'swing',label:'Breakout-Ready Setup', desc:'EMA squeeze (coiled) + fresh MACD 5/35 bull cross (trigger firing) — the textbook compression + trigger breakout entry', stars:'★★★★★',section:8},
+  {tab:'swing',strat:'ema_sq_d_tight', emoji:'🗜',badge:'swing',label:'Ultra-Tight EMA Squeeze',   desc:'All 6 EMAs (10-200) within 1%% of each other — extremely rare, historically precedes the largest volatility expansions', stars:'★★★★★',section:8},
 ];
 
 const SECTIONS=[
@@ -4757,9 +4947,10 @@ const SECTIONS=[
   '📡 MARKET BREADTH & UNIVERSE SIGNALS',
   '🏹 BREAKOUT PRO — PAID SCANNER STRATEGIES',
   '🔢 SMART RANK — AI COMPOSITE SCORING',
+  '🎯 SWING SETUP — EMA SQUEEZE · MACD 5/35 · TRADE PLANS',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup'};
 
 function renderHome(){
   let html=`<div class="home-wrap">`;
@@ -4933,12 +5124,17 @@ const STRAT_HELP_KEY={
     harm_cypher_bull:0,harm_cypher_bear:0,harm_abcd_bull:0,harm_abcd_bear:0,
     cp_hs:1,cp_inv_hs:1,cp_dbl_top:1,cp_dbl_bot:1,
     cp_rise_wedge:1,cp_fall_wedge:1,cp_bull_flag:1,cp_bear_flag:1,
+    dbl_bot_d:2,dbl_bot_d_bo:2,dbl_bot_w:2,dbl_bot_w_bo:2,dbl_bot_m:2,dbl_bot_m_bo:2,
+    dbl_top_d:3,dbl_top_d_bo:3,dbl_top_w:3,dbl_top_w_bo:3,dbl_top_m:3,dbl_top_m_bo:3,
   },
   br:{all:0,above200:0,stage2:0,near52wh:0,pnf_x:0,renko_bull:0,ha_bull:0,ema_fan:0,rs80:0},
   gap:{up1:0,up2:0,up3:0,up_cont:0,dn1:0,dn_cont:0},
   combo:{},
   bp:{vcp:0,vcp3:0,pp:0,pp_strong:0,twt3:0,rsh:0,ads_ab:0,hvb:0,vdu_bull:0,ems_power:0,iw1:0,tlb:0},
   sr:{ms_90:0,ms_75:0,ms_50:0,season_bull:0,season_strong:0,mtf_perfect:0,mtf_strong:0,ath:0,tc3:0,mtfrs_90:0},
+  swing:{ema_sq_d:0,ema_sq_d_tight:0,ema_sq_w:0,ema_sq_m:0,ema_sq_d_bull:0,ema_sq_w_bull:0,
+    macd535_d_bull:1,macd535_d_bear:1,macd535_w_bull:1,macd535_w_bear:1,macd535_m_bull:1,macd535_m_bear:1,macd535_d_zero_bull:1,macd535_align:1,
+    swing_buy:2,swing_strong:2,swing_breakout_ready:2},
 };
 // Map tab → section index in Help H array
 const TAB_SEC={
@@ -4948,7 +5144,7 @@ const TAB_SEC={
   xp:11,  // Experimental / VSA
   patt:12,// Patterns
   br:13,  // Market Breadth
-  gap:14, combo:14, bp:15, sr:16,
+  gap:14, combo:14, bp:15, sr:16, swing:8,
 };
 
 function showHelp(tab,stratVal){
@@ -5194,7 +5390,7 @@ function renderHelp(){
       },
       { n:'52-Week High Consolidation / Tight Coil',
         f:'Coil10: dist%=(w52h−Close)/w52h×100 ≤5% AND (max_High_10d − min_Low_10d)/w52h×100 ≤5% · Coil15: dist%≤7% AND volume_5d_avg/vol_20d_avg<0.8',
-        d:`The 52-Week High Consolidation scan is one of the most popular pre-breakout setups in Indian markets, offered as a premium filter on both Chartink and StockEdge. The pattern identifies stocks that are within 5-7% of their annual high but have entered a period of tight range consolidation — a "coil" — where the daily price range has contracted significantly. This pattern is the quantified version of the Volatility Contraction Pattern (VCP) and Darvas Box: after reaching new highs, the best stocks don't fall sharply — they consolidate tightly near the high, absorbing any remaining sellers, before resuming the uptrend. The "10-day tight coil" filter requires that the stock is within 5% of its 52-week high AND that the entire 10-day high-low range fits within a 5% band relative to the 52-week high. This extremely tight requirement ensures genuine supply/demand equilibrium — not a wide, sloppy consolidation but a genuine coil. The "15-day extended base" is a less strict but more common variant that adds the volume dimension: volume during the last 5 days should be below 80% of the 20-day average, indicating that the selling interest has completely dried up. William O\'Neil's research showed that stocks in these tight bases near new highs had dramatically higher breakout follow-through rates than stocks breaking out from wide, volatile bases. Chartink's paid subscribers specifically scan for this pattern daily as it represents stocks where the "risk/reward is most favorable" — a very small stop (just below the recent low) with potentially large upside once the resistance is cleared. In NSE large-cap stocks, this setup has been particularly reliable for Nifty 50 constituents during sector rotation where FII inflows are building.`,
+        d:`The 52-Week High Consolidation scan is one of the most popular pre-breakout setups in Indian markets, offered as a premium filter on both Chartink and StockEdge. The pattern identifies stocks that are within 5-7% of their annual high but have entered a period of tight range consolidation — a "coil" — where the daily price range has contracted significantly. This pattern is the quantified version of the Volatility Contraction Pattern (VCP) and Darvas Box: after reaching new highs, the best stocks don't fall sharply — they consolidate tightly near the high, absorbing any remaining sellers, before resuming the uptrend. The "10-day tight coil" filter requires that the stock is within 5% of its 52-week high AND that the entire 10-day high-low range fits within a 5% band relative to the 52-week high. This extremely tight requirement ensures genuine supply/demand equilibrium — not a wide, sloppy consolidation but a genuine coil. The "15-day extended base" is a less strict but more common variant that adds the volume dimension: volume during the last 5 days should be below 80% of the 20-day average, indicating that the selling interest has completely dried up. William O'Neil's research showed that stocks in these tight bases near new highs had dramatically higher breakout follow-through rates than stocks breaking out from wide, volatile bases. Chartink's paid subscribers specifically scan for this pattern daily as it represents stocks where the "risk/reward is most favorable" — a very small stop (just below the recent low) with potentially large upside once the resistance is cleared. In NSE large-cap stocks, this setup has been particularly reliable for Nifty 50 constituents during sector rotation where FII inflows are building.`,
         links:[['Chartink','https://chartink.com'],['Investopedia Consolidation','https://www.investopedia.com/terms/c/consolidation.asp'],['IBD Chartink style','https://www.investors.com/ibd-university/can-slim/']],
         ai:'Explain the 52-week high consolidation / tight coil pattern for NSE trading as scanned by Chartink. What percentage from the 52W high qualifies as a valid consolidation? How tight should the price range be? What does volume drying up signal about supply? How is this pattern related to VCP and Darvas Box? What is the historical breakout success rate for tight coil setups within 5% of 52W high on NSE stocks? How should traders set entry and stop-loss for this setup?'
       },
@@ -5311,6 +5507,18 @@ function renderHelp(){
         d:'Classical chart patterns have been documented since the early 20th century by Richard Schabacker ("Technical Analysis and Stock Market Profits," 1932) and popularized by John Magee in "Technical Analysis of Stock Trends" (1948). These patterns represent recurring formations caused by the psychology of buyers and sellers at specific price levels. The Head & Shoulders is the most reliable reversal pattern in technical analysis: three peaks where the center (head) is highest and the two shoulders are at similar levels, with the neckline connecting the intervening lows. A confirmed close below the neckline initiates a bearish move with a target equal to the head height below the neckline. The Inverse H&S is the mirror: three troughs with the center (head) deepest, a break above the neckline targets the head height projected upward. The Rising Wedge is deceptively bullish-looking (both highs and lows are rising) but is actually bearish because the distance between support and resistance is narrowing, meaning buyers are losing momentum despite each successive high. The Falling Wedge is the opposite — despite falling, it resolves bullishly. Bull Flags are among the highest probability continuation patterns: a vertical "pole" move followed by a consolidation that drifts slightly against the trend, then resumes the original direction with the target equal to the pole length. This scanner uses 4-bar local extrema zigzag detection and 5% tolerance for pattern matching — confirmation with volume is essential before trading.',
         links:[['Investopedia H&S','https://www.investopedia.com/terms/h/head-shoulders.asp'],['Investopedia Bull Flag','https://www.investopedia.com/terms/b/bull-flag.asp'],['StockCharts Patterns','https://school.stockcharts.com/doku.php?id=chart_analysis:chart_patterns']],
         ai:'Explain classical chart patterns for NSE trading. What is the specific definition of a Head & Shoulders neckline and how is the price target calculated? Why does a Rising Wedge resolve bearishly despite making higher highs? How is a Bull Flag pole identified and what is the breakout target? How reliable are Double Tops vs Head & Shoulders as reversal signals? What volume patterns should accompany each pattern type for confirmation? How do these patterns perform on NSE mid-cap vs large-cap stocks historically?'
+      },
+      { n:'Double Bottom (W) — Daily / Weekly / Monthly with Neckline Confirmation',
+        f:`Two zigzag lows within tol% of each other, with a peak (neckline) between them at least 3% above the lows. Breakout = Close > neckline.`,
+        d:`The Double Bottom is the classic "W" reversal pattern: price falls to a low, bounces to an intermediate peak (the neckline), falls again to a similar low (within a tight tolerance band), then ideally breaks above the neckline to confirm the reversal. This scanner detects the W shape automatically using zigzag pivot detection on three independent timeframes. The DAILY version catches short-term reversals (days to weeks) - useful for swing entries. The WEEKLY version requires the W shape to form across weekly bars, representing a multi-month base - these breakouts tend to run for months once confirmed. The MONTHLY version is rare and represents a multi-year base; when a monthly W pattern breaks its neckline, it often marks the start of a multi-year bull phase. Each timeframe has a plain version (pattern visible, breakout not yet confirmed - useful for watching/alerts) and a "Neckline Breakout" version (pattern confirmed AND price has closed above the neckline - the actionable entry signal). The depth_pct field shows how deep the W is relative to the neckline - deeper patterns (10%+) tend to produce larger subsequent moves than shallow ones (3-5%).`,
+        links:[['Double Bottom Pattern','https://www.investopedia.com/terms/d/doublebottom.asp']],
+        ai:'How reliable is a Double Bottom pattern on NSE stocks compared to global markets? What is the typical price target after a neckline breakout, using the measured-move technique? How does pattern reliability differ between daily, weekly, and monthly Double Bottoms?'
+      },
+      { n:'Double Top (M) — Daily / Weekly / Monthly with Neckline Confirmation',
+        f:`Two zigzag highs within tol% of each other, with a trough (neckline) between them at least 3% below the highs. Breakdown = Close < neckline.`,
+        d:`The Double Top is the classic "M" reversal pattern: price rises to a high, pulls back to an intermediate trough (the neckline), rises again to a similar high (within a tight tolerance band), then ideally breaks below the neckline to confirm the bearish reversal. This scanner detects the M shape on three independent timeframes. The DAILY version catches short-term tops - useful for exiting longs or short-term short setups. The WEEKLY version represents a multi-month topping process; a confirmed weekly M pattern often precedes a multi-week-to-multi-month decline. The MONTHLY version is rare and represents a multi-year top - when confirmed, it can mark a major trend change lasting years. As with Double Bottoms, each timeframe has a plain "pattern visible" version and a "Neckline Breakdown" confirmed version. The depth_pct field shows how deep the M is - larger depths historically correspond to larger subsequent declines.`,
+        links:[['Double Top Pattern','https://www.investopedia.com/terms/d/doubletop.asp']],
+        ai:'How reliable is a Double Top pattern for predicting reversals on NSE large-cap vs mid-cap stocks? What is the typical decline magnitude after a confirmed neckline breakdown? Should I exit existing long positions on an unconfirmed Double Top, or wait for the neckline breakdown?'
       },
     ]},
     // ── Section 13: Market Breadth ────────────────────────────────────────────
@@ -5449,16 +5657,17 @@ function renderHelp(){
         ai:'How does consistent multi-period RS leadership predict future performance? What percentage of stocks that are top-10% across all four periods maintain their leadership over the next 6 months? How does multi-period RS leadership compare to single-period RS rating?'
       },
     ]},
+
     {icon:'📐', title:'Donchian Channel & GMMA — Trend Systems', items:[
       { n:'Donchian 20-Day / 55-Day Breakout (Richard Donchian / Turtle Trading)',
         f:'Upper = MAX(High, 20 bars). Lower = MIN(Low, 20 bars). Bull = Close > Upper',
-        d:"Richard Donchian built this channel in the 1950s; it became the Turtle Trading System in the 1980s. A close above the 20-day upper band = new 20-day high — the simplest mechanically backtested breakout signal. 55-day = Turtle System 2 slow entry, catches major trends. Donchian Squeeze (bandwidth at 6-month low) identifies the pre-breakout coiling state. This is Chartink\'s most-used breakout filter.",
+        d:`Richard Donchian built this channel in the 1950s; it became the Turtle Trading System in the 1980s. A close above the 20-day upper band = new 20-day high — the simplest mechanically backtested breakout signal. 55-day = Turtle System 2 slow entry, catches major trends. Donchian Squeeze (bandwidth at 6-month low) identifies the pre-breakout coiling state. This is Chartink's most-used breakout filter.`,
         links:[['Chartink','https://chartink.com'],['Turtle Rules','https://www.turtletrader.com']],
         ai:'Compare Donchian 20d vs 55d breakout success rates on NSE. How does bandwidth contraction predict breakout magnitude? What stop-loss rules did the Turtle Traders use with Donchian entries?'
       },
       { n:'GMMA Cross Bull — Guppy Multiple Moving Average (Daryl Guppy)',
         f:'Short-term: EMA(3,5,8,10,12,15). Long-term: EMA(30,35,40,45,50,60). Cross = short avg > long avg (fresh today)',
-        d:"Daryl Guppy identified two dominant market participant groups: short-term traders (3-15 day EMAs) and long-term investors (30-60 day EMAs). When the short-term ribbon crosses above the long-term ribbon, both groups are aligned bullishly. \"All-Bull\" (zero ribbon overlap) is the highest conviction state. \"GMMA Compression\" (ribbons converging) signals major trend change pending. Available on Zerodha Kite and TradePoint — not on Chartink or StockEdge.",
+        d:`Daryl Guppy identified two dominant market participant groups: short-term traders (3-15 day EMAs) and long-term investors (30-60 day EMAs). When the short-term ribbon crosses above the long-term ribbon, both groups are aligned bullishly. "All-Bull" (zero ribbon overlap) is the highest conviction state. "GMMA Compression" (ribbons converging) signals major trend change pending. Available on Zerodha Kite and TradePoint — not on Chartink or StockEdge.`,
         links:[['TradePoint','https://www.definedgesecurities.com']],
         ai:'How does GMMA compare to a simple Golden Cross? What does GMMA compression predict? How is GMMA used with Renko charts for trend confirmation?'
       },
@@ -5466,13 +5675,13 @@ function renderHelp(){
     {icon:'📊', title:'RSI Trend Filter & MACD Histogram — Advanced Momentum', items:[
       { n:'RSI Cross Above 50 — Momentum Phase Shift',
         f:'cross50_bull = RSI(14)[-1] > 50 AND RSI(14)[-2] <= 50',
-        d:"RSI 50 is the professional\'s momentum threshold — RSI crossing above 50 means average gains exceed average losses for the first time. This is earlier than waiting for RSI oversold recovery and more reliable than RSI overbought for trend entry. Stage 2 stocks consistently hold RSI above 50 on pullbacks. RSI Bull Zone (40-80) selects stocks in sustainable uptrends — stocks that drop below 40 are in distribution.",
+        d:`RSI 50 is the professional's momentum threshold — RSI crossing above 50 means average gains exceed average losses for the first time. This is earlier than waiting for RSI oversold recovery and more reliable than RSI overbought for trend entry. Stage 2 stocks consistently hold RSI above 50 on pullbacks. RSI Bull Zone (40-80) selects stocks in sustainable uptrends — stocks that drop below 40 are in distribution.`,
         links:[],
         ai:'Why is RSI 50 more important than RSI 30/70 for trend trading? How does RSI behave differently in bull vs bear markets on NSE? What is the win rate of RSI-cross-50-bull combined with price above 200 SMA?'
       },
       { n:'MACD Histogram Rising (Negative + Improving) — Early Bull Divergence',
         f:'hist_neg_inc = hist[-1] < 0 AND hist[-1] > hist[-2]',
-        d:"MACD histogram rising from negative territory is an earlier entry signal than waiting for the histogram to cross zero. When the histogram is still negative but improving, selling pressure is diminishing before bulls take control. This is the early divergence signal — entering before the MACD crossover that the crowd uses. Chartink charges for this filter. Zero-Line Cross (MACD > 0) is the stronger confirmation: equivalent to a 12/26 EMA Golden Cross.",
+        d:`MACD histogram rising from negative territory is an earlier entry signal than waiting for the histogram to cross zero. When the histogram is still negative but improving, selling pressure is diminishing before bulls take control. This is the early divergence signal — entering before the MACD crossover that the crowd uses. Chartink charges for this filter. Zero-Line Cross (MACD > 0) is the stronger confirmation: equivalent to a 12/26 EMA Golden Cross.`,
         links:[['MACD explained','https://www.investopedia.com/terms/m/macd.asp']],
         ai:'How much earlier does histogram divergence signal a trend change vs the signal-line crossover? What is the forward return after MACD zero-line cross on NSE midcaps?'
       },
@@ -5480,18 +5689,37 @@ function renderHelp(){
     {icon:'📍', title:'Pivot Bounce Scanner — Support & Resistance', items:[
       { n:'Pivot Bounce Filter — Price Near S1/S2/P/R1/R2 (0.7% tolerance)',
         f:'P=(H+L+C)/3. S1=2P-H. S2=P-R. R1=2P-L. R2=P+R where R=H-L. Near = |price-level|/level < 0.7%',
-        d:"The Pivot tab now has a Bounce Filter dropdown — combine any pivot strategy with a price-level filter. \"Near S1\" finds stocks testing first support; \"Above P\" finds stocks that just crossed the pivot bullishly. These are the most-searched Chartink scans: stocks near support about to bounce. The 0.7% tolerance catches stocks within ±7 points on a ₹1000 stock — tight enough to be actionable.",
+        d:`The Pivot tab now has a Bounce Filter dropdown — combine any pivot strategy with a price-level filter. "Near S1" finds stocks testing first support; "Above P" finds stocks that just crossed the pivot bullishly. These are the most-searched Chartink scans: stocks near support about to bounce. The 0.7% tolerance catches stocks within ±7 points on a ₹1000 stock — tight enough to be actionable.`,
         links:[['Floor Trader Pivots','https://www.investopedia.com/terms/p/pivotpoint.asp']],
         ai:'What is the bounce success rate at S1 vs S2 on NSE? How should I combine pivot bounces with candlestick patterns? Which pivot types (Fibonacci vs Classic) have better bounce reliability?'
       },
-    ]}
+    ]},
+    {icon:'🎯', title:'Swing Setup — EMA Squeeze · MACD 5/35 · Trade Plans', items:[
+      { n:'EMA Squeeze (10/20/50/100/150/200) — Daily/Weekly/Monthly',
+        f:`tight_pct = (MAX(EMA10..EMA200) - MIN(EMA10..EMA200)) / AVG(EMAs) * 100. Squeeze if tight_pct <= 2.5%, Ultra-Tight if <= 1%`,
+        d:`When 6 EMAs spanning 10 to 200 periods all converge to within 2.5% of each other, every major group of market participants - from day traders watching the 10 EMA to position traders watching the 200 EMA - is looking at nearly the same price. This represents maximum equilibrium. Historically, the tighter this squeeze, the more explosive the eventual breakout, because the energy has been compressed across ALL timeframes simultaneously rather than just one. The Daily Squeeze captures short-term coiling (days to weeks). The Weekly Squeeze (10/20/50/100-week EMAs) captures multi-month consolidations that resolve into multi-week trends. The Monthly Squeeze (10/20/50-month EMAs) is rare and signals multi-year base patterns - when these resolve, the resulting trend often lasts for quarters or years. Bull Stack squeeze (EMAs tight AND shorter-above-longer) is the highest-probability continuation setup: the stock is pausing INSIDE an established uptrend rather than reversing.`,
+        links:[['EMA Ribbon Concept','https://www.investopedia.com/terms/e/ema.asp']],
+        ai:'Explain why converging EMAs across multiple timeframes (daily/weekly/monthly) predict larger breakouts than a single-timeframe squeeze. What is the typical breakout magnitude after a daily EMA squeeze versus a weekly EMA squeeze on NSE stocks? How long does an EMA squeeze typically last before resolving?'
+      },
+      { n:'MACD 5/35/5 Crossover — Fast Swing Variant (Daily/Weekly/Monthly)',
+        f:`Fast EMA(5) - Slow EMA(35) = MACD line. Signal = EMA(5) of MACD line. Cross_bull = MACD crosses above Signal. Computed independently for daily, weekly, and monthly closes.`,
+        d:`Standard MACD uses 12/26/9 periods, tuned for medium-term position trades. The 5/35/5 variant uses a much faster fast-EMA (5 vs 12) and a faster signal line (5 vs 9), making it react roughly 40% quicker to momentum shifts - at the cost of slightly more false signals. This makes it ideal for SWING trading specifically: the Daily 5/35/5 cross catches entries 1-2 days before the standard MACD would, while the Weekly 5/35/5 cross identifies multi-week swing moves perfect for a 1-3 month holding horizon. The Monthly 5/35/5 cross is positional - when it turns bullish, the underlying trend change often persists for 3-12 months. The "All Timeframes Aligned" signal requires Daily, Weekly AND Monthly MACD(5,35,5) to all be bullish simultaneously - this is the strongest possible momentum confirmation because short-term traders, swing traders, AND positional investors are all aligned in the same direction at the same time. The Zero-Line Cross (MACD line itself crossing above zero, not just the signal line) confirms that the 5-EMA has crossed above the 35-EMA in absolute terms - a stronger trend-change confirmation than the signal-line cross alone.`,
+        links:[['MACD Explained','https://www.investopedia.com/terms/m/macd.asp']],
+        ai:'How does a 5/35/5 MACD compare to the standard 12/26/9 MACD for swing trading on NSE? What is the false-signal rate of the faster variant versus the standard one? How should position size differ when entering on a daily versus weekly MACD 5/35 cross?'
+      },
+      { n:'Swing Trade Suggestion — Entry / Stop / Target for 1 Week to 3 Months',
+        f:`Entry = current price. Stop = Pivot S1 (if below price) else price - 1.5*ATR. Target = Pivot R2 (if above price) else price + 2.5*ATR. R:R = (Target-Entry)/(Entry-Stop)`,
+        d:`The Swing Trade Suggestion combines the composite Buy/Sell score (built from 148 signals across 14 categories - see Stock Lookup) with concrete trade levels. "Swing Buy Candidates" filters to score >= 60 (Buy or Strong Buy grade) and computes a suggested entry (the current price), a stop-loss (placed at the nearest pivot support level S1, or 1.5x ATR below price if no pivot support is nearby), and a target (the next pivot resistance R2, or 2.5x ATR above price). The resulting Risk:Reward ratio is shown - a ratio above 1.5 is generally considered favorable for swing trades. "Strong Swing Buy" raises the bar to score >= 75 AND confluence across 4+ signal categories (meaning the bullish case is confirmed by multiple independent methods - e.g. trend-following AND smart money concepts AND momentum - not just one). "Breakout-Ready" combines an EMA squeeze (the stock is coiled, compressed across timeframes) with a fresh MACD 5/35 bullish cross (the momentum trigger has just fired) - this compression-plus-trigger combination is the textbook breakout entry pattern used by professional swing traders. The 1-week to 3-month horizon is appropriate because: EMA squeezes typically resolve within 1-4 weeks, MACD 5/35 weekly crosses persist for 4-12 weeks, and the ATR-based stop/target levels are calibrated for swing (not intraday or long-term investment) volatility.`,
+        links:[['Position Sizing & R:R','https://www.investopedia.com/articles/trading/04/091504.asp']],
+        ai:'How should I size a swing trade position based on the Risk:Reward ratio and my account size? What R:R ratio is considered acceptable for a 1-3 month swing trade on NSE? How often should I review and adjust the stop-loss on an open swing position?'
+      },
+    ]},
   ];
 
   let html=`<div class="help-wrap">
     <div style="font-family:var(--mono);font-size:9px;color:var(--mu);margin-bottom:14px;padding:8px 12px;background:rgba(59,158,255,.04);border:1px solid rgba(59,158,255,.12);border-radius:5px">
       ❓ Detailed reference for every strategy in the scanner — 10+ sentence explanations, authoritative references, and AI chat shortcuts to learn more. Click any section to expand.
     </div>`;
-
   window._HS=H; // expose to showHelp() popup
   H.forEach(sec=>{
     const cnt=sec.items.length;
@@ -5561,6 +5789,7 @@ function triggerAutoScan(){
     else if(t==='combo'){ scanCombo(); }
     else if(t==='bp'){ scanBP(); }
     else if(t==='sr'){ scanSR(); }
+    else if(t==='swing'){ scanSwing(); }
   },350);
 }
 function initAutoScan(){
@@ -5997,6 +6226,18 @@ const PATT_INFO={
   cp_fall_wedge:'<b>Falling Wedge</b> · Both trendlines slope down but converge — lows falling slower than highs · Despite looking bearish, it is bullish · Demand is absorbing supply · Breakout above upper trendline · Common in healthy bull market corrections',
   cp_bull_flag:'<b>Bull Flag</b> · Strong vertical up-move (the pole) followed by a tight, slightly downward consolidation channel (the flag) · The consolidation shows supply exhaustion · Breakout from the flag = continuation of the original move · Target = pole length added to breakout point',
   cp_bear_flag:'<b>Bear Flag</b> · Strong down-move (pole) followed by tight upward consolidation · Bearish continuation · Distribution into the bounce · Breakdown from flag = continuation of decline',
+  dbl_bot_d:'<b>Double Bottom (W) — Daily</b> · Two lows at a similar level separated by a peak (neckline) · The classic "W" reversal shape on the daily chart · Confirmation comes when price closes above the neckline',
+  dbl_bot_d_bo:'<b>Double Bottom (W) — Daily, Neckline Breakout</b> · The W pattern is complete AND price has already closed above the neckline · Confirmed, actionable entry — the reversal is validated',
+  dbl_bot_w:'<b>Double Bottom (W) — Weekly</b> · Two weekly lows at a similar level with a neckline peak between them · A weekly W pattern represents a multi-month base — breakouts tend to run for months',
+  dbl_bot_w_bo:'<b>Double Bottom (W) — Weekly, Neckline Breakout</b> · Weekly W pattern confirmed with price closing above the weekly neckline · One of the highest-conviction swing/position entries',
+  dbl_bot_m:'<b>Double Bottom (W) — Monthly</b> · Two monthly lows at a similar level — represents a multi-year base · Rare and significant when found',
+  dbl_bot_m_bo:'<b>Double Bottom (W) — Monthly, Neckline Breakout</b> · Monthly W pattern confirmed — a major multi-year trend reversal, holding period often measured in years',
+  dbl_top_d:'<b>Double Top (M) — Daily</b> · Two highs at a similar level separated by a trough (neckline) · The classic "M" reversal shape on the daily chart · Confirmation comes when price closes below the neckline',
+  dbl_top_d_bo:'<b>Double Top (M) — Daily, Neckline Breakdown</b> · The M pattern is complete AND price has already closed below the neckline · Confirmed bearish reversal — consider exits or short setups',
+  dbl_top_w:'<b>Double Top (M) — Weekly</b> · Two weekly highs at a similar level with a neckline trough between them · A weekly M pattern signals a multi-month top forming',
+  dbl_top_w_bo:'<b>Double Top (M) — Weekly, Neckline Breakdown</b> · Weekly M pattern confirmed with price closing below the weekly neckline · High-conviction multi-week bearish signal',
+  dbl_top_m:'<b>Double Top (M) — Monthly</b> · Two monthly highs at a similar level — represents a multi-year topping process · Rare and significant when found',
+  dbl_top_m_bo:'<b>Double Top (M) — Monthly, Neckline Breakdown</b> · Monthly M pattern confirmed — a major multi-year trend reversal to the downside',
 };
 function updatePATTInfo(){
   const s=document.getElementById('patt-strat').value;
@@ -6037,6 +6278,21 @@ function scanPATT(){
     if(strat==='cp_fall_wedge'){matched=!!cp.fall_wedge; sig='📐 Fall Wedge'; extra={pivots:cp.n_pivots};}
     if(strat==='cp_bull_flag') {matched=!!cp.bull_flag;  sig='🚩 Bull Flag';  extra={pivots:cp.n_pivots};}
     if(strat==='cp_bear_flag') {matched=!!cp.bear_flag;  sig='🚩 Bear Flag';  extra={pivots:cp.n_pivots};}
+    // Double Bottom (W) / Double Top (M) — Daily/Weekly/Monthly with neckline confirmation
+    const dbl=s.patt?.dbl||{}; const dd=dbl.d||{}, dw=dbl.w||{}, dm=dbl.m||{};
+    const wW=dd.w||{}, wM=dd.m||{}, wwW=dw.w||{}, wwM=dw.m||{}, mwW=dm.w||{}, mwM=dm.m||{};
+    if(strat==='dbl_bot_d')   {matched=!!wW.found;             sig='〔W〕 D Dbl Bot';     extra={neckline:wW.neckline,depth:wW.depth_pct+'%',breakout:wW.breakout?'✓':'—'};}
+    if(strat==='dbl_bot_d_bo'){matched=!!wW.found&&!!wW.breakout; sig='〔W〕 D Dbl Bot BO'; extra={neckline:wW.neckline,depth:wW.depth_pct+'%'};}
+    if(strat==='dbl_bot_w')   {matched=!!wwW.found;            sig='〔W〕 W Dbl Bot';     extra={neckline:wwW.neckline,depth:wwW.depth_pct+'%',breakout:wwW.breakout?'✓':'—'};}
+    if(strat==='dbl_bot_w_bo'){matched=!!wwW.found&&!!wwW.breakout; sig='〔W〕 W Dbl Bot BO'; extra={neckline:wwW.neckline,depth:wwW.depth_pct+'%'};}
+    if(strat==='dbl_bot_m')   {matched=!!mwW.found;            sig='〔W〕 M Dbl Bot';     extra={neckline:mwW.neckline,depth:mwW.depth_pct+'%',breakout:mwW.breakout?'✓':'—'};}
+    if(strat==='dbl_bot_m_bo'){matched=!!mwW.found&&!!mwW.breakout; sig='〔W〕 M Dbl Bot BO'; extra={neckline:mwW.neckline,depth:mwW.depth_pct+'%'};}
+    if(strat==='dbl_top_d')   {matched=!!wM.found;             sig='〔M〕 D Dbl Top';     extra={neckline:wM.neckline,depth:wM.depth_pct+'%',breakdown:wM.breakdown?'✓':'—'};}
+    if(strat==='dbl_top_d_bo'){matched=!!wM.found&&!!wM.breakdown; sig='〔M〕 D Dbl Top BD'; extra={neckline:wM.neckline,depth:wM.depth_pct+'%'};}
+    if(strat==='dbl_top_w')   {matched=!!wwM.found;            sig='〔M〕 W Dbl Top';     extra={neckline:wwM.neckline,depth:wwM.depth_pct+'%',breakdown:wwM.breakdown?'✓':'—'};}
+    if(strat==='dbl_top_w_bo'){matched=!!wwM.found&&!!wwM.breakdown; sig='〔M〕 W Dbl Top BD'; extra={neckline:wwM.neckline,depth:wwM.depth_pct+'%'};}
+    if(strat==='dbl_top_m')   {matched=!!mwM.found;            sig='〔M〕 M Dbl Top';     extra={neckline:mwM.neckline,depth:mwM.depth_pct+'%',breakdown:mwM.breakdown?'✓':'—'};}
+    if(strat==='dbl_top_m_bo'){matched=!!mwM.found&&!!mwM.breakdown; sig='〔M〕 M Dbl Top BD'; extra={neckline:mwM.neckline,depth:mwM.depth_pct+'%'};}
     if(!matched)continue;
     rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
       above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
@@ -6556,6 +6812,648 @@ Format as 3 short paragraphs: (1) Overall assessment, (2) Key bullish/bearish si
   btn.disabled=false; btn.textContent='🤖 AI Analysis';
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🔍 SIGNAL SCORER — evaluates ~35 signals across all tabs, returns Buy/Sell score
+// ════════════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🏆 TOP PICKS — universe-wide Strong Buy / Strong Sell board
+// ════════════════════════════════════════════════════════════════════════════
+function renderTopPicks(){
+  return `<div style="padding:14px">
+    <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mu)">Universe</label>
+      <select id="tp-idx" style="padding:6px 10px;background:var(--bg2);border:1px solid var(--brd);
+        border-radius:5px;color:var(--txt);font-size:12px" onchange="scanTopPicks()">
+        <option value="0">All Stocks</option>
+        <option value="fno">F&O Only</option>
+        <option value="50">Nifty 50</option>
+        <option value="100">Nifty 100</option>
+        <option value="200">Nifty 200</option>
+        <option value="500">Nifty 500</option>
+        <option value="750">Nifty 750</option>
+      </select>
+      <label style="font-size:12px;color:var(--mu)">Show top</label>
+      <select id="tp-n" style="padding:6px 10px;background:var(--bg2);border:1px solid var(--brd);
+        border-radius:5px;color:var(--txt);font-size:12px" onchange="scanTopPicks()">
+        <option value="10">10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+        <option value="30">30</option>
+      </select>
+      <span id="tp-count" style="font-size:11px;color:var(--mu);margin-left:auto"></span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;min-width:0">
+      <div>
+        <div style="font-size:12px;font-weight:700;color:#00e5a0;margin-bottom:8px;font-family:var(--mono)">
+          🟢 TOP BUYS — highest confluence-weighted score</div>
+        <div id="tp-buy"></div>
+      </div>
+      <div>
+        <div style="font-size:12px;font-weight:700;color:#ef4444;margin-bottom:8px;font-family:var(--mono)">
+          🔴 TOP SELLS — lowest confluence-weighted score</div>
+        <div id="tp-sell"></div>
+      </div>
+    </div>
+    <div style="margin-top:14px;font-size:10px;color:var(--mu);padding:8px 12px;background:rgba(59,158,255,.04);
+      border:1px solid rgba(59,158,255,.12);border-radius:5px">
+      💡 Score combines 148 signals across 14 categories with a confluence bonus — stocks confirmed by
+      multiple independent methods (e.g. Trend + SMC + Smart Rank together) rank higher than stocks with
+      many signals from a single category. Click ⓘ on any symbol for the full scanner breakdown.
+    </div>
+  </div>`;
+}
+
+function _tpRow(s,sc,rank){
+  const f2=v=>typeof v==='number'?v.toFixed(2):(v||'—');
+  const pct=(v,b)=>b&&v?((v-b)/b*100).toFixed(1)+'%':'—';
+  const dist=s.dma200?((s.price-s.dma200)/s.dma200*100):0;
+  return `<div onclick="showScorePopup('${s.sym}')" style="display:flex;align-items:center;gap:10px;
+    padding:8px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:6px;
+    margin-bottom:5px;cursor:pointer">
+    <span style="color:var(--mu);font-size:11px;width:18px;text-align:right">${rank}</span>
+    <span class="sd-ico" onmouseenter="_sdHover('${s.sym}')" title="Stock detail" onclick="event.stopPropagation()">i</span>
+    <a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${s.sym}" target="_blank" rel="noopener"
+       onclick="event.stopPropagation()" style="font-weight:700;min-width:90px">${s.sym}</a>
+    <span style="font-size:11px;color:var(--mu);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.sector||'—'}</span>
+    <span style="font-size:12px">₹${f2(s.price)}</span>
+    <span style="font-size:11px;color:${dist>=0?'#00e5a0':'#ef4444'};min-width:54px;text-align:right">${pct(s.price,s.dma200)}</span>
+    <div style="width:50px;height:6px;background:var(--brd);border-radius:3px;overflow:hidden">
+      <div style="width:${sc.score}%;height:100%;background:${sc.color}"></div>
+    </div>
+    <span style="color:${sc.color};font-weight:700;min-width:30px;text-align:right">${sc.score}</span>
+  </div>`;
+}
+
+function scanTopPicks(){
+  const idxSel=document.getElementById('tp-idx').value;
+  const n=parseInt(document.getElementById('tp-n').value)||10;
+  let list=S.slice();
+  if(idxSel==='fno') list=list.filter(s=>s.fno);
+  else if(idxSel!=='0') list=list.filter(s=>s.idx&&s.idx<=parseInt(idxSel));
+
+  const scored=list.map(s=>({s,sc:scoreStock(s)}));
+  scored.sort((a,b)=>b.sc.score-a.sc.score);
+
+  const buys=scored.slice(0,n);
+  const sells=scored.slice(-n).reverse();
+
+  document.getElementById('tp-count').textContent=list.length+' stocks scanned';
+  document.getElementById('tp-buy').innerHTML=buys.map((x,i)=>_tpRow(x.s,x.sc,i+1)).join('')
+    ||'<div class="nodata">No stocks</div>';
+  document.getElementById('tp-sell').innerHTML=sells.map((x,i)=>_tpRow(x.s,x.sc,i+1)).join('')
+    ||'<div class="nodata">No stocks</div>';
+}
+
+const TAB_NAMES={piv:'Pivot Points',smc:'Price Action/SMC',vol:'Volume',mi:'Multi-Indicator',
+  adv:'Advanced',t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',ti:'India Pro',nl:'Noiseless',
+  xp:'Experimental/VSA',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combiner',
+  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup'};
+const SIGNAL_DEFS=[
+  // ── Trend / Tier-1 ──
+  {cat:'Trend',tab:'t1',label:'SuperTrend Bullish',          w:3, chk:s=>s.t1?.stt?.bull},
+  {cat:'Trend',tab:'t1',label:'SuperTrend Bearish',          w:-3,chk:s=>s.t1?.stt?.bear},
+  {cat:'Trend',tab:'t1',label:'SuperTrend Flip Bull (fresh)',w:4, chk:s=>s.t1?.stt?.flip_bull},
+  {cat:'Trend',tab:'t1',label:'SuperTrend Flip Bear (fresh)',w:-4,chk:s=>s.t1?.stt?.flip_bear},
+  {cat:'Trend',tab:'t1',label:'Golden Cross (50>200 SMA)',   w:3, chk:s=>s.t1?.gc?.bull_zone},
+  {cat:'Trend',tab:'t1',label:'Fresh Golden Cross',          w:4, chk:s=>s.t1?.gc?.fresh_golden},
+  {cat:'Trend',tab:'t1',label:'Fresh Death Cross',           w:-4,chk:s=>s.t1?.gc?.fresh_death},
+  {cat:'Trend',tab:'t1',label:'Price Above 200 SMA',         w:1, chk:s=>s.above200},
+  {cat:'Trend',tab:'t1',label:'Price Below 200 SMA',         w:-1,chk:s=>!s.above200&&s.dma200>0},
+  {cat:'Trend',tab:'adv',label:'Donchian 20-Day Breakout',   w:3, chk:s=>s.adv?.dc?.dc20_bull},
+  {cat:'Trend',tab:'adv',label:'Donchian 20-Day Breakdown',  w:-3,chk:s=>s.adv?.dc?.dc20_bear},
+  {cat:'Trend',tab:'adv',label:'Donchian 55-Day Bull (Turtle)',w:4,chk:s=>s.adv?.dc?.dc55_bull},
+  {cat:'Trend',tab:'adv',label:'GMMA Cross Bull (fresh)',    w:4, chk:s=>s.adv?.gmma?.cross_bull},
+  {cat:'Trend',tab:'adv',label:'GMMA Cross Bear (fresh)',    w:-4,chk:s=>s.adv?.gmma?.cross_bear},
+  {cat:'Trend',tab:'adv',label:'GMMA All-Bull (full stack)', w:3, chk:s=>s.adv?.gmma?.all_bull},
+  {cat:'Trend',tab:'adv',label:'GMMA All-Bear',              w:-3,chk:s=>s.adv?.gmma?.all_bear},
+  {cat:'Trend',tab:'adv',label:'Ichimoku Price Above Cloud', w:2, chk:s=>s.adv?.ichi?.above},
+  {cat:'Trend',tab:'adv',label:'Ichimoku Kumo Breakout',     w:3, chk:s=>s.adv?.ichi?.kbo},
+  {cat:'Trend',tab:'bp', label:'EMA Power Stack (full)',     w:3, chk:s=>s.bp?.ems?.full_stack},
+  {cat:'Trend',tab:'bp', label:'EMA Power Stack (rising)',   w:4, chk:s=>s.bp?.ems?.power_stack},
+
+  // ── Momentum ──
+  {cat:'Momentum',tab:'t1',label:'RSI Bullish Divergence',   w:3, chk:s=>s.t1?.rsi?.bull_div},
+  {cat:'Momentum',tab:'t1',label:'RSI Bearish Divergence',   w:-3,chk:s=>s.t1?.rsi?.bear_div},
+  {cat:'Momentum',tab:'t1',label:'RSI Cross Above 50',       w:2, chk:s=>s.t1?.rsi?.cross50_bull},
+  {cat:'Momentum',tab:'t1',label:'RSI Cross Below 50',       w:-2,chk:s=>s.t1?.rsi?.cross50_bear},
+  {cat:'Momentum',tab:'t1',label:'RSI Overbought (≥70)',     w:-1,chk:s=>s.t1?.rsi?.overbought},
+  {cat:'Momentum',tab:'t1',label:'RSI Oversold (≤30)',       w:1, chk:s=>s.t1?.rsi?.oversold},
+  {cat:'Momentum',tab:'t1',label:'RSI Bull Zone (40-80)',    w:1, chk:s=>s.t1?.rsi?.bull_zone},
+  {cat:'Momentum',tab:'t2',label:'MACD Bullish Flip',        w:3, chk:s=>s.t2?.macd?.flip_bull},
+  {cat:'Momentum',tab:'t2',label:'MACD Bearish Flip',        w:-3,chk:s=>s.t2?.macd?.flip_bear},
+  {cat:'Momentum',tab:'t2',label:'MACD Zero-Line Cross Up',  w:3, chk:s=>s.t2?.macd?.zero_bull},
+  {cat:'Momentum',tab:'t2',label:'MACD Zero-Line Cross Down',w:-3,chk:s=>s.t2?.macd?.zero_bear},
+  {cat:'Momentum',tab:'t2',label:'MACD Histogram Rising',    w:1, chk:s=>s.t2?.macd?.hist_rising},
+  {cat:'Momentum',tab:'t2',label:'MACD Hist +ve & Rising',   w:2, chk:s=>s.t2?.macd?.hist_pos_inc},
+  {cat:'Momentum',tab:'t2',label:'MACD Bull Divergence',     w:3, chk:s=>s.t2?.macd?.bull_div},
+  {cat:'Momentum',tab:'t2',label:'MACD Bear Divergence',     w:-3,chk:s=>s.t2?.macd?.bear_div},
+  {cat:'Momentum',tab:'t3',label:'ADX Strong Bull Trend',    w:2, chk:s=>s.t3?.adx?.strong&&s.t3?.adx?.bull_trend},
+  {cat:'Momentum',tab:'t3',label:'Stochastic Bull Cross',    w:2, chk:s=>s.t3?.stoch?.bull_cross},
+  {cat:'Momentum',tab:'t3',label:'Stochastic Oversold',      w:1, chk:s=>s.t3?.stoch?.oversold},
+  {cat:'Momentum',tab:'t3',label:'Stochastic Overbought',    w:-1,chk:s=>s.t3?.stoch?.overbought},
+  {cat:'Momentum',tab:'t3',label:'PSAR Flip Bullish',        w:3, chk:s=>s.t3?.psar?.flip&&s.t3?.psar?.direction==='bull'},
+  {cat:'Momentum',tab:'t3',label:'PSAR Flip Bearish',        w:-3,chk:s=>s.t3?.psar?.flip&&s.t3?.psar?.direction==='bear'},
+
+  // ── Volatility / Breakout ──
+  {cat:'Volatility',tab:'t1',label:'BB Squeeze + Bull Momentum',w:3,chk:s=>s.t1?.bb?.squeeze_bull},
+  {cat:'Volatility',tab:'t1',label:'BB Squeeze + Bear Momentum',w:-3,chk:s=>s.t1?.bb?.squeeze_bear},
+  {cat:'Volatility',tab:'t1',label:'BB Cross Above Upper Band',w:2, chk:s=>s.t1?.bb?.cross_upper},
+  {cat:'Volatility',tab:'t1',label:'BB Cross Below Lower Band',w:-2,chk:s=>s.t1?.bb?.cross_lower},
+  {cat:'Volatility',tab:'t1',label:'52-Week High Breakout',  w:3, chk:s=>s.t1?.w52?.breakout},
+  {cat:'Volatility',tab:'t1',label:'30-Day High Breakout',   w:2, chk:s=>s.t1?.w52?.h30_bo},
+  {cat:'Volatility',tab:'t1',label:'90-Day High Breakout',   w:2, chk:s=>s.t1?.w52?.h90_bo},
+  {cat:'Volatility',tab:'sr',label:'All-Time High Breakout', w:4, chk:s=>s.sr?.ath?.is_ath},
+  {cat:'Volatility',tab:'sr',label:'Triple Compression (NR7+VDU+BBSq)',w:2,chk:s=>s.sr?.tc?.tc3},
+
+  // ── Smart Money / Structure ──
+  {cat:'SMC',tab:'smc',label:'Break of Structure Bull',      w:3, chk:s=>s.smc?.bos_bull},
+  {cat:'SMC',tab:'smc',label:'Break of Structure Bear',      w:-3,chk:s=>s.smc?.bos_bear},
+  {cat:'SMC',tab:'smc',label:'Change of Character (ChoCh)',  w:3, chk:s=>s.smc?.choch==='bull'},
+  {cat:'SMC',tab:'smc',label:'Change of Character (Bear)',   w:-3,chk:s=>s.smc?.choch==='bear'},
+  {cat:'SMC',tab:'smc',label:'Bullish Fair Value Gap',       w:2, chk:s=>s.smc?.bull_fvg},
+  {cat:'SMC',tab:'smc',label:'Bearish Fair Value Gap',       w:-2,chk:s=>s.smc?.bear_fvg},
+  {cat:'SMC',tab:'smc',label:'Bullish Order Block',          w:2, chk:s=>s.smc?.bull_ob},
+  {cat:'SMC',tab:'smc',label:'Bearish Order Block',          w:-2,chk:s=>s.smc?.bear_ob},
+
+  // ── Minervini / Weinstein ──
+  {cat:'MultiIndicator',tab:'mi',label:'Minervini Trend Template (≥6/8)',w:4,chk:s=>(s.mi?.mts||0)>=6},
+  {cat:'MultiIndicator',tab:'mi',label:'Weinstein Stage 2 (Advancing)',w:3,chk:s=>s.mi?.stg===2},
+  {cat:'MultiIndicator',tab:'mi',label:'Weinstein Stage 4 (Declining)',w:-3,chk:s=>s.mi?.stg===4},
+
+  // ── Breakout Pro ──
+  {cat:'BreakoutPro',tab:'bp',label:'VCP (Volatility Contraction)',w:4,chk:s=>s.bp?.vcp?.is_vcp},
+  {cat:'BreakoutPro',tab:'bp',label:'VCP Tight (3+ contractions)',w:5,chk:s=>s.bp?.vcp?.is_vcp3},
+  {cat:'BreakoutPro',tab:'bp',label:'Pocket Pivot',           w:3, chk:s=>s.bp?.pp?.is_pp},
+  {cat:'BreakoutPro',tab:'bp',label:'Strong Pocket Pivot',    w:4, chk:s=>s.bp?.pp?.is_pp_strong},
+  {cat:'BreakoutPro',tab:'bp',label:'3-Week Tight',           w:2, chk:s=>s.bp?.twt?.is_3wt},
+  {cat:'BreakoutPro',tab:'bp',label:'5-Week Tight',           w:3, chk:s=>s.bp?.twt?.is_5wt},
+  {cat:'BreakoutPro',tab:'bp',label:'RS New 52W High',        w:4, chk:s=>s.bp?.rsh?.is_rs_new_high},
+  {cat:'BreakoutPro',tab:'bp',label:'RS Line Breakout',       w:3, chk:s=>s.bp?.rsh?.rs_breakout},
+  {cat:'BreakoutPro',tab:'bp',label:'A/D Rating A or B',      w:2, chk:s=>s.bp?.ads?.is_accum},
+  {cat:'BreakoutPro',tab:'bp',label:'A/D Rating D or E',      w:-2,chk:s=>s.bp?.ads?.is_distrib},
+  {cat:'BreakoutPro',tab:'bp',label:'High Volume Breakout',   w:3, chk:s=>s.bp?.hvb?.hvb},
+  {cat:'BreakoutPro',tab:'bp',label:'Volume Dry-Up (Bullish)',w:2, chk:s=>s.bp?.vdu?.vdu_bullish},
+  {cat:'BreakoutPro',tab:'bp',label:'Trendline Breakout',     w:2, chk:s=>s.bp?.tlb?.tl_breakout},
+
+  // ── Smart Rank ──
+  {cat:'SmartRank',tab:'sr',label:'Momentum Score ≥ 90',      w:4, chk:s=>(s.sr?.ms||0)>=90},
+  {cat:'SmartRank',tab:'sr',label:'Momentum Score ≥ 75',      w:2, chk:s=>(s.sr?.ms||0)>=75&&(s.sr?.ms||0)<90},
+  {cat:'SmartRank',tab:'sr',label:'Momentum Score < 25',      w:-2,chk:s=>(s.sr?.ms||0)<25},
+  {cat:'SmartRank',tab:'sr',label:'MTF Matrix Perfect (15/15)',w:5,chk:s=>(s.sr?.mtf?.total||0)===15},
+  {cat:'SmartRank',tab:'sr',label:'MTF Matrix Strong (≥12)',  w:3, chk:s=>(s.sr?.mtf?.total||0)>=12&&(s.sr?.mtf?.total||0)<15},
+  {cat:'SmartRank',tab:'sr',label:'Consistent RS Leader',     w:4, chk:s=>{
+    const r1=s.sr?.r1m||0,r3=s.sr?.r3m||0,r6=s.sr?.r6m||0,r12=s.sr?.r12m||0;
+    return r1>0&&r3>0&&r6>0&&r12>0&&(s.rs||0)>=80;
+  }},
+
+  // ── Patterns ──
+  {cat:'Patterns',tab:'patt',label:'Gartley Bullish (Harmonic)',w:3,chk:s=>s.patt?.harm?.gartley_bull},
+  {cat:'Patterns',tab:'patt',label:'Gartley Bearish (Harmonic)',w:-3,chk:s=>s.patt?.harm?.gartley_bear},
+  {cat:'Patterns',tab:'patt',label:'Double Bottom',           w:3, chk:s=>s.patt?.cp?.double_bottom},
+  {cat:'Patterns',tab:'patt',label:'Double Top',              w:-3,chk:s=>s.patt?.cp?.double_top},
+
+
+  // ── Double Bottom (W) / Double Top (M) — D/W/M ──
+  {cat:'Patterns',tab:'patt',label:'Double Bottom (W) Daily — Neckline BO',w:3,chk:s=>s.patt?.dbl?.d?.w?.found&&s.patt?.dbl?.d?.w?.breakout},
+  {cat:'Patterns',tab:'patt',label:'Double Bottom (W) Weekly — Neckline BO',w:4,chk:s=>s.patt?.dbl?.w?.w?.found&&s.patt?.dbl?.w?.w?.breakout},
+  {cat:'Patterns',tab:'patt',label:'Double Bottom (W) Monthly — Neckline BO',w:5,chk:s=>s.patt?.dbl?.m?.w?.found&&s.patt?.dbl?.m?.w?.breakout},
+  {cat:'Patterns',tab:'patt',label:'Double Top (M) Daily — Neckline BD',w:-3,chk:s=>s.patt?.dbl?.d?.m?.found&&s.patt?.dbl?.d?.m?.breakdown},
+  {cat:'Patterns',tab:'patt',label:'Double Top (M) Weekly — Neckline BD',w:-4,chk:s=>s.patt?.dbl?.w?.m?.found&&s.patt?.dbl?.w?.m?.breakdown},
+  {cat:'Patterns',tab:'patt',label:'Double Top (M) Monthly — Neckline BD',w:-5,chk:s=>s.patt?.dbl?.m?.m?.found&&s.patt?.dbl?.m?.m?.breakdown},
+
+  // ── Gap ──
+  {cat:'Gap',tab:'gap',label:'Gap Up Continuation',           w:2, chk:s=>s.gap?.up&&s.gap?.cont},
+  {cat:'Gap',tab:'gap',label:'Gap Down Continuation',         w:-2,chk:s=>s.gap?.dn&&s.gap?.cont},
+
+  // ── India Pro Candlesticks ──
+  {cat:'Candles',tab:'ti',label:'Hammer',                     w:2, chk:s=>s.ti?.candle?.hammer},
+  {cat:'Candles',tab:'ti',label:'Inverted Hammer',            w:1, chk:s=>s.ti?.candle?.inv_hammer},
+  {cat:'Candles',tab:'ti',label:'Bullish Engulfing',          w:3, chk:s=>s.ti?.candle?.bull_eng},
+  {cat:'Candles',tab:'ti',label:'Bearish Engulfing',          w:-3,chk:s=>s.ti?.candle?.bear_eng},
+  {cat:'Candles',tab:'ti',label:'Morning Star',               w:3, chk:s=>s.ti?.candle?.morning_star},
+  {cat:'Candles',tab:'ti',label:'Evening Star',               w:-3,chk:s=>s.ti?.candle?.evening_star},
+  {cat:'Candles',tab:'ti',label:'Piercing Pattern',           w:2, chk:s=>s.ti?.candle?.piercing},
+  {cat:'Candles',tab:'ti',label:'Bullish Harami',             w:1, chk:s=>s.ti?.candle?.bull_har},
+  {cat:'Candles',tab:'ti',label:'Bearish Harami',             w:-1,chk:s=>s.ti?.candle?.bear_har},
+  {cat:'Candles',tab:'ti',label:'Three White Soldiers',       w:3, chk:s=>s.ti?.candle?.tws},
+  {cat:'Candles',tab:'ti',label:'Three Black Crows',          w:-3,chk:s=>s.ti?.candle?.tbc},
+  {cat:'Candles',tab:'ti',label:'Doji',                       w:0, chk:s=>s.ti?.candle?.doji, info:true},
+  {cat:'Candles',tab:'ti',label:'Shooting Star',              w:-2,chk:s=>s.ti?.candle?.shooting_star},
+  {cat:'Candles',tab:'ti',label:'Marubozu Bull',              w:2, chk:s=>s.ti?.candle?.marubozu_bull},
+  {cat:'Candles',tab:'ti',label:'Marubozu Bear',              w:-2,chk:s=>s.ti?.candle?.marubozu_bear},
+
+  // ── Noiseless Charts ──
+  {cat:'Noiseless',tab:'nl',label:'P&F X Column (Bull)',      w:2, chk:s=>s.nl?.pnf?.in_x},
+  {cat:'Noiseless',tab:'nl',label:'P&F O Column (Bear)',      w:-2,chk:s=>s.nl?.pnf?.in_o},
+  {cat:'Noiseless',tab:'nl',label:'P&F Double Top BO',        w:3, chk:s=>s.nl?.pnf?.dbl_top},
+  {cat:'Noiseless',tab:'nl',label:'P&F Double Bottom BO',     w:-3,chk:s=>s.nl?.pnf?.dbl_bot},
+  {cat:'Noiseless',tab:'nl',label:'P&F Bullish Catapult',     w:4, chk:s=>s.nl?.pnf?.bull_cat},
+  {cat:'Noiseless',tab:'nl',label:'P&F Bearish Catapult',     w:-4,chk:s=>s.nl?.pnf?.bear_cat},
+  {cat:'Noiseless',tab:'nl',label:'P&F High Pole',            w:-2,chk:s=>s.nl?.pnf?.high_pole},
+  {cat:'Noiseless',tab:'nl',label:'Renko Bull',               w:2, chk:s=>s.nl?.renko?.bull},
+  {cat:'Noiseless',tab:'nl',label:'Renko Bear',               w:-2,chk:s=>s.nl?.renko?.bear},
+  {cat:'Noiseless',tab:'nl',label:'Renko Fresh Reversal',     w:3, chk:s=>s.nl?.renko?.just_rev&&s.nl?.renko?.bull},
+  {cat:'Noiseless',tab:'nl',label:'Renko 3+ Punch Bull',      w:2, chk:s=>s.nl?.renko?.punch3&&s.nl?.renko?.bull},
+  {cat:'Noiseless',tab:'nl',label:'Renko 5+ Punch Bull',      w:3, chk:s=>s.nl?.renko?.punch5&&s.nl?.renko?.bull},
+  {cat:'Noiseless',tab:'nl',label:'Kagi Yang (Bull)',         w:2, chk:s=>s.nl?.kagi?.yang},
+  {cat:'Noiseless',tab:'nl',label:'Kagi Yin (Bear)',          w:-2,chk:s=>s.nl?.kagi?.yin},
+  {cat:'Noiseless',tab:'nl',label:'Kagi Fresh Reversal (Yang)',w:3,chk:s=>s.nl?.kagi?.just_rev&&s.nl?.kagi?.yang},
+  {cat:'Noiseless',tab:'nl',label:'3-Line Break Bull Reversal',w:3,chk:s=>s.nl?.lb3?.bull_rev},
+  {cat:'Noiseless',tab:'nl',label:'3-Line Break Bear Reversal',w:-3,chk:s=>s.nl?.lb3?.bear_rev},
+  {cat:'Noiseless',tab:'nl',label:'RRG Leading Quadrant',     w:3, chk:s=>s.nl?.rrg?.quadrant==='leading'},
+  {cat:'Noiseless',tab:'nl',label:'RRG Lagging Quadrant',     w:-2,chk:s=>s.nl?.rrg?.quadrant==='lagging'},
+
+  // ── VSA (Experimental) ──
+  {cat:'VSA',tab:'xp',label:'VSA Effort Up (Smart Money Buying)',w:2,chk:s=>s.xp?.vsa?.effort_up},
+  {cat:'VSA',tab:'xp',label:'VSA Effort Down (Smart Money Selling)',w:-2,chk:s=>s.xp?.vsa?.effort_dn},
+  {cat:'VSA',tab:'xp',label:'VSA High Volume Bull Bar',       w:2, chk:s=>s.xp?.vsa?.big_vol_bull},
+  {cat:'VSA',tab:'xp',label:'VSA High Volume Bear Bar',       w:-2,chk:s=>s.xp?.vsa?.big_vol_bear},
+
+  // ── Pivot Bounce ──
+  {cat:'PivotBounce',tab:'piv',label:'Near Pivot S1 (Support)',w:1, chk:s=>s.pb?.near_S1},
+  {cat:'PivotBounce',tab:'piv',label:'Near Pivot S2 (Support)',w:1, chk:s=>s.pb?.near_S2},
+  {cat:'PivotBounce',tab:'piv',label:'Near Pivot R1 (Resistance)',w:-1,chk:s=>s.pb?.near_R1},
+  {cat:'PivotBounce',tab:'piv',label:'Near Pivot R2 (Resistance)',w:-1,chk:s=>s.pb?.near_R2},
+  {cat:'PivotBounce',tab:'piv',label:'Above Pivot Point (Bullish)',w:1,chk:s=>s.pb?.above_P},
+  {cat:'PivotBounce',tab:'piv',label:'At Support Zone',       w:1, chk:s=>s.pb?.at_sup},
+  {cat:'PivotBounce',tab:'piv',label:'At Resistance Zone',    w:-1,chk:s=>s.pb?.at_res},
+  {cat:'PivotBounce',tab:'piv',label:'Below Support S1 (Bearish)',w:-1,chk:s=>s.pb?.below_S1},
+
+  // ── Inside Week / Trendline (Breakout Pro extras) ──
+  {cat:'BreakoutPro',tab:'bp',label:'Inside Week',            w:1, chk:s=>s.bp?.iw?.iw1},
+  {cat:'BreakoutPro',tab:'bp',label:'Double Inside Week',     w:2, chk:s=>s.bp?.iw?.iw2},
+  {cat:'BreakoutPro',tab:'bp',label:'Inside Week in Uptrend', w:2, chk:s=>s.bp?.iw?.iw_uptrend},
+
+  // ── Advanced extras ──
+  {cat:'Advanced',tab:'adv',label:'VCP (Volatility Contraction)',w:3,chk:s=>s.adv?.vcp?.is_vcp},
+  {cat:'Advanced',tab:'adv',label:'Darvas Box Breakout',      w:3, chk:s=>s.adv?.darvas?.breakout},
+  {cat:'Advanced',tab:'adv',label:'Wyckoff Spring (Accumulation)',w:3,chk:s=>s.adv?.wyckoff?.spring},
+  {cat:'Advanced',tab:'adv',label:'Turtle Soup (False BO Reversal)',w:2,chk:s=>s.adv?.turtle?.bull_setup},
+  {cat:'Advanced',tab:'adv',label:'TD Sequential Buy Setup 9',w:3, chk:s=>s.adv?.td?.buy9},
+  {cat:'Advanced',tab:'adv',label:'TD Sequential Sell Setup 9',w:-3,chk:s=>s.adv?.td?.sell9},
+  {cat:'Advanced',tab:'adv',label:'Elder Triple Screen Buy',  w:2, chk:s=>s.adv?.elder?.buy},
+  {cat:'Advanced',tab:'adv',label:'Elder Triple Screen Sell', w:-2,chk:s=>s.adv?.elder?.sell},
+
+  // ── Donchian extras ──
+  {cat:'Trend',tab:'adv',label:'Donchian Squeeze (Pre-Breakout)',w:1,chk:s=>s.adv?.dc?.squeeze},
+  {cat:'Trend',tab:'adv',label:'GMMA Compression (Trend Change Pending)',w:0,chk:s=>s.adv?.gmma?.compress,info:true},
+
+  // ── Fib / Chandelier ──
+  {cat:'Momentum',tab:'t3',label:'Near Fibonacci 61.8% Retracement',w:1,chk:s=>s.t3?.fib?.near&&s.t3?.fib?.nearest==='61.8%'},
+  {cat:'Momentum',tab:'t3',label:'Chandelier Exit Bullish',   w:2, chk:s=>s.t3?.ce?.bull},
+  {cat:'Momentum',tab:'t3',label:'Chandelier Exit Bearish',   w:-2,chk:s=>s.t3?.ce?.bear},
+];
+
+function scoreStock(s){
+  let bullW=0, bearW=0; const matched=[];
+  for(const d of SIGNAL_DEFS){
+    let ok=false;
+    try{ ok=!!d.chk(s); }catch(e){ ok=false; }
+    if(ok){
+      matched.push(d);
+      if(d.w>0) bullW+=d.w; else if(d.w<0) bearW+=Math.abs(d.w);
+    }
+  }
+  // ── Confluence bonus: reward signals spanning MULTIPLE categories over
+  //    redundant signals piling up in one category (e.g. 5 candlestick hits
+  //    shouldn't outweigh 1 hit each from Trend + SMC + Smart Rank + BreakoutPro) ──
+  const bullCats=new Set(matched.filter(m=>m.w>0).map(m=>m.cat));
+  const bearCats=new Set(matched.filter(m=>m.w<0).map(m=>m.cat));
+  // +8% of bullW per distinct bullish category beyond the first (capped at +40%)
+  const bullConfluence=Math.min(bullCats.size>0?(bullCats.size-1)*0.08:0, 0.40);
+  const bearConfluence=Math.min(bearCats.size>0?(bearCats.size-1)*0.08:0, 0.40);
+  const bullWAdj=bullW*(1+bullConfluence);
+  const bearWAdj=bearW*(1+bearConfluence);
+
+  const total=bullWAdj+bearWAdj;
+  const score=total>0?Math.round(bullWAdj/total*100):50;
+  let grade,color;
+  if(score>=75){grade='Strong Buy';color='#00e5a0';}
+  else if(score>=60){grade='Buy';color='#4ade80';}
+  else if(score>=40){grade='Neutral';color='#94a3b8';}
+  else if(score>=25){grade='Sell';color='#fb923c';}
+  else{grade='Strong Sell';color='#ef4444';}
+  return {score,grade,color,bullW,bearW,matched,
+          bullCats:bullCats.size, bearCats:bearCats.size,
+          confluenceBonus:Math.round(bullConfluence*100),
+          bullSignals:matched.filter(m=>m.w>0),
+          bearSignals:matched.filter(m=>m.w<0)};
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🔍 STOCK LOOKUP — search a stock, see all matched signals + score
+// ════════════════════════════════════════════════════════════════════════════
+function renderLookup(){
+  return `<div style="padding:14px;max-width:900px">
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <input id="lookup-input" type="text" placeholder="Enter stock symbol e.g. RELIANCE, TCS, INFY..."
+        style="flex:1;min-width:240px;padding:10px 14px;background:var(--bg2);border:1px solid var(--brd);
+        border-radius:6px;color:var(--txt);font-size:14px;font-family:var(--mono);text-transform:uppercase"
+        onkeydown="if(event.key==='Enter')lookupStock()">
+      <button class="btn" style="background:var(--acc);color:#000" onclick="lookupStock()">🔍 Search</button>
+    </div>
+    <div id="lookup-suggest" style="margin-bottom:10px"></div>
+    <div id="lookup-result"></div>
+  </div>`;
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🎯 SWING SETUP — EMA Squeeze + MACD 5/35 (D/W/M) + Swing Trade Suggestions
+// ════════════════════════════════════════════════════════════════════════════
+const SWING_INFO={
+  ema_sq_d:'<b>Daily EMA Squeeze</b> · 10/20/50/100/150/200 EMA all within 2.5% of each other on the DAILY chart · A tight coil across every major moving average — the calm before a directional expansion',
+  ema_sq_d_tight:'<b>Daily Ultra-Tight Squeeze</b> · All loaded EMAs (10-200) within 1% of each other · Extremely rare — historically precedes the largest volatility expansions',
+  ema_sq_w:'<b>Weekly EMA Squeeze</b> · 10/20/50/100-week EMAs converged within 2.5% · A multi-month consolidation resolving — breakouts from weekly squeeze tend to run for weeks',
+  ema_sq_m:'<b>Monthly EMA Squeeze</b> · 10/20/50-month EMAs converged · Multi-year base — when this resolves, the move is typically a major trend change lasting quarters',
+  ema_sq_d_bull:'<b>Daily Squeeze + Bull Stack</b> · EMAs are tight AND already arranged bullishly (shorter above longer) · Coiling INSIDE an uptrend — highest-probability continuation setup',
+  ema_sq_w_bull:'<b>Weekly Squeeze + Bull Stack</b> · Weekly EMAs tight and bullishly stacked · Multi-week pause within an established uptrend',
+  macd535_d_bull:'<b>Daily MACD 5/35/5 Bullish Cross</b> · Fast 5-EMA crossed above slow 35-EMA today on the daily chart · A faster variant of standard MACD(12,26,9) — catches swing entries 1-2 days earlier',
+  macd535_d_bear:'<b>Daily MACD 5/35/5 Bearish Cross</b> · Fast EMA crossed below slow EMA — momentum turning down on daily timeframe',
+  macd535_w_bull:'<b>Weekly MACD 5/35/5 Bullish Cross</b> · Weekly fast/slow EMA cross — signals a multi-week swing move beginning, ideal for 1-3 month holding periods',
+  macd535_w_bear:'<b>Weekly MACD 5/35/5 Bearish Cross</b> · Weekly momentum turning down — consider exiting swing longs or avoiding new entries',
+  macd535_m_bull:'<b>Monthly MACD 5/35/5 Bullish Cross</b> · Monthly cross — positional/investment-grade signal, holding period often 3-12 months',
+  macd535_m_bear:'<b>Monthly MACD 5/35/5 Bearish Cross</b> · Monthly bearish cross — major trend deterioration, longer-term caution',
+  macd535_d_zero_bull:'<b>Daily MACD 5/35 Zero-Line Cross Up</b> · The fast EMA crossed above the slow EMA AND the MACD line itself crossed above zero — stronger confirmation than signal-line cross alone',
+  macd535_align:'<b>All-Timeframe MACD 5/35 Alignment</b> · Daily, Weekly AND Monthly MACD(5,35,5) are all bullish simultaneously · Full timeframe alignment — the strongest possible momentum confirmation across short, medium and long-term traders',
+  swing_buy:'<b>Swing Buy Candidates</b> · Composite signal score ≥60 (Buy or Strong Buy grade) · Each result includes a suggested Entry (current price), Stop-Loss (below nearest pivot support / 1.5×ATR), and Target (next resistance / 2.5×ATR) for a 1-week to 3-month swing horizon',
+  swing_strong:'<b>Strong Swing Buy</b> · Score ≥75 (Strong Buy) with confluence across 4+ signal categories · The highest-conviction swing setups in the universe right now, with full entry/stop/target plan',
+  swing_breakout_ready:'<b>Breakout-Ready Setup</b> · Stock is BOTH in an EMA squeeze (coiled) AND has a fresh MACD 5/35 bullish cross (momentum trigger firing) · The combination of compression + trigger is the textbook breakout entry',
+};
+function updateSwingInfo(){const s=document.getElementById('swing-strat').value;setFbar('🎯 <b>Swing Setup</b> · '+(SWING_INFO[s]||s));}
+
+function _swingTargets(s){
+  // Suggest Entry/Stop/Target for a 1-week to 3-month swing using pivot levels + ATR fallback
+  const price=s.price; const pb=s.pb||{}; const ce=s.t3?.ce||{};
+  const atr=ce.atr||price*0.02; // fallback ~2% if ATR missing
+  const stop = pb.S1 && pb.S1<price ? pb.S1 : price-1.5*atr;
+  const target = pb.R2 && pb.R2>price ? pb.R2 : price+2.5*atr;
+  const rr = (price-stop)>0 ? ((target-price)/(price-stop)).toFixed(2) : '—';
+  return {entry:price, stop:Math.round(stop*100)/100, target:Math.round(target*100)/100, rr};
+}
+
+function scanSwing(){
+  const strat=document.getElementById('swing-strat').value;
+  const rsMin=parseInt(document.getElementById('swing-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('swing-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('swing-pmax').value)||Infinity;
+  updateSwingInfo(); rows=[];
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const sq=s.swing?.ema_sq||{}; const m5=s.swing?.macd535||{};
+    const d=sq.d||{}, w=sq.w||{}, m=sq.m||{};
+    const md=m5.d||{}, mw=m5.w||{}, mm=m5.m||{};
+    let matched=false,sig='',extra={};
+
+    if(strat==='ema_sq_d')        {matched=!!d.squeeze;                  sig='🗜 D-EMA Sq';     extra={tight:d.tight_pct+'%',n:d.n_emas};}
+    if(strat==='ema_sq_d_tight')  {matched=!!d.squeeze_tight;            sig='🗜🗜 D-Ultra';     extra={tight:d.tight_pct+'%'};}
+    if(strat==='ema_sq_w')        {matched=!!w.squeeze;                  sig='🗜 W-EMA Sq';     extra={tight:(w.tight_pct||0)+'%',n:w.n_emas};}
+    if(strat==='ema_sq_m')        {matched=!!m.squeeze;                  sig='🗜 M-EMA Sq';     extra={tight:(m.tight_pct||0)+'%',n:m.n_emas};}
+    if(strat==='ema_sq_d_bull')   {matched=!!d.squeeze&&!!d.bull_stack;  sig='🗜📈 D-Sq Bull';  extra={tight:d.tight_pct+'%'};}
+    if(strat==='ema_sq_w_bull')   {matched=!!w.squeeze&&!!w.bull_stack;  sig='🗜📈 W-Sq Bull';  extra={tight:(w.tight_pct||0)+'%'};}
+
+    if(strat==='macd535_d_bull')  {matched=!!md.cross_bull; sig='📊 D MACD5/35↑'; extra={hist:md.hist};}
+    if(strat==='macd535_d_bear')  {matched=!!md.cross_bear; sig='📊 D MACD5/35↓'; extra={hist:md.hist};}
+    if(strat==='macd535_w_bull')  {matched=!!mw.cross_bull; sig='📊 W MACD5/35↑'; extra={hist:mw.hist};}
+    if(strat==='macd535_w_bear')  {matched=!!mw.cross_bear; sig='📊 W MACD5/35↓'; extra={hist:mw.hist};}
+    if(strat==='macd535_m_bull')  {matched=!!mm.cross_bull; sig='📊 M MACD5/35↑'; extra={hist:mm.hist};}
+    if(strat==='macd535_m_bear')  {matched=!!mm.cross_bear; sig='📊 M MACD5/35↓'; extra={hist:mm.hist};}
+    if(strat==='macd535_d_zero_bull'){matched=!!md.zero_bull; sig='📊 D Zero↑'; extra={macd:md.macd};}
+    if(strat==='macd535_align')   {matched=!!md.bull&&!!mw.bull&&!!mm.bull; sig='📊 D+W+M Align'; extra={d:md.bull?'✓':'—',w:mw.bull?'✓':'—',m:mm.bull?'✓':'—'};}
+
+    if(strat==='swing_buy'||strat==='swing_strong'||strat==='swing_breakout_ready'){
+      const sc=scoreStock(s);
+      if(strat==='swing_buy')      matched=sc.score>=60;
+      if(strat==='swing_strong')   matched=sc.score>=75&&sc.bullCats>=4;
+      if(strat==='swing_breakout_ready') matched=!!d.squeeze&&!!md.cross_bull;
+      if(matched){
+        const tgt=_swingTargets(s);
+        sig='🎯 '+sc.grade+' ('+sc.score+')';
+        extra={entry:tgt.entry,stop:tgt.stop,target:tgt.target,rr:tgt.rr+'x',horizon:'1W-3M'};
+      }
+    }
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'swing',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
+function lookupStock(){
+  const q=(document.getElementById('lookup-input').value||'').trim().toUpperCase();
+  const sugEl=document.getElementById('lookup-suggest');
+  const resEl=document.getElementById('lookup-result');
+  if(!q){resEl.innerHTML='';sugEl.innerHTML='';return;}
+  const exact=S.find(s=>s.sym===q);
+  if(exact){ sugEl.innerHTML=''; renderLookupResult(exact); return; }
+  // Suggestions: partial matches
+  const matches=S.filter(s=>s.sym.includes(q)).slice(0,10);
+  if(matches.length===0){
+    resEl.innerHTML='<div class="nodata">No stock found matching "'+q+'"</div>';
+    sugEl.innerHTML=''; return;
+  }
+  resEl.innerHTML='';
+  sugEl.innerHTML='<div style="font-size:11px;color:var(--mu);margin-bottom:6px">Did you mean:</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    +matches.map(s=>`<button class="btn btn-out" style="padding:5px 12px;font-size:12px" onclick="document.getElementById('lookup-input').value='${s.sym}';lookupStock()">${s.sym}</button>`).join('')
+    +'</div>';
+}
+
+function renderLookupResult(s){
+  const sc=scoreStock(s);
+  const resEl=document.getElementById('lookup-result');
+  const f2=v=>typeof v==='number'?v.toFixed(2):(v||'—');
+  const pct=(v,b)=>b&&v?((v-b)/b*100).toFixed(1)+'%':'—';
+
+  // Group matched signals by category
+  const cats={};
+  for(const m of sc.matched){
+    if(!cats[m.cat]) cats[m.cat]=[];
+    cats[m.cat].push(m);
+  }
+  const catOrder=['Trend','Momentum','Volatility','SMC','MultiIndicator','BreakoutPro','SmartRank','Patterns','Gap'];
+  const catLabels={Trend:'📈 Trend',Momentum:'⚡ Momentum',Volatility:'🗜 Volatility/Breakout',
+    SMC:'🎯 Smart Money Concepts',MultiIndicator:'🏆 Minervini/Weinstein',
+    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps'};
+
+  let catsHtml='';
+  for(const cat of catOrder){
+    const items=cats[cat]; if(!items||!items.length)continue;
+    catsHtml+=`<div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;color:var(--acc);letter-spacing:1px;margin-bottom:4px;font-family:var(--mono)">${catLabels[cat]||cat}</div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        ${items.map(m=>{
+          const clr=m.w>0?'#00e5a0':m.w<0?'#ef4444':'#94a3b8';
+          const bg =m.w>0?'rgba(0,229,160,.06)':m.w<0?'rgba(239,68,68,.06)':'rgba(148,163,184,.06)';
+          return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;
+          background:${bg};border-radius:4px;border-left:2px solid ${clr}">
+          <span style="color:${clr};font-weight:700;min-width:24px">${m.w>0?'+'+m.w:m.w<0?m.w:'•'}</span>
+          <span style="flex:1">${m.label}</span>
+          <span style="color:var(--mu);font-size:10px;cursor:pointer" onclick="switchTab('${m.tab}')">→ ${TAB_NAMES[m.tab]||m.tab}</span>
+        </div>`;}).join('')}
+      </div>
+    </div>`;
+  }
+  if(!catsHtml) catsHtml='<div class="nodata">No active signals found for this stock currently.</div>';
+  catsHtml='<div style="font-size:11px;font-weight:700;color:var(--txt);margin-bottom:10px">📋 Appears in '+sc.matched.length+' scanner'+(sc.matched.length===1?'':'s')+':</div>'+catsHtml;
+
+  // Gauge SVG (semicircle)
+  const angle=sc.score/100*180-90; // -90 to +90 degrees
+  const rad=angle*Math.PI/180;
+  const gx=100+70*Math.cos(rad), gy=90+70*Math.sin(rad);
+  const gaugeSvg=`<svg width="200" height="110" viewBox="0 0 200 110">
+    <path d="M 20 90 A 80 80 0 0 1 180 90" fill="none" stroke="var(--brd)" stroke-width="14"/>
+    <path d="M 20 90 A 80 80 0 0 1 180 90" fill="none" stroke="${sc.color}" stroke-width="14"
+      stroke-dasharray="${sc.score/100*251.2} 251.2"/>
+    <line x1="100" y1="90" x2="${gx}" y2="${gy}" stroke="var(--txt)" stroke-width="2.5"/>
+    <circle cx="100" cy="90" r="4" fill="var(--txt)"/>
+    <text x="100" y="75" text-anchor="middle" font-size="24" font-weight="700" fill="${sc.color}" font-family="var(--mono)">${sc.score}</text>
+    <text x="100" y="105" text-anchor="middle" font-size="12" font-weight="700" fill="${sc.color}">${sc.grade}</text>
+  </svg>`;
+
+  const stt=s.t1?.stt||{};
+  resEl.innerHTML=`<div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;align-items:center;
+    padding:14px;background:var(--bg2);border:1px solid var(--brd);border-radius:8px">
+    <div style="min-width:160px">
+      <div style="font-size:24px;font-weight:700;color:var(--txt)">${s.sym}</div>
+      <div style="font-size:12px;color:var(--mu);margin:4px 0">${s.sector||'Other'} · ${s.idx?'Nifty '+s.idx:'Other'}${s.fno?' · <span style="color:#00e5a0">FNO</span>':''}</div>
+      <div style="font-size:20px;color:var(--txt);font-weight:600">₹${f2(s.price)}</div>
+      <div style="font-size:11px;color:var(--mu)">RS Rating: ${s.rs||0}/99 · vs 200DMA: ${pct(s.price,s.dma200)}</div>
+      <div style="font-size:11px;color:var(--mu)">SuperTrend: ${stt.bull?'🟢 Bull':stt.bear?'🔴 Bear':'—'}${stt.consec?' ('+stt.consec+'×)':''}</div>
+    </div>
+    <div style="flex:1;display:flex;justify-content:center;min-width:200px">${gaugeSvg}</div>
+    <div style="min-width:160px;text-align:right">
+      <div style="font-size:11px;color:var(--mu)">Bullish weight: <span style="color:#00e5a0;font-weight:700">+${sc.bullW}</span> across <b style="color:var(--txt)">${sc.bullCats}</b> categories</div>
+      <div style="font-size:11px;color:var(--mu)">Bearish weight: <span style="color:#ef4444;font-weight:700">-${sc.bearW}</span> across <b style="color:var(--txt)">${sc.bearCats}</b> categories</div>
+      ${sc.confluenceBonus>0?'<div style="font-size:10px;color:var(--acc);margin-top:2px">🔗 Confluence bonus: +'+sc.confluenceBonus+'% (signals span multiple categories)</div>':''}
+      <div style="font-size:11px;color:var(--mu);margin-top:6px">Appears in <b style="color:var(--txt)">${sc.matched.length}</b> scanners</div>
+      <button class="btn btn-out" style="margin-top:8px;font-size:11px" onclick="showStockDetail('${s.sym}')">View Full Detail →</button>
+    </div>
+  </div>
+  ${catsHtml}`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 📋 INDEX VIEW — ranked list of stocks by score for selected index
+// ════════════════════════════════════════════════════════════════════════════
+function renderIndexView(){
+  return `<div style="padding:14px">
+    <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mu)">Index</label>
+      <select id="iv-idx" style="padding:6px 10px;background:var(--bg2);border:1px solid var(--brd);
+        border-radius:5px;color:var(--txt);font-size:12px" onchange="scanIndexView()">
+        <option value="0">All Stocks</option>
+        <option value="fno">F&O Only</option>
+        <option value="50">Nifty 50</option>
+        <option value="100">Nifty 100</option>
+        <option value="200">Nifty 200</option>
+        <option value="500">Nifty 500</option>
+        <option value="750">Nifty 750</option>
+      </select>
+      <label style="font-size:12px;color:var(--mu)">Sort</label>
+      <select id="iv-sort" style="padding:6px 10px;background:var(--bg2);border:1px solid var(--brd);
+        border-radius:5px;color:var(--txt);font-size:12px" onchange="scanIndexView()">
+        <option value="score_desc">Score: High → Low (Best Buy)</option>
+        <option value="score_asc">Score: Low → High (Best Sell)</option>
+        <option value="rs_desc">RS Rating: High → Low</option>
+        <option value="sym">Symbol A-Z</option>
+      </select>
+      <span id="iv-count" style="font-size:11px;color:var(--mu);margin-left:auto"></span>
+    </div>
+    <div id="iv-table"></div>
+  </div>`;
+}
+
+function scanIndexView(){
+  const idxSel=document.getElementById('iv-idx').value;
+  const sortSel=document.getElementById('iv-sort').value;
+  let list=S.slice();
+  if(idxSel==='fno') list=list.filter(s=>s.fno);
+  else if(idxSel!=='0') list=list.filter(s=>s.idx&&s.idx<=parseInt(idxSel));
+
+  // Compute scores
+  list=list.map(s=>({s,sc:scoreStock(s)}));
+
+  if(sortSel==='score_desc') list.sort((a,b)=>b.sc.score-a.sc.score);
+  else if(sortSel==='score_asc') list.sort((a,b)=>a.sc.score-b.sc.score);
+  else if(sortSel==='rs_desc') list.sort((a,b)=>(b.s.rs||0)-(a.s.rs||0));
+  else list.sort((a,b)=>a.s.sym.localeCompare(b.s.sym));
+
+  document.getElementById('iv-count').textContent=list.length+' stocks';
+
+  const rows=list.map(({s,sc})=>{
+    const f2=v=>typeof v==='number'?v.toFixed(2):(v||'—');
+    const pct=(v,b)=>b&&v?((v-b)/b*100).toFixed(1)+'%':'—';
+    const dist=s.dma200?((s.price-s.dma200)/s.dma200*100):0;
+    return `<tr style="cursor:pointer" onclick="showScorePopup('${s.sym}')">
+      <td class="csym" style="white-space:nowrap"><span class="sd-ico" onmouseenter="_sdHover('${s.sym}')" title="Stock detail">i</span><a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${s.sym}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${s.sym}</a></td>
+      <td>${s.sector||'—'}</td>
+      <td class="num">₹${f2(s.price)}</td>
+      <td class="num" style="color:${dist>=0?'#00e5a0':'#ef4444'}">${pct(s.price,s.dma200)}</td>
+      <td class="num">${s.rs||0}</td>
+      <td class="num">
+        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
+          <div style="width:60px;height:6px;background:var(--brd);border-radius:3px;overflow:hidden">
+            <div style="width:${sc.score}%;height:100%;background:${sc.color}"></div>
+          </div>
+          <span style="color:${sc.color};font-weight:700;min-width:32px;text-align:right">${sc.score}</span>
+        </div>
+      </td>
+      <td style="color:${sc.color};font-weight:600;font-size:11px">${sc.grade}</td>
+      <td class="mu" style="font-size:11px">${sc.matched.length} scanners</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('iv-table').innerHTML=`<table style="width:100%">
+    <thead><tr>
+      <th>Symbol</th><th>Sector</th><th class="num">Price</th><th class="num">vs 200DMA</th>
+      <th class="num">RS</th><th class="num" style="min-width:120px">Score</th><th>Grade</th><th>Signals</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 📊 SCORE POPUP — used from Index View: shows score + matched signals in modal
+// ════════════════════════════════════════════════════════════════════════════
+function showScorePopup(sym){
+  showStockDetail(sym);
+  // Inject score breakdown into the AI output area as a quick summary
+  const s=S.find(x=>x.sym===sym); if(!s)return;
+  const sc=scoreStock(s);
+  const cats={};
+  for(const m of sc.matched){ if(!cats[m.cat]) cats[m.cat]=[]; cats[m.cat].push(m); }
+  const catLabels={Trend:'📈 Trend',Momentum:'⚡ Momentum',Volatility:'🗜 Volatility',
+    SMC:'🎯 SMC',MultiIndicator:'🏆 Minervini/Weinstein',BreakoutPro:'🏹 Breakout Pro',
+    SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps'};
+  let html=`<div style="padding:10px;font-size:11px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <span style="font-size:20px;font-weight:700;color:${sc.color}">${sc.score}</span>
+      <span style="color:${sc.color};font-weight:600">${sc.grade}</span>
+      <span style="color:var(--mu)">· Appears in ${sc.matched.length} scanners (${sc.bullSignals.length} bull / ${sc.bearSignals.length} bear)</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px">`;
+  for(const cat in cats){
+    html+=`<span style="background:rgba(59,158,255,.08);border:1px solid var(--brd);border-radius:4px;
+      padding:2px 8px;font-size:10px" title="${cats[cat].map(m=>m.label).join(', ')}">${catLabels[cat]||cat}: ${cats[cat].length}</span>`;
+  }
+  html+='</div>';
+  // Full scanner name list
+  html+='<div style="margin-top:8px;display:flex;flex-direction:column;gap:2px;max-height:140px;overflow-y:auto">';
+  for(const m of sc.matched){
+    const clr=m.w>0?'#00e5a0':m.w<0?'#ef4444':'#94a3b8';
+    html+='<div style="font-size:10px;color:var(--txt)"><span style="color:'+clr+';font-weight:700;display:inline-block;width:20px">'+(m.w>0?'+'+m.w:m.w<0?m.w:'•')+'</span>'+m.label+' <span style="color:var(--mu)">('+(TAB_NAMES[m.tab]||m.tab)+')</span></div>';
+  }
+  html+='</div></div>';
+  document.getElementById('ai-output').innerHTML=html;
+}
+
 function buildCols(tab,r0){
   const common=[
     {k:'sym',  h:'Symbol',     fn:r=>symCell(r.sym)},
@@ -6766,7 +7664,7 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -6843,6 +7741,7 @@ function exportCSV(){
     combo:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,r.date],
     bp:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     sr:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
+    swing:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
