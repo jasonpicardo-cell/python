@@ -1910,6 +1910,75 @@ def compute_macd_5_35(df, _wdf=None, _mdf=None):
 
 
 
+
+def _sd_zones_tf(O,H,L,C,max_zones=3,near_pct=3.0):
+    """Detect Supply/Demand zones: a tight 'base' candle followed by a strong
+    directional 'leg-out' candle. The base candle's range becomes the zone.
+    Demand = base followed by a strong bullish leg-out (zone acts as support below).
+    Supply = base followed by a strong bearish leg-out (zone acts as resistance above)."""
+    n=len(C)
+    if n<10: return None
+    lb=min(100,n)
+    avg_range=float(np.mean(H[-lb:]-L[-lb:]))
+    if avg_range<=0: return None
+    demand=[]; supply=[]
+    scan_from=max(0,n-150)
+    for i in range(scan_from,n-1):
+        rng_i=H[i]-L[i]
+        if rng_i>0.5*avg_range: continue  # not a tight base candle
+        rng_n=H[i+1]-L[i+1]; body_n=abs(C[i+1]-O[i+1])
+        if rng_n<1.3*avg_range or body_n<0.6*rng_n: continue  # leg-out not strong enough
+        if C[i+1]>O[i+1] and C[i+1]>H[i]:
+            demand.append((float(L[i]),float(H[i]),i))
+        elif C[i+1]<O[i+1] and C[i+1]<L[i]:
+            supply.append((float(L[i]),float(H[i]),i))
+
+    c=float(C[-1])
+    def process(zones,kind):
+        valid=[]
+        for lo,hi,f in zones:
+            invalidated=False; tested=False
+            for j in range(f+2,n):
+                if kind=='demand':
+                    if C[j]<lo: invalidated=True; break
+                    if L[j]<=hi: tested=True
+                else:
+                    if C[j]>hi: invalidated=True; break
+                    if H[j]>=lo: tested=True
+            if not invalidated: valid.append((lo,hi,f,not tested))
+        return valid[-max_zones:] if valid else []
+
+    out={'demand':None,'supply':None}
+    dz=process(demand,'demand')
+    if dz:
+        lo,hi,f,fresh=dz[-1]
+        dist=(c-hi)/c*100 if c>0 else 0
+        inside=bool(lo<=c<=hi)
+        out['demand']=dict(lo=r2(lo),hi=r2(hi),fresh=bool(fresh),bars_ago=n-1-f,
+                            inside=inside, near=bool(inside or 0<=dist<=near_pct))
+    sz=process(supply,'supply')
+    if sz:
+        lo,hi,f,fresh=sz[-1]
+        dist=(lo-c)/c*100 if c>0 else 0
+        inside=bool(lo<=c<=hi)
+        out['supply']=dict(lo=r2(lo),hi=r2(hi),fresh=bool(fresh),bars_ago=n-1-f,
+                            inside=inside, near=bool(inside or 0<=dist<=near_pct))
+    return out
+
+def compute_supply_demand(df,_wdf=None,_mdf=None):
+    """Supply & Demand zones — Daily / Weekly / Monthly."""
+    O=df['Open'].values.astype(float);H=df['High'].values.astype(float)
+    L=df['Low'].values.astype(float);C=df['Close'].values.astype(float)
+    out={'d': _sd_zones_tf(O,H,L,C) or {'demand':None,'supply':None}}
+    if _wdf is not None and len(_wdf)>=10:
+        out['w']=_sd_zones_tf(_wdf['Open'].values.astype(float),_wdf['High'].values.astype(float),
+                               _wdf['Low'].values.astype(float),_wdf['Close'].values.astype(float)) or {'demand':None,'supply':None}
+    if _mdf is not None and len(_mdf)>=10:
+        out['m']=_sd_zones_tf(_mdf['Open'].values.astype(float),_mdf['High'].values.astype(float),
+                               _mdf['Low'].values.astype(float),_mdf['Close'].values.astype(float)) or {'demand':None,'supply':None}
+    return out
+
+
 def compute_vsa(df):
     """Volume Spread Analysis: interplay of Volume, Spread (H−L), and Close position.
     The 'Big Volume Candle' strategy is the centrepiece."""
@@ -2547,6 +2616,8 @@ def precompute(fp, idx_map, nifty_df=None):
         cp   = compute_chart_patterns(df),
         dbl  = compute_double_patterns(df,_wdf=_wdf,_mdf=_mdf),
     )
+    # 📦 Supply & Demand Zones — Daily / Weekly / Monthly
+    zones = compute_supply_demand(df,_wdf=_wdf,_mdf=_mdf)
     # 🧪 Experimental (VSA)
     xp = dict(vsa=compute_vsa(df))
     # 🔢 Smart Rank raw data
@@ -2599,7 +2670,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,**st,rs=0)
 
 
 def assign_smart_ranks(stocks):
@@ -2658,15 +2729,24 @@ def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None, sector_
             print(f"  Nifty data loaded: {len(nifty_df)} rows from {nifty_path}")
         else:
             print(f"  Warning: could not load Nifty data from {nifty_path}")
+    import time as _time, datetime as _dt
+    _t0=_time.time()
+    print(f"  Scan started: {_dt.datetime.now().strftime('%H:%M:%S')}  ·  {len(files)} files to process")
     stocks  = []
     for i,fp in enumerate(files,1):
-        if i%100==0 or i==len(files): print(f"  [{i}/{len(files)}]…",end="\r")
+        if i%50==0 or i==len(files):
+            _elapsed=_time.time()-_t0
+            _rate=i/_elapsed if _elapsed>0 else 0
+            _eta=(len(files)-i)/_rate if _rate>0 else 0
+            print(f"  [{i}/{len(files)}] elapsed {_elapsed:5.1f}s  ·  ~{_eta:4.1f}s remaining  ·  {_rate:4.1f} stocks/sec",end="\r")
         rec = precompute(fp, idx_map, nifty_df)
         if rec:
             rec['fno']=rec['sym'] in fno_set
             rec['sector']=sector_map.get(rec['sym'],'Other')
             stocks.append(rec)
-    print(f"\n  Done — {len(stocks)} stocks"); assign_rs(stocks); assign_smart_ranks(stocks); assign_breadth(stocks); return stocks
+    _t1=_time.time(); _total=_t1-_t0
+    print(f"\n  Scan finished: {_dt.datetime.now().strftime('%H:%M:%S')}  ·  Total time: {_total:.1f}s ({_total/60:.2f} min)  ·  {len(stocks)} stocks  ·  {len(stocks)/_total:.1f} stocks/sec" if _total>0 else f"\n  Done — {len(stocks)} stocks")
+    assign_rs(stocks); assign_smart_ranks(stocks); assign_breadth(stocks); return stocks
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 HTML = r"""<!DOCTYPE html>
@@ -2803,7 +2883,7 @@ tbody tr.nr td:first-child{border-left:2px solid var(--acc)}
 td{padding:6px 11px;white-space:nowrap;border-right:1px solid rgba(24,32,52,.6)}
 td:last-child{border-right:none}
 .csym{font-weight:700;color:#dde5f5;font-size:12.5px}
-.csym a{color:inherit;text-decoration:none;display:flex;align-items:center;gap:5px}
+.csym a{color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
 .csym a:hover{color:var(--acc)}.csym a:hover .tvi{opacity:1}
 .tvi{opacity:.3;transition:opacity .15s;flex-shrink:0}
 .cpr{color:#dde5f5;font-weight:600}.clv{color:var(--a2);font-weight:700}.cp{color:var(--gold)}
@@ -2943,6 +3023,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .tab-btn.t-iview.active{color:#fbbf24;border-bottom-color:#fbbf24}
 .tab-btn.t-toppicks.active{color:#34d399;border-bottom-color:#34d399}
 .tab-btn.t-swing.active{color:#fb923c;border-bottom-color:#fb923c}
+.tab-btn.t-zones.active{color:#a78bfa;border-bottom-color:#a78bfa}
 /* ⑥ sector grouping */
 .gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
 .gb-chk input{accent-color:var(--acc)}
@@ -2995,6 +3076,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-iview" data-tab="iview" onclick="switchTab('iview')">📋 Index View</button>
   <button class="tab-btn t-toppicks" data-tab="toppicks" onclick="switchTab('toppicks')">🏆 Top Picks</button>
   <button class="tab-btn t-swing" data-tab="swing" onclick="switchTab('swing')">🎯 Swing Setup</button>
+  <button class="tab-btn t-zones" data-tab="zones" onclick="switchTab('zones')">📦 Supply/Demand</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
 <!-- ═══ GLOBAL FILTERS ════════════════════════════════════════════════════ -->
@@ -3223,6 +3305,22 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <option value="st_flip_up">Supertrend — Just flipped UP (fresh signal)</option>
       <option value="elder_buy">Elder Triple Screen — Buy Setup</option>
       <option value="elder_sell">Elder Triple Screen — Sell Setup</option>
+          <optgroup label="── 📐 Donchian Channel (Turtle System) ──">
+        <option value="dc20_bull">Donchian 20-Day Breakout — close above upper band</option>
+        <option value="dc20_bear">Donchian 20-Day Breakdown — close below lower band</option>
+        <option value="dc55_bull">Donchian 55-Day Bull — Turtle System entry</option>
+        <option value="dc55_bear">Donchian 55-Day Bear — Turtle short</option>
+        <option value="dc_squeeze">Donchian Squeeze — bandwidth at 6-month low</option>
+        <option value="dc_mid20">Donchian Mid-Band Pullback</option>
+      </optgroup>
+      <optgroup label="── 🌈 GMMA — Guppy Multiple Moving Average ──">
+        <option value="gmma_cross_bull">GMMA Cross Bull — short-term just crossed above long-term today</option>
+        <option value="gmma_cross_bear">GMMA Cross Bear — fresh bear crossover</option>
+        <option value="gmma_bull">GMMA Bull — short-term group above long-term</option>
+        <option value="gmma_all_bull">GMMA All-Bull — all 6 short-term above all 6 long-term</option>
+        <option value="gmma_bear">GMMA Bear</option>
+        <option value="gmma_compress">GMMA Compression — both groups converging</option>
+      </optgroup>
     </select><button class="info-btn" onclick="showHelp('adv',document.getElementById('adv-strat').value)" title="Show strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Price Range ₹</label>
@@ -3247,22 +3345,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="gc_bull_zone">Bull Zone — 50 SMA above 200 SMA</option>
         <option value="gc_near_golden">Near Golden Cross — gap closing (within 1%)</option>
       </optgroup>
-      <optgroup label="── 📐 Donchian Channel (Turtle System) ──">
-        <option value="dc20_bull">Donchian 20-Day Breakout — close above upper band</option>
-        <option value="dc20_bear">Donchian 20-Day Breakdown — close below lower band</option>
-        <option value="dc55_bull">Donchian 55-Day Bull — Turtle System entry</option>
-        <option value="dc55_bear">Donchian 55-Day Bear — Turtle short</option>
-        <option value="dc_squeeze">Donchian Squeeze — bandwidth at 6-month low</option>
-        <option value="dc_mid20">Donchian Mid-Band Pullback</option>
-      </optgroup>
-      <optgroup label="── 🌈 GMMA — Guppy Multiple Moving Average ──">
-        <option value="gmma_cross_bull">GMMA Cross Bull — short-term just crossed above long-term today</option>
-        <option value="gmma_cross_bear">GMMA Cross Bear — fresh bear crossover</option>
-        <option value="gmma_bull">GMMA Bull — short-term group above long-term</option>
-        <option value="gmma_all_bull">GMMA All-Bull — all 6 short-term above all 6 long-term</option>
-        <option value="gmma_bear">GMMA Bear</option>
-        <option value="gmma_compress">GMMA Compression — both groups converging</option>
-      </optgroup>
+      
       <optgroup label="── RSI Divergence ──">
         <option value="rsi_bull_div">RSI Bullish Divergence — hidden accumulation</option>
         <option value="rsi_bear_div">RSI Bearish Divergence — hidden distribution</option>
@@ -3817,7 +3900,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ BREAKOUT PRO ═══════════════════════════════════════════════════════ -->
 <div id="ctrl-bp" class="ctrl" style="display:none">
   <div class="cg"><label>Strategy</label>
-    <select id="bp-strat" style="min-width:340px" onchange="updateBPInfo()">
+    <div style="display:flex;gap:6px;align-items:center"><select id="bp-strat" style="min-width:340px" onchange="updateBPInfo()">
       <optgroup label="── 🔄 VCP — Mark Minervini ──">
         <option value="vcp">VCP — 2+ contractions + volume dry-up + near 52W high</option>
         <option value="vcp3">VCP Tight — 3+ contractions (higher conviction)</option>
@@ -3863,7 +3946,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <optgroup label="── 📐 Trendline ──">
         <option value="tlb">Descending Trendline Breakout</option>
       </optgroup>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('bp',document.getElementById('bp-strat').value)" title="Strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Min RS</label><select id="bp-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
   <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="bp-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="bp-pmax" placeholder="Max" min="0"></div></div>
@@ -3875,7 +3958,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ SMART RANK ══════════════════════════════════════════════════════════ -->
 <div id="ctrl-sr" class="ctrl" style="display:none">
   <div class="cg"><label>Strategy</label>
-    <select id="sr-strat" style="min-width:360px" onchange="updateSRInfo()">
+    <div style="display:flex;gap:6px;align-items:center"><select id="sr-strat" style="min-width:360px" onchange="updateSRInfo()">
       <optgroup label="── 🔢 Composite Momentum Score ──">
         <option value="ms_90">Momentum Score ≥ 90 — top 10% universe</option>
         <option value="ms_75">Momentum Score ≥ 75 — top quartile</option>
@@ -3908,7 +3991,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="r1m_top">1-Month Return Top 10%</option>
         <option value="r3m_top">3-Month Return Top 10%</option>
       </optgroup>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('sr',document.getElementById('sr-strat').value)" title="Strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Min RS</label><select id="sr-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
   <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="sr-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="sr-pmax" placeholder="Max" min="0"></div></div>
@@ -3920,7 +4003,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 <!-- ═══ SWING SETUP ═══════════════════════════════════════════════════════════ -->
 <div id="ctrl-swing" class="ctrl" style="display:none">
   <div class="cg"><label>Strategy</label>
-    <select id="swing-strat" style="min-width:380px" onchange="updateSwingInfo()">
+    <div style="display:flex;gap:6px;align-items:center"><select id="swing-strat" style="min-width:380px" onchange="updateSwingInfo()">
       <optgroup label="── 🗜 EMA Squeeze — 10/20/50/100/150/200 EMA Tight Coil ──">
         <option value="ema_sq_d">Daily EMA Squeeze — all EMAs within 2.5% (10-200)</option>
         <option value="ema_sq_d_tight">Daily Ultra-Tight (within 1%) — imminent breakout</option>
@@ -3944,7 +4027,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="swing_strong">Strong Swing Buy — Score ≥75 + confluence</option>
         <option value="swing_breakout_ready">Breakout-Ready — EMA squeeze + MACD bull cross</option>
       </optgroup>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('swing',document.getElementById('swing-strat').value)" title="Strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Min RS</label><select id="swing-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
   <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="swing-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="swing-pmax" placeholder="Max" min="0"></div></div>
@@ -3953,10 +4036,45 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 </div>
 
 
+<!-- ═══ SUPPLY & DEMAND ZONES ═══════════════════════════════════════════════ -->
+<div id="ctrl-zones" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="zones-strat" style="min-width:380px" onchange="updateZonesInfo()">
+      <optgroup label="── 📦 Daily Supply & Demand Zones ──">
+        <option value="demand_near_d">Near Fresh Demand Zone (Daily) — bullish bounce setup</option>
+        <option value="demand_inside_d">Inside Demand Zone (Daily)</option>
+        <option value="supply_near_d">Near Fresh Supply Zone (Daily) — bearish rejection setup</option>
+        <option value="supply_inside_d">Inside Supply Zone (Daily)</option>
+      </optgroup>
+      <optgroup label="── 📦 Weekly Supply & Demand Zones ──">
+        <option value="demand_near_w">Near Fresh Demand Zone (Weekly)</option>
+        <option value="demand_inside_w">Inside Demand Zone (Weekly)</option>
+        <option value="supply_near_w">Near Fresh Supply Zone (Weekly)</option>
+        <option value="supply_inside_w">Inside Supply Zone (Weekly)</option>
+      </optgroup>
+      <optgroup label="── 📦 Monthly Supply & Demand Zones ──">
+        <option value="demand_near_m">Near Fresh Demand Zone (Monthly)</option>
+        <option value="demand_inside_m">Inside Demand Zone (Monthly)</option>
+        <option value="supply_near_m">Near Fresh Supply Zone (Monthly)</option>
+        <option value="supply_inside_m">Inside Supply Zone (Monthly)</option>
+      </optgroup>
+      <optgroup label="── 🔗 Multi-Timeframe Confluence ──">
+        <option value="demand_confluence">Demand Confluence — Daily + Weekly zones aligned</option>
+        <option value="supply_confluence">Supply Confluence — Daily + Weekly zones aligned</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('zones',document.getElementById('zones-strat').value)" title="Strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="zones-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="zones-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="zones-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#a78bfa;color:#000" onclick="scanZones()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
 <!-- ═══ GAP SCANNER ════════════════════════════════════════════════════ -->
 <div id="ctrl-gap" class="ctrl" style="display:none">
   <div class="cg"><label>Gap Type</label>
-    <select id="gap-strat" style="min-width:310px" onchange="updateGapInfo()">
+    <div style="display:flex;gap:6px;align-items:center"><select id="gap-strat" style="min-width:310px" onchange="updateGapInfo()">
       <optgroup label="── 🟢 Gap Up ──">
         <option value="up1">Gap Up ≥1%</option>
         <option value="up2">Gap Up ≥2%</option>
@@ -3975,7 +4093,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
       <optgroup label="── 📊 Multi-day ──">
         <option value="consec3">3 Consecutive Gap Ups</option>
       </optgroup>
-    </select>
+    </select><button class="info-btn" onclick="showHelp('gap',document.getElementById('gap-strat').value)" title="Strategy info">ℹ</button></div>
   </div>
   <div class="cg"><label>Min RS</label><select id="gap-rs"><option value="0" selected>Any</option><option value="50">≥50</option><option value="70">≥70</option></select></div>
   <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="gap-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="gap-pmax" placeholder="Max" min="0"></div></div>
@@ -4010,7 +4128,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <div class="st"><div class="sl">Generated</div><div class="sv sm">__GT__</div></div>
 </div>
 
-<div class="sr">
+<div class="sr" id="search-row">
   <input type="text" id="q" placeholder="Search symbol…" oninput="render()">
   <label class="cbl"><input type="checkbox" id="cb-vol" onchange="render()"> Above avg vol</label>
   <label class="cbl"><input type="checkbox" id="cb-52h" onchange="render()"> Near 52W High</label>
@@ -4086,7 +4204,11 @@ let rows=[],sc=4,sd=1,currentTab='home',lastRows=[];
 function switchTab(tab){
   currentTab=tab;
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing'].forEach(t=>{
+  // Hide global index filter + search/checkbox row on custom full-page tabs that don't use them
+  const _isCustomPage=['home','lookup','iview','toppicks','help'].includes(tab);
+  const _gb=document.getElementById('global-bar'); if(_gb) _gb.style.display=_isCustomPage?'none':'flex';
+  const _sr=document.getElementById('search-row'); if(_sr) _sr.style.display=_isCustomPage?'none':'flex';
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -4137,6 +4259,7 @@ function switchTab(tab){
   else if(tab==='bp'){ updateBPInfo(); scanBP(); }
   else if(tab==='sr'){ updateSRInfo(); scanSR(); }
   else if(tab==='swing'){ updateSwingInfo(); scanSwing(); }
+  else if(tab==='zones'){ updateZonesInfo(); scanZones(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -4263,7 +4386,7 @@ function shareLink(){
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
 function symCell(sym){
-  const ico=`<span class="sd-ico" onmouseenter="_sdHover('${sym}')" title="Stock detail">i</span>`;
+  const ico=`<span class="sd-ico" onmouseenter="_sdHover('${sym}',event)" title="Stock detail">i</span>`;
   const lnk=`<a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${sym}" target="_blank" rel="noopener">${sym}</a>`;
   return`<td class="csym" style="white-space:nowrap">${ico}${lnk}</td>`;
 }
@@ -4513,6 +4636,19 @@ const ADV_INFO = {
   st_flip_up:   '<b>Supertrend — Fresh Flip Up</b> · Supertrend just flipped from bearish to bullish (today or yesterday) · Early trend-change signal with tight stop',
   elder_buy:    '<b>Elder Triple Screen — Buy Setup</b> · Dr. Alexander Elder · Screen 1: weekly MACD bullish (trend) · Screen 2: daily Force Index negative (pullback) · Enter long on next bar',
   elder_sell:   '<b>Elder Triple Screen — Sell Setup</b> · Screen 1: weekly MACD bearish · Screen 2: daily Force Index positive (rally) · Enter short on next bar',
+  dc20_bull:'<b>Donchian 20-Day Breakout</b> · Close above the 20-day Donchian upper band (highest high of last 20 days) · Chartink\'s most-used breakout filter · New 20-day high close = momentum confirmed',
+  dc20_bear:'<b>Donchian 20-Day Breakdown</b> · Close below the 20-day Donchian lower band · A fresh 20-day low close — momentum has turned bearish',
+  dc55_bull:'<b>Donchian 55-Day Bull</b> · Close above the 55-day Donchian upper band · Richard Donchian\'s original Turtle System entry signal · Highest win-rate breakout system in backtested research',
+  dc55_bear:'<b>Donchian 55-Day Bear</b> · Close below the 55-day Donchian lower band — Turtle short entry signal',
+  dc_squeeze:'<b>Donchian Squeeze</b> · Bandwidth at a 6-month low — the Donchian channel has compressed to its tightest range in 6 months · Identifies the pre-breakout coiling state before a 20/55-day breakout',
+  dc_mid20:'<b>Donchian Mid-Band Pullback</b> · Price has pulled back to the midpoint of the 20-day Donchian channel · Often acts as dynamic support in an uptrend — a lower-risk re-entry zone',
+  gmma_cross_bull:'<b>GMMA Cross Bull</b> · The short-term EMA group (3,5,8,10,12,15) has just crossed above the long-term EMA group (30,35,40,45,50,60) · Daryl Guppy\'s Multiple Moving Average system — signals short-term traders and long-term investors are now aligned bullishly',
+  gmma_cross_bear:'<b>GMMA Cross Bear</b> · Short-term EMA group crossed below the long-term EMA group · Both trader groups now aligned bearishly',
+  gmma_bull:'<b>GMMA Bull</b> · The short-term EMA group is currently above the long-term EMA group (not necessarily a fresh cross) · An established bullish alignment between short and long-term participants',
+  gmma_all_bull:'<b>GMMA All-Bull</b> · All 6 short-term EMAs (3-15) are above ALL 6 long-term EMAs (30-60) with zero overlap · The strongest possible GMMA alignment — full conviction across every timeframe of trader',
+  gmma_bear:'<b>GMMA Bear</b> · The short-term EMA group is below the long-term EMA group — bearish alignment',
+  gmma_compress:'<b>GMMA Compression</b> · The short-term and long-term EMA ribbons are converging/overlapping · Signals indecision and a potential major trend change pending — watch for a fresh cross to follow',
+
 };
 
 function updateAdvInfo(){
@@ -4594,6 +4730,18 @@ const T1_INFO = {
   nr4:              '<b>NR4</b> · Narrowest range of 4 bars · Shorter compression — active trader setup',
   inside_bar:       '<b>Inside Bar</b> · High &lt; yesterday high AND Low &gt; yesterday low · Full consolidation — mother-bar breakout = entry',
   nr7_inside:       '<b>NR7 + Inside Bar</b> · Both compressions together · Double signal — highest-probability volatility expansion setup',
+  rsi_above50:'<b>RSI Above 50</b> · RSI(14) is currently above 50 · The momentum threshold professionals watch — average gains exceed average losses, indicating the stock is in a bullish momentum regime',
+  rsi_below50:'<b>RSI Below 50</b> · RSI(14) is currently below 50 · Average losses exceed gains — bearish momentum regime',
+  rsi_cross50_bull:'<b>RSI Cross Above 50</b> · RSI(14) just crossed above 50 today (was below 50 yesterday) · Earlier and more reliable than waiting for oversold-recovery — marks the first day momentum flips bullish',
+  rsi_cross50_bear:'<b>RSI Cross Below 50</b> · RSI(14) just crossed below 50 · First day momentum flips bearish — often precedes further weakness',
+  rsi_bull_zone:'<b>RSI Bull Zone (40-80)</b> · RSI(14) is between 40 and 80 · Selects stocks in a sustainable uptrend — RSI staying above 40 on pullbacks (not dropping into oversold) is a hallmark of Stage-2 advancing stocks',
+  st_bull:'<b>SuperTrend Direction UP</b> · The SuperTrend indicator is currently in its bullish (green) state — price is above the SuperTrend line, acting as a trailing dynamic support',
+  st_bear:'<b>SuperTrend Direction DOWN</b> · SuperTrend is in its bearish (red) state — price is below the line, acting as dynamic resistance',
+  st_flip_bull:'<b>SuperTrend Just Flipped UP</b> · SuperTrend changed from bearish to bullish in the most recent bar — a fresh, time-sensitive trend-change signal often used as a direct entry trigger',
+  st_flip_bear:'<b>SuperTrend Just Flipped DOWN</b> · SuperTrend changed from bullish to bearish in the most recent bar — fresh bearish trend-change signal, often used as an exit/short trigger',
+  st_consec5:'<b>SuperTrend 5+ Bars Bullish</b> · Price has remained above the SuperTrend line for 5 or more consecutive bars · Confirms a sustained, established uptrend (not a whipsaw)',
+  st_tight:'<b>SuperTrend Tight (&lt;1% dist)</b> · Price is within 1% of the SuperTrend line · The trailing stop is very close to current price — a low-risk add-on point in a trend, but also higher whipsaw risk if the trend reverses',
+
 };
 
 function updateT1Info(){
@@ -4680,6 +4828,12 @@ const T2_INFO = {
   rsn_outperform: '<b>RS Outperforming Nifty</b> · Stock/Nifty ratio in uptrend · Fund managers prefer stocks that lead the index · Rising relative strength precedes big moves',
   rsn_new_hi:     '<b>RS at 3-Month High</b> · Stock is accelerating vs Nifty — hitting new RS highs · Most powerful leadership signal · O\'Neil: buy leaders, not laggards',
   rsn_underperform:'<b>RS Underperforming Nifty</b> · Stock/Nifty ratio in downtrend · Avoid or reduce these · Even if price is up, weakness vs index signals institutional selling',
+  macd_hist_rising:'<b>MACD Histogram Rising</b> · The MACD histogram bar is taller than the previous bar (regardless of sign) · Momentum is accelerating in its current direction — an early signal that often precedes a signal-line cross',
+  macd_hist_pos_inc:'<b>MACD Histogram Positive &amp; Rising</b> · The histogram is above zero AND increasing · Bullish momentum is both confirmed and accelerating — strong continuation signal',
+  macd_hist_neg_inc:'<b>MACD Histogram Negative &amp; Improving</b> · The histogram is below zero but rising toward zero · Selling pressure is fading before the MACD line crosses its signal — an earlier entry than waiting for the crossover itself',
+  macd_zero_bull:'<b>MACD Zero-Line Cross Up</b> · The MACD line itself (not just histogram) has crossed above zero · Equivalent to the fast EMA crossing above the slow EMA in absolute terms — a stronger trend-change confirmation than a signal-line cross alone',
+  macd_zero_bear:'<b>MACD Zero-Line Cross Down</b> · The MACD line crossed below zero — fast EMA now below slow EMA, confirming bearish trend change',
+
 };
 
 function updateT2Info(){
@@ -4927,6 +5081,29 @@ const HOME_CARDS=[
   {tab:'sr',strat:'tc3',        emoji:'🗜',badge:'sr',label:'Triple Compression',   desc:'NR7 + Volume Dry-Up + BB Squeeze all firing simultaneously — three-dimensional maximum coiling',            stars:'★★★★★',section:7},
   {tab:'sr',strat:'mtfrs_90',   emoji:'🌟',badge:'sr',label:'Consistent RS Leader', desc:'Top 10% by 1M, 3M, 6M AND 12M returns simultaneously. Definedge Smart RS Scanner equivalent',             stars:'★★★★★',section:7},
   {tab:'sr',strat:'tc2',        emoji:'🗜',badge:'sr',label:'Double Compression',   desc:'Any 2 of NR7/VDU/BB Squeeze — strong pre-breakout coiling signal',                                         stars:'★★★★', section:7},
+  // ── Pivot Points ──
+  {tab:'piv',strat:null,            emoji:'🎯',badge:'piv', label:'Fibonacci Pivot Breakout',  desc:'Price breaking above R1/R2 Fibonacci pivot resistance — floor trader levels used by NSE prop desks daily',                  stars:'★★★★', section:0},
+  {tab:'piv',strat:null,            emoji:'🔵',badge:'piv', label:'Pivot Bounce — Near S1/S2', desc:'Price testing pivot support — highest-probability intraday bounce setup, the most-searched scan type',                     stars:'★★★★', section:1},
+  // ── Smart Money Concepts ──
+  {tab:'smc',strat:'bos_bull',      emoji:'💎',badge:'smc', label:'Break of Structure Bull',  desc:'Price breaks above the last significant swing high — SMC/ICT concept confirming bullish trend structure shift',             stars:'★★★★', section:0},
+  {tab:'smc',strat:'choch_bull',    emoji:'🔄',badge:'smc', label:'Change of Character Bull', desc:'First break above a swing high after a downtrend — the earliest SMC reversal signal, ICT methodology',                      stars:'★★★★★',section:1},
+  {tab:'smc',strat:'fvg_bull',      emoji:'💠',badge:'smc', label:'Bullish Fair Value Gap',   desc:'Unfilled imbalance zone acting as support — price entering FVG is an institutional re-entry opportunity',                    stars:'★★★★', section:1},
+  {tab:'smc',strat:'ote_bull',      emoji:'🎯',badge:'smc', label:'OTE Zone 0.62-0.79',       desc:'Price in the 61.8-78.6% Fibonacci retracement of a bullish swing — ICT highest-probability entry zone',                     stars:'★★★★★',section:1},
+  // ── Volume ──
+  {tab:'vol',strat:'vol_spike',     emoji:'🔊',badge:'vol', label:'Volume Shocker 3x',         desc:'Volume exceeds 3x the 10-day average — institutional breakout signal, not retail noise',                                    stars:'★★★★', section:1},
+  {tab:'vol',strat:'vol_acc3',      emoji:'📈',badge:'vol', label:'Accumulation Streak',       desc:'3+ consecutive up-days on above-average volume — institutional accumulation pattern',                                      stars:'★★★★', section:1},
+  {tab:'vol',strat:'vol_dist',      emoji:'📉',badge:'vol', label:'Distribution Alert',        desc:'3+ consecutive down-days on above-average volume — institutional selling, avoid fresh longs',                               stars:'★★★',  section:2},
+  // ── Noiseless Charts ──
+  {tab:'nl', strat:'pnf_dbl_top',   emoji:'📊',badge:'nl',  label:'P and F Double Top BO',     desc:'Point and Figure double-top breakout — removes time noise entirely, Definedge most powerful noiseless signal',              stars:'★★★★★',section:0},
+  {tab:'nl', strat:'renko_bull',    emoji:'🧱',badge:'nl',  label:'Renko Bull Reversal',       desc:'Renko chart flips to bull — fixed-size bricks filter all time noise, capturing only significant price moves',               stars:'★★★★', section:0},
+  {tab:'nl', strat:'rrg_leading',   emoji:'🔵',badge:'nl',  label:'RRG Leading Quadrant',      desc:'Relative Rotation Graph — stock in Leading quadrant means strong RS + improving momentum, used on Bloomberg terminals',     stars:'★★★★★',section:1},
+  // ── Experimental / VSA ──
+  {tab:'xp', strat:'vsa_effort_up', emoji:'🔬',badge:'xp',  label:'VSA Effort Up',             desc:'High volume + narrow spread up-bar — smart money absorbing supply, Tom Williams Volume Spread Analysis',                    stars:'★★★',  section:2},
+  // ── Gap Scanner ──
+  {tab:'gap',strat:'up_cont',       emoji:'🟢',badge:'gap', label:'Gap Up Continuation',       desc:'Gapped up AND closed above open — strongest single-day bullish signal, the gap held and buyers extended the move',          stars:'★★★★★',section:1},
+  {tab:'gap',strat:'up_unfilled',   emoji:'🔵',badge:'gap', label:'Gap Up Unfilled',           desc:'Gap-up zone never filled — unfilled gaps act as support, institutions defending the level',                                 stars:'★★★★', section:1},
+  // ── AND Combiner ──
+  {tab:'combo',strat:null,          emoji:'⚗️',badge:'combo',label:'AND Combiner',             desc:'Find stocks matching 2-5 conditions simultaneously from ANY tab — the most powerful custom filter in the scanner',          stars:'★★★★★',section:0},
   // 🎯 Swing Setup
   {tab:'swing',strat:'ema_sq_d_bull',  emoji:'🗜',badge:'swing',label:'Daily EMA Squeeze + Bull',  desc:'10/20/50/100/150/200 EMA all within 2.5%% AND bullishly stacked — coiling inside an uptrend, highest-probability continuation', stars:'★★★★★',section:8},
   {tab:'swing',strat:'macd535_d_bull', emoji:'📊',badge:'swing',label:'MACD 5/35 Bull Cross (D)', desc:'Fast 5-EMA crossed above slow 35-EMA on daily — faster swing-entry variant of standard MACD, catches moves 1-2 days earlier', stars:'★★★★', section:8},
@@ -4936,6 +5113,15 @@ const HOME_CARDS=[
   {tab:'swing',strat:'swing_strong',   emoji:'🎯',badge:'swing',label:'Strong Swing Buy',          desc:'Score ≥75 with confluence across 4+ categories — highest-conviction swing setups with full Entry/Stop/Target plan for 1W-3M', stars:'★★★★★',section:8},
   {tab:'swing',strat:'swing_breakout_ready',emoji:'🎯',badge:'swing',label:'Breakout-Ready Setup', desc:'EMA squeeze (coiled) + fresh MACD 5/35 bull cross (trigger firing) — the textbook compression + trigger breakout entry', stars:'★★★★★',section:8},
   {tab:'swing',strat:'ema_sq_d_tight', emoji:'🗜',badge:'swing',label:'Ultra-Tight EMA Squeeze',   desc:'All 6 EMAs (10-200) within 1%% of each other — extremely rare, historically precedes the largest volatility expansions', stars:'★★★★★',section:8},
+  // 📦 Supply & Demand Zones
+  {tab:'zones',strat:'demand_near_d',  emoji:'📦',badge:'zones',label:'Fresh Demand Zone (Daily)',  desc:'Price near/inside an untested daily demand zone - a tight base candle followed by a strong bullish leg-out. Highest-probability daily bounce setup',          stars:'★★★★', section:9},
+  {tab:'zones',strat:'demand_near_w',  emoji:'📦',badge:'zones',label:'Fresh Demand Zone (Weekly)', desc:'Weekly base + leg-out demand zone, untested - major multi-week institutional support level approaching for the first time since formation',          stars:'★★★★★',section:9},
+  {tab:'zones',strat:'supply_near_d',  emoji:'📦',badge:'zones',label:'Fresh Supply Zone (Daily)',   desc:'Price near/inside an untested daily supply zone - tight base candle followed by a strong bearish leg-out. Highest-probability daily rejection setup',         stars:'★★★★', section:9},
+  {tab:'zones',strat:'supply_near_w',  emoji:'📦',badge:'zones',label:'Fresh Supply Zone (Weekly)',  desc:'Weekly supply zone, untested - major multi-week resistance level, first retest carries highest rejection probability',         stars:'★★★★★',section:9},
+  {tab:'zones',strat:'demand_near_m',  emoji:'📦',badge:'zones',label:'Fresh Demand Zone (Monthly)', desc:'Monthly base + powerful rally - rare multi-year institutional accumulation level, among the most significant support on the chart',         stars:'★★★★★',section:9},
+  {tab:'zones',strat:'demand_confluence',emoji:'🔗',badge:'zones',label:'D+W Demand Confluence',     desc:'Price near a fresh demand zone on BOTH daily AND weekly timeframes simultaneously - the highest-probability multi-timeframe support area',         stars:'★★★★★',section:9},
+  {tab:'zones',strat:'supply_confluence',emoji:'🔗',badge:'zones',label:'D+W Supply Confluence',     desc:'Price near a fresh supply zone on BOTH daily AND weekly timeframes - highest-probability multi-timeframe rejection area',         stars:'★★★★★',section:9},
+
 ];
 
 const SECTIONS=[
@@ -4948,18 +5134,14 @@ const SECTIONS=[
   '🏹 BREAKOUT PRO — PAID SCANNER STRATEGIES',
   '🔢 SMART RANK — AI COMPOSITE SCORING',
   '🎯 SWING SETUP — EMA SQUEEZE · MACD 5/35 · TRADE PLANS',
+  '📦 SUPPLY & DEMAND ZONES — DAILY · WEEKLY · MONTHLY',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand'};
 
 function renderHome(){
-  let html=`<div class="home-wrap">`;
-  for(let si=0;si<SECTIONS.length;si++){
-    const cards=HOME_CARDS.filter(c=>c.section===si);
-    if(!cards.length) continue;
-    html+=`<div class="home-title">${SECTIONS[si]}</div><div class="home-grid">`;
-    cards.forEach(c=>{
-      html+=`<div class="hcard" onclick="launchScanner('${c.tab}','${c.strat||''}')">
+  const sortMode=(window._homeSort)||'section';
+  const cardHtml=c=>`<div class="hcard" onclick="launchScanner('${c.tab}','${c.strat||''}')">
         <div class="hcard-top"><span class="hcard-emoji">${c.emoji}</span>
           <span class="hcard-badge badge-${c.badge}">${BADGES[c.badge]||c.badge}</span></div>
         <div class="hcard-name">${c.label}</div>
@@ -4967,9 +5149,49 @@ function renderHome(){
         <div class="hcard-stars">${c.stars}</div>
         <div class="hcard-btn">▶ Launch</div>
       </div>`;
+
+  let html=`<div class="home-wrap">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <label style="font-size:12px;color:var(--mu)">Sort by</label>
+      <select id="home-sort" style="padding:5px 10px;background:var(--bg2);border:1px solid var(--brd);
+        border-radius:5px;color:var(--txt);font-size:12px" onchange="window._homeSort=this.value;document.getElementById('ts').innerHTML=renderHome();">
+        <option value="section"${sortMode==='section'?' selected':''}>Category (default)</option>
+        <option value="tab"${sortMode==='tab'?' selected':''}>Tab Name (A-Z)</option>
+        <option value="stars_desc"${sortMode==='stars_desc'?' selected':''}>Stars: High → Low</option>
+        <option value="stars_asc"${sortMode==='stars_asc'?' selected':''}>Stars: Low → High</option>
+      </select>
+    </div>`;
+
+  if(sortMode==='section'){
+    for(let si=0;si<SECTIONS.length;si++){
+      const cards=HOME_CARDS.filter(c=>c.section===si);
+      if(!cards.length) continue;
+      html+=`<div class="home-title">${SECTIONS[si]}</div><div class="home-grid">`;
+      cards.forEach(c=>{ html+=cardHtml(c); });
+      html+=`</div>`;
+    }
+  } else if(sortMode==='tab'){
+    const byTab={};
+    HOME_CARDS.forEach(c=>{ (byTab[c.tab]=byTab[c.tab]||[]).push(c); });
+    Object.keys(byTab).sort((a,b)=>(TAB_NAMES[a]||a).localeCompare(TAB_NAMES[b]||b)).forEach(tab=>{
+      html+=`<div class="home-title">${TAB_NAMES[tab]||tab}</div><div class="home-grid">`;
+      byTab[tab].forEach(c=>{ html+=cardHtml(c); });
+      html+=`</div>`;
     });
-    html+=`</div>`;
+  } else { // stars_desc / stars_asc
+    const starCount=c=>(c.stars.match(/★/g)||[]).length;
+    const sorted=HOME_CARDS.slice().sort((a,b)=>sortMode==='stars_desc'?starCount(b)-starCount(a):starCount(a)-starCount(b));
+    // group by star count for section headers
+    const groups={};
+    sorted.forEach(c=>{ const k=starCount(c); (groups[k]=groups[k]||[]).push(c); });
+    const order=Object.keys(groups).map(Number).sort((a,b)=>sortMode==='stars_desc'?b-a:a-b);
+    order.forEach(k=>{
+      html+=`<div class="home-title">${'★'.repeat(k)}${'☆'.repeat(5-k)} (${k}/5 — ${groups[k].length} scanners)</div><div class="home-grid">`;
+      groups[k].forEach(c=>{ html+=cardHtml(c); });
+      html+=`</div>`;
+    });
   }
+
   html+=`<div style="font-family:var(--mono);font-size:9px;color:var(--mu);margin-top:12px;padding-top:8px;border-top:1px solid var(--brd)">
     ★★★★★ = Highest probability · ★★★★ = Strong edge · ★★★ = Good confluence tool · 
     All strategies computable from daily OHLC data · Success rates based on professional backtesting research
@@ -4980,8 +5202,10 @@ function renderHome(){
 function launchScanner(tab, strat){
   // Map tab → its strategy dropdown id
   const stratMaps={
-    piv:'piv-type', adv:'adv-strat', t1:'t1-strat', t2:'t2-strat', t3:'t3-strat',
+    piv:'sp-type', adv:'adv-strat', t1:'t1-strat', t2:'t2-strat', t3:'t3-strat',
     ti:'ti-strat', nl:'nl-strat', xp:'xp-strat', patt:'patt-strat', br:'br-filter',
+    bp:'bp-strat', sr:'sr-strat', swing:'swing-strat', gap:'gap-strat',
+    smc:'smc-sig', vol:'vol-sig',
   };
   if(strat && stratMaps[tab]){
     const el=document.getElementById(stratMaps[tab]);
@@ -5072,7 +5296,7 @@ function refLinks(links){
 
 // ── HELP POPUP ─────────────────────────────────────────────────────────────
 const STRAT_HELP_KEY={
-  piv_type:{fibonacci:0,traditional:1,camarilla:2,woodie:3,dm:4,floor:1,classic:1},
+  piv_type:{fibonacci:0,traditional:1,camarilla:2,classic:1,dm:3,woodie:4,floor:1,cpr:4},
   smc:{bull_ob:0,bear_ob:0,bull_fvg:1,bear_fvg:1,bos_bull:2,bos_bear:2,choch_bull:2,choch_bear:2,all:0},
   vol:{near_poc:0,above_vah:0,below_val:0,vol_spike:1,obv_div_bull:1,obv_div_bear:1,ad_up:1,all:0},
   mi:{both:0,minervini:0,weinstein:1,any:0},
@@ -5128,13 +5352,16 @@ const STRAT_HELP_KEY={
     dbl_top_d:3,dbl_top_d_bo:3,dbl_top_w:3,dbl_top_w_bo:3,dbl_top_m:3,dbl_top_m_bo:3,
   },
   br:{all:0,above200:0,stage2:0,near52wh:0,pnf_x:0,renko_bull:0,ha_bull:0,ema_fan:0,rs80:0},
-  gap:{up1:0,up2:0,up3:0,up_cont:0,dn1:0,dn_cont:0},
+  gap:{up1:0,up2:0,up3:0,dn1:0,dn2:0,dn3:0,consec3:0,up_cont:1,up_reject:1,dn_cont:1,up_unfilled:2,dn_unfilled:2},
   combo:{},
   bp:{vcp:0,vcp3:0,pp:0,pp_strong:0,twt3:0,rsh:0,ads_ab:0,hvb:0,vdu_bull:0,ems_power:0,iw1:0,tlb:0},
   sr:{ms_90:0,ms_75:0,ms_50:0,season_bull:0,season_strong:0,mtf_perfect:0,mtf_strong:0,ath:0,tc3:0,mtfrs_90:0},
   swing:{ema_sq_d:0,ema_sq_d_tight:0,ema_sq_w:0,ema_sq_m:0,ema_sq_d_bull:0,ema_sq_w_bull:0,
     macd535_d_bull:1,macd535_d_bear:1,macd535_w_bull:1,macd535_w_bear:1,macd535_m_bull:1,macd535_m_bear:1,macd535_d_zero_bull:1,macd535_align:1,
     swing_buy:2,swing_strong:2,swing_breakout_ready:2},
+  zones:{demand_near_d:0,demand_inside_d:0,demand_near_w:0,demand_inside_w:0,demand_near_m:0,demand_inside_m:0,
+    supply_near_d:1,supply_inside_d:1,supply_near_w:1,supply_inside_w:1,supply_near_m:1,supply_inside_m:1,
+    demand_confluence:1,supply_confluence:1},
 };
 // Map tab → section index in Help H array
 const TAB_SEC={
@@ -5144,7 +5371,7 @@ const TAB_SEC={
   xp:11,  // Experimental / VSA
   patt:12,// Patterns
   br:13,  // Market Breadth
-  gap:14, combo:14, bp:15, sr:16, swing:8,
+  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9,
 };
 
 function showHelp(tab,stratVal){
@@ -5179,7 +5406,7 @@ function closeHelpModal(){
 // ── Stock detail hover ──────────────────────────────────────────────────────
 // Show on hover, close only via ESC or overlay click — no auto-close on leave
 let _sdT=null;
-function _sdHover(sym){
+function _sdHover(sym,ev){
   clearTimeout(_sdT);
   // If already open just update; otherwise 150ms delay on first open
   if(document.getElementById('sd-box').style.display==='flex'){
@@ -5220,6 +5447,12 @@ function renderHelp(){
         d:'DeMark pivots were developed by Tom DeMark, quantitative analyst whose clients include George Soros, Paul Tudor Jones, and Steven Cohen, and whose indicators are built into Bloomberg terminals. The system is minimalist — only three levels (P, S1, R1) — because DeMark believed more levels dilute focus. The conditional X formula adjusts directionally: when the close is below the open (bearish session), more weight goes to the low; when the close is above the open (bullish), more weight to the high. This makes DeMark\'s pivot inherently directional — it shifts with yesterday\'s sentiment. When price closes near the session high, the pivot shifts upward, signaling buyers were dominant. DeMark pivot\'s P level is the most reliable "directional bias" filter: open above P = bullish bias, below P = bearish. The tightest range of the seven pivot types makes DeMark conservative and precise. Professional quants use DeMark pivots as a first-pass directional filter before applying other systems. DeMark also created TD Sequential (also in this scanner) with the same philosophy of objective market structure analysis. For NSE weekly chart analysis, DeMark pivots on the yearly source provide clean first-indication support and resistance.',
         links:[['DeMark Analytics','https://demark.com'],['Investopedia','https://www.investopedia.com/terms/d/demark-pivot-point.asp'],['StockCharts','https://school.stockcharts.com/doku.php?id=technical_indicators:pivot_points']],
         ai:'Explain Tom DeMark pivot points and how they differ from all other pivot types. Why does DeMark use a conditional formula based on close vs open? What is the significance of having only 3 levels instead of 7+? Who uses DeMark pivots professionally? How do DeMark pivots connect philosophically to TD Sequential? Provide practical trading examples of DeMark S1 and R1 acting as support/resistance on NSE large-cap stocks over the past 2 years.'
+      },
+      { n:"Woodie\'s Pivots & CPR (Central Pivot Range)",
+        f:`Woodie's: PP=(H+L+2*Cc)/4 (weights today's open via Cc=current open... uses 2x close weighting). CPR: Pivot=(H+L+C)/3, BC=(H+L)/2, TC=2*Pivot-BC. Width=|TC-BC|.`,
+        d:"Woodie's Pivots weight the pivot point toward the most recent close more heavily than Traditional pivots, making them more responsive to overnight gaps - popular with futures and forex traders for capturing gap-driven moves. CPR (Central Pivot Range), used heavily by Indian intraday traders, plots three lines: the Pivot, plus a Top Central (TC) and Bottom Central (BC) band around it. A NARROW CPR (TC and BC very close together) signals low volatility and often precedes a big directional trending day - traders watch for a narrow CPR after a wide-range day as a high-probability trend-day setup. A WIDE CPR suggests a range-bound, choppy session. Price trading above a narrow CPR with rising volume is a classic Indian intraday breakout setup used on tools like ChartInk and TradingView for Nifty/BankNifty.",
+        links:[["CPR Strategy","https://www.tradingview.com/support/solutions/43000587900-pivot-points-standard/"]],
+        ai:"How is CPR width used to predict trend days vs range days on Nifty/BankNifty? What is the win rate of trading CPR breakouts on NSE index futures? How do Woodie\'s pivots differ from Camarilla for intraday support/resistance?"
       },
     ]},
     {icon:'🎯', title:'Price Action / Smart Money Concepts', items:[
@@ -5714,6 +5947,20 @@ function renderHelp(){
         ai:'How should I size a swing trade position based on the Risk:Reward ratio and my account size? What R:R ratio is considered acceptable for a 1-3 month swing trade on NSE? How often should I review and adjust the stop-loss on an open swing position?'
       },
     ]},
+    {icon:'📦', title:'Supply & Demand Zones — Daily · Weekly · Monthly', items:[
+      { n:'Demand Zones — Base + Bullish Leg-Out',
+        f:`avg_range = mean(High-Low) over last 100 bars. Base candle: range <= 0.5*avg_range. Leg-out candle: range >= 1.3*avg_range AND |Close-Open| >= 0.6*range AND Close > base_High (bullish). Zone = [base_Low, base_High]. Fresh = never retested since formation. Near = within 3% or inside the zone.`,
+        d:`A demand zone forms where price spent very little time (a single "base" candle with a small range, representing balance between buyers and sellers) before a powerful bullish candle moved price sharply away. The base candle's high-low range becomes the zone - it represents the price level where institutional buy orders were placed but not fully filled before price ran away, leaving "unfilled demand" behind. When price returns to this zone for the first time (a "fresh" or "untested" zone), there is a higher probability of a bounce because those leftover orders are still resting there. Once a zone has been retested and held, it is marked "tested" - it can still work but with somewhat lower probability than a fresh zone. A zone is invalidated entirely if price closes through it (below the zone low for demand). This scanner computes zones independently on Daily, Weekly, and Monthly candles. Daily zones are short-term (days to weeks), Weekly zones represent multi-month institutional order blocks, and Monthly zones are rare multi-year accumulation levels - the larger the timeframe, the more significant and longer-lasting the zone tends to be.`,
+        links:[['Supply & Demand Trading','https://www.investopedia.com/terms/s/supplyanddemand.asp']],
+        ai:'How does a Supply/Demand zone differ from a simple support/resistance level drawn from swing highs/lows? What is the statistical win rate of trading the FIRST retest of a fresh demand zone vs a tested one? How should stop-loss placement differ for daily vs weekly demand zones?'
+      },
+      { n:'Supply Zones & Multi-Timeframe Confluence',
+        f:`Supply zone: base candle (range <= 0.5*avg_range) followed by a bearish leg-out (Close < Open, |Close-Open|>=0.6*range, range>=1.3*avg_range, Close < base_Low). Zone = [base_Low, base_High]. Confluence = fresh zone near price on BOTH Daily and Weekly simultaneously.`,
+        d:`Supply zones are the mirror image of demand zones: a tight base candle followed by a sharp bearish move leaves behind unfilled sell orders at that price level. When price rallies back into a fresh (untested) supply zone, there is elevated probability of a rejection/reversal lower - the leftover supply gets absorbed by the rally and tips the balance back toward sellers. The Multi-Timeframe Confluence strategies look for cases where a Daily zone sits inside (or very close to) a Weekly zone of the same type - when both timeframes agree, the larger Weekly zone reinforces and extends the reaction expected at the smaller Daily zone, producing the highest-probability setups this scanner can find. Traders typically use the larger-timeframe zone to define overall bias (e.g., "don't go long below the weekly supply zone") and the smaller-timeframe zone for precise entry/stop placement.`,
+        links:[['Multi-Timeframe Analysis','https://www.investopedia.com/articles/trading/07/timeframes.asp']],
+        ai:'How much more reliable is a Daily+Weekly supply zone confluence vs a daily-only supply zone on NSE stocks? What additional confirmation (volume, candlestick patterns) should I look for when price enters a fresh supply zone? How wide should a stop-loss be when shorting at a weekly supply zone?'
+      },
+    ]},
   ];
 
   let html=`<div class="help-wrap">
@@ -5790,6 +6037,7 @@ function triggerAutoScan(){
     else if(t==='bp'){ scanBP(); }
     else if(t==='sr'){ scanSR(); }
     else if(t==='swing'){ scanSwing(); }
+    else if(t==='zones'){ scanZones(); }
   },350);
 }
 function initAutoScan(){
@@ -5864,6 +6112,39 @@ const TI_INFO={
   ma_max4:'<b>Above All 4 MAs</b> · StockEdge price scan · Price above 20, 50, 100, AND 200 SMA simultaneously · Maximum bullish alignment — stock is above all significant moving average levels',
   ma_all_bull:'<b>Full MA Stack Bullish</b> · Price > MA20 > MA50 > MA100 > MA200 — perfect stacking in descending order · The "holy grail" of MA alignment — Minervini Trend Template compatible',
   ma_above3:'<b>Above 20/50/100 SMA</b> · Less strict version · All three key MAs confirmed bullish · Good for mid-cap and small-cap where 200 SMA may lag',
+  ha_bull:'<b>Heikin Ashi Bullish</b> · Current Heikin Ashi candle is green (close &gt; open in HA terms) · HA candles smooth out noise by averaging price action — a green HA candle confirms the underlying trend direction with less whipsaw than raw candles',
+  ha_bear:'<b>Heikin Ashi Bearish</b> · Current HA candle is red · Smoothed bearish trend confirmation',
+  ha_strong_bull:'<b>Heikin Ashi Strong Bull</b> · HA candle is green with little to no lower wick (open ≈ low) · Indicates a strong, uninterrupted uptrend with minimal intrabar selling pressure — traders often stay in a position as long as this pattern persists',
+  ha_strong_bear:'<b>Heikin Ashi Strong Bear</b> · HA candle is red with little to no upper wick (open ≈ high) · Strong, uninterrupted downtrend with minimal intrabar buying pressure',
+  ha_doji:'<b>Heikin Ashi Doji</b> · HA candle has a very small body with wicks on both sides · Signals indecision/pause within the current HA trend — often precedes either a continuation or a reversal, watch the next 1-2 candles',
+  ha_rev_bull:'<b>Heikin Ashi Reversal to Bull</b> · The HA candle just flipped from red to green after a downtrend · One of the cleanest trend-reversal signals because HA smoothing filters out single-bar noise',
+  ha_rev_bear:'<b>Heikin Ashi Reversal to Bear</b> · HA candle flipped from green to red after an uptrend · Smoothed bearish reversal signal',
+  ha_consec5:'<b>Heikin Ashi 5+ Consecutive Bull</b> · 5 or more consecutive green HA candles · Indicates a strong, sustained uptrend with virtually no countertrend HA candles — a hallmark of a powerful Stage-2 advance',
+  hma_bull:'<b>Hull Moving Average Bullish</b> · Price is above the HMA, or the HMA itself is sloping upward · The Hull MA (Alan Hull) is designed to reduce lag while maintaining smoothness — reacts faster to trend changes than a standard EMA of the same period',
+  hma_bear:'<b>Hull Moving Average Bearish</b> · Price below the HMA / HMA sloping down · Faster bearish trend confirmation than equivalent-period EMAs',
+  hma_flip_bull:'<b>HMA Flip Bullish</b> · The Hull MA slope just turned from down to up · Because the HMA has very little lag, this flip tends to occur close to the actual price turning point — an early trend-change signal',
+  hma_flip_bear:'<b>HMA Flip Bearish</b> · Hull MA slope turned from up to down · Early bearish trend-change signal with minimal lag',
+  kelt_above:'<b>Above Keltner Channel</b> · Price is trading above the upper Keltner Channel band (EMA + multiple of ATR) · Indicates strong momentum — in trending markets, persistent trading above the upper band is bullish (not necessarily "overbought")',
+  kelt_below:'<b>Below Keltner Channel</b> · Price below the lower Keltner band · Strong bearish momentum, persistent downtrend',
+  kelt_cross_up:'<b>Keltner Cross Up</b> · Price just crossed above the upper Keltner band · A volatility-adjusted breakout signal — because the band is ATR-based, this breakout is scaled to the stock\'s own volatility rather than a fixed percentage',
+  kelt_cross_dn:'<b>Keltner Cross Down</b> · Price just crossed below the lower Keltner band · Volatility-adjusted breakdown signal',
+  kelt_squeeze:'<b>Keltner Squeeze</b> · The Keltner Channel width (in ATR terms) has compressed to a multi-month low · Low-volatility coiling state — often precedes a sharp expansion in either direction (similar concept to a Bollinger Band squeeze but ATR-based)',
+  mfi_os:'<b>Money Flow Index Oversold (&lt;20)</b> · MFI, the "volume-weighted RSI", is below 20 · Indicates selling pressure combined with declining volume has reached an extreme — potential bounce zone, especially if price holds support',
+  mfi_ob:'<b>Money Flow Index Overbought (&gt;80)</b> · MFI above 80 · Buying pressure with high volume has reached an extreme — potential for a pullback, though strong trends can stay overbought for extended periods',
+  mfi_bull_div:'<b>MFI Bullish Divergence</b> · Price made a lower low while MFI made a higher low · Selling volume is drying up even as price falls — an early reversal signal that incorporates volume, making it often more reliable than price-only RSI divergence',
+  mfi_bear_div:'<b>MFI Bearish Divergence</b> · Price made a higher high while MFI made a lower high · Buying volume is fading even as price rises — early warning of a top forming',
+  cci_os:'<b>CCI Oversold (&lt;-100)</b> · Commodity Channel Index below -100 · Price is statistically far below its recent average — historically an extreme reading associated with short-term bounces',
+  cci_ob:'<b>CCI Overbought (&gt;+100)</b> · CCI above +100 · Price is statistically far above its recent average — in strong trends, CCI can remain above +100 for extended periods (a feature, not a sell signal, in trending markets)',
+  cci_zero_up:'<b>CCI Zero-Line Cross Up</b> · CCI just crossed above zero · Marks the transition from a below-average to above-average price regime — a simple, effective trend-following trigger',
+  cci_zero_dn:'<b>CCI Zero-Line Cross Down</b> · CCI crossed below zero · Transition to a below-average price regime — bearish trend trigger',
+  cci_os_exit:'<b>CCI Exiting Oversold</b> · CCI was below -100 and has now crossed back above -100 · The extreme oversold condition is resolving — often marks the start of a relief rally or reversal',
+  cci_ob_exit:'<b>CCI Exiting Overbought</b> · CCI was above +100 and has crossed back below +100 · The extreme overbought condition is resolving — caution for longs, often precedes a pullback',
+  lr_above_chan:'<b>Above Linear Regression Channel</b> · Price is above the upper band of the linear regression channel (the statistical trendline ± standard deviations) · Indicates the stock is trading at a statistical premium to its recent trend — strong momentum',
+  lr_below_chan:'<b>Below Linear Regression Channel</b> · Price below the lower regression band · Statistical discount to the recent trend — strong downward momentum',
+  lr_slope_bull:'<b>Linear Regression Slope Bullish</b> · The regression line\'s slope (the best-fit trend over the lookback period) is positive · Confirms the underlying statistical trend direction is up, independent of short-term price swings',
+  lr_slope_bear:'<b>Linear Regression Slope Bearish</b> · Regression slope is negative · Statistical trend is down',
+  lr_mean_rev:'<b>Linear Regression Mean Reversion</b> · Price has moved 2+ standard deviations away from the regression line and is the first bar pulling back toward it · A statistical mean-reversion setup — works best in range-bound/non-trending conditions, riskier in strong trends',
+
 };
 
 function updateTIInfo(){
@@ -6059,6 +6340,14 @@ const NL_INFO={
   ew_w5_dn:'<b>EW Wave 5 Bearish Impulse</b> · Simplified detection of a 5-wave bearish impulse pattern · Wave 3 is the strongest wave down · Potential completion of a bearish impulse — watch for corrective bounce',
   ew_w3_ext:'<b>EW Wave 3 Extension</b> · Wave 3 is at least 161.8% of Wave 1 (Golden Ratio extension) · Extended wave 3s are the strongest, fastest moves in Elliott Wave · If wave 3 is still in progress, significant upside potential remains',
   ew_abc:'<b>EW ABC Correction Done</b> · Three-wave A-B-C correction pattern appears to be completing · C wave ≤ A wave length suggests correction is exhausted · Potential resumption of the primary trend',
+  kagi_yang:'<b>Kagi Yang (Bull)</b> · The Kagi chart line is currently thick/Yang (bullish) · Kagi lines only change direction on a meaningful reversal amount, filtering out time-based noise entirely — Yang state means buyers are in control',
+  kagi_yin:'<b>Kagi Yin (Bear)</b> · The Kagi line is thin/Yin (bearish) · Sellers in control on this noise-filtered chart',
+  kagi_rev_yang:'<b>Kagi Fresh Reversal to Yang</b> · The Kagi line just flipped from Yin (thin) to Yang (thick) · A significant reversal just occurred — Kagi reversals require a real price move (not just a new high/low by 1 tick), making this a high-conviction signal',
+  kagi_rev_yin:'<b>Kagi Fresh Reversal to Yin</b> · The Kagi line just flipped from Yang to Yin · A significant bearish reversal — sellers have taken control after a meaningful price decline',
+  kagi_shoulder:'<b>Kagi Shoulder</b> · Price is at a "shoulder" level — a prior Yang-to-Yin reversal point that acts as resistance · A break above a shoulder on the next Yang move is a bullish breakout signal',
+  kagi_waist:'<b>Kagi Waist</b> · Price is at a "waist" level — a prior Yin-to-Yang reversal point that acts as support · A break below a waist on the next Yin move is a bearish breakdown signal',
+  kagi_consec:'<b>Kagi Consecutive Yang</b> · Multiple consecutive Yang (thick/bullish) lines without a Yin reversal · Indicates a strong, sustained uptrend with no significant pullback yet — the noise-filtered trend is intact',
+
 };
 
 function updateNLInfo(){
@@ -6396,7 +6685,22 @@ if(window.TYPE_META) TYPE_META['cpr']={label:'CPR',levels:['TC','BC','P','R1','R
 // ════════════════════════════════════════════════════════════════════════════
 // ③ GAP SCANNER
 // ════════════════════════════════════════════════════════════════════════════
-function updateGapInfo(){setFbar('⚡ <b>Gap Scanner</b> — overnight gap vs prior close');}
+const GAP_INFO={
+  up1:'<b>Gap Up ≥1%</b> · Today\'s open is at least 1% above yesterday\'s close · A modest overnight gap — often news-driven or sector rotation · Watch whether it holds (continuation) or fades (rejection)',
+  up2:'<b>Gap Up ≥2%</b> · A significant overnight gap, typically driven by results, news, or strong sector momentum · Higher conviction than a 1% gap but also higher risk of an intraday fade',
+  up3:'<b>Gap Up ≥3%</b> · A large overnight gap — usually major news (results beat, block deal, index inclusion) · High momentum but also higher volatility; many such gaps see partial retracement intraday',
+  up_cont:'<b>Gap Up + Continuation</b> · Stock gapped up AND closed above its open (green candle) · The gap held and buyers extended the move — strongest single-day bullish signal, often followed by further upside',
+  up_reject:'<b>Gap Up Rejection</b> · Stock gapped up but closed below its open (red candle) · Early buyers were absorbed by sellers — a warning sign, the gap may get filled in coming sessions',
+  up_unfilled:'<b>Gap Up Unfilled</b> · The gap-up zone from open has not been filled (price never traded back down into the gap) · Unfilled gaps act as support — institutions are defending this level',
+  dn1:'<b>Gap Down ≥1%</b> · Today\'s open is at least 1% below yesterday\'s close · A modest bearish gap — could be profit booking or minor negative news',
+  dn2:'<b>Gap Down ≥2%</b> · A significant overnight bearish gap, typically results/news driven · Often triggers stop-losses and forced selling — watch for capitulation reversal',
+  dn3:'<b>Gap Down ≥3%</b> · A large bearish gap — major negative catalyst · High risk of further downside but also potential for an oversold bounce if the gap is overdone',
+  dn_cont:'<b>Gap Down + Continuation</b> · Stock gapped down AND closed below its open (red candle) · The gap held and sellers extended the move — strongest single-day bearish signal',
+  dn_unfilled:'<b>Gap Down Unfilled</b> · The gap-down zone from open has not been filled · Unfilled bearish gaps act as resistance — overhead supply remains until filled',
+  consec3:'<b>3 Consecutive Gap Ups</b> · Three trading sessions in a row with gap-up opens · Indicates sustained strong demand or momentum/FOMO buying · Can signal either a powerful trend OR an exhaustion blow-off — check volume and RSI for confirmation',
+};
+
+function updateGapInfo(){const s=document.getElementById('gap-strat').value;setFbar('⚡ <b>Gap Scanner</b> · '+(GAP_INFO[s]||'overnight gap vs prior close'));}
 function scanGap(){
   var strat=document.getElementById('gap-strat').value;
   var rsMin=parseInt(document.getElementById('gap-rs').value)||0;
@@ -6873,7 +7177,7 @@ function _tpRow(s,sc,rank){
     padding:8px 10px;background:var(--bg2);border:1px solid var(--brd);border-radius:6px;
     margin-bottom:5px;cursor:pointer">
     <span style="color:var(--mu);font-size:11px;width:18px;text-align:right">${rank}</span>
-    <span class="sd-ico" onmouseenter="_sdHover('${s.sym}')" title="Stock detail" onclick="event.stopPropagation()">i</span>
+    <span class="sd-ico" onmouseenter="_sdHover('${s.sym}',event)" title="Stock detail" onclick="event.stopPropagation()">i</span>
     <a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${s.sym}" target="_blank" rel="noopener"
        onclick="event.stopPropagation()" style="font-weight:700;min-width:90px">${s.sym}</a>
     <span style="font-size:11px;color:var(--mu);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.sector||'—'}</span>
@@ -6909,7 +7213,7 @@ function scanTopPicks(){
 const TAB_NAMES={piv:'Pivot Points',smc:'Price Action/SMC',vol:'Volume',mi:'Multi-Indicator',
   adv:'Advanced',t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',ti:'India Pro',nl:'Noiseless',
   xp:'Experimental/VSA',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combiner',
-  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup'};
+  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand'};
 const SIGNAL_DEFS=[
   // ── Trend / Tier-1 ──
   {cat:'Trend',tab:'t1',label:'SuperTrend Bullish',          w:3, chk:s=>s.t1?.stt?.bull},
@@ -7022,6 +7326,17 @@ const SIGNAL_DEFS=[
   {cat:'Patterns',tab:'patt',label:'Double Top (M) Daily — Neckline BD',w:-3,chk:s=>s.patt?.dbl?.d?.m?.found&&s.patt?.dbl?.d?.m?.breakdown},
   {cat:'Patterns',tab:'patt',label:'Double Top (M) Weekly — Neckline BD',w:-4,chk:s=>s.patt?.dbl?.w?.m?.found&&s.patt?.dbl?.w?.m?.breakdown},
   {cat:'Patterns',tab:'patt',label:'Double Top (M) Monthly — Neckline BD',w:-5,chk:s=>s.patt?.dbl?.m?.m?.found&&s.patt?.dbl?.m?.m?.breakdown},
+
+
+  // ── Supply & Demand Zones — D/W/M ──
+  {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Demand Zone (Daily)',  w:3, chk:s=>s.zones?.d?.demand?.near&&s.zones?.d?.demand?.fresh},
+  {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Demand Zone (Weekly)', w:4, chk:s=>s.zones?.w?.demand?.near&&s.zones?.w?.demand?.fresh},
+  {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Demand Zone (Monthly)',w:5, chk:s=>s.zones?.m?.demand?.near&&s.zones?.m?.demand?.fresh},
+  {cat:'SupplyDemand',tab:'zones',label:'D+W Demand Zone Confluence',     w:6, chk:s=>s.zones?.d?.demand?.near&&s.zones?.d?.demand?.fresh&&s.zones?.w?.demand?.near&&s.zones?.w?.demand?.fresh},
+  {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Supply Zone (Daily)', w:-3,chk:s=>s.zones?.d?.supply?.near&&s.zones?.d?.supply?.fresh},
+  {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Supply Zone (Weekly)',w:-4,chk:s=>s.zones?.w?.supply?.near&&s.zones?.w?.supply?.fresh},
+  {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Supply Zone (Monthly)',w:-5,chk:s=>s.zones?.m?.supply?.near&&s.zones?.m?.supply?.fresh},
+  {cat:'SupplyDemand',tab:'zones',label:'D+W Supply Zone Confluence',     w:-6,chk:s=>s.zones?.d?.supply?.near&&s.zones?.d?.supply?.fresh&&s.zones?.w?.supply?.near&&s.zones?.w?.supply?.fresh},
 
   // ── Gap ──
   {cat:'Gap',tab:'gap',label:'Gap Up Continuation',           w:2, chk:s=>s.gap?.up&&s.gap?.cont},
@@ -7245,6 +7560,75 @@ function scanSwing(){
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// 📦 SUPPLY & DEMAND ZONES — Daily/Weekly/Monthly base + leg-out detection
+// ════════════════════════════════════════════════════════════════════════════
+const ZONES_INFO={
+  demand_near_d:'<b>Near Fresh Demand Zone (Daily)</b> · Price is approaching (within 3%) or inside an untested daily demand zone — a tight "base" candle followed by a strong bullish leg-out · The zone has never been retested since it formed, making it a high-probability bounce/support area',
+  demand_inside_d:'<b>Inside Demand Zone (Daily)</b> · Price is currently trading WITHIN the boundaries of a daily demand zone (the base candle\'s high-low range) · This is the zone itself — watch for a reaction (bounce) here',
+  supply_near_d:'<b>Near Fresh Supply Zone (Daily)</b> · Price is approaching (within 3%) or inside an untested daily supply zone — a tight base candle followed by a strong bearish leg-out · Untested zones are the highest-probability rejection/resistance areas',
+  supply_inside_d:'<b>Inside Supply Zone (Daily)</b> · Price is currently trading WITHIN a daily supply zone\'s boundaries · Watch for rejection (selling pressure) here',
+  demand_near_w:'<b>Near Fresh Demand Zone (Weekly)</b> · Same concept as daily, but the base + leg-out formed on WEEKLY candles · Weekly zones represent much larger institutional order blocks and tend to hold for months when first retested',
+  demand_inside_w:'<b>Inside Demand Zone (Weekly)</b> · Price is trading within a weekly demand zone — a major multi-week support area formed by a weekly base candle followed by a strong weekly rally',
+  supply_near_w:'<b>Near Fresh Supply Zone (Weekly)</b> · Price approaching an untested weekly supply zone · A major multi-week resistance area — first retest after formation carries the highest rejection probability',
+  supply_inside_w:'<b>Inside Supply Zone (Weekly)</b> · Price trading within a weekly supply zone\'s boundaries — major resistance, watch for rejection',
+  demand_near_m:'<b>Near Fresh Demand Zone (Monthly)</b> · A monthly base candle followed by a powerful monthly rally · Monthly zones are rare and represent multi-year institutional accumulation levels — among the most significant support levels on the chart',
+  demand_inside_m:'<b>Inside Demand Zone (Monthly)</b> · Price trading within a monthly demand zone — a major long-term support level, often coinciding with multi-year lows',
+  supply_near_m:'<b>Near Fresh Supply Zone (Monthly)</b> · A monthly base candle followed by a powerful monthly decline · Represents multi-year institutional distribution levels — among the most significant resistance levels on the chart',
+  supply_inside_m:'<b>Inside Supply Zone (Monthly)</b> · Price trading within a monthly supply zone — major long-term resistance',
+  demand_confluence:'<b>Demand Confluence — Daily + Weekly</b> · Price is near/inside a fresh demand zone on BOTH the daily AND weekly timeframe simultaneously · When a smaller-timeframe zone sits inside a larger-timeframe zone, the larger zone reinforces the smaller one — the highest-probability multi-timeframe support area',
+  supply_confluence:'<b>Supply Confluence — Daily + Weekly</b> · Price is near/inside a fresh supply zone on BOTH daily AND weekly timeframes · Multi-timeframe resistance confluence — the highest-probability rejection area',
+};
+function updateZonesInfo(){const s=document.getElementById('zones-strat').value;setFbar('📦 <b>Supply &amp; Demand Zones</b> · '+(ZONES_INFO[s]||s));}
+
+function scanZones(){
+  const strat=document.getElementById('zones-strat').value;
+  const rsMin=parseInt(document.getElementById('zones-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('zones-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('zones-pmax').value)||Infinity;
+  updateZonesInfo(); rows=[];
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const z=s.zones||{}; const d=z.d||{}, w=z.w||{}, m=z.m||{};
+    let matched=false,sig='',extra={};
+
+    const fmtZone=zo=>zo?('₹'+zo.lo+'-'+zo.hi+(zo.fresh?' (fresh)':' (tested)')+' · '+zo.bars_ago+'bars ago'):'—';
+
+    if(strat==='demand_near_d')  {matched=!!d.demand?.near&&!!d.demand?.fresh;  sig='📦🟢 D Demand'; extra={zone:fmtZone(d.demand)};}
+    if(strat==='demand_inside_d'){matched=!!d.demand?.inside;                   sig='📦🟢 D Inside Demand'; extra={zone:fmtZone(d.demand)};}
+    if(strat==='supply_near_d')  {matched=!!d.supply?.near&&!!d.supply?.fresh;  sig='📦🔴 D Supply'; extra={zone:fmtZone(d.supply)};}
+    if(strat==='supply_inside_d'){matched=!!d.supply?.inside;                   sig='📦🔴 D Inside Supply'; extra={zone:fmtZone(d.supply)};}
+
+    if(strat==='demand_near_w')  {matched=!!w.demand?.near&&!!w.demand?.fresh;  sig='📦🟢 W Demand'; extra={zone:fmtZone(w.demand)};}
+    if(strat==='demand_inside_w'){matched=!!w.demand?.inside;                   sig='📦🟢 W Inside Demand'; extra={zone:fmtZone(w.demand)};}
+    if(strat==='supply_near_w')  {matched=!!w.supply?.near&&!!w.supply?.fresh;  sig='📦🔴 W Supply'; extra={zone:fmtZone(w.supply)};}
+    if(strat==='supply_inside_w'){matched=!!w.supply?.inside;                   sig='📦🔴 W Inside Supply'; extra={zone:fmtZone(w.supply)};}
+
+    if(strat==='demand_near_m')  {matched=!!m.demand?.near&&!!m.demand?.fresh;  sig='📦🟢 M Demand'; extra={zone:fmtZone(m.demand)};}
+    if(strat==='demand_inside_m'){matched=!!m.demand?.inside;                   sig='📦🟢 M Inside Demand'; extra={zone:fmtZone(m.demand)};}
+    if(strat==='supply_near_m')  {matched=!!m.supply?.near&&!!m.supply?.fresh;  sig='📦🔴 M Supply'; extra={zone:fmtZone(m.supply)};}
+    if(strat==='supply_inside_m'){matched=!!m.supply?.inside;                   sig='📦🔴 M Inside Supply'; extra={zone:fmtZone(m.supply)};}
+
+    if(strat==='demand_confluence'){
+      matched=!!d.demand?.near&&!!d.demand?.fresh&&!!w.demand?.near&&!!w.demand?.fresh;
+      sig='🔗📦🟢 D+W Demand'; extra={daily:fmtZone(d.demand),weekly:fmtZone(w.demand)};
+    }
+    if(strat==='supply_confluence'){
+      matched=!!d.supply?.near&&!!d.supply?.fresh&&!!w.supply?.near&&!!w.supply?.fresh;
+      sig='🔗📦🔴 D+W Supply'; extra={daily:fmtZone(d.supply),weekly:fmtZone(w.supply)};
+    }
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'zones',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
 function lookupStock(){
   const q=(document.getElementById('lookup-input').value||'').trim().toUpperCase();
   const sugEl=document.getElementById('lookup-suggest');
@@ -7280,7 +7664,7 @@ function renderLookupResult(s){
   const catOrder=['Trend','Momentum','Volatility','SMC','MultiIndicator','BreakoutPro','SmartRank','Patterns','Gap'];
   const catLabels={Trend:'📈 Trend',Momentum:'⚡ Momentum',Volatility:'🗜 Volatility/Breakout',
     SMC:'🎯 Smart Money Concepts',MultiIndicator:'🏆 Minervini/Weinstein',
-    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps'};
+    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand'};
 
   let catsHtml='';
   for(const cat of catOrder){
@@ -7392,7 +7776,7 @@ function scanIndexView(){
     const pct=(v,b)=>b&&v?((v-b)/b*100).toFixed(1)+'%':'—';
     const dist=s.dma200?((s.price-s.dma200)/s.dma200*100):0;
     return `<tr style="cursor:pointer" onclick="showScorePopup('${s.sym}')">
-      <td class="csym" style="white-space:nowrap"><span class="sd-ico" onmouseenter="_sdHover('${s.sym}')" title="Stock detail">i</span><a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${s.sym}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${s.sym}</a></td>
+      <td class="csym" style="white-space:nowrap"><span class="sd-ico" onmouseenter="_sdHover('${s.sym}',event)" title="Stock detail">i</span><a href="https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${s.sym}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${s.sym}</a></td>
       <td>${s.sector||'—'}</td>
       <td class="num">₹${f2(s.price)}</td>
       <td class="num" style="color:${dist>=0?'#00e5a0':'#ef4444'}">${pct(s.price,s.dma200)}</td>
@@ -7664,7 +8048,7 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -7742,6 +8126,7 @@ function exportCSV(){
     bp:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     sr:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     swing:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
+    zones:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
