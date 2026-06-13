@@ -1368,12 +1368,12 @@ def compute_rrg(df, nifty_df):
     rs=stk/nif; m=len(rs)
     # RS-Ratio: normalized around 100 using 10-period SMA
     if m<12: return {}
-    sma10=np.array([rs[i-10:i].mean() for i in range(10,m+1)])
+    sma10=np.array([rs[i-10:i].mean() for i in range(10,m)])
     rs_aligned=rs[10:]
     rs_ratio=rs_aligned/sma10*100 if sma10.any() else rs_aligned
     if len(rs_ratio)<12: return {}
     # RS-Momentum: RS-Ratio normalized by its own 10-period SMA
-    sma10b=np.array([rs_ratio[i-10:i].mean() for i in range(10,len(rs_ratio)+1)])
+    sma10b=np.array([rs_ratio[i-10:i].mean() for i in range(10,len(rs_ratio))])
     rsr_aligned=rs_ratio[10:]
     rs_mom=rsr_aligned/sma10b*100 if sma10b.any() else rsr_aligned
     if not len(rs_mom): return {}
@@ -1978,6 +1978,281 @@ def compute_supply_demand(df,_wdf=None,_mdf=None):
                                _mdf['Low'].values.astype(float),_mdf['Close'].values.astype(float)) or {'demand':None,'supply':None}
     return out
 
+
+
+def _atr_series(H,L,C,period=14):
+    n=len(C)
+    tr=np.maximum(H[1:]-L[1:],np.maximum(np.abs(H[1:]-C[:-1]),np.abs(L[1:]-C[:-1])))
+    tr=np.concatenate([[H[0]-L[0]],tr])
+    atr=np.zeros(n); atr[:period]=np.mean(tr[:period])
+    for i in range(period,n): atr[i]=(atr[i-1]*(period-1)+tr[i])/period
+    return atr
+
+# ── 1. Volume Profile / Point of Control ──────────────────────────────────────
+def compute_volume_profile(df, lookback=150, bins=24):
+    n=len(df)
+    if n<30: return {}
+    lb=min(lookback,n)
+    H=df['High'].values[-lb:].astype(float); L=df['Low'].values[-lb:].astype(float)
+    C=df['Close'].values[-lb:].astype(float); V=df['Volume'].values[-lb:].astype(float)
+    pmin,pmax=float(L.min()),float(H.max())
+    if pmax<=pmin: return {}
+    edges=np.linspace(pmin,pmax,bins+1)
+    tp=(H+L+C)/3.0
+    idx=np.clip(np.digitize(tp,edges)-1,0,bins-1)
+    hist=np.zeros(bins)
+    for i in range(lb): hist[idx[i]]+=V[i]
+    poc_bin=int(np.argmax(hist))
+    poc=float((edges[poc_bin]+edges[poc_bin+1])/2)
+    # Value area = bins around POC containing ~70% of total volume
+    total=hist.sum(); target=total*0.70
+    order=sorted(range(bins),key=lambda b:-hist[b])
+    cum=0; va_bins=set()
+    for b in order:
+        cum+=hist[b]; va_bins.add(b)
+        if cum>=target: break
+    va_lo=float(edges[min(va_bins)]); va_hi=float(edges[max(va_bins)+1])
+    c=float(C[-1]); prev=float(C[-2]); avg_v=float(V[-20:].mean()) if lb>=20 else float(V.mean())
+    dist=(c-poc)/poc*100 if poc else 0
+    return dict(poc=r2(poc), va_lo=r2(va_lo), va_hi=r2(va_hi), dist_pct=r2(dist),
+                 near_poc=bool(abs(dist)<=2),
+                 above_va=bool(c>va_hi), below_va=bool(c<va_lo),
+                 poc_breakout_bull=bool(prev<=poc and c>poc and V[-1]>avg_v*1.2),
+                 poc_breakdown_bear=bool(prev>=poc and c<poc and V[-1]>avg_v*1.2))
+
+# ── 2. First Pullback After Breakout ──────────────────────────────────────────
+def compute_first_pullback(df, scan_back=30):
+    n=len(df)
+    if n<60: return {}
+    C=df['Close'].values.astype(float); V=df['Volume'].values.astype(float)
+    ema20=np.empty(n); ema20[0]=C[0]; k=2/21
+    for i in range(1,n): ema20[i]=C[i]*k+ema20[i-1]*(1-k)
+    # find most recent fresh 20-day high in [n-scan_back, n-3]
+    bo_idx=None
+    for i in range(n-3, n-scan_back, -1):
+        if i<20: break
+        if C[i]>=np.max(C[i-19:i+1])*0.999 and C[i]>np.max(C[i-40:i-20] if i>=40 else C[:max(1,i-20)],initial=0):
+            bo_idx=i; break
+    if bo_idx is None: return dict(found=False)
+    # since breakout, has price stayed above ema20 (no pullback yet)?
+    held=all(C[j]>=ema20[j]*0.985 for j in range(bo_idx+1,n-1)) if n-1>bo_idx+1 else True
+    c=float(C[-1]); e=float(ema20[-1])
+    near_ema=abs(c-e)/e*100<=2.5
+    below_breakout_high=c<C[bo_idx]
+    vol_declining=bool(V[-1]<np.mean(V[bo_idx:n-1])) if n-1>bo_idx else False
+    is_fpb=bool(held and near_ema and below_breakout_high and c>=e*0.97)
+    return dict(found=bool(is_fpb), bars_since_bo=n-1-bo_idx, breakout_level=r2(C[bo_idx]),
+                 ema20=r2(e), vol_declining=vol_declining, near_ema20=bool(near_ema))
+
+# ── 3. Quiet Accumulation (Stealth Buying) ────────────────────────────────────
+def compute_quiet_accumulation(df, lookback=40):
+    n=len(df)
+    if n<lookback+5: return {}
+    H=df['High'].values[-lookback:].astype(float); L=df['Low'].values[-lookback:].astype(float)
+    C=df['Close'].values[-lookback:].astype(float); V=df['Volume'].values[-lookback:].astype(float)
+    price_range_pct=(H.max()-L.min())/C.mean()*100
+    # OBV
+    obv=np.zeros(lookback)
+    for i in range(1,lookback):
+        if C[i]>C[i-1]: obv[i]=obv[i-1]+V[i]
+        elif C[i]<C[i-1]: obv[i]=obv[i-1]-V[i]
+        else: obv[i]=obv[i-1]
+    tight=bool(price_range_pct<8)
+    obv_rising=bool(obv[-1]>obv[0])
+    obv_new_high=bool(obv[-1]>=obv.max()*0.999)
+    return dict(price_range_pct=r2(price_range_pct), tight=tight,
+                 obv_rising=obv_rising, obv_new_high=obv_new_high,
+                 quiet_accum=bool(tight and obv_rising and obv_new_high))
+
+# ── 4. 52-Week High Anniversary ───────────────────────────────────────────────
+def compute_anniversary_high(df):
+    n=len(df)
+    if n<280: return {}
+    C=df['Close'].values.astype(float)
+    dates=df['Date'].values
+    # window ~1 year ago: 237-267 bars back (252±15 trading days)
+    lo,hi=max(0,n-267),max(1,n-236)
+    if hi<=lo: return {}
+    window=C[lo:hi]
+    rel=int(np.argmax(window)); idx=lo+rel
+    days_since=int((dates[-1]-dates[idx]).astype('timedelta64[D]').astype(int))
+    return dict(anniversary=bool(351<=days_since<=379), days_since=days_since,
+                 high_price=r2(C[idx]))
+
+# ── 5. Anchored VWAP from 52W High / Low ──────────────────────────────────────
+def compute_anchored_vwap(df, lookback=252):
+    n=len(df)
+    if n<60: return {}
+    lb=min(lookback,n)
+    H=df['High'].values[-lb:].astype(float); L=df['Low'].values[-lb:].astype(float)
+    C=df['Close'].values[-lb:].astype(float); V=df['Volume'].values[-lb:].astype(float)
+    tp=(H+L+C)/3.0
+    idx_hi=int(np.argmax(H)); idx_lo=int(np.argmin(L))
+    def avwap(start):
+        seg_tp=tp[start:]; seg_v=V[start:]
+        sv=seg_v.sum()
+        return float((seg_tp*seg_v).sum()/sv) if sv>0 else float(seg_tp[-1])
+    vwap_lo=avwap(idx_lo); vwap_hi=avwap(idx_hi)
+    c=float(C[-1]); prev=float(C[-2])
+    return dict(vwap_from_low=r2(vwap_lo), vwap_from_high=r2(vwap_hi),
+                 reclaim_bull=bool(prev<=vwap_lo and c>vwap_lo and idx_lo<lb-1),
+                 reject_bear=bool(prev>=vwap_hi and c<vwap_hi and idx_hi<lb-1),
+                 above_vwap_lo=bool(c>vwap_lo), below_vwap_hi=bool(c<vwap_hi))
+
+# ── 6. Volatility Percentile Rank ──────────────────────────────────────────────
+def compute_volatility_percentile(df, lookback=500):
+    n=len(df)
+    if n<60: return {}
+    H=df['High'].values.astype(float); L=df['Low'].values.astype(float); C=df['Close'].values.astype(float)
+    atr=_atr_series(H,L,C,14)
+    atr_pct=atr/np.where(C==0,1,C)*100
+    lb=min(lookback,n)
+    hist=atr_pct[-lb:]
+    cur=float(atr_pct[-1])
+    pct_rank=float((hist<=cur).sum())/len(hist)*100
+    return dict(atr_pct=r2(cur), percentile=r2(pct_rank), quiet_2y=bool(pct_rank<=10))
+
+# ── 7. Correlation Decoupling vs Nifty ────────────────────────────────────────
+def compute_correlation_decoupling(df, nifty_df, w=20):
+    if nifty_df is None: return {}
+    try:
+        import pandas as _pd
+        sd=df.copy(); sd['Date']=_pd.to_datetime(sd['Date']); sd=sd.set_index('Date')
+        nd=nifty_df.copy(); nd['Date']=_pd.to_datetime(nd['Date']); nd=nd.set_index('Date')
+        common=sd.index.intersection(nd.index)
+        if len(common)<80: return {}
+        sc=sd.loc[common,'Close'].values.astype(float)
+        nc=nd.loc[common,'Close'].values.astype(float)
+        sr=np.diff(sc)/sc[:-1]; nr=np.diff(nc)/nc[:-1]
+        n=len(sr)
+        if n<w+w+5: return {}
+        corr_now=float(np.corrcoef(sr[-w:],nr[-w:])[0,1])
+        corr_prev=float(np.corrcoef(sr[-(2*w):-w],nr[-(2*w):-w])[0,1])
+        rs_now=sc[-1]/sc[-w]; rs_nifty=nc[-1]/nc[-w]
+        rs_improving=bool(rs_now>rs_nifty)
+        decoupled=bool(corr_prev>0.5 and corr_now<0.2)
+        return dict(corr_now=r2(corr_now), corr_prev=r2(corr_prev),
+                     decoupled=decoupled, rs_improving=rs_improving,
+                     decouple_bull=bool(decoupled and rs_improving),
+                     decouple_bear=bool(decoupled and not rs_improving))
+    except Exception:
+        return {}
+
+
+# ── 1. Pocket Pivot (O'Neil) ───────────────────────────────────────────────────
+def compute_pocket_pivot(df):
+    n=len(df)
+    if n<60: return {}
+    C=df['Close'].values.astype(float); V=df['Volume'].values.astype(float)
+    def ema(period):
+        e=np.empty(n); e[0]=C[0]; k=2/(period+1)
+        for i in range(1,n): e[i]=C[i]*k+e[i-1]*(1-k)
+        return e
+    e10,e20,e50=ema(10),ema(20),ema(50)
+    down_vols=[V[i] for i in range(n-11,n-1) if C[i]<C[i-1]]
+    max_down_vol=max(down_vols) if down_vols else 0
+    is_up=C[-1]>C[-2]
+    c=float(C[-1])
+    near_ema=any(abs(c-e[-1])/e[-1]<=0.03 and e[-1]>e[-6] for e in (e10,e20,e50))
+    found=bool(is_up and max_down_vol>0 and V[-1]>max_down_vol and near_ema)
+    return dict(found=found, vol_ratio=r2(V[-1]/max_down_vol) if max_down_vol>0 else None)
+
+# ── 2. Multi-Year Box Breakout ─────────────────────────────────────────────────
+def compute_box_breakout(df, lookback=500):
+    n=len(df)
+    if n<lookback+10: return {}
+    H=df['High'].values.astype(float); L=df['Low'].values.astype(float); C=df['Close'].values.astype(float)
+    rh=float(H[-lookback-1:-1].max()); rl=float(L[-lookback-1:-1].min())
+    if rl<=0: return {}
+    compression=(rh-rl)/rl*100
+    c=float(C[-1])
+    found=bool(compression<=60 and c>rh*1.02)
+    return dict(found=found, range_high=r2(rh), range_low=r2(rl), compression_pct=r2(compression))
+
+# ── 3. Wyckoff Spring / Upthrust ───────────────────────────────────────────────
+def compute_wyckoff(df):
+    n=len(df)
+    if n<260: return {}
+    H=df['High'].values.astype(float); L=df['Low'].values.astype(float); C=df['Close'].values.astype(float); V=df['Volume'].values.astype(float)
+    prior_low=float(L[-255:-3].min()); prior_high=float(H[-255:-3].max())
+    recent_low=float(L[-3:].min()); recent_high=float(H[-3:].max())
+    avg_v=float(V[-20:].mean())
+    spring=bool(recent_low<prior_low*0.99 and C[-1]>prior_low and V[-1]<avg_v)
+    upthrust=bool(recent_high>prior_high*1.005 and C[-1]<prior_high and V[-1]<avg_v)
+    return dict(spring=spring, upthrust=upthrust, prior_low=r2(prior_low), prior_high=r2(prior_high))
+
+# ── 4. Volume Climax Reversal ──────────────────────────────────────────────────
+def compute_volume_climax(df, lookback=60):
+    n=len(df)
+    if n<lookback+5: return {}
+    H=df['High'].values.astype(float); L=df['Low'].values.astype(float); C=df['Close'].values.astype(float); V=df['Volume'].values.astype(float)
+    avg_v=float(V[-21:-1].mean()); avg_range=float((H[-21:-1]-L[-21:-1]).mean())
+    rng=float(H[-1]-L[-1])
+    body_pos=(C[-1]-L[-1])/rng if rng>0 else 0.5
+    is_new_high=bool(H[-1]>=H[-lookback:-1].max())
+    is_new_low=bool(L[-1]<=L[-lookback:-1].min())
+    huge_vol=bool(V[-1]>=3*avg_v) if avg_v>0 else False
+    wide_range=bool(rng>=1.5*avg_range) if avg_range>0 else False
+    buying_climax=bool(is_new_high and huge_vol and wide_range and body_pos<0.35)
+    selling_climax=bool(is_new_low and huge_vol and wide_range and body_pos>0.65)
+    return dict(buying_climax=buying_climax, selling_climax=selling_climax,
+                 vol_ratio=r2(V[-1]/avg_v) if avg_v>0 else 0)
+
+# ── 5. Relative Volume Percentile (1-Year) ─────────────────────────────────────
+def compute_rvol_percentile(df, lookback=252):
+    n=len(df)
+    if n<60: return {}
+    V=df['Volume'].values.astype(float)
+    lb=min(lookback,n-1)
+    hist=V[-lb-1:-1]; cur=float(V[-1])
+    pctile=float((hist<=cur).sum())/len(hist)*100
+    return dict(percentile=r2(pctile), rvol_high=bool(pctile>=90), rvol_extreme=bool(pctile>=98))
+
+# ── 6. RS Line Trough/Peak Reversal (emerging/fading leadership) ─────────────
+def compute_rs_reversal(df, nifty_df, lookback=20):
+    if nifty_df is None: return {}
+    try:
+        sd=df.copy(); sd['Date']=pd.to_datetime(sd['Date']); sd=sd.set_index('Date')
+        nd=nifty_df.copy(); nd['Date']=pd.to_datetime(nd['Date']); nd=nd.set_index('Date')
+        common=sd.index.intersection(nd.index)
+        if len(common)<lookback+15: return {}
+        sc=sd.loc[common,'Close'].values.astype(float)
+        nc=nd.loc[common,'Close'].values.astype(float)
+        nc=np.where(nc==0,1,nc)
+        rs=sc/nc; n=len(rs)
+        if n<lookback+5: return {}
+        window=rs[-lookback:]
+        trough_rel=int(np.argmin(window)); peak_rel=int(np.argmax(window))
+        trough_idx=n-lookback+trough_rel; peak_idx=n-lookback+peak_rel
+        rs_now=float(rs[-1])
+        new_leader=bool(trough_idx<=n-3 and trough_idx>n-lookback and rs[trough_idx]>0 and rs_now>rs[trough_idx]*1.05)
+        fading_leader=bool(peak_idx<=n-3 and peak_idx>n-lookback and rs[peak_idx]>0 and rs_now<rs[peak_idx]*0.95)
+        return dict(new_leader=new_leader, fading_leader=fading_leader)
+    except Exception:
+        return {}
+
+# ── 7. Sector Rotation / Laggard Catch-Up — post-pass over all stocks ─────────
+def assign_sector_rotation(stocks):
+    by_sector={}
+    for s in stocks:
+        sec=s.get('sector','Other')
+        by_sector.setdefault(sec,[]).append(s)
+    all_r1m=[s.get('sr',{}).get('raw',{}).get('r1m',0) for s in stocks]
+    universe_avg=sum(all_r1m)/len(all_r1m) if all_r1m else 0
+    sector_avg={}
+    for sec,grp in by_sector.items():
+        vals=[s.get('sr',{}).get('raw',{}).get('r1m',0) for s in grp]
+        sector_avg[sec]=sum(vals)/len(vals) if vals else 0
+    for s in stocks:
+        sec=s.get('sector','Other')
+        sec_r1m=sector_avg.get(sec,0)
+        own_r1m=s.get('sr',{}).get('raw',{}).get('r1m',0)
+        rotating_in=bool(sec_r1m>universe_avg and sec_r1m>0.5)
+        leader=bool(rotating_in and own_r1m>sec_r1m)
+        laggard=bool(rotating_in and own_r1m<sec_r1m*0.4 and s.get('rs',0)>=30)
+        s['sector_rot']=dict(sector_avg_r1m=r2(sec_r1m), universe_avg_r1m=r2(universe_avg),
+                              own_r1m=r2(own_r1m), rotating_in=rotating_in,
+                              leader=leader, laggard_catchup=laggard)
 
 def compute_vsa(df):
     """Volume Spread Analysis: interplay of Volume, Spread (H−L), and Close position.
@@ -2618,6 +2893,23 @@ def precompute(fp, idx_map, nifty_df=None):
     )
     # 📦 Supply & Demand Zones — Daily / Weekly / Monthly
     zones = compute_supply_demand(df,_wdf=_wdf,_mdf=_mdf)
+    # 💎 Pro Scanners — Volume Profile, First Pullback, Quiet Accumulation,
+    #    52W Anniversary, Anchored VWAP, Volatility Percentile, Correlation Decoupling
+    pro = dict(
+        vp      = compute_volume_profile(df),
+        fpb     = compute_first_pullback(df),
+        qa      = compute_quiet_accumulation(df),
+        anniv   = compute_anniversary_high(df),
+        avwap   = compute_anchored_vwap(df),
+        volpct  = compute_volatility_percentile(df),
+        decouple= compute_correlation_decoupling(df, nifty_df),
+        pocket  = compute_pocket_pivot(df),
+        box     = compute_box_breakout(df),
+        wyckoff = compute_wyckoff(df),
+        climax  = compute_volume_climax(df),
+        rvol    = compute_rvol_percentile(df),
+        rsrev   = compute_rs_reversal(df, nifty_df),
+    )
     # 🧪 Experimental (VSA)
     xp = dict(vsa=compute_vsa(df))
     # 🔢 Smart Rank raw data
@@ -2670,7 +2962,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,**st,rs=0)
 
 
 def assign_smart_ranks(stocks):
@@ -2746,7 +3038,7 @@ def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None, sector_
             stocks.append(rec)
     _t1=_time.time(); _total=_t1-_t0
     print(f"\n  Scan finished: {_dt.datetime.now().strftime('%H:%M:%S')}  ·  Total time: {_total:.1f}s ({_total/60:.2f} min)  ·  {len(stocks)} stocks  ·  {len(stocks)/_total:.1f} stocks/sec" if _total>0 else f"\n  Done — {len(stocks)} stocks")
-    assign_rs(stocks); assign_smart_ranks(stocks); assign_breadth(stocks); return stocks
+    assign_rs(stocks); assign_smart_ranks(stocks); assign_breadth(stocks); assign_sector_rotation(stocks); return stocks
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
 HTML = r"""<!DOCTYPE html>
@@ -3024,6 +3316,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .tab-btn.t-toppicks.active{color:#34d399;border-bottom-color:#34d399}
 .tab-btn.t-swing.active{color:#fb923c;border-bottom-color:#fb923c}
 .tab-btn.t-zones.active{color:#a78bfa;border-bottom-color:#a78bfa}
+.tab-btn.t-pro.active{color:#22d3ee;border-bottom-color:#22d3ee}
 /* ⑥ sector grouping */
 .gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
 .gb-chk input{accent-color:var(--acc)}
@@ -3077,6 +3370,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-toppicks" data-tab="toppicks" onclick="switchTab('toppicks')">🏆 Top Picks</button>
   <button class="tab-btn t-swing" data-tab="swing" onclick="switchTab('swing')">🎯 Swing Setup</button>
   <button class="tab-btn t-zones" data-tab="zones" onclick="switchTab('zones')">📦 Supply/Demand</button>
+  <button class="tab-btn t-pro" data-tab="pro" onclick="switchTab('pro')">💎 Pro Scanners</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
 <!-- ═══ GLOBAL FILTERS ════════════════════════════════════════════════════ -->
@@ -4071,6 +4365,74 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 </div>
 
 
+<!-- ═══ PRO SCANNERS (rare/advanced) ═══════════════════════════════════════ -->
+<div id="ctrl-pro" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="pro-strat" style="min-width:380px" onchange="updateProInfo()">
+      <optgroup label="── 📊 Volume Profile / Point of Control ──">
+        <option value="vp_near_poc">Near POC — price within 2% of Point of Control</option>
+        <option value="vp_breakout">POC Breakout — crossed above POC on high volume</option>
+        <option value="vp_breakdown">POC Breakdown — crossed below POC on high volume</option>
+        <option value="vp_above_va">Above Value Area — trading above the 70% volume zone</option>
+        <option value="vp_below_va">Below Value Area — trading below the 70% volume zone</option>
+      </optgroup>
+      <optgroup label="── 🎯 First Pullback After Breakout ──">
+        <option value="fpb_found">First Pullback to 20-EMA — post-breakout, declining volume</option>
+      </optgroup>
+      <optgroup label="── 🤫 Quiet Accumulation (Stealth Buying) ──">
+        <option value="qa_found">Quiet Accumulation — tight range + OBV at new highs</option>
+      </optgroup>
+      <optgroup label="── 📅 52-Week High Anniversary ──">
+        <option value="anniv_found">Approaching 52W-High Anniversary — ±2 weeks of 1-year mark</option>
+      </optgroup>
+      <optgroup label="── ⚓ Anchored VWAP — from 52W High/Low ──">
+        <option value="avwap_reclaim">Reclaimed AVWAP from 52W Low — bullish</option>
+        <option value="avwap_reject">Rejected at AVWAP from 52W High — bearish</option>
+        <option value="avwap_above_lo">Above AVWAP from 52W Low</option>
+        <option value="avwap_below_hi">Below AVWAP from 52W High</option>
+      </optgroup>
+      <optgroup label="── 🌙 Volatility Percentile Rank ──">
+        <option value="volpct_quiet">Quietest in 2 Years — ATR% in bottom 10th percentile</option>
+      </optgroup>
+      <optgroup label="── 🔓 Correlation Decoupling vs Nifty ──">
+        <option value="decouple_bull">Decoupling Bullish — correlation collapsed + RS improving</option>
+        <option value="decouple_bear">Decoupling Bearish — correlation collapsed + RS weakening</option>
+      </optgroup>
+      <optgroup label="── 👛 Pocket Pivot (O'Neil) ──">
+        <option value="pocket_pivot">Pocket Pivot — up-vol exceeds max down-vol of last 10 days, near rising EMA</option>
+      </optgroup>
+      <optgroup label="── 📦 Multi-Year Box Breakout ──">
+        <option value="box_breakout">Box Breakout — closes above a 2-year sideways range (≤60% compression)</option>
+      </optgroup>
+      <optgroup label="── 🪤 Wyckoff Spring / Upthrust ──">
+        <option value="wyckoff_spring">Wyckoff Spring — false breakdown below 52W low, reclaimed (bullish)</option>
+        <option value="wyckoff_upthrust">Wyckoff Upthrust — false breakout above 52W high, rejected (bearish)</option>
+      </optgroup>
+      <optgroup label="── 💥 Volume Climax Reversal ──">
+        <option value="climax_buying">Buying Climax — new high + 3x volume + close reverses down</option>
+        <option value="climax_selling">Selling Climax — new low + 3x volume + close reverses up</option>
+      </optgroup>
+      <optgroup label="── 📶 Relative Volume Percentile (1-Year) ──">
+        <option value="rvol_high">RVOL ≥ 90th Percentile — today's volume in top 10% of the year</option>
+        <option value="rvol_extreme">RVOL ≥ 98th Percentile — extreme, top 2% of the year</option>
+      </optgroup>
+      <optgroup label="── 🔄 RS Line Reversal — New/Fading Leadership ──">
+        <option value="rs_new_leader">RS Trough Reversal — emerging leadership (RS line turning up)</option>
+        <option value="rs_fading_leader">RS Peak Reversal — fading leadership (RS line turning down)</option>
+      </optgroup>
+      <optgroup label="── 🔁 Sector Rotation / Laggard Catch-Up ──">
+        <option value="sector_leader">Sector Leader — sector rotating in, stock leading the move</option>
+        <option value="sector_laggard">Laggard Catch-Up — sector rotating in, this stock hasn't moved yet</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('pro',document.getElementById('pro-strat').value)" title="Strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="pro-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="pro-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="pro-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#22d3ee;color:#000" onclick="scanPro()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
 <!-- ═══ GAP SCANNER ════════════════════════════════════════════════════ -->
 <div id="ctrl-gap" class="ctrl" style="display:none">
   <div class="cg"><label>Gap Type</label>
@@ -4208,7 +4570,7 @@ function switchTab(tab){
   const _isCustomPage=['home','lookup','iview','toppicks','help'].includes(tab);
   const _gb=document.getElementById('global-bar'); if(_gb) _gb.style.display=_isCustomPage?'none':'flex';
   const _sr=document.getElementById('search-row'); if(_sr) _sr.style.display=_isCustomPage?'none':'flex';
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones','pro'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -4260,6 +4622,7 @@ function switchTab(tab){
   else if(tab==='sr'){ updateSRInfo(); scanSR(); }
   else if(tab==='swing'){ updateSwingInfo(); scanSwing(); }
   else if(tab==='zones'){ updateZonesInfo(); scanZones(); }
+  else if(tab==='pro'){ updateProInfo(); scanPro(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -5121,6 +5484,21 @@ const HOME_CARDS=[
   {tab:'zones',strat:'demand_near_m',  emoji:'📦',badge:'zones',label:'Fresh Demand Zone (Monthly)', desc:'Monthly base + powerful rally - rare multi-year institutional accumulation level, among the most significant support on the chart',         stars:'★★★★★',section:9},
   {tab:'zones',strat:'demand_confluence',emoji:'🔗',badge:'zones',label:'D+W Demand Confluence',     desc:'Price near a fresh demand zone on BOTH daily AND weekly timeframes simultaneously - the highest-probability multi-timeframe support area',         stars:'★★★★★',section:9},
   {tab:'zones',strat:'supply_confluence',emoji:'🔗',badge:'zones',label:'D+W Supply Confluence',     desc:'Price near a fresh supply zone on BOTH daily AND weekly timeframes - highest-probability multi-timeframe rejection area',         stars:'★★★★★',section:9},
+  // 💎 Pro Scanners (rare techniques)
+  {tab:'pro',strat:'vp_near_poc',  emoji:'📊',badge:'pro',label:'Near Point of Control',     desc:'Price within 2% of the Point of Control - the price level with the heaviest volume over 6-12 months, acting as a gravitational magnet/equilibrium zone',          stars:'★★★★', section:10},
+  {tab:'pro',strat:'fpb_found',    emoji:'🎯',badge:'pro',label:'First Pullback (FPB)',          desc:'Fresh 20-day-high breakout, held above 20-EMA ever since, now testing it for the FIRST time on declining volume - the O Neil/Minervini second-chance entry',          stars:'★★★★★',section:10},
+  {tab:'pro',strat:'qa_found',     emoji:'🤫',badge:'pro',label:'Quiet Accumulation',            desc:'Price range under 8% over 40 days while OBV makes new highs - flat price but rising volume-based accumulation, smart money loading before the move',         stars:'★★★★★',section:10},
+  {tab:'pro',strat:'avwap_reclaim',emoji:'⚓',badge:'pro',label:'Reclaimed AVWAP from 52W Low',    desc:'Price crossed back above the volume-weighted average price since the 52-week low - every buyer since the bottom is now profitable, bullish balance shift',         stars:'★★★★', section:10},
+  {tab:'pro',strat:'volpct_quiet', emoji:'🌙',badge:'pro',label:'Quietest in 2 Years',           desc:'ATR%% ranks in the bottom 10th percentile of its own 2-year history - self-calibrated squeeze, flags a stock at its personal quietest point',         stars:'★★★★', section:10},
+  {tab:'pro',strat:'decouple_bull',emoji:'🔓',badge:'pro',label:'Decoupling Bullish',             desc:'20-day correlation with Nifty collapsed from above 0.5 to below 0.2 while relative strength improves - stock starting to move on its own catalyst',          stars:'★★★★★',section:10},
+  {tab:'pro',strat:'anniv_found',  emoji:'📅',badge:'pro',label:'52W-High Anniversary',           desc:'Stock made its prior 52-week high ~1 year ago (±2 weeks) - seasonal recurrence around results/events may be approaching again',          stars:'★★★', section:10},
+  {tab:'pro',strat:'pocket_pivot',  emoji:'👛',badge:'pro',label:'Pocket Pivot',              desc:'Up-day volume exceeds the highest down-day volume of the last 10 days, near a rising EMA - O Neil earliest entry signal, fires BEFORE the breakout', stars:'★★★★★',section:10},
+  {tab:'pro',strat:'wyckoff_spring',emoji:'🪤',badge:'pro',label:'Wyckoff Spring',              desc:'False breakdown below the 52-week low on low volume, already reclaimed - classic shakeout before markup, often the final low before a rally', stars:'★★★★★',section:10},
+  {tab:'pro',strat:'sector_leader', emoji:'🔁',badge:'pro',label:'Sector Rotation Leader',      desc:'Sector 1-month return beats the universe average, and this stock is leading that rotation within its sector', stars:'★★★★', section:10},
+  {tab:'pro',strat:'sector_laggard',emoji:'🔁',badge:'pro',label:'Laggard Catch-Up',            desc:'Sector is rotating in but this stock hasn\'t participated yet (RS≥30) - candidate for catch-up as buying broadens to laggards', stars:'★★★★', section:10},
+  {tab:'pro',strat:'box_breakout',  emoji:'📦',badge:'pro',label:'Multi-Year Box Breakout',     desc:'Closes above a 2-year sideways range (≤60% compression) - rare generational breakouts that often start multi-year trends', stars:'★★★★★',section:10},
+  {tab:'pro',strat:'climax_selling',emoji:'💥',badge:'pro',label:'Selling Climax',              desc:'New low + 3x volume + close reverses into upper third of range - panic selling absorbed by buyers, often a bottom', stars:'★★★★', section:10},
+  {tab:'pro',strat:'rs_new_leader', emoji:'🔄',badge:'pro',label:'RS Trough Reversal',          desc:'RS line vs Nifty bottomed within 20 days and has turned up 5%+ - catches emerging leadership at the start, not after it\'s extended', stars:'★★★★', section:10},
 
 ];
 
@@ -5135,9 +5513,10 @@ const SECTIONS=[
   '🔢 SMART RANK — AI COMPOSITE SCORING',
   '🎯 SWING SETUP — EMA SQUEEZE · MACD 5/35 · TRADE PLANS',
   '📦 SUPPLY & DEMAND ZONES — DAILY · WEEKLY · MONTHLY',
+  '💎 PRO SCANNERS — RARE TECHNIQUES NOT ON FREE SCREENERS',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners'};
 
 function renderHome(){
   const sortMode=(window._homeSort)||'section';
@@ -5362,6 +5741,15 @@ const STRAT_HELP_KEY={
   zones:{demand_near_d:0,demand_inside_d:0,demand_near_w:0,demand_inside_w:0,demand_near_m:0,demand_inside_m:0,
     supply_near_d:1,supply_inside_d:1,supply_near_w:1,supply_inside_w:1,supply_near_m:1,supply_inside_m:1,
     demand_confluence:1,supply_confluence:1},
+  pro:{vp_near_poc:0,vp_breakout:0,vp_breakdown:0,vp_above_va:0,vp_below_va:0,
+    fpb_found:1,
+    qa_found:2,anniv_found:2,
+    avwap_reclaim:3,avwap_reject:3,avwap_above_lo:3,avwap_below_hi:3,volpct_quiet:3,
+    decouple_bull:4,decouple_bear:4,
+    pocket_pivot:5,box_breakout:5,
+    wyckoff_spring:6,wyckoff_upthrust:6,
+    climax_buying:7,climax_selling:7,rvol_high:7,rvol_extreme:7,
+    rs_new_leader:8,rs_fading_leader:8,sector_leader:8,sector_laggard:8},
 };
 // Map tab → section index in Help H array
 const TAB_SEC={
@@ -5371,7 +5759,7 @@ const TAB_SEC={
   xp:11,  // Experimental / VSA
   patt:12,// Patterns
   br:13,  // Market Breadth
-  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9,
+  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9, pro:10,
 };
 
 function showHelp(tab,stratVal){
@@ -5961,6 +6349,62 @@ function renderHelp(){
         ai:'How much more reliable is a Daily+Weekly supply zone confluence vs a daily-only supply zone on NSE stocks? What additional confirmation (volume, candlestick patterns) should I look for when price enters a fresh supply zone? How wide should a stop-loss be when shorting at a weekly supply zone?'
       },
     ]},
+    {icon:'💎', title:'Pro Scanners — Rare Techniques Not on Free Screeners', items:[
+      { n:'Volume Profile / Point of Control (POC)',
+        f:`Build a volume histogram (24 bins) over the last 150 bars using typical price (H+L+C)/3. POC = bin with the most volume. Value Area = smallest set of bins (by volume, descending) covering 70% of total volume. near_poc = |price-POC|/POC <= 2%. Breakout = prior close on opposite side of POC, current close crosses POC, volume > 1.2x 20-day average.`,
+        d:`Volume Profile shows WHERE (at what price) trading activity concentrated, unlike a normal volume chart which shows WHEN. The Point of Control is the single price level where the most shares changed hands over the lookback period - it represents the market's consensus "fair value" and acts as a magnet: price tends to revisit it, and reactions (bounces or rejections) are common on the first retest. The Value Area (70% of volume) defines the "normal" trading range; trading outside it is called "price discovery" and is statistically less stable - it often mean-reverts back into the value area, though a high-volume breakout through the POC can also mark the start of a new value area entirely. Most free Indian screeners show volume-by-time (bar charts) but not volume-by-price - this is a institutional/professional-platform feature (used heavily on Sierra Chart, NinjaTrader, TradingView Premium) being made available here computed purely from daily OHLCV.`,
+        links:[['Volume Profile','https://www.investopedia.com/terms/v/volume-by-price.asp']],
+        ai:'How is the Point of Control used by professional traders to set entry and stop-loss levels? What is the difference between trading inside vs outside the Value Area? How often does price revisit the POC after a breakout, on average?'
+      },
+      { n:'First Pullback After Breakout (FPB)',
+        f:`Find the most recent bar in the last 30 where Close >= max(Close, 20-bar trailing window)*0.999 (a fresh 20-day-high close) AND that high exceeds the prior 20-40 bar range (a genuine breakout, not just drift). "Held" = no close since then dropped more than 1.5% below the 20-EMA. FPB = held AND current price within 2.5% of 20-EMA AND still below the breakout high AND volume below the average volume since breakout.`,
+        d:`This is the "second chance" entry popularized by William O'Neil and Mark Minervini: rather than chasing a breakout on the day it happens (when risk is highest and the move may already be extended), wait for price to come back and test the breakout level or the rising 20-day EMA for the FIRST time, on lighter volume (indicating the pullback is just profit-taking, not a reversal). The word "first" is critical - if price has already pulled back and recovered once, the setup is different (and generally lower-quality) than the first test. This requires tracking the entire price history since the breakout bar to confirm no prior violation occurred - something essentially no free scanner does, because it requires stateful logic across an arbitrary lookback rather than a single-bar condition.`,
+        links:[['Mark Minervini Pullback Entries','https://www.investopedia.com/articles/trading/08/momentum-trading.asp']],
+        ai:'What is the historical success rate of the "first pullback to 20-EMA after breakout" pattern on NSE stocks? How should the stop-loss be placed differently for an FPB entry vs the original breakout entry? What volume threshold confirms a pullback is healthy vs the start of a failed breakout?'
+      },
+      { n:'Quiet Accumulation (Stealth Buying) &amp; 52-Week High Anniversary',
+        f:`Quiet Accumulation: price_range_pct = (max(High,40) - min(Low,40)) / mean(Close,40) * 100. tight = range < 8%. OBV = cumulative sum of sign(Close diff)*Volume. quiet_accum = tight AND OBV[-1] > OBV[-40] AND OBV[-1] >= max(OBV,40)*0.999. Anniversary: find the index of max(Close) in the 237-267 bars-ago window (~1 year ago); anniversary = true if days since that date is between 351-379.`,
+        d:`Quiet Accumulation looks for a divergence: price is doing almost nothing (under 8% range over 8 weeks) while the On-Balance-Volume line - a running total that adds volume on up-days and subtracts it on down-days - is making new highs. This means more volume is flowing in on up-days than down-days even though price isn't moving much yet, which is the textbook signature of large institutional buyers accumulating a position slowly to avoid moving the price against themselves. When this accumulation phase ends, the resulting move can be sharp because the float has been quietly absorbed. The 52-Week High Anniversary scanner is a simpler seasonal idea: many Indian stocks have recurring catalysts (quarterly results dates cluster around the same calendar window year to year, as do sector-specific events like budget announcements, monsoon data for agri stocks, etc). If a stock made its 52-week high around a specific date last year, there's a reasonable chance a similar catalyst window is approaching again this year - this scanner simply flags stocks within +/-2 weeks of that one-year anniversary so you can research what drove the move last time and watch for a repeat.`,
+        links:[['On-Balance Volume','https://www.investopedia.com/terms/o/onbalancevolume.asp']],
+        ai:'What follow-through price move typically occurs after a "quiet accumulation" OBV divergence resolves? How long can the accumulation phase last before the breakout? For the 52-week anniversary scanner, how should I research what catalyst drove the prior year\'s high to judge if a repeat is likely?'
+      },
+      { n:'Anchored VWAP from 52W High/Low &amp; Volatility Percentile Rank',
+        f:`AVWAP from date X = sum(typical_price[X:] * Volume[X:]) / sum(Volume[X:]), recalculated daily as the window grows. Anchors used: the date of the 52-week Low (for vwap_from_low) and the date of the 52-week High (for vwap_from_high). Volatility Percentile: ATR(14)% = ATR/Close*100 for every day in the last 500 bars; percentile = % of those days with ATR%% <= today's ATR%. quiet_2y = percentile <= 10.`,
+        d:`A standard VWAP resets every day and is mainly an intraday tool. An ANCHORED VWAP instead starts accumulating from a specific, meaningful date - here, the date of the 52-week low or 52-week high - and never resets. The result is the average price paid by everyone who has bought since that pivotal date. When price crosses back above the AVWAP-from-low, it means the "average buyer since the bottom" is now profitable - a meaningful shift in market psychology that often acts as a support level on subsequent pullbacks. Symmetrically, the AVWAP-from-high tracks the average seller since the top; price below it means that cohort is underwater and likely to sell into any rally, making it resistance. Volatility Percentile Rank solves a calibration problem with fixed squeeze indicators (like Bollinger Band width or EMA squeeze): a 2% ATR might be "tight" for a volatile small-cap but "normal" for a stable large-cap. By ranking each stock's CURRENT ATR%% against its OWN trailing 2-year history, this scanner finds stocks at their personal quietest point regardless of their baseline volatility level - the bottom-10th-percentile threshold has historically preceded significant volatility expansions.`,
+        links:[['Anchored VWAP','https://www.investopedia.com/terms/v/vwap.asp']],
+        ai:'How is Anchored VWAP from a significant pivot used by institutional traders as a trend-bias filter? What typically happens to price after ATR%% volatility percentile drops below 10 - how soon does the expansion usually occur and in which direction?'
+      },
+      { n:'Correlation Decoupling vs Nifty',
+        f:`corr_now = Pearson correlation of 20-day daily returns (stock vs Nifty), corr_prev = same correlation for the PRIOR 20-day window (days -40 to -20). decoupled = corr_prev > 0.5 AND corr_now < 0.2. rs_improving = (price[-1]/price[-20]) > (nifty[-1]/nifty[-20]). decouple_bull = decoupled AND rs_improving; decouple_bear = decoupled AND NOT rs_improving.`,
+        d:`Most stocks move with the broader market most of the time - a 20-day rolling correlation with Nifty above 0.5 is typical. "Decoupling" happens when that correlation suddenly collapses toward zero (or goes negative): the stock stops responding to index-wide moves and starts trading purely on its own news/fundamentals. This is genuinely difficult to find on existing tools because it requires (a) computing a rolling correlation, which few retail screeners expose at all, and (b) comparing it across two different time windows to detect the CHANGE, not just the current level. Combined with relative strength direction, a bullish decoupling (correlation collapse + the stock outperforming Nifty over the same window) often signals the early stages of a stock-specific catalyst (e.g., a private deal, sector-specific news, or an upcoming result that the market is starting to price in ahead of the broad index). A bearish decoupling - correlation collapse with underperformance - can flag company-specific weakness emerging independent of overall market conditions, useful for risk management even in a strong broad market.`,
+        links:[['Correlation in Trading','https://www.investopedia.com/terms/c/correlation.asp']],
+        ai:'How long does a correlation decoupling from the index typically persist once it begins? Should a bullish decoupling be treated as a standalone buy signal or does it need confirmation from other indicators? How does sector-wide news affect single-stock correlation with Nifty differently than company-specific news?'
+      },
+      { n:'Pocket Pivot (O\'Neil) &amp; Multi-Year Box Breakout',
+        f:`Pocket Pivot: today Close>prior Close AND today Volume > max(Volume on down-days in last 10 bars) AND |Close-EMA|/EMA<=3% for EMA in {10,20,50} with that EMA rising (EMA[-1]>EMA[-6]). Box Breakout: compression=(max(High,500)-min(Low,500))/min(Low,500)*100 over the prior 500 bars (excluding today); found if compression<=60% AND Close>range_high*1.02.`,
+        d:`The Pocket Pivot is William O'Neil's earliest actionable buy signal. Most breakout scanners wait for price to clear a defined resistance level - but by then the easy gains may already be priced in and risk is highest. A pocket pivot instead looks for a VOLUME signature while the stock is still trading near (often just above or testing) its 10, 20, or 50-day moving average: if today's up-day volume exceeds every down-day's volume over the last two weeks, it means more shares are being bought on the way up than were sold on any single down day recently - a tell that institutional accumulation has begun, days or weeks before a visible breakout. The Multi-Year Box Breakout looks at the opposite end of the time spectrum: stocks that have spent roughly two years going essentially nowhere (the entire 2-year high-low range is 60% or less, meaning the stock hasn't even doubled from its low over two years) and have now closed decisively (2%+) above that entire range. These "generational" breakouts are uncommon - most stocks trend or correct over a 2-year window rather than going flat - but when a stock does break out of a true multi-year base, the resulting move is often a multi-year trend in its own right, similar in spirit to a weekly/monthly EMA squeeze resolving but on an even longer timeframe.`,
+        links:[['Pocket Pivot - IBD','https://www.investopedia.com/terms/p/pocket-pivot.asp']],
+        ai:'How early does a Pocket Pivot typically fire relative to a standard breakout - days or weeks? What follow-through is expected after a multi-year box breakout, and how should position sizing differ for such a rare setup versus a routine breakout?'
+      },
+      { n:'Wyckoff Spring &amp; Upthrust',
+        f:`prior_low/prior_high = min(Low)/max(High) over bars [-255:-3] (52-week range excluding the last 3 bars). Spring: min(Low,last 3 bars) < prior_low*0.99 AND Close > prior_low AND Volume < 20-day average. Upthrust: max(High,last 3 bars) > prior_high*1.005 AND Close < prior_high AND Volume < 20-day average.`,
+        d:`Richard Wyckoff described how large operators engineer brief false moves to trigger weak-handed traders before the "real" move begins. A SPRING is a brief, low-volume dip below an established support level (here, the 52-week low) that gets reclaimed within a day or two - it shakes out stop-losses and short-sellers right before the stock turns up, on volume that is BELOW average (showing the move down lacked real selling conviction). An UPTHRUST is the mirror image at resistance (the 52-week high): a brief false breakout that fails on low volume and reverses back below the prior high, trapping late buyers and short-squeeze chasers before the stock turns down. Because both patterns require the breach to be brief (last 1-3 bars), already reclaimed/rejected by the current bar, AND on below-average volume, they filter out genuine breakouts/breakdowns (which typically come on high volume and don't immediately reverse) - leaving mainly the engineered, low-conviction false moves that Wyckoff theory says precede the real directional move.`,
+        links:[['Wyckoff Method','https://www.investopedia.com/articles/trading/05/playscreen.asp']],
+        ai:'How does the Wyckoff Spring differ from a simple "near 52-week low" scan, and why does the volume condition matter so much? What confirmation (price action over the following days) should I look for before acting on a detected Spring or Upthrust?'
+      },
+      { n:'Volume Climax Reversal &amp; Relative Volume Percentile',
+        f:`Climax: avg_v=mean(Volume,20), avg_range=mean(High-Low,20), body_pos=(Close-Low)/(High-Low). Buying climax: High==max(High,60) AND Volume>=3*avg_v AND range>=1.5*avg_range AND body_pos<0.35. Selling climax: mirror at Low with body_pos>0.65. RVOL percentile = % of the last 252 days with Volume<=today's Volume.`,
+        d:`A Volume Climax identifies exhaustion: when a new multi-month high (or low) coincides with extreme volume (3x the 20-day average) AND an unusually wide range (1.5x average) AND the close ends up on the OPPOSITE side of the bar from where the extreme was made - that combination signals the move attracted maximum participation right as it ran out of fuel. A buying climax (new high, huge volume, but closing weak) often marks at least a short-term top; a selling climax (new low, huge volume, but closing strong - a "hammer"-like reversal on steroids) often marks at least a short-term bottom. The Relative Volume Percentile solves the problem that "3x average volume" means very different things for a heavily-traded large-cap versus a thinly-traded small-cap - by ranking TODAY's volume against this SAME STOCK's own full-year distribution, a reading above the 90th or 98th percentile is unusual specifically for this stock, regardless of its normal liquidity level.`,
+        links:[['Climax Volume','https://www.investopedia.com/terms/c/climax.asp']],
+        ai:'How reliable is a volume climax as a standalone reversal signal versus needing confirmation over the following 2-3 days? What is considered an extreme RVOL percentile reading and how does the market typically behave in the days after?'
+      },
+      { n:'RS Line Reversal &amp; Sector Rotation / Laggard Catch-Up',
+        f:`RS line = stock Close / Nifty Close (date-aligned). Over the last 20 bars, find the trough/peak of the RS line; new_leader = trough is not in the last 2 bars AND current RS > trough RS * 1.05. fading_leader = mirror with peak and *0.95. Sector Rotation (post-pass over all stocks): sector_avg_r1m = mean(1-month return) per sector; rotating_in = sector_avg_r1m > universe_avg_r1m AND > 0.5%. leader = rotating_in AND own_r1m > sector_avg_r1m. laggard_catchup = rotating_in AND own_r1m < sector_avg_r1m*0.4 AND RS>=30.`,
+        d:`The RS Line Reversal scanners track the trend of a stock's price RELATIVE to the index, independent of the stock's absolute price trend. A stock can be flat or even falling in absolute terms while its RS line is turning up (meaning it's falling LESS than the index) - this is often the earliest sign of emerging leadership, well before the stock's absolute price chart looks attractive. Symmetrically, a "fading leader" might still be near its highs in absolute price, but its RS line peaking and turning down is an early warning that its run of outperformance is ending. The Sector Rotation scanners operate at a different level: rather than looking at one stock in isolation, this is a two-pass calculation across the ENTIRE universe - first computing each sector's average 1-month return and comparing it to the overall market average to identify which sectors are "rotating in" (money flowing toward them), then for stocks within those hot sectors, distinguishing the LEADERS (already outperforming their sector) from the LAGGARDS (sector is hot but this specific stock hasn't moved yet, while still being fundamentally sound with RS>=30). Laggard catch-up is a well-documented phenomenon - as a sector rotation matures, money typically broadens from the initial leaders into the names that haven't moved yet.`,
+        links:[['Sector Rotation','https://www.investopedia.com/terms/s/sectorrotation.asp']],
+        ai:'How is the price/index ratio (RS line) used by professional fund managers to time entries independent of absolute price trends? In a sector rotation, how long does it typically take for buying to broaden from leaders to laggards, and what risks come with buying laggards versus leaders?'
+      },
+    ]},
   ];
 
   let html=`<div class="help-wrap">
@@ -6038,6 +6482,7 @@ function triggerAutoScan(){
     else if(t==='sr'){ scanSR(); }
     else if(t==='swing'){ scanSwing(); }
     else if(t==='zones'){ scanZones(); }
+    else if(t==='pro'){ scanPro(); }
   },350);
 }
 function initAutoScan(){
@@ -7213,7 +7658,7 @@ function scanTopPicks(){
 const TAB_NAMES={piv:'Pivot Points',smc:'Price Action/SMC',vol:'Volume',mi:'Multi-Indicator',
   adv:'Advanced',t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',ti:'India Pro',nl:'Noiseless',
   xp:'Experimental/VSA',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combiner',
-  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand'};
+  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners'};
 const SIGNAL_DEFS=[
   // ── Trend / Tier-1 ──
   {cat:'Trend',tab:'t1',label:'SuperTrend Bullish',          w:3, chk:s=>s.t1?.stt?.bull},
@@ -7337,6 +7782,32 @@ const SIGNAL_DEFS=[
   {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Supply Zone (Weekly)',w:-4,chk:s=>s.zones?.w?.supply?.near&&s.zones?.w?.supply?.fresh},
   {cat:'SupplyDemand',tab:'zones',label:'Near Fresh Supply Zone (Monthly)',w:-5,chk:s=>s.zones?.m?.supply?.near&&s.zones?.m?.supply?.fresh},
   {cat:'SupplyDemand',tab:'zones',label:'D+W Supply Zone Confluence',     w:-6,chk:s=>s.zones?.d?.supply?.near&&s.zones?.d?.supply?.fresh&&s.zones?.w?.supply?.near&&s.zones?.w?.supply?.fresh},
+
+
+  // ── Pro Scanners (rare techniques) ──
+  {cat:'ProScanners',tab:'pro',label:'Near Point of Control',          w:2, chk:s=>s.pro?.vp?.near_poc},
+  {cat:'ProScanners',tab:'pro',label:'POC Breakout (Volume)',          w:5, chk:s=>s.pro?.vp?.poc_breakout_bull},
+  {cat:'ProScanners',tab:'pro',label:'POC Breakdown (Volume)',         w:-5,chk:s=>s.pro?.vp?.poc_breakdown_bear},
+  {cat:'ProScanners',tab:'pro',label:'First Pullback After Breakout',  w:6, chk:s=>s.pro?.fpb?.found},
+  {cat:'ProScanners',tab:'pro',label:'Quiet Accumulation (OBV)',       w:6, chk:s=>s.pro?.qa?.quiet_accum},
+  {cat:'ProScanners',tab:'pro',label:'Reclaimed AVWAP from 52W Low',   w:4, chk:s=>s.pro?.avwap?.reclaim_bull},
+  {cat:'ProScanners',tab:'pro',label:'Rejected at AVWAP from 52W High',w:-4,chk:s=>s.pro?.avwap?.reject_bear},
+  {cat:'ProScanners',tab:'pro',label:'Quietest Volatility in 2 Years', w:3, chk:s=>s.pro?.volpct?.quiet_2y},
+  {cat:'ProScanners',tab:'pro',label:'Decoupling Bullish vs Nifty',    w:5, chk:s=>s.pro?.decouple?.decouple_bull},
+  {cat:'ProScanners',tab:'pro',label:'Decoupling Bearish vs Nifty',    w:-5,chk:s=>s.pro?.decouple?.decouple_bear},
+
+
+  // ── Pro Scanners batch 2 ──
+  {cat:'ProScanners',tab:'pro',label:'Pocket Pivot',           w:7, chk:s=>s.pro?.pocket?.found},
+  {cat:'ProScanners',tab:'pro',label:'Multi-Year Box Breakout',w:8, chk:s=>s.pro?.box?.found},
+  {cat:'ProScanners',tab:'pro',label:'Wyckoff Spring',         w:7, chk:s=>s.pro?.wyckoff?.spring},
+  {cat:'ProScanners',tab:'pro',label:'Wyckoff Upthrust',       w:-7,chk:s=>s.pro?.wyckoff?.upthrust},
+  {cat:'ProScanners',tab:'pro',label:'Buying Climax',          w:-5,chk:s=>s.pro?.climax?.buying_climax},
+  {cat:'ProScanners',tab:'pro',label:'Selling Climax',         w:5, chk:s=>s.pro?.climax?.selling_climax},
+  {cat:'ProScanners',tab:'pro',label:'RS Trough Reversal (New Leader)', w:5, chk:s=>s.pro?.rsrev?.new_leader},
+  {cat:'ProScanners',tab:'pro',label:'RS Peak Reversal (Fading Leader)',w:-5,chk:s=>s.pro?.rsrev?.fading_leader},
+  {cat:'ProScanners',tab:'pro',label:'Sector Rotation Leader', w:4, chk:s=>s.sector_rot?.leader},
+  {cat:'ProScanners',tab:'pro',label:'Sector Laggard Catch-Up',w:3, chk:s=>s.sector_rot?.laggard_catchup},
 
   // ── Gap ──
   {cat:'Gap',tab:'gap',label:'Gap Up Continuation',           w:2, chk:s=>s.gap?.up&&s.gap?.cont},
@@ -7629,6 +8100,98 @@ function scanZones(){
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// 💎 PRO SCANNERS — 7 advanced techniques rarely available on free screeners
+// ════════════════════════════════════════════════════════════════════════════
+const PRO_INFO={
+  vp_near_poc:'<b>Near Point of Control</b> · Price is within 2% of the Point of Control - the price level where the MOST volume traded over the last ~6-12 months · POC acts as a magnet/equilibrium level - price often gravitates back to it and can either bounce or pause here',
+  vp_breakout:'<b>POC Breakout</b> · Price just crossed ABOVE the POC on volume 20%+ above the 20-day average · The price level with the heaviest historical trading has been decisively broken to the upside - often marks a shift from balance to a new bullish trend',
+  vp_breakdown:'<b>POC Breakdown</b> · Price just crossed BELOW the POC on elevated volume · The heaviest-traded price level has failed as support - often marks a shift toward distribution',
+  vp_above_va:'<b>Above Value Area</b> · Price is trading above the Value Area High (the top of the zone containing 70% of recent volume) · The stock is in "price discovery" above its normal trading range - can mean strength, but watch for mean-reversion back into the value area',
+  vp_below_va:'<b>Below Value Area</b> · Price is trading below the Value Area Low · The stock is in price discovery below its normal range - can mean weakness or a value opportunity, watch for reversion',
+  fpb_found:'<b>First Pullback After Breakout (FPB)</b> · Stock made a fresh 20-day high recently, has stayed above its 20-EMA ever since (no prior pullback), and is now testing the 20-EMA for the FIRST time with declining volume · This is the classic "second chance" entry used by O\'Neil/Minervini-style traders - lower risk than chasing the original breakout',
+  qa_found:'<b>Quiet Accumulation (Stealth Buying)</b> · Price has been range-bound (under 8% high-low range over 40 days) WHILE the On-Balance-Volume line has been rising and is at/near its own recent high · This divergence - flat price but rising volume-based accumulation - suggests institutions are quietly building a position before any visible price move',
+  anniv_found:'<b>52-Week High Anniversary</b> · The stock made its prior 52-week high approximately 1 year ago (within a ±2 week window of the exact anniversary date) · Many stocks show seasonal recurrence around results/events - this surfaces candidates that may be approaching a similar catalyst window again',
+  avwap_reclaim:'<b>Reclaimed AVWAP from 52W Low</b> · Price just crossed back ABOVE the Volume-Weighted Average Price calculated from the date of the 52-week low to today · Every buyer since the bottom is now, on average, profitable - a bullish shift in the balance of trapped vs profitable positions',
+  avwap_reject:'<b>Rejected at AVWAP from 52W High</b> · Price just crossed back BELOW the AVWAP anchored from the 52-week high date · The average seller since the top is back in control - bearish, often acts as resistance on rallies',
+  avwap_above_lo:'<b>Above AVWAP from 52W Low</b> · Price is currently above the AVWAP anchored at the 52-week low · The average position opened since the bottom is in profit - this AVWAP line often acts as dynamic support',
+  avwap_below_hi:'<b>Below AVWAP from 52W High</b> · Price is below the AVWAP anchored at the 52-week high · The average position opened since the top is underwater - this AVWAP line often acts as dynamic resistance on rallies',
+  volpct_quiet:'<b>Quietest in 2 Years</b> · Today\'s ATR% (Average True Range as % of price) ranks in the bottom 10th percentile of its own trailing 2-year history · More precise than a fixed Bollinger/EMA squeeze because it is self-calibrated to each stock\'s own normal volatility - flags stocks at their personal quietest point, often preceding a volatility expansion',
+  decouple_bull:'<b>Decoupling Bullish</b> · The stock\'s 20-day rolling correlation with Nifty has collapsed from above 0.5 to below 0.2 (it was moving with the index, now it isn\'t) AND its relative performance vs Nifty over the same window is improving · The stock is starting to move on its own company-specific strength rather than riding index moves - often an early sign of a stock-specific catalyst',
+  decouple_bear:'<b>Decoupling Bearish</b> · Correlation with Nifty has collapsed similarly, but relative performance vs Nifty is WORSENING · The stock is decoupling to the downside - moving against/ignoring index strength, often an early warning of company-specific weakness',
+  pocket_pivot:'<b>Pocket Pivot</b> · Today is an up-day AND today\'s volume exceeds the HIGHEST single down-day volume of the last 10 sessions, while price is within 3% of a rising 10/20/50-day EMA · William O\'Neil\'s earliest, lowest-risk entry signal - it fires WHILE the stock is still consolidating near its moving average, BEFORE any visible breakout, because the volume surge reveals institutional buying has already begun',
+  box_breakout:'<b>Multi-Year Box Breakout</b> · The stock has been confined to a sideways range (high-to-low compression of 60% or less) for the last ~2 years, and has now closed more than 2% above that range\'s high · "Generational breakouts" out of multi-year bases are rare but often mark the start of major multi-year trends - essentially a monthly-timeframe squeeze taken to its logical extreme',
+  wyckoff_spring:'<b>Wyckoff Spring</b> · Price broke below the prior 52-week low by at least 1% in the last 1-3 bars, on below-average volume, and has already closed back ABOVE that prior low · A classic Wyckoff "shakeout": weak hands are forced out by a brief false breakdown, then smart money absorbs the supply and price reclaims the level - often the final low before a markup phase',
+  wyckoff_upthrust:'<b>Wyckoff Upthrust</b> · Price broke above the prior 52-week high by at least 0.5% in the last 1-3 bars, on below-average volume, and has already closed back BELOW that prior high · The bearish mirror of a Spring: a false breakout traps late buyers before a markdown phase',
+  climax_buying:'<b>Buying Climax</b> · A new multi-month high was made on volume 3x+ the 20-day average and a range 1.5x+ the average, but the candle closed in the LOWER third of its range (opened/traded near the high, sold off into the close) · Classic exhaustion signature - the rally attracts maximum participation right as it runs out of buyers, often marking a short-to-medium-term top',
+  climax_selling:'<b>Selling Climax</b> · A new multi-month low was made on volume 3x+ average and a wide range, but the candle closed in the UPPER third of its range (sold off then recovered into the close) · Classic capitulation signature - panic selling gets absorbed by buyers, often marking a short-to-medium-term bottom',
+  rvol_high:'<b>Relative Volume ≥ 90th Percentile (1-Year)</b> · Today\'s volume ranks in the top 10% of this stock\'s own trailing 1-year volume distribution · Self-calibrated per stock - a "high volume" day for a thinly-traded small-cap is a different absolute number than for a liquid large-cap, this finds days that are unusual FOR THIS STOCK specifically',
+  rvol_extreme:'<b>Relative Volume ≥ 98th Percentile (1-Year)</b> · Today\'s volume is in the top 2% of the last year - an extremely rare event for this specific stock · Almost always associated with major news, results, or index-rebalancing flows',
+  rs_new_leader:'<b>RS Line Trough Reversal — New Leadership</b> · The stock\'s RS line (price ÷ Nifty) made a local low within the last 20 days and has since risen 5%+ from that trough, with the trough not at the very latest bars (i.e., the turn has already begun) · Catches stocks at the START of an emerging leadership phase - the RS line bottoming and turning up tends to precede sustained outperformance',
+  rs_fading_leader:'<b>RS Line Peak Reversal — Fading Leadership</b> · The stock\'s RS line made a local high within the last 20 days and has since fallen 5%+ from that peak · A former leader\'s relative strength is rolling over - often an early warning before the stock starts underperforming the index outright',
+  sector_leader:'<b>Sector Leader (Rotation)</b> · This stock\'s sector has a 1-month average return above both zero and the broad universe average (the sector is "rotating in") AND this stock\'s own 1-month return exceeds its sector\'s average · Identifies which specific stocks are LEADING a sector rotation, useful for riding the strongest names in a hot sector',
+  sector_laggard:'<b>Laggard Catch-Up (Sector Rotation)</b> · This stock\'s sector is rotating in (sector average 1-month return above the universe average) BUT this specific stock\'s own 1-month return is less than 40% of its sector\'s average (it hasn\'t participated yet), while still maintaining RS ≥ 30 (not a dead stock) · These are candidates for "catch-up" moves as sector-wide buying broadens from leaders to laggards',
+};
+function updateProInfo(){const s=document.getElementById('pro-strat').value;setFbar('💎 <b>Pro Scanners</b> · '+(PRO_INFO[s]||s));}
+
+function scanPro(){
+  const strat=document.getElementById('pro-strat').value;
+  const rsMin=parseInt(document.getElementById('pro-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('pro-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('pro-pmax').value)||Infinity;
+  updateProInfo(); rows=[];
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const p=s.pro||{}; const vp=p.vp||{}, fpb=p.fpb||{}, qa=p.qa||{}, an=p.anniv||{}, av=p.avwap||{}, vpc=p.volpct||{}, dc=p.decouple||{};
+    let matched=false,sig='',extra={};
+
+    if(strat==='vp_near_poc')   {matched=!!vp.near_poc;        sig='📊 Near POC';      extra={poc:vp.poc,dist:vp.dist_pct+'%'};}
+    if(strat==='vp_breakout')   {matched=!!vp.poc_breakout_bull;sig='📊 POC Breakout';  extra={poc:vp.poc};}
+    if(strat==='vp_breakdown')  {matched=!!vp.poc_breakdown_bear;sig='📊 POC Breakdown';extra={poc:vp.poc};}
+    if(strat==='vp_above_va')   {matched=!!vp.above_va;        sig='📊 Above VA';      extra={va_hi:vp.va_hi};}
+    if(strat==='vp_below_va')   {matched=!!vp.below_va;        sig='📊 Below VA';      extra={va_lo:vp.va_lo};}
+
+    if(strat==='fpb_found')     {matched=!!fpb.found;          sig='🎯 1st Pullback';  extra={bo_level:fpb.breakout_level,ema20:fpb.ema20,bars:fpb.bars_since_bo};}
+
+    if(strat==='qa_found')      {matched=!!qa.quiet_accum;     sig='🤫 Quiet Accum';   extra={range:qa.price_range_pct+'%'};}
+
+    if(strat==='anniv_found')   {matched=!!an.anniversary;     sig='📅 52W Anniversary';extra={days:an.days_since,high:an.high_price};}
+
+    if(strat==='avwap_reclaim') {matched=!!av.reclaim_bull;    sig='⚓ AVWAP Reclaim'; extra={vwap_lo:av.vwap_from_low};}
+    if(strat==='avwap_reject')  {matched=!!av.reject_bear;     sig='⚓ AVWAP Reject';  extra={vwap_hi:av.vwap_from_high};}
+    if(strat==='avwap_above_lo'){matched=!!av.above_vwap_lo;   sig='⚓ Above AVWAP-Lo';extra={vwap_lo:av.vwap_from_low};}
+    if(strat==='avwap_below_hi'){matched=!!av.below_vwap_hi;   sig='⚓ Below AVWAP-Hi';extra={vwap_hi:av.vwap_from_high};}
+
+    if(strat==='volpct_quiet')  {matched=!!vpc.quiet_2y;       sig='🌙 Quietest 2Y';   extra={atr_pct:vpc.atr_pct+'%',pctile:vpc.percentile};}
+
+    if(strat==='decouple_bull') {matched=!!dc.decouple_bull;   sig='🔓 Decouple Bull'; extra={corr_now:dc.corr_now,corr_prev:dc.corr_prev};}
+    if(strat==='decouple_bear') {matched=!!dc.decouple_bear;   sig='🔓 Decouple Bear'; extra={corr_now:dc.corr_now,corr_prev:dc.corr_prev};}
+
+    const pk=p.pocket||{}, bx=p.box||{}, wy=p.wyckoff||{}, cl=p.climax||{}, rv=p.rvol||{}, rr=p.rsrev||{}, srot=s.sector_rot||{};
+    if(strat==='pocket_pivot')   {matched=!!pk.found;          sig='👛 Pocket Pivot';  extra={vol_ratio:pk.vol_ratio};}
+    if(strat==='box_breakout')   {matched=!!bx.found;          sig='📦 Box Breakout'; extra={range_high:bx.range_high,compression:bx.compression_pct+'%'};}
+    if(strat==='wyckoff_spring') {matched=!!wy.spring;         sig='🪤 Wyckoff Spring'; extra={prior_low:wy.prior_low};}
+    if(strat==='wyckoff_upthrust'){matched=!!wy.upthrust;      sig='🪤 Wyckoff Upthrust'; extra={prior_high:wy.prior_high};}
+    if(strat==='climax_buying')  {matched=!!cl.buying_climax;  sig='💥 Buying Climax'; extra={vol_ratio:cl.vol_ratio};}
+    if(strat==='climax_selling') {matched=!!cl.selling_climax; sig='💥 Selling Climax';extra={vol_ratio:cl.vol_ratio};}
+    if(strat==='rvol_high')      {matched=!!rv.rvol_high;      sig='📶 RVOL≥90%ile';   extra={percentile:rv.percentile};}
+    if(strat==='rvol_extreme')   {matched=!!rv.rvol_extreme;   sig='📶 RVOL≥98%ile';   extra={percentile:rv.percentile};}
+    if(strat==='rs_new_leader')  {matched=!!rr.new_leader;     sig='🔄 RS New Leader'; extra={};}
+    if(strat==='rs_fading_leader'){matched=!!rr.fading_leader; sig='🔄 RS Fading';     extra={};}
+    if(strat==='sector_leader')  {matched=!!srot.leader;       sig='🔁 Sector Leader'; extra={sector:s.sector,sec_r1m:srot.sector_avg_r1m+'%',own_r1m:srot.own_r1m+'%'};}
+    if(strat==='sector_laggard') {matched=!!srot.laggard_catchup; sig='🔁 Laggard Catch-Up'; extra={sector:s.sector,sec_r1m:srot.sector_avg_r1m+'%',own_r1m:srot.own_r1m+'%'};}
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'pro',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
 function lookupStock(){
   const q=(document.getElementById('lookup-input').value||'').trim().toUpperCase();
   const sugEl=document.getElementById('lookup-suggest');
@@ -7664,7 +8227,7 @@ function renderLookupResult(s){
   const catOrder=['Trend','Momentum','Volatility','SMC','MultiIndicator','BreakoutPro','SmartRank','Patterns','Gap'];
   const catLabels={Trend:'📈 Trend',Momentum:'⚡ Momentum',Volatility:'🗜 Volatility/Breakout',
     SMC:'🎯 Smart Money Concepts',MultiIndicator:'🏆 Minervini/Weinstein',
-    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand'};
+    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand',ProScanners:'💎 Pro Scanners'};
 
   let catsHtml='';
   for(const cat of catOrder){
@@ -8048,7 +8611,7 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'||tab==='pro'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -8127,6 +8690,7 @@ function exportCSV(){
     sr:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     swing:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     zones:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
+    pro:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
