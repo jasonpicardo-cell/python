@@ -2877,7 +2877,7 @@ def precompute(fp, idx_map, nifty_df=None):
         ew    = compute_ew_simple(df),
         kagi  = compute_kagi(df),
     )
-    # ── Pre-compute shared weekly/monthly DFs (used by patt.dbl, sr.season, sr.mtf, swing) ──
+    # ── Pre-compute shared weekly/monthly DFs (used by patt.dbl, sr.season, sr.mtf, swing, ti_w/ti_m) ──
     _wdf=None; _mdf=None
     try:
         import pandas as _pdx
@@ -2885,6 +2885,9 @@ def precompute(fp, idx_map, nifty_df=None):
         _wdf=_dft.resample('W-FRI').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
         _mdf=_dft.resample('ME').agg({'Open':'first','High':'max','Low':'min','Close':'last','Volume':'sum'}).dropna()
     except: pass
+    # 🏅 India Pro strategies — Weekly / Monthly (Timeframe dropdown)
+    ti_w = _ti_for(_wdf) if _wdf is not None and len(_wdf)>=20 else {}
+    ti_m = _ti_for(_mdf) if _mdf is not None and len(_mdf)>=20 else {}
     # 🎨 Patterns (Harmonic + Chart Patterns)
     patt = dict(
         harm = compute_harmonics(df),
@@ -2962,7 +2965,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,ti_w=ti_w,ti_m=ti_m,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,**st,rs=0)
 
 
 def assign_smart_ranks(stocks):
@@ -3955,7 +3958,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   </div>
 
   <div class="cg"><label>Timeframe</label>
-    <select id="ti-tf">
+    <select id="ti-tf" onchange="scanTI()">
       <option value="d" selected>📅 Daily</option>
       <option value="w">📅 Weekly</option>
       <option value="m">📅 Monthly</option>
@@ -6609,8 +6612,9 @@ function scanTI(){
     if(!passesIdx(s))continue;
     if(s.price<prMin||s.price>prMax)continue;
     if(s.rs<rsMin)continue;
-    if(!s.ti)continue;
-    const tiData=s.ti;
+    const tf=document.getElementById('ti-tf').value;
+    const tiData=(tf==='w'?s.ti_w:tf==='m'?s.ti_m:s.ti)||{};
+    if(!tiData||!Object.keys(tiData).length)continue;
     const cd=tiData.candle||{}; const em=tiData.ema||{}; const mo=tiData.mom||{};
     const sq=tiData.seq||{}; const vb=tiData.volbld||{}; const co=tiData.consol||{};
     const ma=tiData.ma||{};
@@ -6741,9 +6745,10 @@ function scanTI(){
     if(strat==='lr_mean_rev')    {matched=lr.dev&&Math.abs(lr.dev)>=2; sig='⚖ LR ±2σ';    extra={dev:lr.dev,fit:lr.curr_fit};}
 
     if(!matched)continue;
+    const tfTag=tf==='w'?' (W)':tf==='m'?' (M)':'';
     rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
       above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
-      sig, extra, strat, _tab:'ti'});
+      sig:sig+tfTag, extra, strat, _tab:'ti'});
   }
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
