@@ -1,0 +1,944 @@
+// =============================================================================
+// SD-Pro-MTF :: Multi-Timeframe Supply & Demand + Trend + Fundamentals + VP
+// =============================================================================
+// Original implementation. Conceptually covers the GTF Indicator 2.0 Extended
+// feature set (swing-pivot S/D zones, ATR-scaled sizing, sensitivity modes,
+// EMA/SMA trend layer, multi-timeframe zone projection, multi-TF candle
+// overlay, fundamentals table, golden/death cross, body-vs-wick zone basis,
+// "boring candle" detection) PLUS several original enhancements:
+//   - Break-of-Structure (BOS) zone invalidation (zones expire, not permanent)
+//   - Retest/freshness tracking with a numeric strength score per zone
+//     (freshness + base tightness vs ATR + volume confirmation at formation)
+//   - PVSRA-style volume/spread candle classification (climax/rising vectors)
+//   - Confluence dashboard table aggregating D/W/M zone state + trend + PVSRA
+//   - Structured alertconditions for zone break, zone retest, golden/death cross
+//   - Auto-pruned box/label budget management (oldest broken zones recycled)
+//
+// Volume Profile module (search "VOLUME PROFILE" below) is merged in from a
+// third-party script, used and modified with attribution as required:
+//   Original: "Volume Profile" by kv4coins
+//   License:  Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/)
+//   This merged file remains available under the same MPL 2.0 terms for the
+//   Volume Profile portion; renamed variables/functions only (vp_ / f_vp
+//   prefixes) to avoid collisions with the rest of this script -- no logic
+//   was altered.
+// =============================================================================
+
+//@version=6
+indicator("SD-Pro-MTF :: Supply & Demand + Trend + Fundamentals + VP", shorttitle="SD-Pro-MTF",
+     overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+
+// -----------------------------------------------------------------------
+// INPUTS
+// -----------------------------------------------------------------------
+grpZone  = "Zone Detection"
+sensitivityInput = input.string("Conservative", "Sensitivity", options=["Aggressive", "Dynamic", "Conservative"], group=grpZone)
+swingLenOv  = input.int(0, "Swing Length Override (0 = auto)", minval=0, group=grpZone)
+atrMultOv   = input.float(0.0, "ATR Multiplier Override (0 = auto)", step=0.05, group=grpZone)
+atrLen      = input.int(14, "ATR Length", minval=1, group=grpZone)
+zoneBasis   = input.string("Wick", "Zone Basis", options=["Wick", "Body"], group=grpZone)
+maxZonesPerSide = input.int(6, "Max Live Zones / Side / Timeframe", minval=1, maxval=20, group=grpZone)
+
+grpMTF = "Multi-Timeframe"
+showCurrentZones = input.bool(true, "Show Current-TF Zones", group=grpMTF)
+showWeeklyZones  = input.bool(true, "Show Weekly Zones", group=grpMTF)
+showMonthlyZones = input.bool(true, "Show Monthly Zones", group=grpMTF)
+showWeeklyCandles  = input.bool(false, "Overlay Weekly Candles", group=grpMTF)
+showMonthlyCandles = input.bool(false, "Overlay Monthly Candles", group=grpMTF)
+
+grpTrend = "Trend / EMA"
+showEMA      = input.bool(true, "Show EMA20 / EMA50 / SMA200", group=grpTrend)
+showCross    = input.bool(true, "Mark Golden / Death Cross", group=grpTrend)
+
+grpVol = "Volume / PVSRA"
+showPVSRA      = input.bool(true, "Color Candles via PVSRA Vector Logic", group=grpVol)
+showBoring     = input.bool(true, "Tag Low-Range / Low-Volume Candles", group=grpVol)
+volLookback    = input.int(10, "PVSRA Volume/Spread Lookback", minval=2, group=grpVol)
+
+grpFund = "Fundamentals (cash equities only)"
+showFundTable = input.bool(true, "Show Fundamentals Table", group=grpFund)
+
+grpVP = "Volume Profile"
+showVolumeProfile   = input.bool(true, "Show Volume Profile", group=grpVP)
+vp_use_visible_range = input.bool(false, "Use Visible Range", group=grpVP, tooltip="Calculate Volume Profile using all visible bars in the current chart")
+vp_lookback_depth    = input.int(200, "Fixed Range Lookback Depth [10-3000]", minval=10, maxval=3000, group=grpVP, tooltip="Ignored if 'Use Visible Range' is enabled")
+vp_num_bars          = input.int(200, "Number of Volume Bars [10-490]", minval=10, maxval=490, group=grpVP)
+vp_bar_thickness     = input.int(1, "Volume Bar Thickness [1-30]", minval=1, maxval=30, group=grpVP)
+vp_bar_len_mult      = input.int(20, "Bar Length Multiplier [1-50]", minval=1, maxval=50, group=grpVP)
+vp_right_offset      = input.int(70, "Right Offset [0-400]", minval=0, maxval=400, group=grpVP)
+vp_volume_type       = input.string("Both", "Volume Type", options=["Both", "Bullish", "Bearish"], group=grpVP)
+vp_bar_color         = input.color(color.new(color.gray, 50), "Volume Bar Color", group=grpVP)
+vp_display_poc       = input.bool(true, "Display Point of Control (PoC)", group=grpVP)
+vp_poc_line_thickness = input.int(1, "PoC Line Thickness [1-30]", minval=1, maxval=30, group=grpVP)
+vp_poc_line_color    = input.color(color.red, "PoC Line Color", group=grpVP)
+vp_display_va        = input.bool(true, "Display Value Area", group=grpVP)
+vp_va_percent        = input.int(68, "Value Area Percentage(%) [5-95]", minval=5, maxval=95, group=grpVP)
+vp_va_bar_color      = input.color(color.blue, "Value Area Bar Color", group=grpVP)
+vp_display_va_lines  = input.bool(true, "Display Value Area Lines", group=grpVP)
+vp_va_lines_thickness = input.int(1, "Value Area Lines Thickness [1-20]", minval=1, maxval=20, group=grpVP)
+
+grpPivot = "Pivot Points"
+showPivotPoints = input.bool(true, "Show Pivot Points", group=grpPivot)
+pp_pivotTypeInput    = input.string("Traditional", "Type", options=["Traditional", "Fibonacci", "Woodie", "Classic", "DM", "Camarilla"], group=grpPivot)
+pp_pivotAnchorInput  = input.string("Auto", "Pivots timeframe", options=["Auto", "Daily", "Weekly", "Monthly", "Quarterly", "Yearly", "Biyearly", "Triyearly", "Quinquennially", "Decennially"], group=grpPivot)
+pp_maxHistoricalPivotsInput = input.int(2, "Number of pivots back", 1, 200, group=grpPivot)
+pp_isDailyBasedInput = input.bool(true, "Use daily-based values", group=grpPivot,
+     tooltip="When not selected, the indicator uses intraday data instead of EOD data on intraday charts. If intraday OHLC values differ from EOD values, the calculated pivot levels will also differ.")
+
+PP_GRP01 = "Pivot Points - Labels"
+pp_showLabelsInput     = input.bool(true, "Show labels", group=PP_GRP01)
+pp_showPricesInput     = input.bool(true, "Show prices", group=PP_GRP01)
+pp_positionLabelsInput = input.string("Left", "Labels position", options=["Left", "Right"], group=PP_GRP01)
+
+PP_DEFAULT_COLOR  = #fb8c00
+pp_showLevel2and3 = pp_pivotTypeInput != "DM"
+pp_showLevel4     = pp_pivotTypeInput != "DM" and pp_pivotTypeInput != "Fibonacci"
+pp_showLevel5     = pp_pivotTypeInput == "Traditional" or pp_pivotTypeInput == "Camarilla"
+
+PP_GRP02            = "Pivot Points - Levels"
+pp_linewidthInput    = input.int(1, "Line width", 1, 100, group=PP_GRP02)
+pp_pColorInput       = input.color(PP_DEFAULT_COLOR, "P ", inline="10", group=PP_GRP02)
+pp_pShowInput        = input.bool(true, "", inline="10", group=PP_GRP02)
+pp_s1ColorInput      = input.color(PP_DEFAULT_COLOR, "S1", inline="02", group=PP_GRP02)
+pp_s1ShowInput       = input.bool(true, "", inline="02", group=PP_GRP02)
+pp_r1ColorInput      = input.color(PP_DEFAULT_COLOR, "   R1", inline="02", group=PP_GRP02)
+pp_r1ShowInput       = input.bool(true, "", inline="02", group=PP_GRP02)
+pp_s2ColorInput      = input.color(PP_DEFAULT_COLOR, "S2", inline="03", group=PP_GRP02, active=pp_showLevel2and3)
+pp_s2ShowInput       = input.bool(true, "", inline="03", group=PP_GRP02, active=pp_showLevel2and3)
+pp_r2ColorInput      = input.color(PP_DEFAULT_COLOR, "   R2", inline="03", group=PP_GRP02, active=pp_showLevel2and3)
+pp_r2ShowInput       = input.bool(true, "", inline="03", group=PP_GRP02, active=pp_showLevel2and3)
+pp_s3ColorInput      = input.color(PP_DEFAULT_COLOR, "S3", inline="04", group=PP_GRP02, active=pp_showLevel2and3)
+pp_s3ShowInput       = input.bool(true, "", inline="04", group=PP_GRP02, active=pp_showLevel2and3)
+pp_r3ColorInput      = input.color(PP_DEFAULT_COLOR, "   R3", inline="04", group=PP_GRP02, active=pp_showLevel2and3)
+pp_r3ShowInput       = input.bool(true, "", inline="04", group=PP_GRP02, active=pp_showLevel2and3)
+pp_s4ColorInput      = input.color(PP_DEFAULT_COLOR, "S4", inline="05", group=PP_GRP02, active=pp_showLevel4)
+pp_s4ShowInput       = input.bool(true, "", inline="05", group=PP_GRP02, active=pp_showLevel4)
+pp_r4ColorInput      = input.color(PP_DEFAULT_COLOR, "   R4", inline="05", group=PP_GRP02, active=pp_showLevel4)
+pp_r4ShowInput       = input.bool(true, "", inline="05", group=PP_GRP02, active=pp_showLevel4)
+pp_s5ColorInput      = input.color(PP_DEFAULT_COLOR, "S5", inline="06", group=PP_GRP02, active=pp_showLevel5)
+pp_s5ShowInput       = input.bool(true, "", inline="06", group=PP_GRP02, active=pp_showLevel5)
+pp_r5ColorInput      = input.color(PP_DEFAULT_COLOR, "   R5", inline="06", group=PP_GRP02, active=pp_showLevel5)
+pp_r5ShowInput       = input.bool(true, "", inline="06", group=PP_GRP02, active=pp_showLevel5)
+
+grpVWAP = "Session VWAP"
+showVWAP       = input.bool(true, "Show Session VWAP", group=grpVWAP)
+vwapColor      = input.color(color.new(color.yellow, 0), "VWAP Color", group=grpVWAP)
+vwapBand1Mult  = input.float(1.0, "Band 1 StdDev Multiplier", step=0.1, group=grpVWAP)
+showVwapBand2  = input.bool(true, "Show Band 2", group=grpVWAP)
+vwapBand2Mult  = input.float(2.0, "Band 2 StdDev Multiplier", step=0.1, group=grpVWAP)
+
+grpORB = "Opening Range (ORB)"
+showORB        = input.bool(true, "Show Opening Range", group=grpORB)
+orSessionInput = input.session("0915-0930", "Opening Range Session", group=grpORB)
+showORBox      = input.bool(true, "Shade Opening Range Box", group=grpORB)
+orHighColor    = input.color(color.new(color.lime, 0), "OR High Color", group=grpORB)
+orLowColor     = input.color(color.new(color.red, 0), "OR Low Color", group=grpORB)
+orBoxColor     = input.color(color.new(color.gray, 0), "OR Box Color", group=grpORB)
+
+grpPriorLevels = "Prior Period Levels"
+showPDHPDL    = input.bool(true, "Show PDH / PDL (Daily)", group=grpPriorLevels)
+showPWHPWL    = input.bool(true, "Show PWH / PWL (Weekly)", group=grpPriorLevels)
+showPMHPML    = input.bool(false, "Show PMH / PML (Monthly)", group=grpPriorLevels)
+pdLevelColor  = input.color(color.new(color.blue, 0), "Daily Level Color", group=grpPriorLevels)
+pwLevelColor  = input.color(color.new(color.purple, 0), "Weekly Level Color", group=grpPriorLevels)
+pmLevelColor  = input.color(color.new(color.orange, 0), "Monthly Level Color", group=grpPriorLevels)
+
+grpRightLabels = "Right-Side Labels"
+showRightLabels = input.bool(true, "Show Right-Side Labels (MA / VWAP / ORB / Prior Levels)", group=grpRightLabels,
+     tooltip="Adds a value label at the right edge of each line, with full detail shown on hover.")
+
+grpDash = "Dashboard"
+showDashboard = input.bool(true, "Show Confluence Dashboard", group=grpDash)
+dashPosInput  = input.string("Top Right", "Dashboard Position",
+     options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=grpDash)
+
+grpAlert = "Alerts"
+alertOnBreak  = input.bool(true, "Enable Zone-Break Alerts", group=grpAlert)
+alertOnRetest = input.bool(true, "Enable Zone-Retest Alerts", group=grpAlert)
+alertOnCross  = input.bool(true, "Enable Golden/Death Cross Alerts", group=grpAlert)
+
+// -----------------------------------------------------------------------
+// SENSITIVITY RESOLUTION
+// -----------------------------------------------------------------------
+swingLen = swingLenOv > 0 ? swingLenOv :
+     sensitivityInput == "Aggressive" ? 3 :
+     sensitivityInput == "Conservative" ? 8 : 5
+
+atrMult = atrMultOv > 0 ? atrMultOv :
+     sensitivityInput == "Aggressive" ? 0.50 :
+     sensitivityInput == "Conservative" ? 1.00 : 0.75
+
+// -----------------------------------------------------------------------
+// CORE SERIES
+// -----------------------------------------------------------------------
+atrVal = ta.atr(atrLen)
+avgVol = ta.sma(volume, 20)
+
+ema20  = ta.ema(close, 20)
+ema50  = ta.ema(close, 50)
+sma200 = ta.sma(close, 200)
+
+goldenCross = ta.crossover(ema20, ema50)
+deathCross  = ta.crossunder(ema20, ema50)
+
+// -----------------------------------------------------------------------
+// VOLUME PROFILE :: core variables (ported from kv4coins, MPL 2.0 -- see header)
+// -----------------------------------------------------------------------
+var int vp_tf_ms = 1000 * timeframe.in_seconds()
+var int vp_lookback_bars = vp_use_visible_range ? math.round((last_bar_time - chart.left_visible_bar_time) / vp_tf_ms) : vp_lookback_depth
+
+var line vp_poc = na
+var line vp_vah = na
+var line vp_val = na
+var array<line> vp_bars = array.new_line()
+var array<float> vp_volumes = array.new_float(vp_num_bars, 0)
+
+vp_highest_price  = ta.highest(vp_lookback_bars)
+vp_lowest_price   = ta.lowest(vp_lookback_bars)
+vp_price_interval = (vp_highest_price - vp_lowest_price) / (vp_num_bars - 1)
+
+// -----------------------------------------------------------------------
+// ZONE TYPE
+// -----------------------------------------------------------------------
+type Zone
+    box    b
+    label  lbl
+    float  top
+    float  bottom
+    string ztype
+    string tf
+    int    formedTime
+    int    testCount
+    bool   broken
+    bool   touching
+    float  score
+    float  atrAtFormation
+    float  volAtFormation
+    float  avgVolAtFormation
+
+var array<Zone> curZones = array.new<Zone>()
+var array<Zone> wkZones  = array.new<Zone>()
+var array<Zone> moZones  = array.new<Zone>()
+
+var bool anyZoneBroken   = false
+var bool anyZoneRetested = false
+
+color supplyColor = color.new(color.red, 0)
+color demandColor = color.new(color.green, 0)
+
+// -----------------------------------------------------------------------
+// PIVOT POINTS :: types (ported from TradingView's built-in "Pivot Points Standard")
+// -----------------------------------------------------------------------
+type graphicSettings
+    string levelName
+    color  levelColor
+    bool   showLevel
+
+type pivotGraphic
+    line  pivotLine
+    label pivotLabel
+
+var array<graphicSettings> graphicSettingsArray = array.from(
+     graphicSettings.new(" P", pp_pColorInput,  pp_pShowInput),
+     graphicSettings.new("R1", pp_r1ColorInput, pp_r1ShowInput), graphicSettings.new("S1", pp_s1ColorInput, pp_s1ShowInput),
+     graphicSettings.new("R2", pp_r2ColorInput, pp_r2ShowInput), graphicSettings.new("S2", pp_s2ColorInput, pp_s2ShowInput),
+     graphicSettings.new("R3", pp_r3ColorInput, pp_r3ShowInput), graphicSettings.new("S3", pp_s3ColorInput, pp_s3ShowInput),
+     graphicSettings.new("R4", pp_r4ColorInput, pp_r4ShowInput), graphicSettings.new("S4", pp_s4ColorInput, pp_s4ShowInput),
+     graphicSettings.new("R5", pp_r5ColorInput, pp_r5ShowInput), graphicSettings.new("S5", pp_s5ColorInput, pp_s5ShowInput)
+     )
+
+var string autoAnchor = switch
+    timeframe.isintraday => timeframe.multiplier <= 15 ? pp_isDailyBasedInput ? "1D" : "1440" : "1W"
+    timeframe.isdaily    => "1M"
+    => "12M"
+
+var string pivotTimeframe = switch pp_pivotAnchorInput
+    "Auto"      => autoAnchor
+    "Daily"     => pp_isDailyBasedInput ? "1D" : "1440"
+    "Weekly"    => "1W"
+    "Monthly"   => "1M"
+    "Quarterly" => "3M"
+    => "12M"
+
+var int pivotYearMultiplier = switch pp_pivotAnchorInput
+    "Biyearly"       => 2
+    "Triyearly"      => 3
+    "Quinquennially" => 5
+    "Decennially"    => 10
+    => 1
+
+var matrix<pivotGraphic> drawnGraphics = matrix.new<pivotGraphic>()
+
+// -----------------------------------------------------------------------
+// HELPER FUNCTIONS
+// -----------------------------------------------------------------------
+f_zoneBounds(ztype, wickVal, atrRef, basis, openVal, closeVal) =>
+    anchor = ztype == "supply" ?
+         (basis == "Body" ? math.max(openVal, closeVal) : wickVal) :
+         (basis == "Body" ? math.min(openVal, closeVal) : wickVal)
+    top    = ztype == "supply" ? anchor : anchor + atrRef * atrMult
+    bottom = ztype == "supply" ? anchor - atrRef * atrMult : anchor
+    [top, bottom]
+
+f_computeScore(testCount, height, atrRef, volAtForm, avgVolRef) =>
+    freshScore = math.max(0.0, 4.0 - testCount * 1.5)
+    tightScore = atrRef > 0 ? math.max(0.0, 3.0 - math.min(height / atrRef, 3.0)) : 0.0
+    volScore   = avgVolRef > 0 ? math.min(3.0, math.max(0.0, (volAtForm / avgVolRef - 1.0) * 3.0)) : 0.0
+    freshScore + tightScore + volScore
+
+f_newZone(arr, ztype, topVal, bottomVal, formedT, tfLabel, atrAtForm, volAtForm, avgVolAtForm) =>
+    col = ztype == "supply" ? supplyColor : demandColor
+    bx  = box.new(left=formedT, top=topVal, right=time, bottom=bottomVal, xloc=xloc.bar_time,
+         extend=extend.right, bgcolor=color.new(col, 85), border_color=col, border_width=1)
+    initScore = f_computeScore(0, topVal - bottomVal, atrAtForm, volAtForm, avgVolAtForm)
+    lb = label.new(x=formedT, y=ztype == "supply" ? topVal : bottomVal, xloc=xloc.bar_time,
+         text=tfLabel + " " + ztype + "\nScore: " + str.tostring(initScore, "#.#"),
+         style=ztype == "supply" ? label.style_label_down : label.style_label_up,
+         color=color.new(col, 70), textcolor=color.white, size=size.small)
+    z = Zone.new(b=bx, lbl=lb, top=topVal, bottom=bottomVal, ztype=ztype, tf=tfLabel,
+         formedTime=formedT, testCount=0, broken=false, touching=false, score=initScore,
+         atrAtFormation=atrAtForm, volAtFormation=volAtForm, avgVolAtFormation=avgVolAtForm)
+    array.push(arr, z)
+
+f_processZones(arr, curClose, curHigh, curLow, curTime) =>
+    bool brokenFlag = false
+    bool retestFlag = false
+    int n = array.size(arr)
+    if n > 0
+        for i = n - 1 to 0
+            z = array.get(arr, i)
+            if not z.broken
+                isOverlap = curLow <= z.top and curHigh >= z.bottom
+                if isOverlap and not z.touching
+                    z.testCount := z.testCount + 1
+                    z.touching := true
+                    retestFlag := true
+                if not isOverlap
+                    z.touching := false
+
+                brokeNow = z.ztype == "supply" ? curClose > z.top : curClose < z.bottom
+                if brokeNow
+                    z.broken := true
+                    box.set_extend(z.b, extend.none)
+                    box.set_right(z.b, curTime)
+                    box.set_bgcolor(z.b, color.new(color.gray, 90))
+                    box.set_border_color(z.b, color.gray)
+                    label.delete(z.lbl)
+                    brokenFlag := true
+                else
+                    z.score := f_computeScore(z.testCount, z.top - z.bottom, z.atrAtFormation, z.volAtFormation, z.avgVolAtFormation)
+                    label.set_text(z.lbl, z.tf + " " + z.ztype + "\nScore: " + str.tostring(z.score, "#.#") + " | Tests: " + str.tostring(z.testCount))
+    [brokenFlag, retestFlag]
+
+f_pruneOld(arr, maxTotal) =>
+    while array.size(arr) > maxTotal
+        removed = false
+        for j = 0 to array.size(arr) - 1
+            zz = array.get(arr, j)
+            if zz.broken
+                box.delete(zz.b)
+                if not na(zz.lbl)
+                    label.delete(zz.lbl)
+                array.remove(arr, j)
+                removed := true
+                break
+        if not removed
+            break
+
+f_nearestZones(arr, refPrice) =>
+    float nearestAbove = na
+    float nearestBelow = na
+    int n = array.size(arr)
+    if n > 0
+        for i = 0 to n - 1
+            z = array.get(arr, i)
+            if not z.broken
+                if z.bottom > refPrice and (na(nearestAbove) or z.bottom < nearestAbove)
+                    nearestAbove := z.bottom
+                if z.top < refPrice and (na(nearestBelow) or z.top > nearestBelow)
+                    nearestBelow := z.top
+    [nearestAbove, nearestBelow]
+
+f_deleteIfExists(lbl) =>
+    if not na(lbl)
+        label.delete(lbl)
+
+// -----------------------------------------------------------------------
+// VOLUME PROFILE :: helper functions (ported from kv4coins, MPL 2.0 -- see header)
+// -----------------------------------------------------------------------
+f_vpScaleVolume(vol, maxVol) =>
+    float d = maxVol / vp_lookback_bars / (vp_bar_len_mult / 100)
+    int scaledVol = math.round(vol / d)
+    scaledVol
+
+f_vpCalculate() =>
+    array.fill(vp_volumes, 0)
+    for i = 0 to (vp_lookback_bars - 1)
+        for j = 0 to (vp_num_bars - 1)
+            float priceLevel = vp_lowest_price + vp_price_interval * j
+            bool isBullish = close[i] >= open[i]
+            bool includeVol = vp_volume_type == "Both" ? true : (vp_volume_type == "Bullish" ? isBullish : not isBullish)
+            if (priceLevel >= low[i] and priceLevel < high[i] and includeVol)
+                array.set(vp_volumes, j, array.get(vp_volumes, j) + volume[i])
+
+f_vpCalculateVA(int maxIdx, float maxVol) =>
+    float sumVol = array.sum(vp_volumes)
+    float vaVol = sumVol * vp_va_percent / 100
+    int vaUp = maxIdx
+    int vaDn = maxIdx
+    float vaSum = maxVol
+    while vaSum < vaVol
+        float vUp = (vaUp < vp_num_bars - 1) ? array.get(vp_volumes, vaUp + 1) : 0.0
+        float vDn = (vaDn > 0) ? array.get(vp_volumes, vaDn - 1) : 0.0
+        if vUp == 0 and vDn == 0
+            break
+        if vUp >= vDn
+            vaSum += vUp
+            vaUp += 1
+        else
+            vaSum += vDn
+            vaDn -= 1
+    [vaDn, vaUp]
+
+f_vpDraw() =>
+    float maxVol = array.max(vp_volumes)
+    int maxIdx = array.indexof(vp_volumes, maxVol)
+    int x2 = bar_index + vp_right_offset
+    for i = 0 to (vp_num_bars - 1)
+        int vol = f_vpScaleVolume(array.get(vp_volumes, i), maxVol)
+        int x1 = x2 - vol
+        float y = vp_lowest_price + vp_price_interval * i
+        line.set_xy1(array.get(vp_bars, i), x1, y)
+        line.set_xy2(array.get(vp_bars, i), x2, y)
+        line.set_color(array.get(vp_bars, i), maxIdx == i ? vp_poc_line_color : vp_bar_color)
+    if vp_display_poc
+        int vol = f_vpScaleVolume(maxVol, maxVol)
+        int pocX1 = bar_index - vp_lookback_bars
+        int pocX2 = x2 - vol - 10
+        float y = vp_lowest_price + vp_price_interval * maxIdx
+        line.set_xy1(vp_poc, pocX1, y)
+        line.set_xy2(vp_poc, pocX2, y)
+    if vp_display_va
+        [vaDn, vaUp] = f_vpCalculateVA(maxIdx, maxVol)
+        for i = vaDn to vaUp
+            if i != maxIdx
+                line.set_color(array.get(vp_bars, i), vp_va_bar_color)
+        if vp_display_va_lines
+            int vahVol = f_vpScaleVolume(array.get(vp_volumes, vaUp), maxVol)
+            int valVol = f_vpScaleVolume(array.get(vp_volumes, vaDn), maxVol)
+            int vaX1 = bar_index - vp_lookback_bars
+            int vahX2 = x2 - vahVol - 10
+            int valX2 = x2 - valVol - 10
+            float vahY1 = vp_lowest_price + vp_price_interval * vaUp
+            float valY1 = vp_lowest_price + vp_price_interval * vaDn
+            line.set_xy1(vp_vah, vaX1, vahY1)
+            line.set_xy1(vp_val, vaX1, valY1)
+            line.set_xy2(vp_vah, vahX2, vahY1)
+            line.set_xy2(vp_val, valX2, valY1)
+
+// -----------------------------------------------------------------------
+// PIVOT POINTS :: helper functions (ported from TradingView's built-in "Pivot Points Standard")
+// -----------------------------------------------------------------------
+pivotTimeframeChangeCounter(bool condition) =>
+    var int count = 0
+    if condition and bar_index > 0
+        count += 1
+    count
+
+method delete(pivotGraphic graphic) =>
+    graphic.pivotLine.delete()
+    graphic.pivotLabel.delete()
+
+calculatePivots(simple bool isDailyBased) =>
+    if isDailyBased
+        bool pivotTimeframeChange = (
+             timeframe.change(timeframe.period) and year(time_tradingday, syminfo.timezone) % pivotYearMultiplier == 0
+             )
+        [pivotPointsArrayStatic, pivotPointsArrayDeveloping, pivotCounter] = request.security(
+             ticker.modify(syminfo.tickerid, settlement_as_close = settlement_as_close.on),
+             pivotTimeframe, [
+                 ta.pivot_point_levels(pp_pivotTypeInput, pivotTimeframeChange),
+                 ta.pivot_point_levels(pp_pivotTypeInput, pivotTimeframeChange, developing = pp_pivotTypeInput != "Woodie"),
+                 pivotTimeframeChangeCounter(pivotTimeframeChange)
+                 ], lookahead = barmerge.lookahead_on
+             )
+        [pivotPointsArrayStatic, pivotPointsArrayDeveloping, pivotCounter]
+    else
+        bool pivotTimeframeChange = (
+             timeframe.change(pivotTimeframe) and year(time_tradingday, syminfo.timezone) % pivotYearMultiplier == 0
+             )
+        array<float> pivotPointsArrayStatic = ta.pivot_point_levels(pp_pivotTypeInput, pivotTimeframeChange)
+        array<float> pivotPointsArrayDeveloping = ta.pivot_point_levels(
+             pp_pivotTypeInput, pivotTimeframeChange, developing = pp_pivotTypeInput != "Woodie"
+             )
+        int pivotCounter = pivotTimeframeChangeCounter(pivotTimeframeChange)
+        [pivotPointsArrayStatic, pivotPointsArrayDeveloping, pivotCounter]
+
+affixOldPivots(int endTime) =>
+    int rows = matrix.rows(drawnGraphics)
+    if rows > 0
+        array<pivotGraphic> lastGraphics = matrix.row(drawnGraphics, rows - 1)
+        for graphic in lastGraphics
+            line.set_x2(graphic.pivotLine, endTime)
+            if pp_positionLabelsInput == "Right"
+                label.set_x(graphic.pivotLabel, endTime)
+
+drawNewPivots(int startTime, array<float> pivotPointsArray) =>
+    array<pivotGraphic> newGraphics = array.new<pivotGraphic>()
+    int endTime = startTime + timeframe.in_seconds(pivotTimeframe) * 1000 * pivotYearMultiplier
+    [labelPosition, labelStyle] = switch pp_positionLabelsInput
+        "Left"  => [startTime, label.style_label_right]
+        "Right" => [endTime,   label.style_label_left]
+    for [index, level] in pivotPointsArray
+        graphicSettings levelSettings = array.get(graphicSettingsArray, index)
+        if not na(level) and levelSettings.showLevel
+            line pivotLine = line.new(
+                 startTime, level, endTime, level, xloc = xloc.bar_time, color = levelSettings.levelColor,
+                 width = pp_linewidthInput
+                 )
+            label pivotLabel = label.new(
+                 labelPosition, level,
+                 (pp_showLabelsInput ? levelSettings.levelName + " " : "")
+                 + (pp_showPricesInput ? "(" + str.tostring(level, format.mintick) + ")" : ""),
+                 style = labelStyle, textcolor = levelSettings.levelColor, color = #00000000, xloc = xloc.bar_time
+                 )
+            array.push(newGraphics, pivotGraphic.new(pivotLine, pivotLabel))
+    if array.size(newGraphics) > 0
+        matrix.add_row(drawnGraphics, array_id = newGraphics)
+        if matrix.rows(drawnGraphics) > pp_maxHistoricalPivotsInput
+            array<pivotGraphic> oldGraphics = matrix.remove_row(drawnGraphics, 0)
+            for graphic in oldGraphics
+                graphic.delete()
+
+// -----------------------------------------------------------------------
+// CURRENT TIMEFRAME ZONE DETECTION
+// -----------------------------------------------------------------------
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+pivotTime    = time[swingLen]
+pivotATR     = atrVal[swingLen]
+pivotVol     = volume[swingLen]
+pivotAvgVol  = avgVol[swingLen]
+pivotOpen    = open[swingLen]
+pivotClose   = close[swingLen]
+
+if showCurrentZones and not na(ph) and not na(pivotATR)
+    [sTop, sBottom] = f_zoneBounds("supply", ph, pivotATR, zoneBasis, pivotOpen, pivotClose)
+    f_newZone(curZones, "supply", sTop, sBottom, pivotTime, "Cur", pivotATR, pivotVol, pivotAvgVol)
+
+if showCurrentZones and not na(pl) and not na(pivotATR)
+    [dTop, dBottom] = f_zoneBounds("demand", pl, pivotATR, zoneBasis, pivotOpen, pivotClose)
+    f_newZone(curZones, "demand", dTop, dBottom, pivotTime, "Cur", pivotATR, pivotVol, pivotAvgVol)
+
+// -----------------------------------------------------------------------
+// WEEKLY ZONE DETECTION (request.security)
+// -----------------------------------------------------------------------
+[wOpenC, wHighC, wLowC, wCloseC] = request.security(syminfo.tickerid, "W",
+     [open, high, low, close], lookahead=barmerge.lookahead_off)
+
+[wPH, wPL, wPivotTime, wPivotOpen, wPivotClose, wPivotATR, wPivotVol, wPivotAvgVol] =
+     request.security(syminfo.tickerid, "W",
+     [ta.pivothigh(high, swingLen, swingLen), ta.pivotlow(low, swingLen, swingLen),
+      time[swingLen], open[swingLen], close[swingLen],
+      ta.atr(atrLen)[swingLen], volume[swingLen], ta.sma(volume, 20)[swingLen]],
+     lookahead=barmerge.lookahead_on)
+
+var int lastWPHtime = na
+var int lastWPLtime = na
+
+if showWeeklyZones and not na(wPH) and not na(wPivotATR) and wPivotTime != lastWPHtime
+    lastWPHtime := wPivotTime
+    [wsTop, wsBottom] = f_zoneBounds("supply", wPH, wPivotATR, zoneBasis, wPivotOpen, wPivotClose)
+    f_newZone(wkZones, "supply", wsTop, wsBottom, wPivotTime, "Wk", wPivotATR, wPivotVol, wPivotAvgVol)
+
+if showWeeklyZones and not na(wPL) and not na(wPivotATR) and wPivotTime != lastWPLtime
+    lastWPLtime := wPivotTime
+    [wdTop, wdBottom] = f_zoneBounds("demand", wPL, wPivotATR, zoneBasis, wPivotOpen, wPivotClose)
+    f_newZone(wkZones, "demand", wdTop, wdBottom, wPivotTime, "Wk", wPivotATR, wPivotVol, wPivotAvgVol)
+
+// -----------------------------------------------------------------------
+// MONTHLY ZONE DETECTION (request.security)
+// -----------------------------------------------------------------------
+[mOpenC, mHighC, mLowC, mCloseC] = request.security(syminfo.tickerid, "M",
+     [open, high, low, close], lookahead=barmerge.lookahead_off)
+
+[mPH, mPL, mPivotTime, mPivotOpen, mPivotClose, mPivotATR, mPivotVol, mPivotAvgVol] =
+     request.security(syminfo.tickerid, "M",
+     [ta.pivothigh(high, swingLen, swingLen), ta.pivotlow(low, swingLen, swingLen),
+      time[swingLen], open[swingLen], close[swingLen],
+      ta.atr(atrLen)[swingLen], volume[swingLen], ta.sma(volume, 20)[swingLen]],
+     lookahead=barmerge.lookahead_on)
+
+var int lastMPHtime = na
+var int lastMPLtime = na
+
+if showMonthlyZones and not na(mPH) and not na(mPivotATR) and mPivotTime != lastMPHtime
+    lastMPHtime := mPivotTime
+    [msTop, msBottom] = f_zoneBounds("supply", mPH, mPivotATR, zoneBasis, mPivotOpen, mPivotClose)
+    f_newZone(moZones, "supply", msTop, msBottom, mPivotTime, "Mo", mPivotATR, mPivotVol, mPivotAvgVol)
+
+if showMonthlyZones and not na(mPL) and not na(mPivotATR) and mPivotTime != lastMPLtime
+    lastMPLtime := mPivotTime
+    [mdTop, mdBottom] = f_zoneBounds("demand", mPL, mPivotATR, zoneBasis, mPivotOpen, mPivotClose)
+    f_newZone(moZones, "demand", mdTop, mdBottom, mPivotTime, "Mo", mPivotATR, mPivotVol, mPivotAvgVol)
+
+// -----------------------------------------------------------------------
+// ZONE MAINTENANCE (every bar): BOS check, retest tracking, pruning
+// -----------------------------------------------------------------------
+[curBroken, curRetested] = f_processZones(curZones, close, high, low, time)
+[wkBroken, wkRetested]   = f_processZones(wkZones,  close, high, low, time)
+[moBroken, moRetested]   = f_processZones(moZones,  close, high, low, time)
+
+anyZoneBroken   := curBroken or wkBroken or moBroken
+anyZoneRetested := curRetested or wkRetested or moRetested
+
+f_pruneOld(curZones, maxZonesPerSide * 2)
+f_pruneOld(wkZones,  maxZonesPerSide * 2)
+f_pruneOld(moZones,  maxZonesPerSide * 2)
+
+// -----------------------------------------------------------------------
+// MULTI-TIMEFRAME CANDLE OVERLAY
+// -----------------------------------------------------------------------
+plotcandle(showWeeklyCandles ? wOpenC : na, showWeeklyCandles ? wHighC : na,
+     showWeeklyCandles ? wLowC : na, showWeeklyCandles ? wCloseC : na,
+     title="Weekly Candle Overlay",
+     color=wCloseC >= wOpenC ? color.new(color.teal, 70) : color.new(color.maroon, 70),
+     wickcolor=color.new(color.gray, 60), bordercolor=color.new(color.gray, 60))
+
+plotcandle(showMonthlyCandles ? mOpenC : na, showMonthlyCandles ? mHighC : na,
+     showMonthlyCandles ? mLowC : na, showMonthlyCandles ? mCloseC : na,
+     title="Monthly Candle Overlay",
+     color=mCloseC >= mOpenC ? color.new(color.blue, 75) : color.new(color.orange, 75),
+     wickcolor=color.new(color.gray, 65), bordercolor=color.new(color.gray, 65))
+
+// -----------------------------------------------------------------------
+// TREND LAYER
+// -----------------------------------------------------------------------
+plot(showEMA ? ema20 : na, title="EMA 20", color=color.new(color.aqua, 0), linewidth=1)
+plot(showEMA ? ema50 : na, title="EMA 50", color=color.new(color.orange, 0), linewidth=1)
+plot(showEMA ? sma200 : na, title="SMA 200 (Trend)", color=color.new(color.purple, 0), linewidth=2)
+
+plotshape(showCross and goldenCross, title="Golden Cross", style=shape.triangleup,
+     location=location.belowbar, color=color.new(color.lime, 0), size=size.small)
+plotshape(showCross and deathCross, title="Death Cross", style=shape.triangledown,
+     location=location.abovebar, color=color.new(color.red, 0), size=size.small)
+
+// -----------------------------------------------------------------------
+// PVSRA-STYLE VOLUME/SPREAD CANDLE CLASSIFICATION
+// -----------------------------------------------------------------------
+spreadVal = high - low
+avgSpread = ta.sma(spreadVal, volLookback)
+avgVolP   = ta.sma(volume, volLookback)
+
+isClimax = showPVSRA and volume >= avgVolP * 2.0 and spreadVal >= avgSpread
+isRising = showPVSRA and not isClimax and volume >= avgVolP * 1.5
+
+pvsraColor = isClimax ? (close >= open ? color.new(color.fuchsia, 0) : color.new(color.purple, 0)) :
+     isRising ? color.new(color.blue, 0) : na
+
+barcolor(pvsraColor, title="PVSRA Vector Color")
+
+isBoring = showBoring and spreadVal < (atrVal * 0.5) and volume < (avgVolP * 0.7)
+bgcolor(isBoring ? color.new(color.gray, 92) : na, title="Boring / Basing Candle")
+
+// -----------------------------------------------------------------------
+// SESSION VWAP + STANDARD DEVIATION BANDS
+// -----------------------------------------------------------------------
+isNewVwapSession = timeframe.change("D")
+
+var float vwap_cumVol = 0.0
+var float vwap_cumPV  = 0.0
+var float vwap_cumPV2 = 0.0
+
+if isNewVwapSession
+    vwap_cumVol := 0.0
+    vwap_cumPV  := 0.0
+    vwap_cumPV2 := 0.0
+
+vwap_tp = hlc3
+vwap_cumVol += volume
+vwap_cumPV  += vwap_tp * volume
+vwap_cumPV2 += vwap_tp * vwap_tp * volume
+
+vwapVal      = vwap_cumVol > 0 ? vwap_cumPV / vwap_cumVol : na
+vwapVariance = vwap_cumVol > 0 ? math.max((vwap_cumPV2 / vwap_cumVol) - vwapVal * vwapVal, 0.0) : na
+vwapStdev    = na(vwapVariance) ? na : math.sqrt(vwapVariance)
+
+vwapUpper1 = na(vwapVal) ? na : vwapVal + vwapStdev * vwapBand1Mult
+vwapLower1 = na(vwapVal) ? na : vwapVal - vwapStdev * vwapBand1Mult
+vwapUpper2 = na(vwapVal) ? na : vwapVal + vwapStdev * vwapBand2Mult
+vwapLower2 = na(vwapVal) ? na : vwapVal - vwapStdev * vwapBand2Mult
+
+plot(showVWAP ? vwapVal : na, title="Session VWAP", color=vwapColor, linewidth=2)
+vwapU1Plot = plot(showVWAP ? vwapUpper1 : na, title="VWAP Upper Band 1", color=color.new(vwapColor, 40), linewidth=1)
+vwapL1Plot = plot(showVWAP ? vwapLower1 : na, title="VWAP Lower Band 1", color=color.new(vwapColor, 40), linewidth=1)
+fill(vwapU1Plot, vwapL1Plot, color=color.new(vwapColor, 94), title="VWAP Band 1 Fill")
+vwapU2Plot = plot(showVWAP and showVwapBand2 ? vwapUpper2 : na, title="VWAP Upper Band 2", color=color.new(vwapColor, 65), linewidth=1)
+vwapL2Plot = plot(showVWAP and showVwapBand2 ? vwapLower2 : na, title="VWAP Lower Band 2", color=color.new(vwapColor, 65), linewidth=1)
+
+// -----------------------------------------------------------------------
+// OPENING RANGE (default NSE 9:15-9:30, configurable session)
+// -----------------------------------------------------------------------
+orInSession    = not na(time(timeframe.period, orSessionInput))
+orSessionStart = orInSession and not orInSession[1]
+
+var float orHigh     = na
+var float orLow      = na
+var line  orHighLine = na
+var line  orLowLine  = na
+var box   orBox       = na
+
+if showORB and orSessionStart
+    if not na(orHighLine)
+        line.delete(orHighLine)
+    if not na(orLowLine)
+        line.delete(orLowLine)
+    if not na(orBox)
+        box.delete(orBox)
+    orHigh := high
+    orLow  := low
+    orHighLine := line.new(time, orHigh, time, orHigh, xloc=xloc.bar_time, extend=extend.right, color=orHighColor, width=1)
+    orLowLine  := line.new(time, orLow, time, orLow, xloc=xloc.bar_time, extend=extend.right, color=orLowColor, width=1)
+    orBox      := showORBox ? box.new(time, orHigh, time, orLow, xloc=xloc.bar_time, bgcolor=color.new(orBoxColor, 85), border_color=na) : na
+else if showORB and orInSession
+    orHigh := math.max(orHigh, high)
+    orLow  := math.min(orLow, low)
+    if not na(orHighLine)
+        line.set_y1(orHighLine, orHigh)
+        line.set_y2(orHighLine, orHigh)
+        line.set_x2(orHighLine, time)
+    if not na(orLowLine)
+        line.set_y1(orLowLine, orLow)
+        line.set_y2(orLowLine, orLow)
+        line.set_x2(orLowLine, time)
+    if not na(orBox)
+        box.set_top(orBox, orHigh)
+        box.set_right(orBox, time)
+
+// -----------------------------------------------------------------------
+// PRIOR PERIOD LEVELS (PDH/PDL, PWH/PWL, optional PMH/PML)
+// -----------------------------------------------------------------------
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_on)
+pmh = request.security(syminfo.tickerid, "M", high[1], lookahead=barmerge.lookahead_on)
+pml = request.security(syminfo.tickerid, "M", low[1], lookahead=barmerge.lookahead_on)
+
+plot(showPDHPDL ? pdh : na, title="PDH", color=pdLevelColor, style=plot.style_linebr, linewidth=1)
+plot(showPDHPDL ? pdl : na, title="PDL", color=pdLevelColor, style=plot.style_linebr, linewidth=1)
+plot(showPWHPWL ? pwh : na, title="PWH", color=pwLevelColor, style=plot.style_linebr, linewidth=2)
+plot(showPWHPWL ? pwl : na, title="PWL", color=pwLevelColor, style=plot.style_linebr, linewidth=2)
+plot(showPMHPML ? pmh : na, title="PMH", color=pmLevelColor, style=plot.style_linebr, linewidth=3)
+plot(showPMHPML ? pml : na, title="PML", color=pmLevelColor, style=plot.style_linebr, linewidth=3)
+
+// -----------------------------------------------------------------------
+// RIGHT-SIDE VALUE LABELS (toggle-controlled; hover for full detail)
+// -----------------------------------------------------------------------
+var label lbl_ema20  = na
+var label lbl_ema50  = na
+var label lbl_sma200 = na
+var label lbl_vwap   = na
+var label lbl_vwapU1 = na
+var label lbl_vwapL1 = na
+var label lbl_vwapU2 = na
+var label lbl_vwapL2 = na
+var label lbl_orHigh = na
+var label lbl_orLow  = na
+var label lbl_pdh    = na
+var label lbl_pdl    = na
+var label lbl_pwh    = na
+var label lbl_pwl    = na
+var label lbl_pmh    = na
+var label lbl_pml    = na
+
+if showRightLabels and barstate.islast
+    f_deleteIfExists(lbl_ema20)
+    f_deleteIfExists(lbl_ema50)
+    f_deleteIfExists(lbl_sma200)
+    f_deleteIfExists(lbl_vwap)
+    f_deleteIfExists(lbl_vwapU1)
+    f_deleteIfExists(lbl_vwapL1)
+    f_deleteIfExists(lbl_vwapU2)
+    f_deleteIfExists(lbl_vwapL2)
+    f_deleteIfExists(lbl_orHigh)
+    f_deleteIfExists(lbl_orLow)
+    f_deleteIfExists(lbl_pdh)
+    f_deleteIfExists(lbl_pdl)
+    f_deleteIfExists(lbl_pwh)
+    f_deleteIfExists(lbl_pwl)
+    f_deleteIfExists(lbl_pmh)
+    f_deleteIfExists(lbl_pml)
+
+    if showEMA
+        lbl_ema20 := label.new(bar_index, ema20, "EMA20  " + str.tostring(ema20, format.mintick),
+             style=label.style_label_left, color=color.new(color.aqua, 0), textcolor=color.white, size=size.small,
+             tooltip="Exponential Moving Average (20): " + str.tostring(ema20, format.mintick))
+        lbl_ema50 := label.new(bar_index, ema50, "EMA50  " + str.tostring(ema50, format.mintick),
+             style=label.style_label_left, color=color.new(color.orange, 0), textcolor=color.white, size=size.small,
+             tooltip="Exponential Moving Average (50): " + str.tostring(ema50, format.mintick))
+        lbl_sma200 := label.new(bar_index, sma200, "SMA200  " + str.tostring(sma200, format.mintick),
+             style=label.style_label_left, color=color.new(color.purple, 0), textcolor=color.white, size=size.small,
+             tooltip="Simple Moving Average (200) Trend: " + str.tostring(sma200, format.mintick))
+
+    if showVWAP
+        lbl_vwap := label.new(bar_index, vwapVal, "VWAP  " + str.tostring(vwapVal, format.mintick),
+             style=label.style_label_left, color=vwapColor, textcolor=color.black, size=size.small,
+             tooltip="Session VWAP: " + str.tostring(vwapVal, format.mintick))
+        lbl_vwapU1 := label.new(bar_index, vwapUpper1, "VWAP +1σ  " + str.tostring(vwapUpper1, format.mintick),
+             style=label.style_label_left, color=color.new(vwapColor, 40), textcolor=color.white, size=size.small,
+             tooltip="VWAP Upper Band (" + str.tostring(vwapBand1Mult) + " StdDev): " + str.tostring(vwapUpper1, format.mintick))
+        lbl_vwapL1 := label.new(bar_index, vwapLower1, "VWAP -1σ  " + str.tostring(vwapLower1, format.mintick),
+             style=label.style_label_left, color=color.new(vwapColor, 40), textcolor=color.white, size=size.small,
+             tooltip="VWAP Lower Band (" + str.tostring(vwapBand1Mult) + " StdDev): " + str.tostring(vwapLower1, format.mintick))
+        if showVwapBand2
+            lbl_vwapU2 := label.new(bar_index, vwapUpper2, "VWAP +2σ  " + str.tostring(vwapUpper2, format.mintick),
+                 style=label.style_label_left, color=color.new(vwapColor, 65), textcolor=color.white, size=size.small,
+                 tooltip="VWAP Upper Band (" + str.tostring(vwapBand2Mult) + " StdDev): " + str.tostring(vwapUpper2, format.mintick))
+            lbl_vwapL2 := label.new(bar_index, vwapLower2, "VWAP -2σ  " + str.tostring(vwapLower2, format.mintick),
+                 style=label.style_label_left, color=color.new(vwapColor, 65), textcolor=color.white, size=size.small,
+                 tooltip="VWAP Lower Band (" + str.tostring(vwapBand2Mult) + " StdDev): " + str.tostring(vwapLower2, format.mintick))
+
+    if showORB and not na(orHigh)
+        lbl_orHigh := label.new(time, orHigh, "OR High  " + str.tostring(orHigh, format.mintick), xloc=xloc.bar_time,
+             style=label.style_label_left, color=orHighColor, textcolor=color.black, size=size.small,
+             tooltip="Opening Range High (" + orSessionInput + "): " + str.tostring(orHigh, format.mintick))
+        lbl_orLow := label.new(time, orLow, "OR Low  " + str.tostring(orLow, format.mintick), xloc=xloc.bar_time,
+             style=label.style_label_left, color=orLowColor, textcolor=color.black, size=size.small,
+             tooltip="Opening Range Low (" + orSessionInput + "): " + str.tostring(orLow, format.mintick))
+
+    if showPDHPDL
+        lbl_pdh := label.new(bar_index, pdh, "PDH  " + str.tostring(pdh, format.mintick),
+             style=label.style_label_left, color=pdLevelColor, textcolor=color.white, size=size.small,
+             tooltip="Previous Day High: " + str.tostring(pdh, format.mintick))
+        lbl_pdl := label.new(bar_index, pdl, "PDL  " + str.tostring(pdl, format.mintick),
+             style=label.style_label_left, color=pdLevelColor, textcolor=color.white, size=size.small,
+             tooltip="Previous Day Low: " + str.tostring(pdl, format.mintick))
+
+    if showPWHPWL
+        lbl_pwh := label.new(bar_index, pwh, "PWH  " + str.tostring(pwh, format.mintick),
+             style=label.style_label_left, color=pwLevelColor, textcolor=color.white, size=size.small,
+             tooltip="Previous Week High: " + str.tostring(pwh, format.mintick))
+        lbl_pwl := label.new(bar_index, pwl, "PWL  " + str.tostring(pwl, format.mintick),
+             style=label.style_label_left, color=pwLevelColor, textcolor=color.white, size=size.small,
+             tooltip="Previous Week Low: " + str.tostring(pwl, format.mintick))
+
+    if showPMHPML
+        lbl_pmh := label.new(bar_index, pmh, "PMH  " + str.tostring(pmh, format.mintick),
+             style=label.style_label_left, color=pmLevelColor, textcolor=color.white, size=size.small,
+             tooltip="Previous Month High: " + str.tostring(pmh, format.mintick))
+        lbl_pml := label.new(bar_index, pml, "PML  " + str.tostring(pml, format.mintick),
+             style=label.style_label_left, color=pmLevelColor, textcolor=color.white, size=size.small,
+             tooltip="Previous Month Low: " + str.tostring(pml, format.mintick))
+
+// -----------------------------------------------------------------------
+// VOLUME PROFILE :: execution (ported from kv4coins, MPL 2.0 -- see header)
+// -----------------------------------------------------------------------
+if barstate.isfirst
+    for i = 0 to (vp_num_bars - 1)
+        array.push(vp_bars, line.new(x1=bar_index, y1=close, x2=bar_index, y2=close, width=vp_bar_thickness))
+    if vp_display_poc
+        vp_poc := line.new(x1=bar_index, y1=close, x2=bar_index, y2=close, color=vp_poc_line_color, width=vp_poc_line_thickness)
+    if vp_display_va and vp_display_va_lines
+        vp_vah := line.new(x1=bar_index, y1=close, x2=bar_index, y2=close, color=vp_va_bar_color, width=vp_va_lines_thickness)
+        vp_val := line.new(x1=bar_index, y1=close, x2=bar_index, y2=close, color=vp_va_bar_color, width=vp_va_lines_thickness)
+
+if showVolumeProfile and barstate.islast
+    f_vpCalculate()
+    f_vpDraw()
+
+// -----------------------------------------------------------------------
+// PIVOT POINTS :: execution (ported from TradingView's built-in "Pivot Points Standard")
+// calculatePivots() itself runs unconditionally (cheap bookkeeping + one
+// request.security call) so the [1]-history references on pivotCount below
+// keep working exactly as in the original script; only the actual drawing /
+// runtime.error side effects are gated behind showPivotPoints.
+// -----------------------------------------------------------------------
+[pivotPointsArrayStatic, pivotPointsArrayDeveloping, pivotCount] = calculatePivots(pp_isDailyBasedInput)
+
+var bool skipNextPivots = false
+if showPivotPoints and barstate.islast and barstate.isconfirmed and pp_pivotTypeInput != "Woodie"
+    int nextBarOpenTime = time("", bars_back = -1)
+    int nextPivotStartTime = time(pivotTimeframe, timeframe_bars_back = -1)
+    if nextBarOpenTime >= nextPivotStartTime
+        affixOldPivots(nextPivotStartTime)
+        drawNewPivots(nextPivotStartTime, pivotPointsArrayDeveloping)
+        skipNextPivots := true
+
+if showPivotPoints and pivotCount != pivotCount[1]
+    if skipNextPivots
+        skipNextPivots := false
+    else
+        affixOldPivots(time)
+        drawNewPivots(time, pivotPointsArrayStatic)
+else if showPivotPoints and matrix.rows(drawnGraphics) > 0 and array.last(matrix.row(drawnGraphics, matrix.rows(drawnGraphics) - 1)).pivotLine.get_x2() <= time[1]
+    affixOldPivots(time)
+
+var int firstBarTime = time
+if showPivotPoints and barstate.islastconfirmedhistory and matrix.rows(drawnGraphics) == 0
+    if pivotCount > 0 and not na(pivotPointsArrayStatic)
+        drawNewPivots(firstBarTime, pivotPointsArrayStatic)
+    else if timeframe.isintraday and not pp_isDailyBasedInput
+        runtime.error("Not enough intraday data available for pivot point calculation. Select a lower timeframe from the 'Pivots timeframe' input, or enable 'Use daily-based values' to request EOD data.")
+    else
+        runtime.error("Not enough data available for pivot point calculation. Select a lower timeframe from the 'Pivots timeframe' input.")
+
+// -----------------------------------------------------------------------
+// FUNDAMENTALS OVERLAY (cash equities; returns na on index/derivative symbols)
+// -----------------------------------------------------------------------
+peRatio   = request.financial(syminfo.tickerid, "PRICE_EARNINGS_RATIO", "FQ", ignore_invalid_symbol=true)
+epsTTM    = request.financial(syminfo.tickerid, "EARNINGS_PER_SHARE_BASIC", "FQ", ignore_invalid_symbol=true)
+sharesOut = request.financial(syminfo.tickerid, "TOTAL_SHARES_OUTSTANDING", "FQ", ignore_invalid_symbol=true)
+marketCap = na(sharesOut) ? na : close * sharesOut
+
+if showFundTable and barstate.islast
+    fundTable = table.new(position.bottom_right, 2, 4, bgcolor=color.new(color.black, 80), border_color=color.gray, border_width=1)
+    table.cell(fundTable, 0, 0, "Fundamentals", text_color=color.white, bgcolor=color.new(color.gray, 60))
+    table.cell(fundTable, 1, 0, "", bgcolor=color.new(color.gray, 60))
+    table.cell(fundTable, 0, 1, "P/E (TTM)", text_color=color.white)
+    table.cell(fundTable, 1, 1, na(peRatio) ? "N/A" : str.tostring(peRatio, "#.##"), text_color=color.white)
+    table.cell(fundTable, 0, 2, "EPS (TTM)", text_color=color.white)
+    table.cell(fundTable, 1, 2, na(epsTTM) ? "N/A" : str.tostring(epsTTM, "#.##"), text_color=color.white)
+    table.cell(fundTable, 0, 3, "Market Cap", text_color=color.white)
+    table.cell(fundTable, 1, 3, na(marketCap) ? "N/A" : str.tostring(marketCap / 10000000, "#.##") + " Cr", text_color=color.white)
+
+// -----------------------------------------------------------------------
+// CONFLUENCE DASHBOARD
+// -----------------------------------------------------------------------
+dashPos = switch dashPosInput
+    "Top Right"    => position.top_right
+    "Top Left"     => position.top_left
+    "Bottom Right" => position.bottom_right
+    "Bottom Left"  => position.bottom_left
+    => position.top_right
+
+if showDashboard and barstate.islast
+    [curAbove, curBelow] = f_nearestZones(curZones, close)
+    [wkAbove, wkBelow]   = f_nearestZones(wkZones, close)
+    [moAbove, moBelow]   = f_nearestZones(moZones, close)
+
+    trendBias = close > sma200 and ema20 > ema50 ? "Bullish" : close < sma200 and ema20 < ema50 ? "Bearish" : "Mixed"
+    pvsraTag  = isClimax ? "Climax" : isRising ? "Rising" : "Normal"
+
+    dash = table.new(dashPos, 2, 6, bgcolor=color.new(color.black, 80), border_color=color.gray, border_width=1)
+    table.cell(dash, 0, 0, "Confluence Dashboard", text_color=color.white, bgcolor=color.new(color.navy, 40))
+    table.cell(dash, 1, 0, "", bgcolor=color.new(color.navy, 40))
+    table.cell(dash, 0, 1, "Trend Bias", text_color=color.white)
+    table.cell(dash, 1, 1, trendBias, text_color=trendBias == "Bullish" ? color.lime : trendBias == "Bearish" ? color.red : color.yellow)
+    table.cell(dash, 0, 2, "Nearest Daily S/D", text_color=color.white)
+    table.cell(dash, 1, 2, (na(curBelow) ? "-" : str.tostring(curBelow, "#.##")) + " / " + (na(curAbove) ? "-" : str.tostring(curAbove, "#.##")), text_color=color.white)
+    table.cell(dash, 0, 3, "Nearest Weekly S/D", text_color=color.white)
+    table.cell(dash, 1, 3, (na(wkBelow) ? "-" : str.tostring(wkBelow, "#.##")) + " / " + (na(wkAbove) ? "-" : str.tostring(wkAbove, "#.##")), text_color=color.white)
+    table.cell(dash, 0, 4, "Nearest Monthly S/D", text_color=color.white)
+    table.cell(dash, 1, 4, (na(moBelow) ? "-" : str.tostring(moBelow, "#.##")) + " / " + (na(moAbove) ? "-" : str.tostring(moAbove, "#.##")), text_color=color.white)
+    table.cell(dash, 0, 5, "Candle Type", text_color=color.white)
+    table.cell(dash, 1, 5, pvsraTag, text_color=color.white)
+
+// -----------------------------------------------------------------------
+// ALERTS
+// -----------------------------------------------------------------------
+alertcondition(alertOnBreak and anyZoneBroken, title="Zone Break", message="A supply/demand zone was broken (BOS) on {{ticker}} {{interval}}")
+alertcondition(alertOnRetest and anyZoneRetested, title="Zone Retest", message="Price retested a supply/demand zone on {{ticker}} {{interval}}")
+alertcondition(alertOnCross and goldenCross, title="Golden Cross", message="EMA20 crossed above EMA50 on {{ticker}} {{interval}}")
+alertcondition(alertOnCross and deathCross, title="Death Cross", message="EMA20 crossed below EMA50 on {{ticker}} {{interval}}")
