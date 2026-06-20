@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "telegram_token": "",
+  "telegram_chat_id": "",
+  "pcr_extreme_high": 1.3,
+  "pcr_extreme_low": 0.7,
+  "vix_spike_pct": 10.0,
+  "min_seconds_between_alerts": 120
+}

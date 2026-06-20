@@ -33,12 +33,26 @@ measures, and OI walls move intraday as writers adjust.
 
 USAGE
 -----
+    pip install requests curl_cffi   # curl_cffi is required — see note below
+
     python3 nse_options_strategy.py --symbol NIFTY
     python3 nse_options_strategy.py --symbol BANKNIFTY --expiry 2026-06-24
     python3 nse_options_strategy.py --symbol NIFTY --band 10 --output report.html
+    python3 nse_options_strategy.py --symbol NIFTY --debug   # see every request's status/body
 
     # Test against a previously saved JSON dump (no network needed):
     python3 nse_options_strategy.py --symbol NIFTY --offline saved_chain.json
+
+WHY curl_cffi IS REQUIRED
+--------------------------
+NSE sits behind Akamai Bot Manager, which fingerprints the raw TLS handshake
+(JA3/JA4) before it even reads your HTTP headers. Python's stock `requests`
+library has a recognizable, catalogued TLS fingerprint that gets flagged as
+non-browser traffic regardless of how convincing your User-Agent/headers are
+— this is why even a homepage GET can come back as an Akamai "Access Denied"
+page. `curl_cffi` wraps a libcurl build that replicates Chrome's actual TLS/
+HTTP2 fingerprint, which is what gets you past this layer. The script will
+run without it but will very likely fail.
 
 NOTES ON THE NSE ENDPOINT
 --------------------------
@@ -67,26 +81,90 @@ from typing import Optional
 
 import requests
 
+# NSE sits behind Akamai, which fingerprints the raw TLS handshake (JA3/JA4) —
+# not just HTTP headers — to identify non-browser clients. Python's `requests`
+# (via urllib3/OpenSSL) has a recognizable TLS fingerprint that gets flagged
+# regardless of how browser-like your headers look. curl_cffi wraps libcurl's
+# browser-impersonation build, which replicates Chrome's actual TLS/HTTP2
+# fingerprint and is the standard fix for this. We use it when available and
+# fall back to plain `requests` (which will likely still get blocked) otherwise.
+try:
+    from curl_cffi import requests as cffi_requests
+    HAS_CURL_CFFI = True
+except ImportError:
+    cffi_requests = None
+    HAS_CURL_CFFI = False
+
 # --------------------------------------------------------------------------
 # Config
 # --------------------------------------------------------------------------
 
 INDEX_SYMBOLS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"}
 
-BASE_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9",
+# NSE's anti-bot layer fingerprints requests closely. A header set that's
+# "close enough" (just User-Agent + Accept) gets served a decoy 404 instead
+# of an honest block. These mirror what a real Chrome/Edge browser sends,
+# based on what currently-working scrapers (e.g. nsepython) use in practice.
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+# Headers for full page loads (homepage, option-chain page) — mimics a
+# top-level browser navigation.
+PAGE_HEADERS = {
+    "User-Agent": UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,"
+              "image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "en-US,en;q=0.9,en-IN;q=0.8,en-GB;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "max-age=0",
+    "Connection": "keep-alive",
+    "Sec-Ch-Ua": '"Chromium";v="126", "Not.A/Brand";v="8", "Google Chrome";v="126"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+# Headers for the XHR-style JSON API call — mimics what the page's own
+# JavaScript sends when it fetches the chain (same-origin, cors, json accept).
+API_HEADERS = {
+    "User-Agent": UA,
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9,en-IN;q=0.8,en-GB;q=0.7",
     "Accept-Encoding": "gzip, deflate, br",
     "Connection": "keep-alive",
+    "Sec-Ch-Ua": '"Chromium";v="126", "Not.A/Brand";v="8", "Google Chrome";v="126"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "X-Requested-With": "XMLHttpRequest",
 }
 
 NSE_HOME = "https://www.nseindia.com"
 NSE_OC_PAGE = "https://www.nseindia.com/option-chain"
-NSE_OC_API_INDEX = "https://www.nseindia.com/api/option-chain-indices?symbol={symbol}"
+# NSE migrated off the old static /api/option-chain-indices route to this
+# Next.js-based gateway (consistent with the v3.x app rebuild visible in the
+# site's own meta tags). getSymbolDerivativesData returns ALL expiries and
+# strikes in a single flat list (one row per CE or PE, not nested) — we
+# recombine it into the old nested-by-strike shape in _normalize_nextapi_payload
+# so the rest of the parsing code below doesn't need to change.
+NSE_OC_API_INDEX = (
+    "https://www.nseindia.com/api/NextApi/apiClient/GetQuoteApi"
+    "?functionName=getSymbolDerivativesData&symbol={symbol}"
+)
+# Used for India VIX (and could expose other live indices if useful later).
+# This is on the OLD /api/ namespace (not NextApi) — per community-documented
+# usage (nsepython), unverified live in this build. If it 404s the way the
+# old option-chain endpoint did, the fix is almost certainly the same kind
+# of migration to a NextApi-style route — check with --debug.
+NSE_ALL_INDICES_API = "https://www.nseindia.com/api/allIndices"
 
 # Thresholds used by the rule-based read. Tune these if you find them too
 # loose/tight for the underlying you're trading.
@@ -108,11 +186,15 @@ class StrikeData:
     ce_iv: float = 0.0
     ce_ltp: float = 0.0
     ce_volume: int = 0
+    ce_bid: float = 0.0
+    ce_ask: float = 0.0
     pe_oi: int = 0
     pe_oi_chg: int = 0
     pe_iv: float = 0.0
     pe_ltp: float = 0.0
     pe_volume: int = 0
+    pe_bid: float = 0.0
+    pe_ask: float = 0.0
 
 
 @dataclass
@@ -133,63 +215,240 @@ class NSEFetchError(RuntimeError):
     pass
 
 
+def _normalize_nextapi_payload(raw: dict) -> dict:
+    """The new NextApi endpoint returns a flat list under `data` — one row
+    per CE or PE (with an `optionType` field), plus top-level `underlyingValue`
+    and `timestamp`. Recombine it into the old `{"records": {"data": [...],
+    "expiryDates": [...], "underlyingValue": ..., "timestamp": ...}}` shape
+    so parse_chain() and everything downstream needs no further changes."""
+    if "data" not in raw:
+        raise NSEFetchError(f"Unexpected NextApi response shape — no 'data' key. Keys: {list(raw.keys())}")
+
+    # IMPORTANT: unlike the old API, `underlyingValue` (and likely `timestamp`)
+    # are NOT top-level keys in this payload — they're repeated inside each
+    # individual row, the same way they lived inside each old-style CE/PE
+    # object. Scan rows for the first one that actually carries each field
+    # rather than assuming raw['data'][0] has it (the 'XX' rows, when
+    # present, may not) or that it's top-level at all.
+    #
+    # Also: this endpoint appears to return numeric-looking fields (strike
+    # price, underlying value) as STRINGS rather than JSON numbers in some
+    # responses — cast defensively wherever arithmetic happens on them.
+    def _to_float(v):
+        try:
+            return float(v) if v not in (None, "") else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    underlying_value = _to_float(raw.get("underlyingValue"))
+    timestamp = raw.get("timestamp") or ""
+    if not underlying_value or not timestamp:
+        for entry in raw["data"]:
+            if not underlying_value:
+                uv = _to_float(entry.get("underlyingValue"))
+                if uv:
+                    underlying_value = uv
+            if not timestamp and entry.get("timestamp"):
+                timestamp = entry["timestamp"]
+            if underlying_value and timestamp:
+                break
+
+    combined: dict[tuple, dict] = {}
+    expiry_set: set[str] = set()
+    for entry in raw["data"]:
+        sp = _to_float(entry.get("strikePrice"))
+        ed = entry.get("expiryDate")
+        ot = entry.get("optionType")
+        if not sp or not ed or ot not in ("CE", "PE"):
+            continue
+        expiry_set.add(ed)
+        key = (sp, ed)
+        if key not in combined:
+            combined[key] = {"strikePrice": sp, "expiryDate": ed, "CE": None, "PE": None}
+        combined[key][ot] = entry
+
+    def _sort_key(d: str):
+        try:
+            return datetime.strptime(d, "%d-%b-%Y")
+        except ValueError:
+            return datetime.max  # unparseable dates sort last rather than crashing
+
+    expiry_dates = sorted(expiry_set, key=_sort_key)
+
+    # Sanity check: if we still couldn't find a spot price, or it falls
+    # nowhere near the actual strikes on offer, something about the schema
+    # has shifted again — fail loudly here rather than silently handing
+    # back underlying_value=0 and letting find_atm_strike() quietly pick
+    # the lowest strike in the chain as "ATM" (which is exactly what broke
+    # the dashboard last time, with no error at any layer).
+    if combined:
+        all_strikes_seen = [k[0] for k in combined.keys()]
+        lo_strike, hi_strike = min(all_strikes_seen), max(all_strikes_seen)
+        margin = (hi_strike - lo_strike) * 0.5  # generous — spot should be well inside the chain, but don't be overly strict
+        if not underlying_value or not (lo_strike - margin <= underlying_value <= hi_strike + margin):
+            raise NSEFetchError(
+                f"Could not reliably determine the spot price from NSE's response "
+                f"(got underlyingValue={underlying_value!r}, but strikes range from "
+                f"{lo_strike} to {hi_strike} — these don't line up). NSE likely changed "
+                f"the response schema again. Run with --debug and inspect a single row "
+                f"of the raw payload (e.g. via --dump-json) to find the new field name."
+            )
+
+    return {
+        "records": {
+            "data": list(combined.values()),
+            "expiryDates": expiry_dates,
+            "underlyingValue": underlying_value,
+            "timestamp": timestamp,
+        }
+    }
+
+
 class NSESession:
     """Handles the cookie warm-up handshake NSE requires before its JSON
-    API will return real data instead of `{}`."""
+    API will return real data instead of `{}` or a decoy 404."""
 
-    def __init__(self, timeout: int = 10, max_retries: int = 3):
-        self.session = requests.Session()
-        self.session.headers.update(BASE_HEADERS)
+    def __init__(self, timeout: int = 10, max_retries: int = 4, debug: bool = False):
+        if HAS_CURL_CFFI:
+            self.session = cffi_requests.Session(impersonate="chrome124")
+            self._backend = "curl_cffi (TLS-impersonating — recommended)"
+        else:
+            self.session = requests.Session()
+            self._backend = "requests (no TLS impersonation)"
+            print(
+                "[!] curl_cffi not installed — falling back to plain `requests`.\n"
+                "[!] NSE's Akamai protection fingerprints the TLS handshake itself, "
+                "which plain `requests` cannot fake even with perfect headers.\n"
+                "[!] This fetch will very likely 403 again. Fix: pip install curl_cffi\n"
+            )
         self.timeout = timeout
         self.max_retries = max_retries
+        self.debug = debug
         self._warmed = False
 
+    def _log(self, msg: str) -> None:
+        if self.debug:
+            print(f"[debug] {msg}")
+
+    def _snippet(self, resp: requests.Response) -> str:
+        body = resp.text[:200].replace("\n", " ")
+        return f"status={resp.status_code} content-type={resp.headers.get('content-type')} body~={body!r}"
+
     def _warm_up(self) -> None:
-        # Hit the homepage, then the option-chain page, in order — NSE's
-        # WAF checks for this referer chain and sets cookies along the way.
-        self.session.get(NSE_HOME, timeout=self.timeout)
-        time.sleep(0.6)
-        self.session.headers["Referer"] = NSE_HOME
-        self.session.get(NSE_OC_PAGE, timeout=self.timeout)
-        time.sleep(0.6)
-        self.session.headers["Referer"] = NSE_OC_PAGE
+        self._log(f"Backend: {self._backend}")
+        # Hit the homepage, then the option-chain page, in that order — NSE's
+        # WAF checks for this referer/navigation chain and sets cookies along
+        # the way. Both use full page-navigation headers, not API headers.
+        r1 = self.session.get(NSE_HOME, headers=PAGE_HEADERS, timeout=self.timeout)
+        self._log(f"GET {NSE_HOME} -> {self._snippet(r1)}")
+        if r1.status_code != 200:
+            raise NSEFetchError(f"Homepage warm-up failed: {self._snippet(r1)}")
+        time.sleep(1.0)
+
+        page_headers = dict(PAGE_HEADERS)
+        page_headers["Referer"] = NSE_HOME
+        r2 = self.session.get(NSE_OC_PAGE, headers=page_headers, timeout=self.timeout)
+        self._log(f"GET {NSE_OC_PAGE} -> {self._snippet(r2)}")
+        if r2.status_code != 200:
+            raise NSEFetchError(f"Option-chain page warm-up failed: {self._snippet(r2)}")
+        time.sleep(1.0)
+
         self._warmed = True
 
     def get_option_chain(self, symbol: str) -> dict:
         symbol = symbol.upper()
-        if symbol not in INDEX_SYMBOLS:
-            raise NSEFetchError(
-                f"'{symbol}' isn't in INDEX_SYMBOLS ({sorted(INDEX_SYMBOLS)}). "
-                "For individual stocks, use the option-chain-equities endpoint instead."
-            )
+        # NOTE: previously restricted to INDEX_SYMBOLS only. Confirmed via
+        # nsepython's source that getSymbolDerivativesData works identically
+        # for individual F&O stocks (just pass the stock's symbol) — no
+        # separate endpoint needed. We no longer hard-block other symbols
+        # here; an invalid symbol will simply fail naturally against NSE's
+        # API with a clear error from the retry loop below.
 
         last_err: Optional[Exception] = None
         for attempt in range(1, self.max_retries + 1):
             try:
                 if not self._warmed:
+                    self._log(f"Attempt {attempt}: warming up session...")
                     self._warm_up()
-                resp = self.session.get(
-                    NSE_OC_API_INDEX.format(symbol=symbol), timeout=self.timeout
-                )
+
+                api_headers = dict(API_HEADERS)
+                api_headers["Referer"] = NSE_OC_PAGE
+                url = NSE_OC_API_INDEX.format(symbol=symbol)
+                resp = self.session.get(url, headers=api_headers, timeout=self.timeout)
+                self._log(f"GET {url} -> {self._snippet(resp)}")
+
                 if resp.status_code != 200:
-                    raise NSEFetchError(f"HTTP {resp.status_code} from NSE")
+                    raise NSEFetchError(
+                        f"HTTP {resp.status_code} from NSE API "
+                        f"(this is almost always anti-bot detection, not a missing "
+                        f"endpoint — the route is correct). Body preview: "
+                        f"{resp.text[:150]!r}"
+                    )
                 data = resp.json()
-                if not data or "records" not in data:
-                    raise NSEFetchError("Empty/invalid response — session likely not warmed correctly")
-                return data
-            except Exception as exc:  # noqa: BLE001 - we want to retry on anything and report clearly
+                if not data or "data" not in data:
+                    raise NSEFetchError("Empty/invalid JSON — session likely not warmed correctly")
+                return _normalize_nextapi_payload(data)
+            except Exception as exc:  # noqa: BLE001 - retry on anything, report clearly
                 last_err = exc
                 self._warmed = False  # force a fresh handshake on retry
-                time.sleep(1.5 * attempt)
+                self.session.cookies.clear()
+                wait = 2.0 * attempt
+                self._log(f"Attempt {attempt} failed ({exc}); retrying in {wait:.1f}s with a fresh session")
+                time.sleep(wait)
 
         raise NSEFetchError(
             f"Failed to fetch NSE option chain for {symbol} after "
-            f"{self.max_retries} attempts: {last_err}\n"
-            "Common causes: you're behind a network that NSE's WAF blocks "
-            "(some corporate/cloud IP ranges are blacklisted), or NSE is "
-            "rate-limiting this IP. Try again from a normal home/mobile "
-            "connection, or increase the delay between runs."
+            f"{self.max_retries} attempts. Last error: {last_err}\n\n"
+            "A 404/403 here means NSE's anti-bot layer flagged the request — the\n"
+            "API route itself (api/option-chain-indices) is correct and current.\n"
+            "Things to try:\n"
+            "  1. Run with --debug to see the exact status/body at each step.\n"
+            "  2. Open https://www.nseindia.com/option-chain in a real browser first\n"
+            "     — if THAT also fails/redirects oddly, NSE may be geo/IP-blocking\n"
+            "     your network entirely (common on some VPNs, cloud IPs, or certain\n"
+            "     ISPs), not just the scripted request.\n"
+            "  3. Wait 60-90 seconds before retrying — repeated quick attempts while\n"
+            "     testing can trip a short-lived rate-limit block.\n"
+            "  4. Try --offline against a manually saved chain in the meantime (see\n"
+            "     --dump-json to capture one next time a fetch succeeds)."
         )
+
+    def get_india_vix(self) -> float:
+        """Fetches India VIX from NSE's allIndices endpoint, reusing the same
+        warmed-up session as the option chain. Raises NSEFetchError with a
+        clear message if the schema doesn't match what's expected (this
+        endpoint is community-documented, not something we've verified live
+        against the real site in this build — same caution as everything
+        else fetched from NSE in this codebase)."""
+        last_err: Optional[Exception] = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                if not self._warmed:
+                    self._warm_up()
+                api_headers = dict(API_HEADERS)
+                api_headers["Referer"] = NSE_OC_PAGE
+                resp = self.session.get(NSE_ALL_INDICES_API, headers=api_headers, timeout=self.timeout)
+                self._log(f"GET {NSE_ALL_INDICES_API} -> {self._snippet(resp)}")
+                if resp.status_code != 200:
+                    raise NSEFetchError(f"HTTP {resp.status_code} fetching allIndices")
+                data = resp.json()
+                rows = data.get("data", [])
+                vix_row = next((r for r in rows if r.get("index") == "INDIA VIX"), None)
+                if not vix_row:
+                    raise NSEFetchError(
+                        f"'INDIA VIX' not found among {len(rows)} index rows — "
+                        f"the allIndices schema may have changed."
+                    )
+                last_val = vix_row.get("last")
+                if last_val is None:
+                    raise NSEFetchError(f"INDIA VIX row found but has no 'last' field: {vix_row}")
+                return float(last_val)
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                self._warmed = False
+                self.session.cookies.clear()
+                time.sleep(1.5 * attempt)
+        raise NSEFetchError(f"Failed to fetch India VIX after {self.max_retries} attempts: {last_err}")
 
 
 # --------------------------------------------------------------------------
@@ -222,6 +481,8 @@ def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> 
             sd.ce_iv = float(ce.get("impliedVolatility", 0.0) or 0.0)
             sd.ce_ltp = float(ce.get("lastPrice", 0.0) or 0.0)
             sd.ce_volume = int(ce.get("totalTradedVolume", 0) or 0)
+            sd.ce_bid = float(ce.get("buyPrice1", ce.get("bidprice", 0.0)) or 0.0)
+            sd.ce_ask = float(ce.get("sellPrice1", ce.get("askPrice", 0.0)) or 0.0)
 
         pe = row.get("PE")
         if pe:
@@ -230,6 +491,8 @@ def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> 
             sd.pe_iv = float(pe.get("impliedVolatility", 0.0) or 0.0)
             sd.pe_ltp = float(pe.get("lastPrice", 0.0) or 0.0)
             sd.pe_volume = int(pe.get("totalTradedVolume", 0) or 0)
+            sd.pe_bid = float(pe.get("buyPrice1", pe.get("bidprice", 0.0)) or 0.0)
+            sd.pe_ask = float(pe.get("sellPrice1", pe.get("askPrice", 0.0)) or 0.0)
 
     strikes = sorted(by_strike.values(), key=lambda s: s.strike)
     if not strikes:
@@ -264,8 +527,20 @@ def compute_max_pain(snap: ChainSnapshot) -> float:
     least — i.e. the strike where total intrinsic payout to buyers is
     minimized. Classic 'max pain' theory says price gravitates here into
     expiry, though this gets noisier the further out you are from expiry."""
-    best_strike, best_loss = None, None
+    distribution = compute_payout_distribution(snap)
+    return min(distribution, key=lambda d: d[1])[0]
+
+
+def compute_payout_distribution(snap: ChainSnapshot) -> list[tuple[float, float]]:
+    """The full per-strike writer-payout curve that compute_max_pain picks
+    its single minimum from. Returns [(strike, total_payout_to_holders), ...]
+    for every strike in the chain — this is the 'Gain/Pain by strike' data:
+    LOW payout = strikes where option WRITERS are doing well (their 'gain'
+    zone), HIGH payout = strikes where writers are hurting most (their
+    'pain' zone). Same O(n²) computation compute_max_pain always did
+    internally; this just returns the whole curve instead of only the argmin."""
     all_strikes = [s.strike for s in snap.strikes]
+    distribution = []
     for candidate in all_strikes:
         total_payout = 0.0
         for s in snap.strikes:
@@ -273,9 +548,8 @@ def compute_max_pain(snap: ChainSnapshot) -> float:
                 total_payout += (candidate - s.strike) * s.ce_oi  # ITM calls
             if candidate < s.strike:
                 total_payout += (s.strike - candidate) * s.pe_oi  # ITM puts
-        if best_loss is None or total_payout < best_loss:
-            best_loss, best_strike = total_payout, candidate
-    return best_strike
+        distribution.append((candidate, total_payout))
+    return distribution
 
 
 def support_resistance(snap: ChainSnapshot, atm: float, band: int, strike_gap: float):
@@ -657,13 +931,13 @@ def render_html(
 # Main
 # --------------------------------------------------------------------------
 
-def run(symbol: str, expiry: Optional[str], band: int, output: Path, offline_json: Optional[Path], dump_json: Optional[Path]) -> Path:
+def run(symbol: str, expiry: Optional[str], band: int, output: Path, offline_json: Optional[Path], dump_json: Optional[Path], debug: bool = False) -> Path:
     if offline_json:
         raw = json.loads(Path(offline_json).read_text())
         print(f"[i] Loaded offline chain from {offline_json}")
     else:
         print(f"[i] Connecting to NSE for {symbol}...")
-        fetcher = NSESession()
+        fetcher = NSESession(debug=debug)
         raw = fetcher.get_option_chain(symbol)
         print("[i] Fetched live chain.")
         if dump_json:
@@ -710,6 +984,7 @@ def main():
     ap.add_argument("--output", default=None, help="Output HTML path")
     ap.add_argument("--offline", default=None, help="Path to a previously saved raw JSON dump (skip network)")
     ap.add_argument("--dump-json", default=None, help="Optionally cache the raw fetched JSON to this path")
+    ap.add_argument("--debug", action="store_true", help="Print status code + body snippet for every request NSE makes")
     args = ap.parse_args()
 
     output = Path(args.output) if args.output else Path(
@@ -724,6 +999,7 @@ def main():
             output=output,
             offline_json=Path(args.offline) if args.offline else None,
             dump_json=Path(args.dump_json) if args.dump_json else None,
+            debug=args.debug,
         )
     except NSEFetchError as e:
         print(f"[ERROR] {e}", file=sys.stderr)

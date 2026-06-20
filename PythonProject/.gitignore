@@ -18,5 +18,11 @@ institutional_signals.html
 *.html
 *.md
 !index.html
+!nse_dashboard.html
 
 
+
+/1OPTIONS/history/BANKNIFTY_2026-06-20.jsonl
+/1OPTIONS/history/FINNIFTY_2026-06-20.jsonl
+/1OPTIONS/history/MIDCPNIFTY_2026-06-20.jsonl
+/1OPTIONS/history/NIFTY_2026-06-20.jsonl
