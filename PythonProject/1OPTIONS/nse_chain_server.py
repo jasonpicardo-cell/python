@@ -92,6 +92,7 @@ try:
     import nse_history_store
     import nse_alerts
     import nse_paper_trades
+    import nse_drafts
 except ImportError as e:
     print(
         f"[ERROR] Could not import a required module ({e}) — make sure "
@@ -424,6 +425,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Could not load paper trades: {e}"}, status=500)
             return
 
+        if parsed.path == "/api/drafts":
+            try:
+                self._send_json({"drafts": nse_drafts.get_drafts()})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"Could not load drafts: {e}"}, status=500)
+            return
+
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)
 
     def do_POST(self):
@@ -482,6 +490,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"deleted": deleted})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Could not delete paper trade: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/draft/save":
+            try:
+                name = body.get("name", "Untitled")
+                symbol = body.get("symbol", "").upper()
+                legs = body.get("legs", [])
+                if not legs:
+                    self._send_json({"error": "No legs to save"}, status=400)
+                    return
+                draft = nse_drafts.save_draft(name, symbol, legs)
+                self._send_json({"draft": draft})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"Could not save draft: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/draft/delete":
+            try:
+                draft_id = body.get("id")
+                deleted = nse_drafts.delete_draft(draft_id) if draft_id else False
+                self._send_json({"deleted": deleted})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"Could not delete draft: {e}"}, status=500)
             return
 
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)
