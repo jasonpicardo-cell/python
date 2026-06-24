@@ -248,6 +248,71 @@
   .vs-legend { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; color: var(--muted-2); }
   .vs-gradient { width: 80px; height: 8px; border-radius: 3px; background: linear-gradient(to right, hsl(220,70%,50%), hsl(30,80%,50%), hsl(0,80%,50%)); }
 
+  /* ── Level panels (pivot + VWAP) ── */
+  .level-panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .level-panel-head {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;
+  }
+  .level-select {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 4px 8px; font-size: 11px; font-family: inherit; cursor: pointer;
+  }
+  .level-source { font-size: 9.5px; color: var(--muted-2); }
+  .level-alert-toggle { font-size: 11px; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .level-alert-toggle input { cursor: pointer; }
+
+  /* Level bar grid */
+  .level-bars-wrap { display: flex; flex-direction: column; gap: 3px; }
+  .level-bar-row {
+    display: grid; grid-template-columns: 54px 80px 1fr 14px;
+    align-items: center; gap: 6px; padding: 3px 0;
+  }
+  .level-bar-label { font-size: 10px; font-weight: 700; text-align: right; }
+  .level-bar-price { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; text-align: right; }
+  .level-bar-track {
+    height: 7px; border-radius: 3px; background: var(--panel-3); position: relative; overflow: visible;
+  }
+  .level-bar-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+  .level-bar-spot { /* dot marking current spot on the track */
+    position: absolute; top: -3px; width: 13px; height: 13px;
+    border-radius: 50%; background: var(--text); border: 2px solid var(--panel);
+    transform: translateX(-50%); pointer-events: none;
+  }
+  .level-bar-dist { font-size: 9px; color: var(--muted-2); font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
+  .level-divider { height: 1px; background: var(--border-soft); margin: 4px 0; grid-column: 1/-1; }
+
+  /* Label colors */
+  .label-pivot { color: var(--text); }
+  .label-r { color: #ff6b6b; }
+  .label-s { color: #51cf66; }
+  .label-vwap { color: var(--accent); }
+  .label-vu1 { color: #a9c4f7; }
+  .label-vu2 { color: #7099e8; }
+  .label-vd1 { color: #a3d9a5; }
+  .label-vd2 { color: #6dc970; }
+
+  /* Bar fill colors */
+  .fill-r { background: linear-gradient(90deg, rgba(255,107,107,0.7), rgba(255,107,107,0.2)); }
+  .fill-s { background: linear-gradient(90deg, rgba(81,207,102,0.7), rgba(81,207,102,0.2)); }
+  .fill-pivot { background: linear-gradient(90deg, rgba(91,140,255,0.7), rgba(91,140,255,0.2)); }
+  .fill-vwap { background: linear-gradient(90deg, rgba(91,140,255,0.6), rgba(91,140,255,0.1)); }
+  .fill-vu { background: linear-gradient(90deg, rgba(255,107,107,0.4), rgba(255,107,107,0.1)); }
+  .fill-vd { background: linear-gradient(90deg, rgba(81,207,102,0.4), rgba(81,207,102,0.1)); }
+
+  /* Price touch alert flash */
+  @keyframes levelFlash { 0%,100%{opacity:1} 50%{opacity:0.2} }
+  .level-bar-row.touched { animation: levelFlash 0.6s ease 3; }
+  .level-touch-toast {
+    position: fixed; top: 70px; right: 16px; background: var(--panel-3); border: 1.5px solid var(--gold);
+    border-radius: 8px; padding: 10px 16px; font-size: 12px; font-weight: 600; z-index: 200;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4); color: var(--text); opacity: 0;
+    transition: opacity .2s ease; pointer-events: none;
+  }
+  .level-touch-toast.show { opacity: 1; }
+
   .movers-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 18px; }
   .movers-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .movers-time { font-size: 10px; color: var(--muted-2); margin-left: 8px; font-weight: 400; }
@@ -778,6 +843,7 @@
 <body>
 <div class="app">
   <div class="toast" id="toast"></div>
+  <div class="level-touch-toast" id="levelTouchToast"></div>
 
   <div class="topbar">
     <div class="brand">
@@ -833,6 +899,38 @@
 
   <main>
     <section id="tab-chain" class="tab-panel active">
+
+      <!-- ── Pivot Levels ─────────────────────────────────────────── -->
+      <div class="level-panel" id="pivotPanel">
+        <div class="level-panel-head">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="skew-chart-title">Pivot Levels</span>
+            <select id="pivotTypeSelect" class="level-select">
+              <option value="fibonacci" selected>Fibonacci</option>
+              <option value="traditional">Traditional</option>
+              <option value="woodie">Woodie</option>
+              <option value="camarilla">Camarilla</option>
+              <option value="demark">DeMark</option>
+              <option value="classic">Classic</option>
+            </select>
+            <span class="level-source" id="pivotSource"></span>
+          </div>
+          <label class="level-alert-toggle" title="Beep and flash when price touches a level">
+            <input type="checkbox" id="pivotAlertToggle" checked> 🔔 Price alerts
+          </label>
+        </div>
+        <div class="level-bars-wrap" id="pivotBars"></div>
+      </div>
+
+      <!-- ── Anchored VWAP Bands ──────────────────────────────────── -->
+      <div class="level-panel" id="vwapPanel">
+        <div class="level-panel-head">
+          <span class="skew-chart-title">Anchored VWAP Bands <span style="font-size:9px;color:var(--muted-2);font-weight:400;">(session open)</span></span>
+          <span class="level-source" id="vwapSource"></span>
+        </div>
+        <div class="level-bars-wrap" id="vwapBars"></div>
+      </div>
+
       <div class="stat-grid" id="statGrid"></div>
       <div class="pcr-trend-wrap" id="pcrTrendWrap">
         <div class="skew-chart-head">
@@ -1327,7 +1425,10 @@
     state.expiry = null;
     state.shouldScrollToAtm = true;
     state.sessionHistory = [];
-    _chainRowState.clear(); // force full rebuild for new symbol
+    _chainRowState.clear();
+    _touchedLevels.clear();  // reset alerts for new symbol
+    Object.assign(state_ohlc, {open:null,high:null,low:null,close:null,prev_close:null,source:null});
+    setTimeout(() => fetchOhlcForPivots(), 1500);  // after chain warms
     renderWatchlist();
     fetchChain();
   });
@@ -1507,6 +1608,8 @@
     state.expiry = data.expiry;
 
     renderStatCards(data);
+    renderPivotLevels();
+    renderVwapBands();
 
     // ─── Determine which tab is currently active ──────────────────────────
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -1577,6 +1680,182 @@
 
   function statCard(label, value, cls) {
     return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value ${cls || ''}">${value}</div></div>`;
+  }
+
+  // ====================================================================
+  // PIVOT LEVELS  — 6 types, P + S1-S5 + R1-R5, visually striking bars
+  // ====================================================================
+  const PIVOT_TYPES = {
+    fibonacci: (H, L, C, O) => {
+      const P = (H + L + C) / 3, r = H - L;
+      return { P, R1: P+0.382*r, R2: P+0.618*r, R3: P+r, R4: P+1.618*r, R5: P+2.618*r,
+                    S1: P-0.382*r, S2: P-0.618*r, S3: P-r, S4: P-1.618*r, S5: P-2.618*r };
+    },
+    traditional: (H, L, C, O) => {
+      const P = (H + L + C) / 3, r = H - L;
+      return { P, R1: 2*P-L, R2: P+r, R3: H+2*(P-L), R4: H+3*(P-L), R5: H+4*(P-L),
+                    S1: 2*P-H, S2: P-r, S3: L-2*(H-P), S4: L-3*(H-P), S5: L-4*(H-P) };
+    },
+    classic: (H, L, C, O) => PIVOT_TYPES.traditional(H, L, C, O),
+    woodie: (H, L, C, O) => {
+      const P = (H + L + 2*C) / 4, r = H - L;
+      return { P, R1: 2*P-L, R2: P+r, R3: H+2*(P-L), R4: H+3*(P-L), R5: H+4*(P-L),
+                    S1: 2*P-H, S2: P-r, S3: L-2*(H-P), S4: L-3*(H-P), S5: L-4*(H-P) };
+    },
+    camarilla: (H, L, C, O) => {
+      const r = H - L;
+      return { P: (H+L+C)/3,
+        R1: C+1.1*r/12, R2: C+1.1*r/6, R3: C+1.1*r/4, R4: C+1.1*r/2, R5: C+1.1*r,
+        S1: C-1.1*r/12, S2: C-1.1*r/6, S3: C-1.1*r/4, S4: C-1.1*r/2, S5: C-1.1*r };
+    },
+    demark: (H, L, C, O) => {
+      const X = C < O ? H+2*L+C : (C > O ? 2*H+L+C : H+L+2*C);
+      const P = X/4;
+      return { P, R1: X/2-L, R2: X/2-L+(H-L)*0.5, R3: X/2-L+(H-L), R4: X/2-L+(H-L)*1.5, R5: X/2-L+(H-L)*2,
+                    S1: X/2-H, S2: X/2-H-(H-L)*0.5, S3: X/2-H-(H-L), S4: X/2-H-(H-L)*1.5, S5: X/2-H-(H-L)*2 };
+    },
+  };
+
+  // ── OHLC state ──────────────────────────────────────────────────────
+  const state_ohlc = { open: null, high: null, low: null, close: null, prev_close: null, source: null };
+
+  async function fetchOhlcForPivots() {
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const resp = await fetch(`${base}/api/ohlc?symbol=${state.symbol}`, { signal: AbortSignal.timeout(8000) });
+      const data = await resp.json();
+      if (data.high && data.low && data.open) {
+        Object.assign(state_ohlc, data);
+        renderPivotLevels();
+      }
+    } catch (e) { /* silently use session-tracked OHLC */ }
+  }
+
+  // ── Beep + alert system ─────────────────────────────────────────────
+  let _audioCtx = null;
+  function beep(freq = 880, duration = 180, vol = 0.25) {
+    if (!document.getElementById('pivotAlertToggle')?.checked) return;
+    try {
+      if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = _audioCtx.createOscillator();
+      const gain = _audioCtx.createGain();
+      osc.connect(gain); gain.connect(_audioCtx.destination);
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(vol, _audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + duration/1000);
+      osc.start(); osc.stop(_audioCtx.currentTime + duration/1000);
+    } catch (e) { /* AudioContext not available */ }
+  }
+
+  const _touchedLevels = new Set();   // label → reset on symbol/day change
+  const _levelTouchToastEl = () => document.getElementById('levelTouchToast');
+  let _levelToastTimer = null;
+  function alertLevelTouch(label, price, polarity) {
+    const key = `${state.symbol}:${label}`;
+    if (_touchedLevels.has(key)) return;
+    _touchedLevels.add(key);
+    // beep: two tones for resistance (high-pitched), one for support (lower)
+    if (polarity === 'r') { beep(1046, 150); setTimeout(() => beep(1318, 150), 180); }
+    else if (polarity === 's') { beep(523, 200); }
+    else { beep(660, 200); }
+    const el = _levelTouchToastEl();
+    if (el) {
+      el.textContent = `⚡ ${label} touched at ${fmtPrice(price)}`;
+      el.classList.add('show');
+      clearTimeout(_levelToastTimer);
+      _levelToastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+    }
+    // flash the bar row
+    const row = document.querySelector(`[data-level-label="${label.replace(/"/g, '\\"')}"]`);
+    if (row) { row.classList.add('touched'); setTimeout(() => row.classList.remove('touched'), 2000); }
+  }
+
+  function checkLevelTouches(levels, spot) {
+    const TOLERANCE_PCT = 0.002;  // 0.2% — "near enough" to trigger
+    for (const [label, price, polarity] of levels) {
+      if (!price) continue;
+      if (Math.abs(spot - price) / price < TOLERANCE_PCT) {
+        alertLevelTouch(label, price, polarity);
+      }
+    }
+  }
+
+  // ── Pivot rendering ──────────────────────────────────────────────────
+  function renderPivotLevels() {
+    const { open: O, high: H, low: L, close: C, source } = state_ohlc;
+    const spot = state.lastData?.underlying_value;
+    if (!H || !L || !C || !spot) {
+      document.getElementById('pivotBars').innerHTML = '<div class="movers-loading">Loading OHLC data…</div>';
+      return;
+    }
+    const pivotType = (document.getElementById('pivotTypeSelect')?.value) || 'fibonacci';
+    const fn = PIVOT_TYPES[pivotType] || PIVOT_TYPES.fibonacci;
+    const pv = fn(H, L, C, O || C);
+    document.getElementById('pivotSource').textContent = source ? `· prev day OHLC · H:${fmtInt(H)} L:${fmtInt(L)} C:${fmtInt(C)}` : '';
+
+    const levels = [
+      ['R5', pv.R5, 'r'], ['R4', pv.R4, 'r'], ['R3', pv.R3, 'r'],
+      ['R2', pv.R2, 'r'], ['R1', pv.R1, 'r'],
+      ['Pivot', pv.P, 'p'],
+      ['S1', pv.S1, 's'], ['S2', pv.S2, 's'], ['S3', pv.S3, 's'],
+      ['S4', pv.S4, 's'], ['S5', pv.S5, 's'],
+    ].filter(([, p]) => p != null && isFinite(p));
+
+    checkLevelTouches(levels, spot);
+    document.getElementById('pivotBars').innerHTML = renderLevelBars(levels, spot, 'pivot');
+  }
+
+  // ── VWAP rendering ───────────────────────────────────────────────────
+  function renderVwapBands() {
+    const spot = state.lastData?.underlying_value;
+    const hist = state.sessionHistory;
+    if (!spot || hist.length < 3) {
+      document.getElementById('vwapBars').innerHTML = '<div class="movers-loading">Accumulating session data…</div>';
+      return;
+    }
+    const prices = hist.map(h => h.spot).filter(Boolean);
+    const vwap = prices.reduce((s, p) => s + p, 0) / prices.length;
+    const variance = prices.reduce((s, p) => s + (p-vwap)**2, 0) / prices.length;
+    const sd = Math.sqrt(variance) || (vwap * 0.005);  // fallback 0.5% if no variation yet
+    document.getElementById('vwapSource').textContent = `· ${prices.length} samples · σ=${fmtPrice(sd)}`;
+    const levels = [
+      ['VWAP+2σ', vwap+2*sd, 'vu2'], ['VWAP+1σ', vwap+sd, 'vu1'],
+      ['VWAP', vwap, 'vwap'],
+      ['VWAP-1σ', vwap-sd, 'vd1'], ['VWAP-2σ', vwap-2*sd, 'vd2'],
+    ];
+    checkLevelTouches(levels.map(([l,p]) => [l, p, l.startsWith('VWAP+') ? 'r' : (l.startsWith('VWAP-') ? 's' : 'p')]), spot);
+    document.getElementById('vwapBars').innerHTML = renderLevelBars(levels, spot, 'vwap');
+  }
+
+  // ── Generic bar renderer for both pivot and VWAP ─────────────────────
+  function renderLevelBars(levels, spot, type) {
+    // Find the range of all level prices to scale the bars
+    const prices = levels.map(l => l[1]).filter(Boolean);
+    const allPrices = [...prices, spot];
+    const minP = Math.min(...allPrices), maxP = Math.max(...allPrices);
+    const spanP = (maxP - minP) || (spot * 0.01);
+
+    return levels.map(([label, price, polarity]) => {
+      if (!price || !isFinite(price)) return '';
+      const spotPct = Math.max(0, Math.min(100, (spot - minP) / spanP * 100));
+      const levPct = Math.max(0, Math.min(100, (price - minP) / spanP * 100));
+      const fillPct = polarity === 's' ? levPct : (100 - levPct);
+      const fillClass = polarity === 'r' ? 'fill-r' : (polarity === 's' ? 'fill-s' : (polarity === 'vwap' ? 'fill-vwap' : (polarity?.startsWith('vu') ? 'fill-vu' : (polarity?.startsWith('vd') ? 'fill-vd' : 'fill-pivot'))));
+      const labelClass = polarity === 'r' ? 'label-r' : (polarity === 's' ? 'label-s' : (polarity === 'vwap' ? 'label-vwap' : (polarity?.startsWith('vu') ? 'label-vu1' : (polarity?.startsWith('vd') ? 'label-vd1' : 'label-pivot'))));
+      const dist = price - spot;
+      const distStr = (dist >= 0 ? '+' : '') + fmtInt(dist) + ' (' + Math.abs(dist/spot*100).toFixed(2) + '%)';
+      const isNear = Math.abs(dist / spot) < 0.002;
+      const priceColor = polarity === 'r' ? '#ff6b6b' : (polarity === 's' ? '#51cf66' : (polarity === 'vwap' ? 'var(--accent)' : 'var(--text)'));
+      return `<div class="level-bar-row${isNear ? ' touched' : ''}" data-level-label="${escapeHtml(label)}">
+        <span class="level-bar-label ${labelClass}">${escapeHtml(label)}</span>
+        <span class="level-bar-price" style="color:${priceColor};">${fmtPrice(price)}</span>
+        <div class="level-bar-track">
+          <div class="level-bar-fill ${fillClass}" style="width:${fillPct.toFixed(1)}%"></div>
+          <div class="level-bar-spot" style="left:${spotPct.toFixed(1)}%"></div>
+        </div>
+        <span class="level-bar-dist" style="color:${dist>0?'#ff6b6b':'#51cf66'}">${distStr}</span>
+      </div>`;
+    }).join('');
   }
 
   function renderStatCards(data) {
@@ -4359,6 +4638,16 @@ End with a one-sentence caveat about F&O risk.`;
     </div>`;
   }
 
+  document.getElementById('pivotTypeSelect')?.addEventListener('change', renderPivotLevels);
+  document.getElementById('pivotAlertToggle')?.addEventListener('change', () => {
+    // reset touched levels when alert is re-enabled so levels trigger fresh
+    _touchedLevels.clear();
+  });
+
+  // Fetch OHLC whenever symbol changes (for pivot accuracy)
+  const _origFetchChain = fetchChain;
+  const _symbolAtLastOhlcFetch = { sym: null };
+
   // ---------- boot ----------
   loadFnoSymbolList();
   fetchWatchlistData();
@@ -4367,7 +4656,8 @@ End with a one-sentence caveat about F&O risk.`;
     state.autoTimer = setInterval(fetchChain, 5000);
   }
   fetchChain();
-  setTimeout(() => fetchAndRenderMovers(), 2500); // non-blocking background load
+  setTimeout(() => fetchAndRenderMovers(), 2500);
+  setTimeout(() => fetchOhlcForPivots(), 3000);  // deferred — needs warmed session
 })();
 </script>
 </body>

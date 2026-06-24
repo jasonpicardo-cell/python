@@ -119,6 +119,9 @@ CACHE_TTL_SECONDS = 4.0
 _last_fetch_time = 0.0
 _cache: dict[str, tuple[float, dict]] = {}
 
+# Track intraday OHLC for each symbol (populated from chain fetches + allIndices)
+_session_ohlc: dict[str, dict] = {}   # symbol → {open,high,low,close,prev_close,date}
+
 # A single module-level NSESession that stays warm across requests.
 # The option-chain endpoint populates it on every successful fetch.
 # The movers endpoint reuses it to avoid paying the 2-second warm-up
@@ -149,6 +152,18 @@ def _get_india_vix(fetcher: NSESession) -> float | None:
     except NSEFetchError as e:
         print(f"[!] India VIX fetch failed (non-fatal, chain data unaffected): {e}")
         return _vix_cache["value"]  # serve last-known value if we have one, else None
+
+
+def _update_session_ohlc(symbol: str, spot: float) -> None:
+    today = time.strftime("%Y-%m-%d")
+    sym = symbol.upper()
+    entry = _session_ohlc.get(sym)
+    if entry is None or entry.get("date") != today:
+        _session_ohlc[sym] = {"date": today, "open": spot, "high": spot, "low": spot, "close": spot, "prev_close": None}
+    else:
+        entry["high"] = max(entry["high"], spot)
+        entry["low"] = min(entry["low"], spot)
+        entry["close"] = spot
 
 
 def _compute_iv_rank(symbol: str, current_iv: float) -> dict | None:
@@ -199,6 +214,12 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         _shared_fetcher_ts = time.time()
 
     snap = parse_chain(raw, symbol, expiry)
+    # Feed spot price into the movers tracker + session OHLC for pivot calculations
+    try:
+        nse_fno_movers.record_spot_price(symbol, snap.underlying_value)
+    except Exception:  # noqa: BLE001
+        pass
+    _update_session_ohlc(symbol, snap.underlying_value)
     strike_gap = infer_strike_gap(snap)
     atm = find_atm_strike(snap)
     support, resistance, nearby = support_resistance(snap, atm, band, strike_gap)
@@ -492,6 +513,47 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"trades": trades, "stats": stats})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Could not load paper trades: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/ohlc":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            try:
+                fetcher = (
+                    _shared_fetcher if (_shared_fetcher and _shared_fetcher._warmed
+                                        and (time.time()-_shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE)
+                    else NSESession()
+                )
+                from nse_options_strategy import NSE_ALL_INDICES_API, API_HEADERS, NSE_OC_PAGE
+                h = dict(API_HEADERS); h["Referer"] = NSE_OC_PAGE
+                resp = fetcher.session.get(NSE_ALL_INDICES_API, headers=h, timeout=10)
+                ohlc = None
+                if resp.status_code == 200:
+                    idx_map = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                               "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
+                    idx_name = idx_map.get(symbol, symbol)
+                    for row in resp.json().get("data", []):
+                        if row.get("index") in (idx_name, symbol):
+                            ohlc = {
+                                "symbol": symbol,
+                                "open": float(row.get("open") or row.get("previousClose") or 0),
+                                "high": float(row.get("high") or 0),
+                                "low": float(row.get("low") or 0),
+                                "close": float(row.get("last") or row.get("lastPrice") or 0),
+                                "prev_close": float(row.get("previousClose") or 0),
+                                "source": "allIndices",
+                            }
+                            break
+                if not ohlc:
+                    e = _session_ohlc.get(symbol, {})
+                    ohlc = {"symbol": symbol, "open": e.get("open") or 0, "high": e.get("high") or 0,
+                            "low": e.get("low") or 0, "close": e.get("close") or 0,
+                            "prev_close": None, "source": "session"}
+                self._send_json(ohlc)
+            except Exception as e:  # noqa: BLE001
+                se = _session_ohlc.get(symbol, {})
+                self._send_json({"symbol": symbol, "open": se.get("open") or 0,
+                    "high": se.get("high") or 0, "low": se.get("low") or 0,
+                    "close": se.get("close") or 0, "prev_close": None, "source": "session", "error": str(e)})
             return
 
         if parsed.path == "/api/drafts":

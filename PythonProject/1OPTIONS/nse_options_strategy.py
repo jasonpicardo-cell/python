@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 import html as html_lib
@@ -455,6 +456,44 @@ class NSESession:
 # Step 2: Parse
 # --------------------------------------------------------------------------
 
+_BS_R = 0.065   # risk-free rate — consistent with nse_strategy_engine.py
+
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _bs_price(S: float, K: float, T: float, sigma: float, r: float, opt: str) -> float:
+    if T <= 0 or sigma <= 0:
+        return max(S - K, 0.0) if opt == "CE" else max(K - S, 0.0)
+    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    if opt == "CE":
+        return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+
+
+def _bs_implied_vol(S: float, K: float, T: float, mkt_price: float, opt: str,
+                    r: float = _BS_R) -> float:
+    """Bisection BS IV solver.  Returns IV as a percentage (e.g. 15.2 = 15.2%),
+    or 0.0 when IV can't be determined (price at or below intrinsic value)."""
+    intrinsic = max(S - K, 0.0) if opt == "CE" else max(K - S, 0.0)
+    if mkt_price <= max(intrinsic, 0.05):
+        return 0.0
+    lo, hi = 0.01, 5.0   # 1% – 500%
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        p = _bs_price(S, K, T, mid, r, opt)
+        if p < mkt_price:
+            lo = mid
+        else:
+            hi = mid
+        if (hi - lo) < 1e-5:
+            break
+    iv = (lo + hi) / 2.0
+    return round(iv * 100.0, 2)
+
+
 def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> ChainSnapshot:
     records = raw.get("records", {})
     all_expiries = records.get("expiryDates", [])
@@ -497,6 +536,17 @@ def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> 
     strikes = sorted(by_strike.values(), key=lambda s: s.strike)
     if not strikes:
         raise NSEFetchError(f"No strikes parsed for expiry {target_expiry} — check the expiry value.")
+
+    # IV fallback: NSE's NextApi returns impliedVolatility=0 for many strikes.
+    # Compute from Black-Scholes when the API gives nothing — this ensures
+    # the skew chart, vol surface, and Greeks always have usable IV data.
+    dte_for_iv = max(days_to_expiry(target_expiry), 0)
+    T_iv = max(dte_for_iv / 365.0, 1 / 365.0)
+    for sd in strikes:
+        if sd.ce_iv <= 0 and sd.ce_ltp > 0:
+            sd.ce_iv = _bs_implied_vol(underlying_value, sd.strike, T_iv, sd.ce_ltp, "CE")
+        if sd.pe_iv <= 0 and sd.pe_ltp > 0:
+            sd.pe_iv = _bs_implied_vol(underlying_value, sd.strike, T_iv, sd.pe_ltp, "PE")
 
     return ChainSnapshot(
         symbol=symbol,
