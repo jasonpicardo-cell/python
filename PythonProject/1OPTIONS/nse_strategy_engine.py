@@ -17,7 +17,8 @@ for each one:
     - Funds needed                   — net premium outlay for debit strategies
     - Margin needed                  — exact-ish for defined-risk spreads
                                         (≈ max loss, per SEBI's post-2021 spread
-                                        margin benefit), ESTIMATED for undefined-
+                                        margin benefit), SPAN-approximated for
+                                        undefined-risk positions (see nse_span.py)
                                         risk strategies (short straddle/strangle,
                                         naked legs) since real SPAN+exposure
                                         margin depends on volatility regime data
@@ -56,6 +57,13 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional
 
+try:
+    import nse_span as _span_module
+    _SPAN_AVAILABLE = True
+except ImportError:
+    _span_module = None
+    _SPAN_AVAILABLE = False
+
 # --------------------------------------------------------------------------
 # Config — verify periodically, NSE rebases these every few quarters.
 # Effective 27-Jan-2026 per NSE circular FAOP70616. If results look off,
@@ -70,7 +78,7 @@ LOT_SIZES = {
 }
 
 RISK_FREE_RATE = 0.065  # approx India short-term rate; only modestly affects POP/calendar pricing
-UNDEFINED_RISK_MARGIN_PCT = 0.12  # retail heuristic: ~12% of notional contract value, see caveats above
+UNDEFINED_RISK_MARGIN_FALLBACK_PCT = 0.10  # fallback only if nse_span import fails
 
 # Strike-offset rules (in "number of strikes from ATM") used to pick legs for
 # each template. All tunable — these are reasonable defaults, not the only
@@ -918,7 +926,26 @@ def build_strategy_list(
         # how a template was tagged.
         if ml_unlim or not is_defined_risk or has_futures_leg:
             notional = spot * lot_size
-            margin_needed = UNDEFINED_RISK_MARGIN_PCT * notional
+            if _SPAN_AVAILABLE and _span_module is not None:
+                # Convert leg dataclasses to the dict format nse_span expects
+                legs_as_dicts = [
+                    {
+                        "action": leg.action,
+                        "option_type": leg.option_type,
+                        "strike": leg.strike,
+                        "premium": leg.premium,
+                        "iv": leg.iv,
+                        "qty_lots": leg.qty_lots,
+                        "instrument_type": leg.instrument_type,
+                    }
+                    for leg in legs
+                ]
+                span_result = _span_module.compute_margin(
+                    legs_as_dicts, spot, atm_iv, dte_near, lot_size, symbol
+                )
+                margin_needed = span_result["total"]
+            else:
+                margin_needed = UNDEFINED_RISK_MARGIN_FALLBACK_PCT * notional
             margin_is_estimate = True
         else:
             # Fully-hedged strategy: margin ≈ max loss. For a pure debit

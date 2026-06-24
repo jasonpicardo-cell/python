@@ -232,6 +232,69 @@
   .pcr-trend-svg { width: 100%; height: 70px; display: block; }
   .pcr-trend-empty { font-size: 11.5px; color: var(--muted-2); padding: 8px 0; }
 
+  .iv-rank-badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px;
+    border-radius: 12px; font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+    font-weight: 700; background: var(--panel-2); border: 1px solid var(--border);
+  }
+  .iv-rank-badge.high { background: rgba(255,93,108,0.15); border-color: rgba(255,93,108,0.35); color: var(--neg); }
+  .iv-rank-badge.mid { background: rgba(232,179,57,0.15); border-color: rgba(232,179,57,0.35); color: var(--gold); }
+  .iv-rank-badge.low { background: rgba(46,204,143,0.15); border-color: rgba(46,204,143,0.35); color: var(--pos); }
+
+  .vol-surface-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  .vol-surface-table th { color: var(--muted-2); font-weight: 500; padding: 3px 5px; text-align: right; font-size: 9.5px; }
+  .vol-surface-table td { width: 50px; height: 28px; text-align: center; border-radius: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; font-weight: 600; cursor: default; }
+  .vol-surface-table td:first-child { text-align: right; color: var(--muted-2); padding-right: 8px; width: auto; }
+  .vs-legend { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; color: var(--muted-2); }
+  .vs-gradient { width: 80px; height: 8px; border-radius: 3px; background: linear-gradient(to right, hsl(220,70%,50%), hsl(30,80%,50%), hsl(0,80%,50%)); }
+
+  .movers-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 18px; }
+  .movers-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .movers-time { font-size: 10px; color: var(--muted-2); margin-left: 8px; font-weight: 400; }
+  .movers-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .movers-col-head { font-size: 11px; font-weight: 700; padding: 4px 0 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .gainers-head { color: var(--pos); }
+  .losers-head { color: var(--neg); }
+  .movers-list { display: flex; flex-direction: column; gap: 5px; }
+  .movers-loading { font-size: 11px; color: var(--muted-2); padding: 8px 0; }
+  .mover-row {
+    display: grid; grid-template-columns: 90px 60px 1fr; align-items: center; gap: 8px;
+    background: var(--panel-2); border-radius: 7px; padding: 8px 11px; cursor: pointer;
+    border: 1px solid transparent; transition: border-color .15s ease;
+  }
+  .mover-row:hover { border-color: var(--accent); }
+  .mover-symbol { font-weight: 700; font-size: 12px; }
+  .mover-pct { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 12px; text-align: right; }
+  .mover-pct.pos { color: var(--pos); }
+  .mover-pct.neg { color: var(--neg); }
+  .mover-bar-wrap { background: var(--panel-3); border-radius: 3px; height: 6px; overflow: hidden; }
+  .mover-bar { height: 100%; border-radius: 3px; }
+  .mover-bar.pos { background: var(--pos); }
+  .mover-bar.neg { background: var(--neg); }
+  .movers-note { font-size: 10px; color: var(--muted-2); margin-top: 10px; text-align: center; }
+
+  .strategy-suggest-panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; margin-top: 16px;
+  }
+  .suggestions-output { margin-top: 12px; font-size: 12px; line-height: 1.7; color: var(--text); }
+  .suggestions-output .suggest-section { margin-bottom: 14px; }
+  .suggestions-output .suggest-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--accent); margin-bottom: 5px;
+  }
+  .suggestions-output .suggest-strategy {
+    background: var(--panel-2); border-left: 3px solid var(--accent-dim);
+    border-radius: 0 7px 7px 0; padding: 10px 13px; margin-bottom: 8px; font-size: 11.5px;
+  }
+  .suggestions-output .suggest-strategy b { font-size: 12.5px; }
+  .suggestions-output .suggest-caveat {
+    font-size: 10px; color: var(--muted-2); padding-top: 10px;
+    border-top: 1px solid var(--border-soft); line-height: 1.5;
+  }
+  .suggest-loading { display: flex; align-items: center; gap: 10px; color: var(--muted-2); font-size: 12px; padding: 10px 0; }
+  .suggest-spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+
   /* ---------- Market View tab ---------- */
   .regime-banner {
     border-radius: var(--radius); padding: 20px 22px; margin-bottom: 16px;
@@ -329,16 +392,30 @@
   }
   .optimizer-results { display: flex; flex-direction: column; gap: 6px; }
   .optimizer-result-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    background: var(--panel-3); border-radius: 7px; padding: 8px 11px; font-size: 11.5px;
+    background: var(--panel-3); border-radius: 7px; padding: 9px 12px;
+    font-size: 11.5px; display: flex; flex-direction: column; gap: 7px;
   }
-  .optimizer-result-row .or-legs { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; }
-  .optimizer-result-row .or-metrics { display: flex; gap: 10px; font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
+  .optimizer-result-row .or-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .optimizer-result-row .or-legs {
+    color: var(--muted); font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .optimizer-result-row .or-load-btn {
     background: var(--accent-dim); border: none; color: var(--text); border-radius: 5px;
-    padding: 4px 9px; font-size: 10.5px; cursor: pointer; font-family: inherit; flex-shrink: 0;
+    padding: 4px 10px; font-size: 10.5px; cursor: pointer; font-family: inherit;
+    flex-shrink: 0; white-space: nowrap;
   }
   .optimizer-result-row .or-load-btn:hover { background: var(--accent); }
+  .optimizer-result-row .or-metrics {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 6px 4px; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px;
+  }
+  .optimizer-result-row .or-metric-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .optimizer-result-row .or-metric-label { color: var(--muted-2); font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .optimizer-result-row .or-metric-val { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .optimizer-status { font-size: 11px; color: var(--muted-2); }
 
   .drafts-panel {
@@ -619,6 +696,44 @@
   .pnl-table td { text-align: right; padding: 7px 10px; font-family: 'IBM Plex Mono', monospace; border-bottom: 1px solid var(--border-soft); }
   .pnl-table tr.pnl-spot-row td { background: rgba(91,140,255,0.08); font-weight: 700; }
   .pnl-table tr.pnl-target-row td { background: rgba(232,179,57,0.12); font-weight: 700; }
+
+  .brokerage-breakdown { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+  .brokerage-item { background: var(--panel-2); border-radius: 7px; padding: 7px 12px; font-size: 11px; }
+  .brokerage-item .bi-label { color: var(--muted-2); margin-bottom: 2px; font-size: 10px; }
+  .brokerage-item .bi-value { font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+  .brokerage-total-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); }
+  .brokerage-total-row .bt-label { font-size: 12px; font-weight: 600; }
+  .brokerage-total-row .bt-value { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 700; color: var(--neg); }
+  .brokerage-net-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+  .brokerage-net-row .bt-label { font-size: 12px; color: var(--muted); }
+  .brokerage-net-row .bt-value { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; }
+  .brokerage-note { font-size: 9.5px; color: var(--muted-2); line-height: 1.5; padding-top: 6px; border-top: 1px solid var(--border-soft); }
+
+  .roll-panel {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px;
+    padding: 12px; margin-bottom: 12px; overflow: hidden;
+  }
+  .roll-table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+  .roll-table th, .roll-table td {
+    padding: 6px 7px; border-bottom: 1px solid var(--border-soft);
+    font-family: 'IBM Plex Mono', monospace; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .roll-table th { color: var(--muted); font-weight: 500; font-size: 9.5px; text-transform: uppercase; text-align: right; }
+  .roll-table th:first-child { text-align: left; }
+  .roll-table td { text-align: right; }
+  .roll-table td:first-child { text-align: left; font-family: inherit; }
+  /* Column widths that fit inside the 356px content area (with gap/padding) */
+  .roll-table col.rc-leg   { width: 38%; }
+  .roll-table col.rc-entry { width: 18%; }
+  .roll-table col.rc-roll  { width: 20%; }
+  .roll-table col.rc-pnl   { width: 24%; }
+  .roll-total-row {
+    display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+    gap: 8px; padding: 10px 0 0; margin-top: 6px; border-top: 1px solid var(--border);
+  }
+  .roll-total-label { font-size: 11.5px; font-weight: 600; }
+  .roll-load-btn { font-size: 11px; background: var(--accent-dim); border: none; color: var(--text); padding: 5px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
   .pnl-table td:first-child, .pnl-table th:first-child { text-align: left; }
 
   /* ---------- Flow tab ---------- */
@@ -701,7 +816,7 @@
     <span class="ticker-symbol" id="tickerSymbol">NIFTY</span>
     <span class="ticker-spot num" id="tickerSpot">—</span>
     <span class="ticker-meta">
-      Expiry <b id="metaExpiry">—</b> &nbsp;·&nbsp; <b id="metaDte">—</b> DTE &nbsp;·&nbsp; VIX <b id="metaVix">—</b> &nbsp;·&nbsp; Updated <b id="metaTime">—</b>
+      Expiry <b id="metaExpiry">—</b> &nbsp;·&nbsp; <b id="metaDte">—</b> DTE &nbsp;·&nbsp; ⏱ <b id="metaCountdown">—</b> &nbsp;·&nbsp; IV <b id="metaAtmIv">—</b> &nbsp; IVR <b id="metaIvRank">—</b> &nbsp;·&nbsp; VIX <b id="metaVix">—</b> &nbsp;·&nbsp; Updated <b id="metaTime">—</b>
     </span>
   </div>
 
@@ -726,6 +841,7 @@
         </div>
         <div id="pcrTrendChart"></div>
       </div>
+
       <div class="skew-chart-wrap" id="skewChartWrap">
         <div class="skew-chart-head">
           <span class="skew-chart-title">IV Skew</span>
@@ -733,6 +849,23 @@
         </div>
         <div id="skewChart"></div>
       </div>
+
+      <div class="skew-chart-wrap" id="volSurfaceWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">Volatility Surface <span style="font-size:10px;color:var(--muted-2);font-weight:400;">(IV across strikes × expiries)</span></span>
+          <span class="chart-legend"><span style="font-size:10px;color:var(--muted-2);">Low IV → High IV (blue → red)</span></span>
+        </div>
+        <div id="volSurfaceChart"></div>
+      </div>
+
+      <div class="pcr-trend-wrap" id="straddleChartWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">ATM Straddle Premium (this session)</span>
+          <span class="pcr-trend-current" id="straddleCurrentVal"></span>
+        </div>
+        <div id="straddleChart"></div>
+      </div>
+
       <div class="table-wrap">
         <table id="chainTable">
           <thead>
@@ -791,11 +924,13 @@
             <h3>Legs</h3>
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               <button class="btn" id="optimizerToggleBtn">⚡ Optimize</button>
+              <button class="btn" id="rollAnalysisBtn">🔁 Roll →</button>
               <button class="btn" id="saveDraftBtn">💾 Save Draft</button>
               <button class="btn" id="loadDraftsBtn">📂 Drafts</button>
               <button class="btn" id="paperTradeBtn">📝 Paper Trade This</button>
             </div>
           </div>
+          <div class="roll-panel" id="rollPanel" style="display:none;"></div>
           <div class="drafts-panel" id="draftsPanel" style="display:none;"></div>
           <div class="optimizer-panel" id="optimizerPanel" style="display:none;"></div>
           <div class="legs-list" id="legsList"></div>
@@ -835,12 +970,17 @@
           <div class="builder-chart-wrap">
             <div class="greek-overlay-toolbar">
               <span class="skew-chart-title">Greek Overlay</span>
-              <div class="filter-group" id="greekOverlaySelect">
-                <button class="filter-pill active" data-greek="none">None</button>
-                <button class="filter-pill" data-greek="delta">Delta</button>
-                <button class="filter-pill" data-greek="gamma">Gamma</button>
-                <button class="filter-pill" data-greek="theta">Theta</button>
-                <button class="filter-pill" data-greek="vega">Vega</button>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <label class="compare-checkbox" title="Show P&L at 5 different time points simultaneously">
+                  <input type="checkbox" id="fanViewToggle"> Fan view (5 date lines)
+                </label>
+                <div class="filter-group" id="greekOverlaySelect">
+                  <button class="filter-pill active" data-greek="none">None</button>
+                  <button class="filter-pill" data-greek="delta">Delta</button>
+                  <button class="filter-pill" data-greek="gamma">Gamma</button>
+                  <button class="filter-pill" data-greek="theta">Theta</button>
+                  <button class="filter-pill" data-greek="vega">Vega</button>
+                </div>
               </div>
             </div>
             <div class="chart-interactive-wrap" id="chartInteractiveWrap">
@@ -848,12 +988,19 @@
               <div class="chart-crosshair-line" id="chartCrosshairLine" style="display:none;"></div>
               <div class="chart-tooltip" id="chartTooltip" style="display:none;"></div>
             </div>
-            <div class="chart-legend">
+            <div class="chart-legend" id="chartLegendStandard">
               <span><span class="legend-swatch solid"></span> At expiry</span>
               <span><span class="legend-swatch dashed"></span> As of selected date</span>
               <span id="greekLegendItem" style="display:none;"><span class="legend-swatch" style="background:var(--warm)"></span> <span id="greekLegendLabel"></span></span>
               <span id="cappedLegendItem" style="display:none;"><span class="legend-swatch dotted" style="background:var(--neg)"></span> SL/Target capped</span>
               <span><span class="legend-swatch" style="background:var(--muted-2);opacity:0.5;"></span> 1σ / 2σ (expected move)</span>
+            </div>
+            <div class="chart-legend" id="chartLegendFan" style="display:none;">
+              <span><span class="legend-swatch" style="background:#5B8CFF;"></span> Today</span>
+              <span><span class="legend-swatch" style="background:#4B78E0;opacity:0.82;"></span> 25% DTE</span>
+              <span><span class="legend-swatch" style="background:#3B65C0;opacity:0.65;"></span> 50% DTE</span>
+              <span><span class="legend-swatch" style="background:#2B52A0;opacity:0.48;"></span> 75% DTE</span>
+              <span><span class="legend-swatch" style="background:#1B3F80;opacity:0.32;"></span> Expiry</span>
             </div>
           </div>
 
@@ -870,6 +1017,22 @@
               </div>
             </div>
             <div id="pnlTable"></div>
+          </div>
+
+          <div class="builder-chart-wrap brokerage-panel" style="margin-top:14px;">
+            <div class="builder-panel-head">
+              <h3>Strategy LTP (this session)</h3>
+              <span style="font-size:10.5px;color:var(--muted-2);">Combined premium of these legs over time · <span id="stratLtpCurrent"></span></span>
+            </div>
+            <div id="stratLtpChart"></div>
+          </div>
+
+          <div class="builder-chart-wrap brokerage-panel" style="margin-top:14px;">
+            <div class="builder-panel-head">
+              <h3>Brokerage &amp; Taxes</h3>
+              <label style="font-size:11px;color:var(--muted);">₹/order <input type="number" id="brokeragePerOrderInput" value="20" min="0" max="100" style="width:55px;background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 7px;font-size:11px;font-family:'IBM Plex Mono',monospace;"></label>
+            </div>
+            <div id="brokeragePanel"></div>
           </div>
         </div>
       </div>
@@ -930,6 +1093,18 @@
         every input and threshold is visible above, nothing is a hidden formula. It's a rule-based read, not a
         prediction. Treat it as one input alongside your own analysis.
       </div>
+
+      <div class="strategy-suggest-panel" id="strategySuggestPanel">
+        <div class="movers-head">
+          <span class="skew-chart-title">🤖 AI Strategy Suggestions
+            <span style="font-size:10px;color:var(--muted-2);font-weight:400;"> · based on current market data + time of day</span>
+          </span>
+          <button class="btn" id="getSuggestionsBtn" style="font-size:10.5px;padding:5px 14px;">Generate</button>
+        </div>
+        <div id="suggestionsOutput" class="suggestions-output">
+          <div class="movers-loading">Hit Generate to get time-aware strategy ideas grounded in the current regime, PCR, VIX, and IV data.</div>
+        </div>
+      </div>
     </section>
 
     <section id="tab-paper" class="tab-panel">
@@ -950,14 +1125,41 @@
     </section>
 
     <section id="tab-flow" class="tab-panel">
-      <div class="flow-table-wrap">
-        <table>
-          <thead><tr><th>Strike</th><th>Side</th><th>ΔOI</th><th>Read</th></tr></thead>
-          <tbody id="flagsBody">
-            <tr><td colspan="4" class="empty-state">No data yet.</td></tr>
-          </tbody>
-        </table>
+
+      <div class="movers-panel" id="moversPanel">
+        <div class="movers-head">
+          <span class="skew-chart-title">F&amp;O Top Movers <span class="movers-time" id="moversTime"></span></span>
+          <button class="btn" id="moversRefreshBtn" style="font-size:10.5px;padding:4px 10px;">↻ Refresh</button>
+        </div>
+        <div class="movers-grid" id="moversGrid">
+          <div class="movers-col">
+            <div class="movers-col-head gainers-head">▲ Top 5 Gainers</div>
+            <div class="movers-list" id="gainersList">
+              <div class="movers-loading">Loading…</div>
+            </div>
+          </div>
+          <div class="movers-col">
+            <div class="movers-col-head losers-head">▼ Top 5 Losers</div>
+            <div class="movers-list" id="losersList">
+              <div class="movers-loading">Loading…</div>
+            </div>
+          </div>
+        </div>
+        <div class="movers-note">Click any stock to load its option chain. F&amp;O stocks only.</div>
       </div>
+
+      <div style="margin-top:20px;">
+        <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
+        <div class="flow-table-wrap">
+          <table>
+            <thead><tr><th>Strike</th><th>Side</th><th>ΔOI</th><th>Read</th></tr></thead>
+            <tbody id="flagsBody">
+              <tr><td colspan="4" class="empty-state">No data yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </section>
   </main>
 
@@ -1009,7 +1211,13 @@
     tickerSymbol: document.getElementById('tickerSymbol'),
     tickerSpot: document.getElementById('tickerSpot'),
     metaExpiry: document.getElementById('metaExpiry'),
+    metaAtmIv: document.getElementById('metaAtmIv'),
+    metaIvRank: document.getElementById('metaIvRank'),
+    metaCountdown: document.getElementById('metaCountdown'),
     metaVix: document.getElementById('metaVix'),
+    volSurfaceChart: document.getElementById('volSurfaceChart'),
+    straddleChart: document.getElementById('straddleChart'),
+    straddleCurrentVal: document.getElementById('straddleCurrentVal'),
     symbolSearch: document.getElementById('symbolSearch'),
     fnoSymbolList: document.getElementById('fnoSymbolList'),
     exportCsvBtn: document.getElementById('exportCsvBtn'),
@@ -1030,6 +1238,13 @@
     gainPainChart: document.getElementById('gainPainChart'),
     historyTrendChart: document.getElementById('historyTrendChart'),
     historyDaysSelect: document.getElementById('historyDaysSelect'),
+    volSurfaceChart: document.getElementById('volSurfaceChart'),
+    straddleChart: document.getElementById('straddleChart'),
+    straddleCurrentVal: document.getElementById('straddleCurrentVal'),
+    stratLtpChart: document.getElementById('stratLtpChart'),
+    stratLtpCurrent: document.getElementById('stratLtpCurrent'),
+    metaAtmIv: document.getElementById('metaAtmIv'),
+    metaIvRank: document.getElementById('metaIvRank'),
     sentimentValue: document.getElementById('sentimentValue'),
     skewNote: document.getElementById('skewNote'),
     strategyGrid: document.getElementById('strategyGrid'),
@@ -1061,8 +1276,29 @@
       els.panels.forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-      if (tab.dataset.tab === 'market') fetchAndRenderHistoryTrend();
+      if (tab.dataset.tab === 'market') {
+        fetchAndRenderHistoryTrend();
+        // Flush any dirty Market View render that was skipped during background refreshes
+        if (state.marketViewDirty && state.lastData) {
+          renderMarketView(state.lastData);
+          renderGainPainChart(state.lastData);
+          state.marketViewDirty = false;
+        }
+      }
+      if (tab.dataset.tab === 'strategy') {
+        if (state.strategyDirty && state.lastData) {
+          renderStrategy(state.lastData);
+          state.strategyDirty = false;
+        }
+      }
+      if (tab.dataset.tab === 'builder') {
+        if (state.builderDirty) {
+          renderBuilder();
+          state.builderDirty = false;
+        }
+      }
       if (tab.dataset.tab === 'paper') fetchAndRenderPaperTrades();
+      if (tab.dataset.tab === 'flow') fetchAndRenderMovers();
     });
   });
 
@@ -1088,9 +1324,10 @@
     [...els.pills.children].forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     state.symbol = btn.dataset.symbol;
-    state.expiry = null; // reset to nearest for the new symbol
+    state.expiry = null;
     state.shouldScrollToAtm = true;
-    state.sessionHistory = []; // PCR trend is symbol-specific, don't mix series
+    state.sessionHistory = [];
+    _chainRowState.clear(); // force full rebuild for new symbol
     renderWatchlist();
     fetchChain();
   });
@@ -1099,6 +1336,7 @@
   els.expirySelect.addEventListener('change', () => {
     state.expiry = els.expirySelect.value;
     state.shouldScrollToAtm = true;
+    _chainRowState.clear(); // different expiry = different strikes
     fetchChain();
   });
 
@@ -1109,6 +1347,7 @@
     bandDebounce = setTimeout(() => {
       const v = parseInt(els.bandInput.value, 10);
       state.band = Number.isFinite(v) && v >= 3 && v <= 30 ? v : 12;
+      _chainRowState.clear(); // different band = different row count
       fetchChain();
     }, 500);
   });
@@ -1219,23 +1458,45 @@
   }
 
   // ---------- render ----------
+  // _chainRowState: strike → last rendered values — used to skip cell writes when unchanged
+  const _chainRowState = new Map();
+
   function render(data) {
-    // ticker
+    // ─── Save scroll position BEFORE any DOM mutations ───────────────────
+    // This is the primary guard against refresh-caused scroll jumps.
+    // We save both window scroll (for the page-level scroll) and each
+    // tab-panel's own scrollTop (for panels that overflow-scroll internally).
+    const savedScrollY = window.scrollY || window.pageYOffset;
+    const savedPanelScrolls = {};
+    document.querySelectorAll('.tab-panel').forEach(p => {
+      savedPanelScrolls[p.id] = p.scrollTop;
+    });
+
+    // ─── Ticker (always fast, no disruption) ─────────────────────────────
     els.tickerSymbol.textContent = data.symbol;
     const newSpot = data.underlying_value;
     if (lastSpot !== null && newSpot !== lastSpot) {
       els.tickerSpot.classList.remove('flash-up', 'flash-down');
-      void els.tickerSpot.offsetWidth; // restart animation
+      void els.tickerSpot.offsetWidth;
       els.tickerSpot.classList.add(newSpot > lastSpot ? 'flash-up' : 'flash-down');
     }
     lastSpot = newSpot;
     els.tickerSpot.textContent = fmtPrice(newSpot);
     els.metaExpiry.textContent = data.expiry;
+    updateCountdown();
+    els.metaAtmIv.textContent = data.atm_iv ? data.atm_iv.toFixed(1) + '%' : '—';
+    if (data.atm_iv_rank) {
+      const r = data.atm_iv_rank;
+      const cls = r.rank_pct >= 70 ? 'high' : (r.rank_pct >= 30 ? 'mid' : 'low');
+      els.metaIvRank.innerHTML = `<span class="iv-rank-badge ${cls}">${r.rank_pct.toFixed(0)}% <span style="font-weight:400;font-size:9px;">${r.period_days}d</span></span>`;
+    } else {
+      els.metaIvRank.textContent = '—';
+    }
     els.metaVix.textContent = (data.india_vix !== null && data.india_vix !== undefined) ? data.india_vix.toFixed(2) : '—';
     els.metaDte.textContent = data.dte >= 0 ? data.dte : '?';
     els.metaTime.textContent = new Date().toLocaleTimeString('en-IN');
 
-    // expiry dropdown (rebuild only if the option set actually changed)
+    // Expiry dropdown: rebuild only when the option set actually changed
     const currentOptions = [...els.expirySelect.options].map(o => o.value).join('|');
     const newOptions = data.all_expiries.join('|');
     if (currentOptions !== newOptions) {
@@ -1246,14 +1507,72 @@
     state.expiry = data.expiry;
 
     renderStatCards(data);
-    renderChainTable(data);
+
+    // ─── Determine which tab is currently active ──────────────────────────
+    const activeTab = document.querySelector('.tab.active')?.dataset.tab;
+    // On the very first render, we do a full render of all tabs so they're
+    // immediately ready when the user switches to them. From the second fetch
+    // onwards (auto-refresh), we go lazy: only render visible tabs.
+    const isFirstRender = !state.initialRenderDone;
+    state.initialRenderDone = true;
+
+    // ─── Chain tab: incremental row updates, never full innerHTML ─────────
+    renderChainTable(data, activeTab === 'chain');
+
+    // ─── Charts: update regardless of tab (lightweight SVG replacements) ──
     renderSkewChart(data);
+    renderVolSurface(data);
     renderPcrTrend(data);
-    renderMarketView(data);
-    renderGainPainChart(data);
-    renderStrategy(data);
+    renderStraddleChart(data);
+    renderStratLtpChart();
+
+    // ─── Market View: skip when not active — it has many DOM writes ───────
+    if (isFirstRender || activeTab === 'market') {
+      renderMarketView(data);
+      renderGainPainChart(data);
+      state.marketViewDirty = false;
+    } else {
+      state.marketViewDirty = true;
+    }
+
+    // ─── Strategy tab: skip full re-render when not active ────────────────
+    if (isFirstRender || activeTab === 'strategy') {
+      renderStrategy(data);
+      state.strategyDirty = false;
+    } else {
+      state.strategyDirty = true;
+    }
+
     renderFlags(data);
-    renderBuilder();
+
+    // ─── Builder: only re-render when builder tab is active ───────────────
+    if (isFirstRender || activeTab === 'builder') {
+      renderBuilder();
+      state.builderDirty = false;
+    } else {
+      state.builderDirty = true;
+    }
+
+    // ─── Restore scroll position AFTER all DOM mutations ─────────────────
+    // Use setTimeout(0) as a cross-environment fallback — requestAnimationFrame
+    // isn't available in all non-browser environments (e.g. Node.js test runners).
+    const _restore = () => {
+      if (typeof window.scrollTo === 'function') {
+        window.scrollTo({ top: savedScrollY, behavior: 'instant' });
+      } else {
+        document.documentElement.scrollTop = savedScrollY;
+      }
+      document.querySelectorAll('.tab-panel').forEach(p => {
+        if (savedPanelScrolls[p.id] != null) {
+          p.scrollTop = savedPanelScrolls[p.id];
+        }
+      });
+    };
+    if (typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(_restore);
+    } else {
+      setTimeout(_restore, 0);
+    }
   }
 
   function statCard(label, value, cls) {
@@ -1271,7 +1590,27 @@
     ].join('');
   }
 
-  function renderChainTable(data) {
+  function _buildChainRow(s, maxOi, atm, support, resistance) {
+    const rowClasses = [
+      Math.abs(s.strike - atm) < 1e-6 ? 'atm-row' : '',
+      Math.abs(s.strike - support) < 1e-6 ? 'support-row' : '',
+      Math.abs(s.strike - resistance) < 1e-6 ? 'resistance-row' : '',
+    ].filter(Boolean).join(' ');
+    const ceChgCls = s.ce_oi_chg > 0 ? 'pos-txt' : (s.ce_oi_chg < 0 ? 'neg-txt' : '');
+    const peChgCls = s.pe_oi_chg > 0 ? 'pos-txt' : (s.pe_oi_chg < 0 ? 'neg-txt' : '');
+    const ceBarPct = Math.min(100, (s.ce_oi / maxOi) * 100);
+    const peBarPct = Math.min(100, (s.pe_oi / maxOi) * 100);
+    const ceItmCls = s.strike < atm ? 'itm-cell' : '';
+    const peItmCls = s.strike > atm ? 'itm-cell' : '';
+    let strikeTag = '';
+    if (Math.abs(s.strike - support) < 1e-6) strikeTag = '<span class="badge-tag badge-support">SUP</span>';
+    if (Math.abs(s.strike - resistance) < 1e-6) strikeTag = '<span class="badge-tag badge-resistance">RES</span>';
+    const ceBidAsk = (s.ce_bid || s.ce_ask) ? `<div class="bid-ask">${fmtPrice(s.ce_bid)} × ${fmtPrice(s.ce_ask)}</div>` : '';
+    const peBidAsk = (s.pe_bid || s.pe_ask) ? `<div class="bid-ask">${fmtPrice(s.pe_bid)} × ${fmtPrice(s.pe_ask)}</div>` : '';
+    return { rowClasses, ceChgCls, peChgCls, ceBarPct, peBarPct, ceItmCls, peItmCls, strikeTag, ceBidAsk, peBidAsk };
+  }
+
+  function renderChainTable(data, isVisible = true) {
     let rows = [...data.strikes];
     if (state.sortCol) {
       rows.sort((a, b) => (a[state.sortCol] - b[state.sortCol]) * state.sortDir);
@@ -1279,45 +1618,93 @@
     const maxOi = Math.max(1, ...data.strikes.map(s => Math.max(s.ce_oi, s.pe_oi)));
     const atm = data.atm, support = data.support.strike, resistance = data.resistance.strike;
 
-    els.chainBody.innerHTML = rows.map(s => {
-      const rowClasses = [
-        Math.abs(s.strike - atm) < 1e-6 ? 'atm-row' : '',
-        Math.abs(s.strike - support) < 1e-6 ? 'support-row' : '',
-        Math.abs(s.strike - resistance) < 1e-6 ? 'resistance-row' : '',
-      ].filter(Boolean).join(' ');
+    // Check whether we need a full rebuild: first render, symbol change, band change, or sort change
+    const existingRows = els.chainBody.querySelectorAll('tr[data-strike]');
+    const existingStrikes = [...existingRows].map(tr => parseFloat(tr.dataset.strike));
+    const newStrikes = rows.map(r => r.strike);
+    const needsFullRebuild = existingStrikes.length === 0
+      || existingStrikes.join(',') !== newStrikes.join(',');
 
-      const ceChgCls = s.ce_oi_chg > 0 ? 'pos-txt' : (s.ce_oi_chg < 0 ? 'neg-txt' : '');
-      const peChgCls = s.pe_oi_chg > 0 ? 'pos-txt' : (s.pe_oi_chg < 0 ? 'neg-txt' : '');
-      const ceBarPct = Math.min(100, (s.ce_oi / maxOi) * 100);
-      const peBarPct = Math.min(100, (s.pe_oi / maxOi) * 100);
-      const ceItmCls = s.strike < atm ? 'itm-cell' : '';
-      const peItmCls = s.strike > atm ? 'itm-cell' : '';
+    if (needsFullRebuild) {
+      // Full rebuild: clear row state cache, replace tbody, then scroll ATM into view
+      _chainRowState.clear();
+      els.chainBody.innerHTML = rows.map(s => {
+        const c = _buildChainRow(s, maxOi, atm, support, resistance);
+        _chainRowState.set(s.strike, {...s, _maxOi: maxOi, _atm: atm});
+        return `<tr class="${c.rowClasses}" data-strike="${s.strike}">
+          <td class="oi-bar-wrap ${c.ceItmCls}"><div class="oi-bar" style="width:${c.ceBarPct}%"></div><span class="oi-text">${fmtInt(s.ce_oi)}</span></td>
+          <td class="${c.ceChgCls} ${c.ceItmCls}">${fmtSigned(s.ce_oi_chg)}</td>
+          <td class="${c.ceItmCls}">${fmtIv(s.ce_iv)}</td>
+          <td class="${c.ceItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="CE" title="Click to add as a Builder leg">${fmtPrice(s.ce_ltp)}${c.ceBidAsk}</td>
+          <td class="strike-cell">${fmtInt(s.strike)}${c.strikeTag}</td>
+          <td class="${c.peItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="PE" title="Click to add as a Builder leg">${fmtPrice(s.pe_ltp)}${c.peBidAsk}</td>
+          <td class="${c.peItmCls}">${fmtIv(s.pe_iv)}</td>
+          <td class="${c.peChgCls} ${c.peItmCls}">${fmtSigned(s.pe_oi_chg)}</td>
+          <td class="oi-bar-wrap ${c.peItmCls}"><div class="oi-bar put" style="width:${c.peBarPct}%"></div><span class="oi-text">${fmtInt(s.pe_oi)}</span></td>
+        </tr>`;
+      }).join('');
 
-      let strikeTag = '';
-      if (Math.abs(s.strike - support) < 1e-6) strikeTag = '<span class="badge-tag badge-support">SUP</span>';
-      if (Math.abs(s.strike - resistance) < 1e-6) strikeTag = '<span class="badge-tag badge-resistance">RES</span>';
-
-      const ceBidAsk = (s.ce_bid || s.ce_ask) ? `<div class="bid-ask">${fmtPrice(s.ce_bid)} × ${fmtPrice(s.ce_ask)}</div>` : '';
-      const peBidAsk = (s.pe_bid || s.pe_ask) ? `<div class="bid-ask">${fmtPrice(s.pe_bid)} × ${fmtPrice(s.pe_ask)}</div>` : '';
-
-      return `<tr class="${rowClasses}">
-        <td class="oi-bar-wrap ${ceItmCls}"><div class="oi-bar" style="width:${ceBarPct}%"></div><span class="oi-text">${fmtInt(s.ce_oi)}</span></td>
-        <td class="${ceChgCls} ${ceItmCls}">${fmtSigned(s.ce_oi_chg)}</td>
-        <td class="${ceItmCls}">${fmtIv(s.ce_iv)}</td>
-        <td class="${ceItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="CE" title="Click to add as a Builder leg">${fmtPrice(s.ce_ltp)}${ceBidAsk}</td>
-        <td class="strike-cell">${fmtInt(s.strike)}${strikeTag}</td>
-        <td class="${peItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="PE" title="Click to add as a Builder leg">${fmtPrice(s.pe_ltp)}${peBidAsk}</td>
-        <td class="${peItmCls}">${fmtIv(s.pe_iv)}</td>
-        <td class="${peChgCls} ${peItmCls}">${fmtSigned(s.pe_oi_chg)}</td>
-        <td class="oi-bar-wrap ${peItmCls}"><div class="oi-bar put" style="width:${peBarPct}%"></div><span class="oi-text">${fmtInt(s.pe_oi)}</span></td>
-      </tr>`;
-    }).join('');
-
-    const atmRow = els.chainBody.querySelector('tr.atm-row');
-    if (atmRow) {
-      atmRow.scrollIntoView({ block: 'center', behavior: state.shouldScrollToAtm ? 'smooth' : 'instant' });
+      // Only scroll ATM into view on first load or explicit user trigger — NEVER on auto-refresh
+      if (state.shouldScrollToAtm) {
+        const atmRow = els.chainBody.querySelector('tr.atm-row');
+        if (atmRow) atmRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        state.shouldScrollToAtm = false;
+      }
+      return;
     }
-    state.shouldScrollToAtm = false;
+
+    // ── Incremental update: update only cells that changed ─────────────────
+    // No DOM nodes are created or destroyed → no scroll disruption whatsoever
+    for (const s of rows) {
+      const tr = els.chainBody.querySelector(`tr[data-strike="${s.strike}"]`);
+      if (!tr) continue;
+      const prev = _chainRowState.get(s.strike) || {};
+      const cells = tr.cells;
+
+      // Row class (atm/support/resistance highlighting)
+      const c = _buildChainRow(s, maxOi, atm, support, resistance);
+      if (tr.className !== c.rowClasses) tr.className = c.rowClasses;
+
+      // Cell 0: CE OI bar + text
+      if (prev.ce_oi !== s.ce_oi || prev._maxOi !== maxOi) {
+        const bar = cells[0].querySelector('.oi-bar');
+        if (bar) bar.style.width = c.ceBarPct + '%';
+        const txt = cells[0].querySelector('.oi-text');
+        if (txt) txt.textContent = fmtInt(s.ce_oi);
+      }
+      // Cell 1: CE OI change
+      if (prev.ce_oi_chg !== s.ce_oi_chg || prev._atm !== atm) {
+        cells[1].textContent = fmtSigned(s.ce_oi_chg);
+        cells[1].className = `${c.ceChgCls} ${c.ceItmCls}`.trim();
+      }
+      // Cell 2: CE IV
+      if (prev.ce_iv !== s.ce_iv) cells[2].textContent = fmtIv(s.ce_iv);
+      // Cell 3: CE LTP + bid/ask
+      if (prev.ce_ltp !== s.ce_ltp || prev.ce_bid !== s.ce_bid || prev.ce_ask !== s.ce_ask) {
+        cells[3].innerHTML = fmtPrice(s.ce_ltp) + c.ceBidAsk;
+      }
+      // Cell 4: Strike — static, never changes
+      // Cell 5: PE LTP + bid/ask
+      if (prev.pe_ltp !== s.pe_ltp || prev.pe_bid !== s.pe_bid || prev.pe_ask !== s.pe_ask) {
+        cells[5].innerHTML = fmtPrice(s.pe_ltp) + c.peBidAsk;
+      }
+      // Cell 6: PE IV
+      if (prev.pe_iv !== s.pe_iv) cells[6].textContent = fmtIv(s.pe_iv);
+      // Cell 7: PE OI change
+      if (prev.pe_oi_chg !== s.pe_oi_chg || prev._atm !== atm) {
+        cells[7].textContent = fmtSigned(s.pe_oi_chg);
+        cells[7].className = `${c.peChgCls} ${c.peItmCls}`.trim();
+      }
+      // Cell 8: PE OI bar + text
+      if (prev.pe_oi !== s.pe_oi || prev._maxOi !== maxOi) {
+        const bar = cells[8].querySelector('.oi-bar');
+        if (bar) bar.style.width = c.peBarPct + '%';
+        const txt = cells[8].querySelector('.oi-text');
+        if (txt) txt.textContent = fmtInt(s.pe_oi);
+      }
+
+      _chainRowState.set(s.strike, {...s, _maxOi: maxOi, _atm: atm});
+    }
   }
 
   function renderSkewChart(data) {
@@ -1349,6 +1736,124 @@
       ${spotLine}
       <polyline points="${pePts}" style="fill:none;stroke:var(--gold);stroke-width:1.6"/>
       <polyline points="${cePts}" style="fill:none;stroke:var(--accent);stroke-width:1.6"/>
+    </svg>`;
+  }
+
+  // ====================================================================
+  // VOLATILITY SURFACE — IV across strikes × expiries as a 2D color grid.
+  // Data already in expiries_data from the chain response.
+  // Color encodes IV: blue (low) → amber (mid) → red (high).
+  // ====================================================================
+  function renderVolSurface(data) {
+    if (!els.volSurfaceChart) return;
+    const expiries = Object.keys(data.expiries_data || {}).sort((a,b) => {
+      const da = data.expiries_data[a].dte, db = data.expiries_data[b].dte;
+      return da - db;
+    }).slice(0, 6);
+    if (!expiries.length) { els.volSurfaceChart.innerHTML = ''; return; }
+
+    const band = 8, gap = data.strike_gap || 50;
+    const atm = data.atm;
+    const strikes = [];
+    for (let i = -band; i <= band; i++) strikes.push(atm + i * gap);
+
+    // collect IV for each (expiry, strike)
+    const surfaceData = expiries.map(exp => {
+      const strikeMap = {};
+      for (const s of data.expiries_data[exp].strikes || []) strikeMap[s.strike] = s;
+      return { exp, strikeMap };
+    });
+
+    // find global IV range for colour scale
+    const allIvs = [];
+    for (const {strikeMap} of surfaceData) {
+      for (const s of Object.values(strikeMap)) {
+        if (s.ce_iv > 0) allIvs.push(s.ce_iv);
+        if (s.pe_iv > 0) allIvs.push(s.pe_iv);
+      }
+    }
+    if (!allIvs.length) { els.volSurfaceChart.innerHTML = ''; return; }
+    const minIv = Math.min(...allIvs), maxIv = Math.max(...allIvs), spanIv = (maxIv - minIv) || 1;
+
+    function ivColor(iv) {
+      if (!iv || iv <= 0) return 'var(--panel-2)';
+      const t = (iv - minIv) / spanIv;  // 0→1
+      // blue (h220) → amber (h30) → red (h0)
+      const h = Math.round(220 - t * 220);
+      const s = 60 + t * 20;
+      const l = 55 - t * 15;
+      return `hsl(${h},${s}%,${l}%)`;
+    }
+    function ivText(iv) {
+      return (iv && iv > 0) ? iv.toFixed(1) : '—';
+    }
+
+    const shortExp = exp => {
+      const parts = exp.split('-');
+      return `${parseInt(parts[0])} ${parts[1]}`;
+    };
+
+    const headerRow = `<tr><th>Strike</th>${expiries.map(e => `<th>${shortExp(e)}<br><span style="font-size:8px;">${data.expiries_data[e].dte}d</span></th>`).join('')}</tr>`;
+    const dataRows = strikes.map(s => {
+      const isAtm = Math.abs(s - atm) < 1e-6;
+      const cells = expiries.map(e => {
+        const sd = surfaceData.find(x=>x.exp===e).strikeMap[s];
+        const iv = sd ? ((sd.ce_iv + sd.pe_iv) / 2 || sd.ce_iv || sd.pe_iv) : 0;
+        const bg = ivColor(iv);
+        const textColor = iv > (minIv + spanIv*0.5) ? '#fff' : 'inherit';
+        return `<td style="background:${bg};color:${textColor};">${ivText(iv)}</td>`;
+      }).join('');
+      return `<tr style="${isAtm?'font-weight:700;outline:2px solid var(--accent);':''}">
+        <td style="color:${isAtm?'var(--accent)':'var(--muted-2)'};">${fmtInt(s)}${isAtm?' ★':''}</td>
+        ${cells}
+      </tr>`;
+    }).join('');
+
+    els.volSurfaceChart.innerHTML = `
+      <div style="overflow-x:auto;">
+        <table class="vol-surface-table">
+          <thead>${headerRow}</thead>
+          <tbody>${dataRows}</tbody>
+        </table>
+      </div>
+      <div class="vs-legend">
+        <span>Low IV</span><div class="vs-gradient"></div><span>High IV</span>
+        <span style="margin-left:12px;">Range: ${minIv.toFixed(1)}% – ${maxIv.toFixed(1)}%</span>
+      </div>
+    `;
+  }
+
+  // ====================================================================
+  // STRADDLE CHART — ATM straddle premium over the session. Tracks
+  // (CE LTP + PE LTP) at ATM strike across each 5s refresh cycle.
+  // Shows theta decay visually as the straddle collapses through the day.
+  // ====================================================================
+  function renderStraddleChart(data) {
+    if (!els.straddleChart) return;
+    const straddle = data.straddle_premium;
+    if (!straddle) return;
+
+    // Use a dedicated straddle history — don't piggyback on sessionHistory
+    // which deduplicates when spot/pcr are unchanged (common on flat days)
+    if (!state.straddleHistory) state.straddleHistory = [];
+    state.straddleHistory.push({ t: Date.now(), v: straddle });
+    if (state.straddleHistory.length > 300) state.straddleHistory.shift();
+    if (els.straddleCurrentVal) els.straddleCurrentVal.textContent = `₹${straddle.toFixed(1)}`;
+
+    const pts = state.straddleHistory;
+    if (pts.length < 2) {
+      els.straddleChart.innerHTML = '<div class="pcr-trend-empty">Building straddle history…</div>';
+      return;
+    }
+    const W = 900, H = 70, padX = 6, padY = 8;
+    const vals = pts.map(p => p.v);
+    const minV = Math.min(...vals) * 0.97, maxV = Math.max(...vals) * 1.03;
+    const spanV = (maxV - minV) || 1;
+    const xScale = i => padX + (i / (pts.length-1)) * (W - 2*padX);
+    const yScale = v => H - padY - ((v - minV) / spanV) * (H - 2*padY);
+    const polyPts = pts.map((p, i) => `${xScale(i).toFixed(1)},${yScale(p.v).toFixed(1)}`).join(' ');
+    els.straddleChart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="pcr-trend-svg" preserveAspectRatio="none">
+      <polyline points="${polyPts}" style="fill:none;stroke:var(--gold);stroke-width:1.6"/>
     </svg>`;
   }
 
@@ -2031,7 +2536,7 @@
   }
 
   // ---------- Builder state ----------
-  const builderState = { legs: [], dateSliderDays: 0, greekOverlay: 'none', slAmount: null, targetAmount: null, ivShiftPct: 0, pnlInterval: 2, manualTarget: null };
+  const builderState = { legs: [], dateSliderDays: 0, greekOverlay: 'none', slAmount: null, targetAmount: null, ivShiftPct: 0, pnlInterval: 2, manualTarget: null, fanView: false, ltpHistory: [] };
 
   function findChainStrikeData(strikeTarget, expiry) {
     const info = state.lastData?.expiries_data?.[expiry];
@@ -2062,6 +2567,7 @@
     }, overrides || {});
     if (!overrides || overrides.premium === undefined) refreshLegFromChain(leg);
     builderState.legs.push(leg);
+    resetStratLtpHistory();
     renderBuilder();
   }
 
@@ -2215,16 +2721,16 @@
         const maxL = r.analysis.maxLossUnlimited ? 'Unlimited' : fmtRupee(r.analysis.maxLoss);
         const legsDesc = r.legs.map(l => `${l.action} ${fmtInt(l.strike)} ${l.option_type}`).join(' / ');
         return `<div class="optimizer-result-row">
-          <div>
-            <div class="or-legs">#${i+1} ${legsDesc}</div>
-            <div class="or-metrics">
-              <span>POP ${r.analysis.popPct.toFixed(1)}%</span>
-              <span class="pos-txt">MaxP ${maxP}</span>
-              <span class="neg-txt">MaxL ${maxL}</span>
-              <span>Credit ${fmtRupee(r.netCredit)}</span>
-            </div>
+          <div class="or-head">
+            <div class="or-legs" title="${legsDesc}">#${i+1} &nbsp;${legsDesc}</div>
+            <button class="or-load-btn" data-optimizer-load="${i}">Load →</button>
           </div>
-          <button class="or-load-btn" data-optimizer-load="${i}">Load →</button>
+          <div class="or-metrics">
+            <div class="or-metric-cell"><span class="or-metric-label">POP</span><span class="or-metric-val">${r.analysis.popPct.toFixed(1)}%</span></div>
+            <div class="or-metric-cell"><span class="or-metric-label">Max Profit</span><span class="or-metric-val pos-txt">${maxP}</span></div>
+            <div class="or-metric-cell"><span class="or-metric-label">Max Loss</span><span class="or-metric-val neg-txt">${maxL}</span></div>
+            <div class="or-metric-cell"><span class="or-metric-label">Credit</span><span class="or-metric-val">${fmtRupee(r.netCredit)}</span></div>
+          </div>
         </div>`;
       }).join('');
       resultsEl.querySelectorAll('[data-optimizer-load]').forEach(btn => {
@@ -2298,6 +2804,89 @@
         <span><b>V</b> ${g.vega!==undefined ? g.vega.toFixed(1) : '—'}</span>
       </div>
     </div>`;
+  }
+
+  // Multi-date "fan" chart — shows P&L at 5 time points simultaneously so
+  // theta decay is visible as a shape, not just a slider to sweep manually.
+  // Colors fade from today (bright blue) to expiry (near-transparent).
+  const FAN_STOPS = [0, 0.25, 0.5, 0.75, 1.0];
+  const FAN_LABELS = ['Today', '25% DTE', '50% DTE', '75% DTE', 'Expiry'];
+  const FAN_COLORS = ['#5B8CFF', '#4B78E0', '#3B65C0', '#2B52A0', '#1B3F80'];
+  const FAN_OPACITIES = [1, 0.82, 0.65, 0.48, 0.32];
+
+  function renderPayoffSvgFan(legs, spot, dteNear, expiryDteMap, sigmaLevels, breakevens) {
+    const chartLo = spot*0.85, chartHi = spot*1.15, chartN = 60;
+    const chartStep = (chartHi-chartLo)/(chartN-1);
+
+    const fanCurves = FAN_STOPS.map(frac => {
+      const days = Math.round(frac * dteNear);
+      return Array.from({length: chartN}, (_, i) => {
+        const p = chartLo + i*chartStep;
+        return [p, portfolioPnlPerUnit(legs, p, days === dteNear ? dteNear : days, expiryDteMap) * (state.lastData?.lot_size || 1)];
+      });
+    });
+
+    const W = 600, H = 280, padX = 10, padY = 18;
+    const allPrices = fanCurves[0].map(c=>c[0]);
+    const allPnls = fanCurves.flat().map(c=>c[1]);
+    const minP = Math.min(...allPrices), maxP = Math.max(...allPrices);
+    const minPnl = Math.min(...allPnls, 0), maxPnl = Math.max(...allPnls, 0);
+    const spanP = (maxP-minP)||1, spanPnl = (maxPnl-minPnl)||1;
+    const xScale = p => padX + ((p-minP)/spanP)*(W-2*padX);
+    const yScale = v => H-padY - ((v-minPnl)/spanPnl)*(H-2*padY);
+    const zeroY = yScale(0);
+
+    // area fill under expiry curve only
+    const expiryC = fanCurves[4];
+    const xFirst = xScale(allPrices[0]).toFixed(1), xLast = xScale(allPrices[allPrices.length-1]).toFixed(1);
+    const profitPts = expiryC.map(([p,v])=>`${xScale(p).toFixed(1)},${yScale(Math.max(v,0)).toFixed(1)}`).join(' ');
+    const lossPts  = expiryC.map(([p,v])=>`${xScale(p).toFixed(1)},${yScale(Math.min(v,0)).toFixed(1)}`).join(' ');
+    const profitArea = `M ${xFirst},${zeroY.toFixed(1)} L ${profitPts} L ${xLast},${zeroY.toFixed(1)} Z`;
+    const lossArea   = `M ${xFirst},${zeroY.toFixed(1)} L ${lossPts}   L ${xLast},${zeroY.toFixed(1)} Z`;
+
+    const beLines = (breakevens||[]).filter(b=>b>=minP&&b<=maxP).map(b =>
+      `<line x1="${xScale(b).toFixed(1)}" y1="${padY}" x2="${xScale(b).toFixed(1)}" y2="${H-padY}" style="stroke:var(--gold);stroke-width:1;stroke-dasharray:2,2;opacity:0.55"/>`
+    ).join('');
+    const spotLine = (spot>=minP && spot<=maxP)
+      ? `<line x1="${xScale(spot).toFixed(1)}" y1="${padY}" x2="${xScale(spot).toFixed(1)}" y2="${H-padY}" style="stroke:var(--accent);stroke-width:1.2;stroke-dasharray:3,2"/>`
+      : '';
+
+    let sigmaLines = '';
+    if (sigmaLevels) {
+      [{price:sigmaLevels.spot-sigmaLevels.oneSigma,label:'-1σ'},{price:sigmaLevels.spot+sigmaLevels.oneSigma,label:'+1σ'},
+       {price:sigmaLevels.spot-2*sigmaLevels.oneSigma,label:'-2σ'},{price:sigmaLevels.spot+2*sigmaLevels.oneSigma,label:'+2σ'}]
+      .filter(s=>s.price>=minP&&s.price<=maxP).forEach(s=>{
+        const x=xScale(s.price).toFixed(1), isOne=s.label.includes('1');
+        sigmaLines+=`<line x1="${x}" y1="${padY}" x2="${x}" y2="${H-padY}" style="stroke:var(--muted-2);stroke-width:1;stroke-dasharray:${isOne?'4,2':'1,3'};opacity:${isOne?0.35:0.25}"/>
+          <text x="${x}" y="${padY-2}" font-size="8" fill="var(--muted-2)" text-anchor="middle">${s.label}</text>`;
+      });
+    }
+
+    const labelCount = 5;
+    let axisLabels = '';
+    for (let i=0;i<labelCount;i++) {
+      const p = minP + (spanP*i/(labelCount-1));
+      axisLabels += `<text x="${xScale(p).toFixed(1)}" y="${H-2}" font-size="9" fill="var(--muted-2)" text-anchor="middle">${Math.round(p).toLocaleString('en-IN')}</text>`;
+    }
+
+    // fan lines: draw oldest first so "today" renders on top
+    const fanLines = [...fanCurves].reverse().map((curve, ri) => {
+      const i = FAN_STOPS.length - 1 - ri;
+      const pts = curve.map(([p,v])=>`${xScale(p).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ');
+      const isToday = i === 0, isExpiry = i === 4;
+      return `<polyline points="${pts}" style="fill:none;stroke:${FAN_COLORS[i]};stroke-width:${isToday?2:1.4};opacity:${FAN_OPACITIES[i]};${isExpiry?'stroke-dasharray:none':''}"/>`;
+    }).join('');
+
+    return `<svg viewBox="0 0 ${W} ${H}" class="builder-payoff-svg" preserveAspectRatio="none">
+      <path d="${profitArea}" style="fill:var(--pos);opacity:0.08"/>
+      <path d="${lossArea}" style="fill:var(--neg);opacity:0.08"/>
+      ${sigmaLines}
+      <line x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${W-padX}" y2="${zeroY.toFixed(1)}" style="stroke:var(--muted-2);stroke-width:1"/>
+      ${beLines}
+      ${spotLine}
+      ${fanLines}
+      ${axisLabels}
+    </svg>`;
   }
 
   function computeChartScale(expiryCurve, sliderCurve, cappedCurve, hasGreekOverlay) {
@@ -2432,6 +3021,146 @@
     return total;
   }
 
+  // ====================================================================
+  // BROKERAGE + TAX CALCULATOR — NSE F&O Options charges as of FY 2025-26.
+  // All rates are publicly documented and applied here explicitly so you
+  // can see exactly what's being deducted (not a black box).
+  //
+  // STT:           0.0125% of sell-side premium turnover only
+  // Exchange:      NSE F&O — 0.053% of total turnover
+  // SEBI:          ₹10 per crore of turnover (= 0.000001 × turnover)
+  // Stamp duty:    0.003% of buy-side turnover only
+  // Brokerage:     configurable, default ₹20/order (standard discount broker)
+  // GST:           18% of (brokerage + exchange charges)
+  //
+  // NOTE: STT on exercise/assignment of ITM options at expiry is 0.125%
+  // of intrinsic value — much higher than the normal 0.0125%. This calc
+  // uses the normal rate (assumes you close before expiry or options expire
+  // worthless). If you routinely let ITM options get exercised, the actual
+  // STT will be significantly higher than shown here.
+  // ====================================================================
+  function computeBrokerageCost(legs, lotSize, brokeragePerOrder = 20) {
+    let buyTurnover = 0, sellTurnover = 0, numOrders = 0;
+    for (const leg of legs) {
+      if (!leg.premium || leg.premium <= 0) continue;
+      if (leg.instrument_type === 'FUTURES') {
+        // Futures charges differ (0.005% each side, no STT on sell)
+        // simplified: treat as zero here, flag as N/A for futures legs
+        numOrders++;
+        continue;
+      }
+      const tv = leg.premium * leg.qty_lots * lotSize;
+      if (leg.action === 'BUY') buyTurnover += tv;
+      else sellTurnover += tv;
+      numOrders++;
+    }
+    const totalTurnover = buyTurnover + sellTurnover;
+    const stt = sellTurnover * 0.000125;            // 0.0125% on sell only
+    const exchangeCharges = totalTurnover * 0.00053; // 0.053% NSE F&O
+    const sebiCharges = totalTurnover * 0.000001;    // ₹10/crore
+    const stampDuty = buyTurnover * 0.00003;         // 0.003% on buy only
+    const brokerage = numOrders * brokeragePerOrder;
+    const gst = (brokerage + exchangeCharges) * 0.18;
+    const total = stt + exchangeCharges + sebiCharges + stampDuty + brokerage + gst;
+    return {
+      stt: +stt.toFixed(2), exchangeCharges: +exchangeCharges.toFixed(2),
+      sebiCharges: +sebiCharges.toFixed(2), stampDuty: +stampDuty.toFixed(2),
+      brokerage: +brokerage.toFixed(2), gst: +gst.toFixed(2),
+      total: +total.toFixed(2), hasFutures: legs.some(l=>l.instrument_type==='FUTURES'),
+    };
+  }
+
+  // ====================================================================
+  // STRATEGY LTP CHART — tracks combined strategy premium over the
+  // session as legs are built. "LTP" here = sign-adjusted combined
+  // current market value of all legs relative to their entry premium.
+  // Shows how the position's market value drifts with spot/time.
+  //
+  // Combined LTP per unit = Σ (current_ltp × sign) for each leg
+  //   where sign = +1 for BUY legs, -1 for SELL legs
+  // This is the current "value" of the whole portfolio — when it
+  // equals the entry combined LTP, P&L = 0. When it's lower for a
+  // short position, you're profitable (decay working for you).
+  // ====================================================================
+  function computeCurrentCombinedLtp(legs) {
+    if (!state.lastData || !legs.length) return null;
+    const expiriesData = state.lastData.expiries_data;
+    if (!expiriesData) return null;
+    let total = 0;
+    for (const leg of legs) {
+      if (leg.instrument_type === 'FUTURES') {
+        const spot = state.lastData.underlying_value;
+        total += (leg.action === 'BUY' ? 1 : -1) * (spot - leg.premium) * leg.qty_lots;
+        continue;
+      }
+      const sd = findChainStrikeData(leg.strike, leg.expiry);
+      if (!sd) {
+        // If we can't find this leg in the chain (e.g. expiry no longer in scope),
+        // fall back to using the entry premium (zero change for that leg)
+        continue;
+      }
+      const currentLtp = leg.option_type === 'CE' ? sd.ce_ltp : sd.pe_ltp;
+      if (!currentLtp) continue;
+      total += (leg.action === 'BUY' ? 1 : -1) * currentLtp * leg.qty_lots;
+    }
+    return total;
+  }
+
+  function renderStratLtpChart() {
+    if (!els.stratLtpChart || !builderState.legs.length) {
+      if (els.stratLtpChart) els.stratLtpChart.innerHTML = '';
+      if (els.stratLtpCurrent) els.stratLtpCurrent.textContent = '';
+      return;
+    }
+    const currentLtp = computeCurrentCombinedLtp(builderState.legs);
+    if (currentLtp === null) return;
+
+    // snapshot the current value
+    const now = Date.now();
+    const hist = builderState.ltpHistory;
+    // sample on every refresh cycle (throttled to avoid duplicates within the same 5s window)
+    const lastSample = hist[hist.length - 1];
+    if (!lastSample || (now - lastSample.t) > 3000) {
+      hist.push({ t: now, v: currentLtp });
+      if (hist.length > 500) hist.shift();
+    }
+
+    const lotSize = state.lastData?.lot_size || 1;
+    const currentRupees = currentLtp * lotSize;
+    if (els.stratLtpCurrent) {
+      const cls = currentLtp >= 0 ? 'pos-txt' : 'neg-txt';
+      els.stratLtpCurrent.innerHTML = `<span class="${cls}">Net ${fmtRupee(currentRupees)}</span>`;
+    }
+
+    if (hist.length < 2) {
+      els.stratLtpChart.innerHTML = '<div class="pcr-trend-empty">Collecting data as the dashboard refreshes…</div>';
+      return;
+    }
+    const W = 900, H = 70, padX = 6, padY = 8;
+    const vals = hist.map(h => h.v);
+    const minV = Math.min(...vals), maxV = Math.max(...vals);
+    const spanV = (maxV - minV) || 1;
+    const xScale = i => padX + (i / (hist.length-1)) * (W - 2*padX);
+    const yScale = v => H - padY - ((v - minV) / spanV) * (H - 2*padY);
+    const pts = hist.map((h, i) => `${xScale(i).toFixed(1)},${yScale(h.v).toFixed(1)}`).join(' ');
+    // zero line
+    const zeroY = minV <= 0 && maxV >= 0 ? yScale(0) : null;
+    const zeroLine = zeroY ? `<line x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${W-padX}" y2="${zeroY.toFixed(1)}" style="stroke:var(--muted-2);stroke-width:1;stroke-dasharray:2,2;opacity:0.5"/>` : '';
+    const color = currentLtp >= 0 ? 'var(--pos)' : 'var(--neg)';
+    els.stratLtpChart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="pcr-trend-svg" preserveAspectRatio="none">
+      ${zeroLine}
+      <polyline points="${pts}" style="fill:none;stroke:${color};stroke-width:1.6"/>
+    </svg>`;
+  }
+
+  // Reset LTP history when legs change structurally (added/removed/expiry changed)
+  // so the chart doesn't mix data from different position configurations
+  function resetStratLtpHistory() {
+    builderState.ltpHistory = [];
+    if (els.stratLtpChart) els.stratLtpChart.innerHTML = '';
+    if (els.stratLtpCurrent) els.stratLtpCurrent.textContent = '';
+  }
+
   function renderBuilder() {
     const data = state.lastData;
     if (!els.legsList) return;
@@ -2496,8 +3225,17 @@
     }
     const expMove = computeExpectedMove(state.lastData);
     const sigmaLevels = expMove ? { spot, oneSigma: expMove.straddle } : null;
-    els.builderPayoffChart.innerHTML = renderPayoffSvgDual(expiryCurve, sliderCurve, analysis.breakevens, spot, greekCurve, builderState.greekOverlay, cappedCurve, sigmaLevels);
-    builderState._chartCurves = { expiryCurve, sliderCurve, cappedCurve, hasGreekOverlay: !!greekCurve };
+    if (builderState.fanView) {
+      els.builderPayoffChart.innerHTML = renderPayoffSvgFan(builderState.legs, spot, dteNear, expiryDteMap, sigmaLevels, analysis.breakevens);
+      // crosshair requires _chartCurves; in fan mode use the expiry and today curves
+      builderState._chartCurves = { expiryCurve, sliderCurve: expiryCurve, cappedCurve: null, hasGreekOverlay: false };
+      // hide Greek/SL overlays in fan mode — they don't render in the fan SVG
+      els.greekLegendItem.style.display = 'none';
+      els.cappedLegendItem.style.display = 'none';
+    } else {
+      els.builderPayoffChart.innerHTML = renderPayoffSvgDual(expiryCurve, sliderCurve, analysis.breakevens, spot, greekCurve, builderState.greekOverlay, cappedCurve, sigmaLevels);
+      builderState._chartCurves = { expiryCurve, sliderCurve, cappedCurve, hasGreekOverlay: !!greekCurve };
+    }
 
     const maxProfitStr = analysis.maxProfitUnlimited ? 'Unlimited' : fmtRupee(analysis.maxProfit);
     const maxLossStr = analysis.maxLossUnlimited ? 'Unlimited' : fmtRupee(analysis.maxLoss);
@@ -2594,6 +3332,38 @@
         </tbody>
       </table>
     `;
+
+    // ---- Brokerage + tax breakdown ----
+    if (els.brokeragePanel) {
+      const brokeragePerOrder = parseInt(els.brokeragePerOrderInput?.value || 20, 10);
+      const bc = computeBrokerageCost(builderState.legs, lotSize, brokeragePerOrder);
+      const items = [
+        { label: 'STT (sell side)', value: bc.stt },
+        { label: 'Exchange (NSE F&O)', value: bc.exchangeCharges },
+        { label: 'SEBI', value: bc.sebiCharges },
+        { label: 'Stamp Duty (buy side)', value: bc.stampDuty },
+        { label: `Brokerage (₹${brokeragePerOrder}×${builderState.legs.length})`, value: bc.brokerage },
+        { label: 'GST (18%)', value: bc.gst },
+      ];
+      const netCredit = netPremium; // already computed above (positive = credit)
+      const netAfterCosts = netCredit - bc.total;
+      const netCls = netAfterCosts >= 0 ? 'pos-txt' : 'neg-txt';
+      els.brokeragePanel.innerHTML = `
+        <div class="brokerage-breakdown">
+          ${items.map(it => `<div class="brokerage-item"><div class="bi-label">${it.label}</div><div class="bi-value">₹${it.value.toFixed(2)}</div></div>`).join('')}
+        </div>
+        <div class="brokerage-total-row"><span class="bt-label">Total charges</span><span class="bt-value">−₹${bc.total.toFixed(2)}</span></div>
+        <div class="brokerage-net-row">
+          <span class="bt-label">Net credit after costs</span>
+          <span class="bt-value ${netCls}">${fmtRupee(netAfterCosts)}</span>
+        </div>
+        <div class="brokerage-note">
+          Rates: STT 0.0125% (sell), NSE exchange 0.053%, SEBI ₹10/cr, stamp 0.003% (buy), GST 18% on brokerage+exchange.
+          ${bc.hasFutures ? ' Futures legs excluded (different rate schedule).' : ''}
+          <b>Important:</b> if ITM options are exercised at expiry, STT jumps to 0.125% of intrinsic value — close before expiry to avoid this.
+        </div>
+      `;
+    }
   }
 
   // ---------- Builder event wiring ----------
@@ -2605,6 +3375,16 @@
   els.greekLegendItem = document.getElementById('greekLegendItem');
   els.greekLegendLabel = document.getElementById('greekLegendLabel');
   els.cappedLegendItem = document.getElementById('cappedLegendItem');
+  els.fanViewToggle = document.getElementById('fanViewToggle');
+  els.chartLegendStandard = document.getElementById('chartLegendStandard');
+  els.chartLegendFan = document.getElementById('chartLegendFan');
+
+  els.fanViewToggle.addEventListener('change', () => {
+    builderState.fanView = els.fanViewToggle.checked;
+    els.chartLegendStandard.style.display = builderState.fanView ? 'none' : '';
+    els.chartLegendFan.style.display = builderState.fanView ? '' : 'none';
+    renderBuilder();
+  });
 
   els.greekOverlaySelect.addEventListener('click', (e) => {
     const btn = e.target.closest('.filter-pill');
@@ -2616,6 +3396,8 @@
   });
   els.greeksPanel = document.getElementById('greeksPanel');
   els.pnlTable = document.getElementById('pnlTable');
+  els.brokeragePanel = document.getElementById('brokeragePanel');
+  els.brokeragePerOrderInput = document.getElementById('brokeragePerOrderInput');
   els.manualTargetInput = document.getElementById('manualTargetInput');
   els.pnlIntervalSelect = document.getElementById('pnlIntervalSelect');
 
@@ -2628,6 +3410,7 @@
     builderState.pnlInterval = parseFloat(els.pnlIntervalSelect.value);
     renderBuilder();
   });
+  els.brokeragePerOrderInput.addEventListener('input', renderBuilder);
   els.slInput = document.getElementById('slInput');
   els.targetInput = document.getElementById('targetInput');
   els.optimizerToggleBtn = document.getElementById('optimizerToggleBtn');
@@ -2843,6 +3626,113 @@
     if (isHidden) renderDraftsPanel();
   });
 
+  els.rollAnalysisBtn = document.getElementById('rollAnalysisBtn');
+  els.rollPanel = document.getElementById('rollPanel');
+
+  els.rollAnalysisBtn.addEventListener('click', () => {
+    if (!builderState.legs.length || !state.lastData) return;
+    const isHidden = els.rollPanel.style.display === 'none';
+    els.rollPanel.style.display = isHidden ? 'block' : 'none';
+    if (isHidden) renderRollAnalysis();
+  });
+
+  function renderRollAnalysis() {
+    if (!state.lastData || !builderState.legs.length) return;
+    const allExpiries = state.lastData.all_expiries || [];
+    // find which expiry most legs are in, then pick the next one
+    const currentExpiry = builderState.legs[0]?.expiry;
+    const currentIdx = allExpiries.indexOf(currentExpiry);
+    if (currentIdx === -1 || currentIdx >= allExpiries.length - 1) {
+      els.rollPanel.innerHTML = '<div class="reversal-empty">No further expiry available to roll into — this is the last one in the chain.</div>';
+      return;
+    }
+    const targetExpiry = allExpiries[currentIdx + 1];
+    const targetDte = state.lastData.expiries_data?.[targetExpiry]?.dte ?? '?';
+
+    const rows = [];
+    const rollLegs = [];
+    let totalRollCost = 0;
+
+    for (const leg of builderState.legs) {
+      if (leg.instrument_type === 'FUTURES') {
+        rows.push({ desc: 'FUTURES leg', currentVal: '—', rollVal: '—', cost: '—', note: 'Manual roll required' });
+        continue;
+      }
+      // current leg value (cost to close: BUY to close a SELL, or SELL to close a BUY)
+      const currentClose = leg.premium; // use entry premium as proxy for current value — crosshair tooltip shows real current value
+      // same strike in target expiry
+      const sd = findChainStrikeData(leg.strike, targetExpiry);
+      const rollPremium = sd ? (leg.option_type === 'CE' ? sd.ce_ltp : sd.pe_ltp) : null;
+      const rollIv = sd ? (leg.option_type === 'CE' ? sd.ce_iv : sd.pe_iv) : null;
+
+      if (rollPremium === null) {
+        rows.push({ desc: `${leg.action} ${fmtInt(leg.strike)} ${leg.option_type}`, currentVal: fmtPrice(currentClose), rollVal: 'N/A', cost: '—', note: 'Strike not found in target expiry' });
+        continue;
+      }
+
+      // roll cost per lot: for a SELL leg, you pay to close (debit = currentClose) and receive to reopen (credit = rollPremium)
+      // net per lot = rollPremium - currentClose (positive = net credit on roll, negative = net debit)
+      const netPerLot = (leg.action === 'SELL' ? rollPremium - currentClose : currentClose - rollPremium) * leg.qty_lots;
+      const netRupees = netPerLot * state.lastData.lot_size;
+      totalRollCost += netRupees;
+
+      rows.push({
+        desc: `${leg.action} ${fmtInt(leg.strike)} ${leg.option_type} ×${leg.qty_lots}`,
+        currentVal: fmtPrice(currentClose),
+        rollVal: fmtPrice(rollPremium),
+        cost: netRupees,
+        note: '',
+      });
+
+      // build the rolled-over leg set for "Load rolled" button
+      rollLegs.push({ ...leg, expiry: targetExpiry, premium: rollPremium, iv: rollIv ?? leg.iv, strike: sd.strike });
+    }
+
+    const totalCls = totalRollCost >= 0 ? 'pos-txt' : 'neg-txt';
+    const totalLabel = totalRollCost >= 0 ? `Net roll credit: ${fmtRupee(totalRollCost)}` : `Net roll debit: ${fmtRupee(Math.abs(totalRollCost))}`;
+
+    els.rollPanel.innerHTML = `
+      <div style="font-size:11px;color:var(--muted-2);margin-bottom:10px;">
+        Rolling from <b style="color:var(--text)">${escapeHtml(currentExpiry)}</b> → <b style="color:var(--text)">${escapeHtml(targetExpiry)}</b> (${targetDte}d DTE).
+        Premiums use live chain data for the target expiry. Entry prices use your leg's opening premium as a proxy — real close prices depend on current bid.
+      </div>
+      <table class="roll-table">
+        <colgroup>
+          <col class="rc-leg"><col class="rc-entry"><col class="rc-roll"><col class="rc-pnl">
+        </colgroup>
+        <thead><tr>
+          <th title="Leg description">Leg</th>
+          <th title="Entry / close premium">Entry</th>
+          <th title="${escapeHtml(targetExpiry)}">${escapeHtml(targetExpiry.split('-').slice(0,2).join('-'))}</th>
+          <th title="Net P&amp;L on roll">Net P&amp;L</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td title="${escapeHtml(r.desc)}">${escapeHtml(r.desc)}</td>
+            <td>${r.currentVal}</td>
+            <td>${r.rollVal}</td>
+            <td class="${typeof r.cost === 'number' ? (r.cost>=0?'pos-txt':'neg-txt') : ''}">${typeof r.cost === 'number' ? fmtRupee(r.cost) : r.cost}${r.note ? ` <span style="color:var(--muted-2);font-size:8.5px;" title="${escapeHtml(r.note)}">ⓘ</span>` : ''}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div class="roll-total-row">
+        <span class="roll-total-label ${totalCls}">${totalLabel}</span>
+        ${rollLegs.length === builderState.legs.filter(l=>l.instrument_type!=='FUTURES').length
+          ? `<button class="roll-load-btn" id="loadRolledLegsBtn">Load rolled position →</button>`
+          : '<span style="font-size:10px;color:var(--muted-2);">Some legs could not be rolled — load manually</span>'}
+      </div>
+    `;
+
+    document.getElementById('loadRolledLegsBtn')?.addEventListener('click', () => {
+      builderState.legs = rollLegs.map(l => ({ ...l }));
+      builderState.dateSliderDays = 0;
+      renderBuilder();
+      els.rollPanel.style.display = 'none';
+      showToast(`Loaded rolled position into ${escapeHtml(targetExpiry)}`);
+    });
+  }
+
+
   els.slInput.addEventListener('input', () => {
     const v = parseFloat(els.slInput.value);
     builderState.slAmount = (!isNaN(v) && v > 0) ? v : null;
@@ -2869,12 +3759,12 @@
     const action = btn.dataset.legAction;
 
     if (action === 'toggle-action') leg.action = leg.action === 'BUY' ? 'SELL' : 'BUY';
-    else if (action === 'toggle-type') { leg.option_type = leg.option_type === 'CE' ? 'PE' : 'CE'; refreshLegFromChain(leg); }
+    else if (action === 'toggle-type') { leg.option_type = leg.option_type === 'CE' ? 'PE' : 'CE'; refreshLegFromChain(leg); resetStratLtpHistory(); }
     else if (action === 'strike-up') { leg.strike += gap; refreshLegFromChain(leg); }
     else if (action === 'strike-down') { leg.strike -= gap; refreshLegFromChain(leg); }
     else if (action === 'qty-up') leg.qty_lots += 1;
     else if (action === 'qty-down') leg.qty_lots = Math.max(1, leg.qty_lots - 1);
-    else if (action === 'remove') builderState.legs.splice(idx, 1);
+    else if (action === 'remove') { builderState.legs.splice(idx, 1); resetStratLtpHistory(); }
 
     renderBuilder();
   });
@@ -3197,6 +4087,278 @@
     else addCustomSymbolPill(sym);
   });
 
+  // ====================================================================
+  // EXPIRY COUNTDOWN TIMER — live clock to 15:30 IST on expiry day.
+  // NSE weekly options expire at 15:30 IST (3:30 PM) on the expiry date.
+  // We compute from the `data.expiry` string (format "23-Jun-2026") that
+  // the server already returns, so no additional data source is needed.
+  // On expiry day, switches to seconds display for urgency.
+  // ====================================================================
+  function parseExpiryDate(expiryStr) {
+    // Format: "23-Jun-2026" — parse manually for cross-browser reliability
+    if (!expiryStr || expiryStr === '—') return null;
+    const parts = expiryStr.split('-');
+    if (parts.length !== 3) return null;
+    const months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+    const day = parseInt(parts[0], 10);
+    const month = months[parts[1]];
+    const year = parseInt(parts[2], 10);
+    if (isNaN(day) || month === undefined || isNaN(year)) return null;
+    // NSE expiry cutoff: 15:30:00 IST = UTC+5:30, so UTC 10:00:00
+    return new Date(Date.UTC(year, month, day, 10, 0, 0));
+  }
+
+  function updateCountdown() {
+    if (!els.metaCountdown) return;
+    const expiry = state.lastData?.expiry;
+    const expiryDate = parseExpiryDate(expiry);
+    if (!expiryDate) { els.metaCountdown.textContent = '—'; return; }
+    const now = Date.now();
+    const msLeft = expiryDate.getTime() - now;
+    if (msLeft <= 0) {
+      els.metaCountdown.textContent = 'Expired';
+      els.metaCountdown.style.color = 'var(--neg)';
+      return;
+    }
+    els.metaCountdown.style.color = '';
+    const totalSec = Math.floor(msLeft / 1000);
+    const days = Math.floor(totalSec / 86400);
+    const hours = Math.floor((totalSec % 86400) / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    const secs = totalSec % 60;
+    if (days >= 1) {
+      els.metaCountdown.textContent = `${days}d ${hours}h ${mins}m`;
+    } else if (hours >= 1) {
+      els.metaCountdown.textContent = `${hours}h ${mins}m ${secs}s`;
+      els.metaCountdown.style.color = hours < 2 ? 'var(--gold)' : '';
+    } else {
+      // within the last hour: show with seconds, highlight urgently
+      els.metaCountdown.textContent = `${mins}m ${secs}s`;
+      els.metaCountdown.style.color = 'var(--neg)';
+    }
+  }
+
+  setInterval(updateCountdown, 1000);
+
+  // ====================================================================
+  // F&O MOVERS — Top 5 Gainers & Losers among F&O stocks for today.
+  // Click any stock to load its option chain in the main dashboard.
+  // Data comes from /api/fno-movers (which calls NSE's live analysis API
+  // server-side and filters to F&O-eligible stocks only).
+  // ====================================================================
+  els.gainersList = document.getElementById('gainersList');
+  els.losersList = document.getElementById('losersList');
+  els.moversTime = document.getElementById('moversTime');
+  els.moversRefreshBtn = document.getElementById('moversRefreshBtn');
+
+  async function fetchAndRenderMovers(force = false) {
+    if (!els.gainersList) return;
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const resp = await fetch(`${base}/api/fno-movers`, { signal: AbortSignal.timeout(20000) });
+      const data = await resp.json();
+      if (data.source === 'pending') {
+        els.gainersList.innerHTML = `<div class="movers-loading">⏳ ${escapeHtml(data.error || 'Starting up…')} Load any option chain to warm the session.</div>`;
+        els.losersList.innerHTML = '';
+        return;
+      }
+      if (data.error && !data.gainers.length) {
+        const errMsg = data.error.length < 200 ? data.error : data.error.slice(0, 200) + '…';
+        els.gainersList.innerHTML = `<div class="movers-loading" style="color:var(--neg);font-size:10.5px;">${escapeHtml(errMsg)}</div>`;
+        els.losersList.innerHTML = `<div class="movers-loading" style="color:var(--muted-2);font-size:10.5px;">Load the option chain first — it warms up the NSE session that movers reuse.</div>`;
+        return;
+      }
+      renderMovers(data.gainers, els.gainersList, 'pos');
+      renderMovers(data.losers, els.losersList, 'neg');
+      if (els.moversTime) els.moversTime.textContent = data.as_of ? `· ${data.as_of}` : '';
+    } catch (e) {
+      els.gainersList.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Server not reachable. Start <code>nse_chain_server.py</code> first.</div>`;
+      els.losersList.innerHTML = '';
+    }
+  }
+
+  function renderMovers(list, container, polarity) {
+    if (!list.length) {
+      container.innerHTML = '<div class="movers-loading">No data.</div>';
+      return;
+    }
+    const maxPct = Math.max(...list.map(m => Math.abs(m.pct_change)), 1);
+    container.innerHTML = list.map(m => {
+      const barWidth = Math.min((Math.abs(m.pct_change) / maxPct) * 100, 100).toFixed(1);
+      const sign = m.pct_change >= 0 ? '+' : '';
+      return `<div class="mover-row" data-mover-symbol="${escapeHtml(m.symbol)}">
+        <div class="mover-symbol">${escapeHtml(m.symbol)}</div>
+        <div class="mover-pct ${polarity}">${sign}${m.pct_change.toFixed(2)}%</div>
+        <div class="mover-bar-wrap"><div class="mover-bar ${polarity}" style="width:${barWidth}%"></div></div>
+      </div>`;
+    }).join('');
+  }
+
+  // Click a mover → switch to chain tab and load that symbol's option chain
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest('[data-mover-symbol]');
+    if (!row) return;
+    const symbol = row.dataset.moverSymbol;
+    if (!symbol) return;
+    // Switch to Chain tab
+    [...document.querySelectorAll('.tab')].forEach(t => t.classList.remove('active'));
+    [...document.querySelectorAll('.tab-panel')].forEach(p => p.classList.remove('active'));
+    const chainTabBtn = document.querySelector('[data-tab="chain"]');
+    chainTabBtn.classList.add('active');
+    document.getElementById('tab-chain').classList.add('active');
+    // Update the symbol selector and trigger a fetch
+    if (els.symbolSelect) {
+      const existing = [...els.symbolSelect.options].find(o => o.value === symbol);
+      if (existing) {
+        els.symbolSelect.value = symbol;
+      } else {
+        const opt = new Option(symbol, symbol);
+        els.symbolSelect.add(opt);
+        els.symbolSelect.value = symbol;
+      }
+    }
+    state.symbol = symbol;
+    fetchChain();
+  });
+
+  els.moversRefreshBtn?.addEventListener('click', () => fetchAndRenderMovers(true));
+
+  // ====================================================================
+  // AI STRATEGY SUGGESTIONS — time-aware strategy ideas using the
+  // Anthropic API, grounded in current live market data.
+  //
+  // Three windows:
+  //   Morning (9:15-11:30): Intraday momentum/gap plays, direction trades
+  //   Afternoon (11:30-14:30): Range trades, straddle/strangle adjustments
+  //   EOD (14:30-15:05): Positional carry-forward setups for next day
+  //
+  // The prompt is constructed from state.lastData so the suggestions are
+  // grounded in the actual current regime, VIX, PCR, IV, and straddle level.
+  // ====================================================================
+  els.getSuggestionsBtn = document.getElementById('getSuggestionsBtn');
+  els.suggestionsOutput = document.getElementById('suggestionsOutput');
+
+  function buildMarketContext() {
+    const d = state.lastData;
+    if (!d) return null;
+    const now = new Date();
+    const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+    const istHour = istNow.getUTCHours();
+    const istMin = istNow.getUTCMinutes();
+    const totalMins = istHour * 60 + istMin;
+
+    let session;
+    if (totalMins < 9*60+15)          session = 'pre-market';
+    else if (totalMins < 11*60+30)    session = 'morning';
+    else if (totalMins < 14*60+30)    session = 'afternoon';
+    else if (totalMins < 15*60+5)     session = 'eod';
+    else                               session = 'post-market';
+
+    const timeStr = `${String(istHour).padStart(2,'0')}:${String(istMin).padStart(2,'0')} IST`;
+    const expMove = d.straddle_premium ? `₹${d.straddle_premium.toFixed(0)} (1-day expected move via ATM straddle)` : 'N/A';
+    const ivRank = d.atm_iv_rank ? `${d.atm_iv_rank.rank_pct.toFixed(0)}th percentile (${d.atm_iv_rank.period_days}d lookback)` : 'insufficient history';
+
+    return {
+      session,
+      timeStr,
+      context: `
+Symbol: ${d.symbol}
+Current time (IST): ${timeStr} — session: ${session}
+Spot: ${d.underlying_value.toFixed(2)}
+ATM: ${d.atm}
+Expiry: ${d.expiry} (${d.dte} DTE)
+PCR (Put-Call Ratio): ${d.pcr}
+ATM IV: ${d.atm_iv}%
+IV Rank: ${ivRank}
+India VIX: ${d.india_vix !== null ? d.india_vix : 'unavailable'}
+Expected move (straddle): ${expMove}
+Market sentiment: ${d.sentiment || 'N/A'}
+Support wall: ${d.support?.strike ? d.support.strike : 'N/A'}
+Resistance wall: ${d.resistance?.strike ? d.resistance.strike : 'N/A'}
+Max pain: ${d.max_pain || 'N/A'}
+Lot size: ${d.lot_size}
+`.trim(),
+    };
+  }
+
+  els.getSuggestionsBtn?.addEventListener('click', async () => {
+    const ctx = buildMarketContext();
+    if (!ctx) {
+      els.suggestionsOutput.innerHTML = '<div class="movers-loading">Load the option chain first.</div>';
+      return;
+    }
+
+    els.suggestionsOutput.innerHTML = '<div class="suggest-loading"><div class="suggest-spinner"></div>Asking Claude for strategy ideas…</div>';
+    els.getSuggestionsBtn.disabled = true;
+
+    const sessionGuidance = {
+      'morning':    'Suggest 2 intraday strategies for the morning session (9:15-11:30). Prefer direction-based plays that exploit gap/momentum. Include a scalping idea and a structured options play.',
+      'afternoon':  'Suggest 2 intraday strategies for the afternoon session. Prefer range-bound or premium-selling setups. Mention whether the open straddle/strangle from morning should be adjusted.',
+      'eod':        'Suggest 2 positional strategies for overnight carry-forward (closing around 3pm). Prefer defined-risk setups with clear stop-loss. Include the best strike levels based on the data above.',
+      'pre-market': 'Market hasn\'t opened yet. Suggest 2 strategies to watch for at open based on the previous session data above.',
+      'post-market':'Market is closed. Suggest 2 positional setups to consider for the next day open.',
+    };
+    const guidance = sessionGuidance[ctx.session] || sessionGuidance['afternoon'];
+
+    const prompt = `You are an expert NSE F&O trader advising on Indian derivatives markets. 
+Here is the current live market snapshot:
+
+${ctx.context}
+
+${guidance}
+
+For each strategy, provide:
+1. Strategy name and structure (exact strikes/expiry if possible)
+2. Setup rationale (1-2 sentences tied to the data above)
+3. Entry condition
+4. Stop loss and target in ₹ premium or underlying points
+5. Risk: one honest sentence about what makes this trade wrong
+
+Format as two sections clearly labelled. Keep each strategy concise — no fluff.
+End with a one-sentence caveat about F&O risk.`;
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1000,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      const data = await response.json();
+      const text = data.content?.map(b => b.text || '').join('') || '';
+      if (!text) throw new Error('Empty response from API');
+      els.suggestionsOutput.innerHTML = renderSuggestionsMarkdown(text, ctx.timeStr, ctx.session);
+    } catch (err) {
+      els.suggestionsOutput.innerHTML = `<div style="color:var(--neg);font-size:11.5px;">Could not get suggestions: ${err.message}</div>`;
+    } finally {
+      els.getSuggestionsBtn.disabled = false;
+    }
+  });
+
+  function renderSuggestionsMarkdown(text, timeStr, session) {
+    const sessionLabels = {
+      morning: '🌅 Morning Session Strategies',
+      afternoon: '☀️ Afternoon Session Strategies',
+      eod: '🌆 EOD Positional Strategies (Carry)',
+      'pre-market': '⏰ Pre-Market Watch',
+      'post-market': '🌙 Next Day Positioning',
+    };
+    const escaped = text
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+      .replace(/\*(.*?)\*/g, '<i>$1</i>')
+      .replace(/^#{1,3}\s+(.+)$/gm, '<div class="suggest-label">$1</div>')
+      .replace(/\n\n/g,'</p><p>').replace(/\n/g,'<br>');
+    return `<div class="suggest-section">
+      <div class="suggest-label">${sessionLabels[session] || '📊 Strategy Suggestions'} · ${timeStr}</div>
+      <div class="suggestions-text"><p>${escaped}</p></div>
+      <div class="suggest-caveat">⚠ AI suggestions are not financial advice. F&O trading involves substantial risk of loss, including loss exceeding your investment. Always verify with your own analysis and manage position sizes carefully.</div>
+    </div>`;
+  }
+
   // ---------- boot ----------
   loadFnoSymbolList();
   fetchWatchlistData();
@@ -3205,6 +4367,7 @@
     state.autoTimer = setInterval(fetchChain, 5000);
   }
   fetchChain();
+  setTimeout(() => fetchAndRenderMovers(), 2500); // non-blocking background load
 })();
 </script>
 </body>

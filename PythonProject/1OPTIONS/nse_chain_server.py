@@ -93,6 +93,8 @@ try:
     import nse_alerts
     import nse_paper_trades
     import nse_drafts
+    import nse_span
+    import nse_fno_movers
 except ImportError as e:
     print(
         f"[ERROR] Could not import a required module ({e}) — make sure "
@@ -116,6 +118,14 @@ MIN_SECONDS_BETWEEN_FETCHES = 3.0
 CACHE_TTL_SECONDS = 4.0
 _last_fetch_time = 0.0
 _cache: dict[str, tuple[float, dict]] = {}
+
+# A single module-level NSESession that stays warm across requests.
+# The option-chain endpoint populates it on every successful fetch.
+# The movers endpoint reuses it to avoid paying the 2-second warm-up
+# cost on a session that's already live.
+_shared_fetcher: NSESession | None = None
+_shared_fetcher_ts: float = 0.0
+_SHARED_FETCHER_MAX_AGE = 270  # seconds — NSE cookies typically expire in ~5 min
 
 # India VIX is symbol-independent (same value regardless of which index/stock
 # you're viewing) and changes slowly relative to the option chain — cache it
@@ -141,6 +151,28 @@ def _get_india_vix(fetcher: NSESession) -> float | None:
         return _vix_cache["value"]  # serve last-known value if we have one, else None
 
 
+def _compute_iv_rank(symbol: str, current_iv: float) -> dict | None:
+    """Compute IV Rank (IVR) from the collected history.
+    IVR = (current_IV - period_low) / (period_high - period_low) × 100
+    Returns None if < 5 days of data (too few to be meaningful)."""
+    try:
+        records = nse_history_store.read_history(symbol, days=30)
+        ivs = [r["atm_iv"] for r in records if r.get("atm_iv") and r["atm_iv"] > 0]
+        if len(ivs) < 5:
+            return None
+        lo, hi = min(ivs), max(ivs)
+        rank = round((current_iv - lo) / (hi - lo) * 100, 1) if hi > lo else 50.0
+        return {
+            "rank_pct": rank,
+            "period_days": len(set(r["t"] // 86400 for r in records)),
+            "low": round(lo, 2),
+            "high": round(hi, 2),
+            "current": round(current_iv, 2),
+        }
+    except Exception as e:  # noqa: BLE001
+        return None
+
+
 def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
     """Fetch (or reuse a cached) chain, run the full analysis pipeline, and
     shape everything into a single JSON-serializable dict for the frontend."""
@@ -160,6 +192,11 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         raw = fetcher.get_option_chain(symbol)
         _last_fetch_time = time.time()
         _cache[cache_key] = (_last_fetch_time, raw)
+        # Save the warmed session so other endpoints (movers, etc.) can reuse
+        # it without paying the 2-second cold-start cost again
+        global _shared_fetcher, _shared_fetcher_ts
+        _shared_fetcher = fetcher
+        _shared_fetcher_ts = time.time()
 
     snap = parse_chain(raw, symbol, expiry)
     strike_gap = infer_strike_gap(snap)
@@ -232,6 +269,13 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
 
     india_vix = _get_india_vix(fetcher)
 
+    # ATM straddle premium — tracked over time for the straddle chart
+    atm_row = next((s for s in snap.strikes if abs(s.strike - atm) < 1e-6), None)
+    straddle_premium = round((atm_row.ce_ltp + atm_row.pe_ltp), 1) if atm_row else None
+
+    # IV Rank from collected history (meaningful after ≥5 days of data)
+    iv_rank = _compute_iv_rank(symbol, round(atm_iv, 2))
+
     response = {
         "symbol": snap.symbol,
         "expiry": snap.expiry,
@@ -243,39 +287,64 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         "far_expiry": far_expiry,
         "atm": atm,
         "atm_iv": round(atm_iv, 2),
+        "atm_iv_rank": iv_rank,
+        "straddle_premium": straddle_premium,
         "strike_gap": strike_gap,
         "lot_size": lot_size,
         "pcr": pcr,
         "max_pain": max_pain,
-        "payout_distribution": payout_distribution,  # [(strike, total_writer_payout), ...] — the Gain/Pain-by-strike data
+        "payout_distribution": payout_distribution,
         "support": asdict(support),
         "resistance": asdict(resistance),
         "sentiment": sentiment,
         "skew_note": skew_note,
         "ideas": [asdict(i) for i in ideas],
         "flags": flags,
-        "strikes": [asdict(s) for s in snap.strikes],   # FULL chain for table display
-        "expiries_data": expiries_data,   # {expiry_str: {"dte": int, "strikes": [...]}} for the Builder's week selector
+        "strikes": [asdict(s) for s in snap.strikes],
+        "expiries_data": expiries_data,
         "strategies": [asdict(s) for s in strategy_list],
         "india_vix": india_vix,
     }
 
-    # Persist a lightweight snapshot for cross-session trend tracking
-    # (Market View's OI-wall/max-pain trend charts read this back), and
-    # check it against alert thresholds. Both are best-effort — neither
-    # should ever be allowed to break the live response if they fail.
     snapshot = {
         "spot": snap.underlying_value, "pcr": pcr, "atm_iv": round(atm_iv, 2),
         "max_pain": max_pain, "support": support.strike, "resistance": resistance.strike,
-        "india_vix": india_vix,
+        "india_vix": india_vix, "straddle_premium": straddle_premium,
     }
     nse_history_store.append_snapshot(symbol, snapshot)
     try:
         nse_alerts.check_and_alert(symbol, snapshot)
-    except Exception as e:  # noqa: BLE001 - alerting must never break the live dashboard
+    except Exception as e:
         print(f"[!] Alert check failed (non-fatal): {e}")
 
     return response
+
+
+def _compute_brokerage_cost(legs: list[dict], lot_size: int, brokerage_per_order: float = 20.0) -> float:
+    """Compute total NSE F&O options transaction costs for a set of legs.
+    Same formula as the JS implementation — see the JS comment block for rate
+    citations. Returns the total cost in rupees (positive number to subtract
+    from P&L)."""
+    buy_turnover = sell_turnover = 0.0
+    num_orders = 0
+    for leg in legs:
+        if not leg.get("premium") or leg.get("instrument_type") == "FUTURES":
+            num_orders += 1
+            continue
+        tv = leg["premium"] * leg.get("qty_lots", 1) * lot_size
+        if leg.get("action") == "BUY":
+            buy_turnover += tv
+        else:
+            sell_turnover += tv
+        num_orders += 1
+    total_turnover = buy_turnover + sell_turnover
+    stt = sell_turnover * 0.000125
+    exchange = total_turnover * 0.00053
+    sebi = total_turnover * 0.000001
+    stamp = buy_turnover * 0.00003
+    brokerage = num_orders * brokerage_per_order
+    gst = (brokerage + exchange) * 0.18
+    return round(stt + exchange + sebi + stamp + brokerage + gst, 2)
 
 
 def _compute_open_trade_pnl(trade: dict) -> float | None:
@@ -432,6 +501,48 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Could not load drafts: {e}"}, status=500)
             return
 
+        if parsed.path == "/api/iv-rank":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            try:
+                records = nse_history_store.read_history(symbol, days=30)
+                ivs = [r["atm_iv"] for r in records if r.get("atm_iv") and r["atm_iv"] > 0]
+                if len(ivs) < 5:
+                    self._send_json({"symbol": symbol, "iv_rank": None,
+                                     "msg": f"Need ≥5 data points, have {len(ivs)}"})
+                    return
+                lo, hi = min(ivs), max(ivs)
+                # Return full IV history for charting (downsampled)
+                iv_history = nse_history_store.downsample(
+                    [{"t": r["t"], "iv": r["atm_iv"]} for r in records if r.get("atm_iv")], 300
+                )
+                self._send_json({
+                    "symbol": symbol,
+                    "iv_rank": {
+                        "current": round(ivs[-1], 2) if ivs else None,
+                        "low": round(lo, 2), "high": round(hi, 2),
+                        "rank_pct": round((ivs[-1] - lo) / (hi - lo) * 100, 1) if hi > lo else 50.0,
+                        "period_days": len(set(r["t"] // 86400 for r in records)),
+                        "samples": len(ivs),
+                    },
+                    "iv_history": iv_history,
+                })
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"IV rank calculation failed: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/fno-movers":
+            self._send_json(nse_fno_movers.get_movers())
+            return
+            try:
+                records = nse_history_store.read_history(symbol, days=1)
+                straddle_pts = [{"t": r["t"], "v": r["straddle_premium"]}
+                                 for r in records if r.get("straddle_premium")]
+                straddle_pts = nse_history_store.downsample(straddle_pts, 300)
+                self._send_json({"symbol": symbol, "points": straddle_pts})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"Straddle history failed: {e}"}, status=500)
+            return
+
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)
 
     def do_POST(self):
@@ -478,7 +589,24 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "Could not price this trade right now (expiry may have passed) — try again or check manually"}, status=502)
                     return
                 closed = nse_paper_trades.close_trade(trade_id, live_pnl, body.get("reason", "manual"))
-                self._send_json({"trade": closed})
+                # deduct brokerage for BOTH entry (when trade was opened) and
+                # exit (now) — two full round-legs of transaction costs
+                entry_costs = _compute_brokerage_cost(trade["legs"], trade["lot_size"])
+                exit_costs = _compute_brokerage_cost(trade["legs"], trade["lot_size"])
+                total_costs = entry_costs + exit_costs
+                net_pnl = live_pnl - total_costs
+                # re-close with the cost-adjusted P&L
+                closed = nse_paper_trades.close_trade.__func__ if False else None
+                # re-read and update in place since close_trade already wrote the file
+                all_trades = nse_paper_trades.load_trades()
+                for t in all_trades:
+                    if t["id"] == trade_id:
+                        t["exit_pnl"] = round(net_pnl, 2)
+                        t["brokerage_deducted"] = round(total_costs, 2)
+                        closed = t
+                        break
+                nse_paper_trades.save_trades(all_trades)
+                self._send_json({"trade": closed, "costs": {"entry": entry_costs, "exit": exit_costs, "total": total_costs}})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Could not close paper trade: {e}"}, status=500)
             return
@@ -527,6 +655,14 @@ def main():
     nse_alerts.ensure_config_file_exists()
     alert_cfg = nse_alerts.load_config()
     alert_status = "ENABLED" if alert_cfg.get("enabled") and alert_cfg.get("telegram_token") else "disabled (edit alert_config.json to set up Telegram alerts)"
+
+    # Start movers background worker — fetches F&O top gainers/losers every 90s
+    # using the shared warmed session from the option chain fetcher.
+    nse_fno_movers.start_background_worker(
+        get_shared_fetcher=lambda: _shared_fetcher,
+        lot_size_fetcher=nse_lot_sizes,
+    )
+    print("[i] F&O movers background worker started (updates every 90s after first chain fetch)")
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[i] NSE chain server running at http://{args.host}:{args.port}")

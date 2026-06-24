@@ -19,7 +19,7 @@ institutional_signals.html
 *.md
 !index.html
 !nse_dashboard.html
-
+*.jsonl
 
 
 /1OPTIONS/history/BANKNIFTY_2026-06-20.jsonl
