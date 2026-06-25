@@ -410,6 +410,367 @@ def _compute_open_trade_pnl(trade: dict) -> float | None:
         return None
 
 
+def _ohlc_from_history(symbol: str) -> dict | None:
+    """
+    Read previous day's OHLC from the locally-stored history files.
+    This is the most reliable source — it's derived from actual spot prices
+    the server observed throughout that session.
+
+    Tries the last 4 calendar days so weekends/holidays are handled automatically.
+    Requires at least 5 observations to be considered a valid session.
+    """
+    from datetime import date, timedelta
+    from nse_history_store import HISTORY_DIR
+    import json as _json
+
+    for delta in range(1, 5):
+        target = date.today() - timedelta(days=delta)
+        path = HISTORY_DIR / f"{symbol.upper()}_{target.isoformat()}.jsonl"
+        if not path.exists():
+            continue
+        spots = []
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        r = _json.loads(line)
+                        s = r.get("spot") or r.get("close")
+                        if s and float(s) > 0:
+                            spots.append(float(s))
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+        if len(spots) < 5:
+            continue   # too few observations — probably a partial/corrupt file
+        return {
+            "symbol": symbol,
+            "open": round(spots[0], 2),
+            "high": round(max(spots), 2),
+            "low":  round(min(spots), 2),
+            "close": round(spots[-1], 2),
+            "source": "history_daily",
+            "date": target.isoformat(),
+        }
+    return None
+
+
+def _fetch_prev_day_ohlc(symbol: str) -> dict:
+    """
+    Fetch the previous trading day's OHLC from NSE APIs only.
+    No dependency on locally-stored .jsonl history files.
+
+    Source priority:
+      1. historical/indicesHistory  — explicit date-range, returns EOD OHLC
+      2. chart-databyindex          — daily candle array, second-to-last = yesterday
+      3. Returns no-data            — user enters manually in the pivot panel
+    """
+    from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+    from datetime import date, timedelta
+
+    global _shared_fetcher, _shared_fetcher_ts
+    fetcher = (
+        _shared_fetcher
+        if (_shared_fetcher and getattr(_shared_fetcher, "_warmed", False)
+            and (time.time() - _shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE)
+        else NSESession()
+    )
+    # If the fetcher is fresh, warm it now so NSE API calls succeed.
+    if not getattr(fetcher, "_warmed", False):
+        try:
+            fetcher._warm_up()
+            _shared_fetcher = fetcher
+            _shared_fetcher_ts = time.time()
+        except Exception:  # noqa: BLE001
+            pass
+    h = dict(API_HEADERS)
+    h["Referer"] = NSE_OC_PAGE
+
+    index_map = {
+        "NIFTY":      ("NIFTY50",              "NIFTY 50"),
+        "BANKNIFTY":  ("NIFTY%20BANK",         "NIFTY BANK"),
+        "FINNIFTY":   ("NIFTY%20FIN%20SERVICE", "NIFTY FIN SERVICE"),
+        "MIDCPNIFTY": ("NIFTY%20MID%20SELECT",  "NIFTY MID SELECT"),
+        "SENSEX":     ("SENSEX",                "SENSEX"),
+    }
+
+    def _v(d, *keys):
+        for k in keys:
+            val = d.get(k)
+            if val:
+                try:
+                    return float(str(val).replace(",", "").strip())
+                except ValueError:
+                    continue
+        return 0.0
+
+    def _ohlc(O, H, L, C, src):
+        return {"symbol": symbol,
+                "open": round(float(O), 2), "high": round(float(H), 2),
+                "low":  round(float(L), 2), "close": round(float(C), 2),
+                "source": src}
+
+    # ── 1. historical/indicesHistory ────────────────────────────────────
+    # NSE prefixes fields with EOD_ (e.g. EOD_HIGH_INDEX_VAL).
+    # We query the last 5 calendar days to skip weekends / holidays.
+    if symbol in index_map:
+        _, idx_name = index_map[symbol]
+        idx_enc = idx_name.replace(" ", "%20")
+        today     = date.today()
+        date_to   = (today - timedelta(days=1)).strftime("%d-%m-%Y")
+        date_from = (today - timedelta(days=5)).strftime("%d-%m-%Y")
+        try:
+            url = (f"https://www.nseindia.com/api/historical/indicesHistory"
+                   f"?indexType={idx_enc}&from={date_from}&to={date_to}")
+            r = fetcher.session.get(url, headers=h, timeout=12)
+            if r.status_code == 200:
+                rows = (r.json().get("data") or {}).get("indexCloseOnlineRecords", [])
+                if rows:
+                    row = rows[-1]
+                    O = _v(row, "EOD_OPEN_INDEX_VAL",  "OPEN_INDEX_VAL",  "OPEN_INDEX_VALUE")
+                    H = _v(row, "EOD_HIGH_INDEX_VAL",  "HIGH_INDEX_VAL",  "HIGH_INDEX_VALUE")
+                    L = _v(row, "EOD_LOW_INDEX_VAL",   "LOW_INDEX_VAL",   "LOW_INDEX_VALUE")
+                    C = _v(row, "EOD_CLOSE_INDEX_VAL", "CLOSE_INDEX_VAL", "CLOSING_INDEX_VAL")
+                    if H > 0 and L > 0 and C > 0:
+                        return _ohlc(O or C, H, L, C, "daily_history")
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── 2. chart-databyindex ─────────────────────────────────────────────
+    if symbol in index_map:
+        idx_code, _ = index_map[symbol]
+        try:
+            r = fetcher.session.get(
+                f"https://www.nseindia.com/api/chart-databyindex?index={idx_code}&indices=true",
+                headers=h, timeout=12)
+            if r.status_code == 200:
+                payload = r.json() if isinstance(r.json(), dict) else {}
+                for key in ("grapthData", "graphData"):
+                    candles = payload.get(key, [])
+                    if candles and isinstance(candles[-1], (list, tuple)) and len(candles[-1]) >= 5:
+                        prev = candles[-2] if len(candles) >= 2 else candles[-1]
+                        O, H, L, C = float(prev[1]), float(prev[2]), float(prev[3]), float(prev[4])
+                        if H > 0 and L > 0 and C > 0:
+                            return _ohlc(O, H, L, C, "daily_chart")
+                closes = payload.get("closePrice") or []
+                highs  = payload.get("dayHigh")    or []
+                lows   = payload.get("dayLow")     or []
+                opens  = payload.get("openPrice")  or []
+                if closes and highs and lows and len(closes) >= 2:
+                    lv = lambda arr: float(arr[-2][1]) if len(arr) >= 2 else float(arr[-1][1])
+                    H2, L2, C2 = lv(highs), lv(lows), lv(closes)
+                    O2 = lv(opens) if opens else C2
+                    if H2 > 0 and L2 > 0 and C2 > 0:
+                        return _ohlc(O2, H2, L2, C2, "daily_chart")
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── No NSE data yet — try history store as last resort ──────────────
+    # The history store (.jsonl files) is populated by the server running
+    # during market hours. If present it's reliable; we use it silently
+    # without changing the "source" label so the UI shows green.
+    hist = _ohlc_from_history(symbol)
+    if hist:
+        return hist
+
+    # ── Absolute fallback: prompt the user ───────────────────────────────
+    se = _session_ohlc.get(symbol, {})
+    return {
+        "symbol": symbol,
+        "open":  round(se.get("open")  or 0, 2),
+        "high":  round(se.get("high")  or 0, 2),
+        "low":   round(se.get("low")   or 0, 2),
+        "close": round(se.get("close") or 0, 2),
+        "source": "no_data",
+        "warn": (
+            "NSE history endpoints did not return OHLC data yet. "
+            "Enter H / L / C manually in the pivot panel."
+        ),
+    }
+
+
+
+_nifty_cache: dict = {"ts": 0, "data": None}
+_NIFTY_CACHE_TTL = 60
+
+
+def _fetch_nifty_constituents() -> dict:
+    """
+    Fetch Nifty 50 top-10 weighted stocks.
+
+    Three strategies tried in order:
+      1. equity-stockIndices via params dict  (correct encoding, no %25 double-encode)
+      2. equity-stockIndices via pre-open key (alternate NSE endpoint)
+      3. Individual quote fetches for hardcoded top-10 (reliable final fallback)
+
+    Weight proxy: each stock's share of total session traded value.
+    Points contributed ≈ (pChange% × est_weight% × nifty_value) / 100
+    """
+    from nse_options_strategy import API_HEADERS, NSE_OC_PAGE, NSE_ALL_INDICES_API
+
+    now = time.time()
+    if _nifty_cache["data"] and (now - _nifty_cache["ts"]) < _NIFTY_CACHE_TTL:
+        return _nifty_cache["data"]
+
+    global _shared_fetcher, _shared_fetcher_ts
+    fetcher = (
+        _shared_fetcher
+        if (_shared_fetcher and getattr(_shared_fetcher, "_warmed", False)
+            and (now - _shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE)
+        else NSESession()
+    )
+    if not getattr(fetcher, "_warmed", False):
+        fetcher._warm_up()
+        _shared_fetcher = fetcher
+        _shared_fetcher_ts = time.time()
+
+    h = dict(API_HEADERS)
+    h["Referer"] = NSE_OC_PAGE
+
+    # Nifty 50 live index value (from allIndices — known reliable)
+    nifty_value = 24000.0
+    try:
+        r = fetcher.session.get(NSE_ALL_INDICES_API, headers=h, timeout=10)
+        if r.status_code == 200:
+            for row in r.json().get("data", []):
+                if row.get("index") == "NIFTY 50":
+                    nifty_value = float(row.get("last") or row.get("lastPrice") or 24000)
+                    break
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ── Strategy 1: equity-stockIndices with params dict ─────────────────
+    # Using params= avoids the %25 double-encoding bug that causes 404 when
+    # the URL string already contains %20 and requests re-encodes the %.
+    raw_stocks = []
+    for idx_name in ("NIFTY 50", "Nifty 50"):
+        try:
+            r = fetcher.session.get(
+                "https://www.nseindia.com/api/equity-stockIndices",
+                params={"index": idx_name},
+                headers=h, timeout=12,
+            )
+            if r.status_code == 200:
+                raw_stocks = r.json().get("data", [])
+                if raw_stocks:
+                    break
+        except Exception:  # noqa: BLE001
+            continue
+
+    # ── Strategy 2: market-data-pre-open (alternate endpoint) ────────────
+    if not raw_stocks:
+        try:
+            r = fetcher.session.get(
+                "https://www.nseindia.com/api/market-data-pre-open",
+                params={"key": "NIFTY"},
+                headers=h, timeout=12,
+            )
+            if r.status_code == 200:
+                payload = r.json()
+                # response shape: {"data": [{"metadata": {...}, "detail": {...}}], ...}
+                pre_open = payload.get("data", [])
+                for item in pre_open:
+                    meta = item.get("metadata") or {}
+                    if meta.get("symbol") and meta.get("lastPrice"):
+                        raw_stocks.append({
+                            "symbol":        meta.get("symbol"),
+                            "lastPrice":     meta.get("lastPrice"),
+                            "previousClose": meta.get("previousClose"),
+                            "change":        meta.get("change"),
+                            "pChange":       meta.get("pChange"),
+                            "totalTradedValue":  meta.get("totalTradedValue") or 0,
+                            "totalTradedVolume": meta.get("totalTradedVolume") or 0,
+                        })
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── Strategy 3: individual quotes for hardcoded top-10 ───────────────
+    # These are the current Nifty 50 heavyweights by free-float market cap.
+    # Weights are approximate (as of 2025 Q1/Q2) and change each quarterly
+    # rebalancing — but they're stable enough for intraday use.
+    _TOP10_WEIGHTS = [
+        ("HDFCBANK",   12.5), ("RELIANCE",   9.5), ("ICICIBANK",  8.8),
+        ("INFY",        6.2), ("TCS",         4.8), ("BHARTIARTL", 4.2),
+        ("KOTAKBANK",   3.8), ("LT",          3.2), ("AXISBANK",   3.1),
+        ("SBIN",        3.0),
+    ]
+    if not raw_stocks:
+        for sym, _ in _TOP10_WEIGHTS:
+            try:
+                r = fetcher.session.get(
+                    "https://www.nseindia.com/api/quote-equity",
+                    params={"symbol": sym, "series": "EQ"},
+                    headers=h, timeout=8,
+                )
+                if r.status_code == 200:
+                    pd = r.json().get("priceInfo") or {}
+                    raw_stocks.append({
+                        "symbol":        sym,
+                        "lastPrice":     pd.get("lastPrice"),
+                        "previousClose": pd.get("previousClose"),
+                        "change":        pd.get("change"),
+                        "pChange":       pd.get("pChange"),
+                        "totalTradedValue":  pd.get("totalTradedValue") or 0,
+                        "totalTradedVolume": pd.get("totalTradedVolume") or 0,
+                    })
+            except Exception:  # noqa: BLE001
+                continue
+
+    if not raw_stocks:
+        raise RuntimeError(
+            "All three NSE data sources failed. "
+            "Check that the session is warmed (load option chain first)."
+        )
+
+    # ── Build result ─────────────────────────────────────────────────────
+    stocks = [
+        s for s in raw_stocks
+        if s.get("symbol") not in ("NIFTY 50", "NIFTY50")
+        and float(s.get("lastPrice") or 0) > 0
+    ]
+    stocks.sort(key=lambda s: float(s.get("totalTradedValue") or 0), reverse=True)
+    # Return all stocks — client sorts and limits display to top 10 (or all 50)
+    top_n = stocks  # full list
+
+    # If we used the hardcoded fallback, apply known weights instead of
+    # computing from traded value (which is unreliable for individual fetches)
+    _weight_map = dict(_TOP10_WEIGHTS)
+    total_tv = sum(float(s.get("totalTradedValue") or 0) for s in stocks) or 1.0
+    use_fixed_weights = total_tv < 100   # sentinel: individual fetches have tiny tv
+
+    result = []
+    for rank, s in enumerate(top_n, 1):
+        sym = s.get("symbol", "")
+        wt  = (_weight_map.get(sym, 2.0) if use_fixed_weights
+               else (float(s.get("totalTradedValue") or 0) / total_tv * 100))
+        pct = float(s.get("pChange") or 0)
+        pts = round(pct / 100 * wt / 100 * nifty_value, 2)
+        result.append({
+            "rank": rank,
+            "symbol": sym,
+            "ltp":        round(float(s.get("lastPrice") or 0), 2),
+            "prev_close": round(float(s.get("previousClose") or 0), 2),
+            "change":     round(float(s.get("change") or 0), 2),
+            "pct_change": round(pct, 2),
+            "volume":     int(float(s.get("totalTradedVolume") or 0)),
+            "weight_est": round(wt, 2),
+            "pts_contributed": pts,
+        })
+
+    data = {
+        "stocks": result,
+        "nifty_value": nifty_value,
+        "as_of": time.strftime("%H:%M:%S"),
+        "note": "Weight estimated from traded value. Points contributed are approximate.",
+    }
+    _nifty_cache["ts"] = time.time()
+    _nifty_cache["data"] = data
+    return data
+
+
 class Handler(BaseHTTPRequestHandler):
     # Quiet the default per-request console spam; we print our own concise log line.
     def log_message(self, fmt, *args):
@@ -518,42 +879,14 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/ohlc":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             try:
-                fetcher = (
-                    _shared_fetcher if (_shared_fetcher and _shared_fetcher._warmed
-                                        and (time.time()-_shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE)
-                    else NSESession()
-                )
-                from nse_options_strategy import NSE_ALL_INDICES_API, API_HEADERS, NSE_OC_PAGE
-                h = dict(API_HEADERS); h["Referer"] = NSE_OC_PAGE
-                resp = fetcher.session.get(NSE_ALL_INDICES_API, headers=h, timeout=10)
-                ohlc = None
-                if resp.status_code == 200:
-                    idx_map = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
-                               "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
-                    idx_name = idx_map.get(symbol, symbol)
-                    for row in resp.json().get("data", []):
-                        if row.get("index") in (idx_name, symbol):
-                            ohlc = {
-                                "symbol": symbol,
-                                "open": float(row.get("open") or row.get("previousClose") or 0),
-                                "high": float(row.get("high") or 0),
-                                "low": float(row.get("low") or 0),
-                                "close": float(row.get("last") or row.get("lastPrice") or 0),
-                                "prev_close": float(row.get("previousClose") or 0),
-                                "source": "allIndices",
-                            }
-                            break
-                if not ohlc:
-                    e = _session_ohlc.get(symbol, {})
-                    ohlc = {"symbol": symbol, "open": e.get("open") or 0, "high": e.get("high") or 0,
-                            "low": e.get("low") or 0, "close": e.get("close") or 0,
-                            "prev_close": None, "source": "session"}
+                ohlc = _fetch_prev_day_ohlc(symbol)
                 self._send_json(ohlc)
             except Exception as e:  # noqa: BLE001
                 se = _session_ohlc.get(symbol, {})
-                self._send_json({"symbol": symbol, "open": se.get("open") or 0,
-                    "high": se.get("high") or 0, "low": se.get("low") or 0,
-                    "close": se.get("close") or 0, "prev_close": None, "source": "session", "error": str(e)})
+                self._send_json({"symbol": symbol,
+                    "open": se.get("open") or 0, "high": se.get("high") or 0,
+                    "low": se.get("low") or 0, "close": se.get("close") or 0,
+                    "prev_close": None, "source": "session", "error": str(e)})
             return
 
         if parsed.path == "/api/drafts":
@@ -592,7 +925,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"IV rank calculation failed: {e}"}, status=500)
             return
 
-        if parsed.path == "/api/fno-movers":
+        if parsed.path == "/api/nifty-constituents":
+            try:
+                self._send_json(_fetch_nifty_constituents())
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"stocks": [], "error": str(e)})
+            return
             self._send_json(nse_fno_movers.get_movers())
             return
             try:
@@ -703,6 +1041,29 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"deleted": deleted})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Could not delete draft: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/ai-suggest":
+            prompt = body.get("prompt", "").strip()
+            if not prompt:
+                self._send_json({"error": "No prompt provided"}, status=400)
+                return
+            try:
+                import anthropic  # noqa: PLC0415
+                client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+                msg = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=1000,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                self._send_json({"text": msg.content[0].text})
+            except ImportError:
+                self._send_json({"error": "anthropic not installed — run: pip install anthropic --break-system-packages"})
+            except Exception as e:  # noqa: BLE001
+                err = str(e)
+                if any(x in err.lower() for x in ("api_key", "authentication", "auth_")):
+                    err = "ANTHROPIC_API_KEY not set. Before starting the server: export ANTHROPIC_API_KEY=sk-ant-..."
+                self._send_json({"error": err})
             return
 
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)

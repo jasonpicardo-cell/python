@@ -248,7 +248,49 @@
   .vs-legend { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; color: var(--muted-2); }
   .vs-gradient { width: 80px; height: 8px; border-radius: 3px; background: linear-gradient(to right, hsl(220,70%,50%), hsl(30,80%,50%), hsl(0,80%,50%)); }
 
-  /* ── Level panels (pivot + VWAP) ── */
+  /* ── Home tab ── */
+  .home-layout {
+    display: grid; grid-template-columns: 1fr 420px; gap: 16px; align-items: start;
+  }
+  @media (max-width: 1100px) { .home-layout { grid-template-columns: 1fr; } }
+  .home-left { display: flex; flex-direction: column; gap: 12px; }
+  .home-right { display: flex; flex-direction: column; gap: 12px; }
+
+  /* ── Nifty 50 widget ── */
+  .nifty-widget {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px;
+  }
+  .nifty-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .nifty-table th {
+    padding: 5px 8px; text-align: right; font-size: 9.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+    cursor: pointer; user-select: none;
+  }
+  .nifty-table th:hover { color: var(--text); }
+  .nifty-table th.sort-asc::after  { content: ' ▲'; font-size: 8px; }
+  .nifty-table th.sort-desc::after { content: ' ▼'; font-size: 8px; }
+  .nifty-table th.sort-active { color: var(--accent); }
+  .nifty-table th:first-child, .nifty-table td:first-child { text-align: left; }
+  .nifty-table th:nth-child(2) { text-align: left; }
+  .nifty-table td {
+    padding: 7px 8px; border-bottom: 1px solid var(--border-soft);
+    font-family: 'IBM Plex Mono', monospace; text-align: right;
+    white-space: nowrap; vertical-align: middle;
+  }
+  .nifty-table td:first-child { font-family: inherit; font-weight: 700; text-align: center; color: var(--muted-2); font-size: 9px; }
+  .nifty-table td:nth-child(2) { font-family: inherit; font-weight: 700; text-align: left; font-size: 11.5px; }
+  .nifty-table tr:last-child td { border-bottom: none; }
+  .nifty-table tr:hover td { background: var(--panel-2); }
+  /* contribution bar inside pts cell */
+  .pts-cell { position: relative; }
+  .pts-bar {
+    position: absolute; top: 0; bottom: 0;
+    opacity: 0.12; border-radius: 2px; pointer-events: none;
+  }
+  .pts-bar.pos { background: var(--pos); right: 0; }
+  .pts-bar.neg { background: var(--neg); left: 0; }
   .level-panel {
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 12px 14px; margin-bottom: 10px;
@@ -263,25 +305,56 @@
   .level-source { font-size: 9.5px; color: var(--muted-2); }
   .level-alert-toggle { font-size: 11px; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 5px; }
   .level-alert-toggle input { cursor: pointer; }
+  .alert-controls { display: flex; align-items: center; gap: 6px; }
+  .alert-dur-label { display: flex; align-items: center; gap: 3px; }
+  .vol-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 64px; height: 4px; border-radius: 2px;
+    background: var(--panel-3); outline: none; cursor: pointer;
+  }
+  .vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+  .vol-slider::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer; border: none;
+  }
+
+  .ohlc-override-row {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px;
+    padding: 6px 0 8px; margin-bottom: 4px;
+    border-bottom: 1px solid var(--border-soft); font-size: 10.5px;
+  }
+  .ohlc-override-label { color: var(--muted); font-size: 9.5px; font-weight: 700; white-space: nowrap; }
+  .ohlc-lbl { display: flex; align-items: center; gap: 3px; color: var(--muted-2); font-size: 9.5px; }
+  .ohlc-inp {
+    width: 70px; background: var(--panel-3); border: 1px solid var(--border);
+    color: var(--text); border-radius: 5px; padding: 3px 5px; font-size: 10.5px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .ohlc-inp:focus { outline: none; border-color: var(--accent); }
+  .ohlc-inp.has-value { border-color: var(--accent-dim); }
 
   /* Level bar grid */
   .level-bars-wrap { display: flex; flex-direction: column; gap: 3px; }
   .level-bar-row {
-    display: grid; grid-template-columns: 54px 80px 1fr 14px;
-    align-items: center; gap: 6px; padding: 3px 0;
+    display: grid; grid-template-columns: 44px minmax(72px, 90px) 1fr;
+    align-items: center; gap: 6px 8px; padding: 3px 0;
+    min-width: 0; overflow: hidden;
   }
   .level-bar-label { font-size: 10px; font-weight: 700; text-align: right; }
-  .level-bar-price { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; text-align: right; }
+  .level-bar-price-block { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+  .level-bar-price { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+  .level-bar-dist { font-size: 8px; color: var(--muted-2); font-family: 'IBM Plex Mono', monospace; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .level-bar-track {
-    height: 7px; border-radius: 3px; background: var(--panel-3); position: relative; overflow: visible;
+    height: 7px; border-radius: 3px; background: var(--panel-3); position: relative; overflow: visible; min-width: 0;
   }
   .level-bar-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
-  .level-bar-spot { /* dot marking current spot on the track */
+  .level-bar-spot {
     position: absolute; top: -3px; width: 13px; height: 13px;
     border-radius: 50%; background: var(--text); border: 2px solid var(--panel);
     transform: translateX(-50%); pointer-events: none;
   }
-  .level-bar-dist { font-size: 9px; color: var(--muted-2); font-family: 'IBM Plex Mono', monospace; white-space: nowrap; }
   .level-divider { height: 1px; background: var(--border-soft); margin: 4px 0; grid-column: 1/-1; }
 
   /* Label colors */
@@ -889,7 +962,8 @@
   <div id="errorBannerWrap"></div>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="chain">Option Chain</button>
+    <button class="tab active" data-tab="home">Home</button>
+    <button class="tab" data-tab="chain">Option Chain</button>
     <button class="tab" data-tab="strategy">Strategy</button>
     <button class="tab" data-tab="builder">Builder</button>
     <button class="tab" data-tab="market">Market View</button>
@@ -898,38 +972,126 @@
   </nav>
 
   <main>
-    <section id="tab-chain" class="tab-panel active">
 
-      <!-- ── Pivot Levels ─────────────────────────────────────────── -->
-      <div class="level-panel" id="pivotPanel">
-        <div class="level-panel-head">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span class="skew-chart-title">Pivot Levels</span>
-            <select id="pivotTypeSelect" class="level-select">
-              <option value="fibonacci" selected>Fibonacci</option>
-              <option value="traditional">Traditional</option>
-              <option value="woodie">Woodie</option>
-              <option value="camarilla">Camarilla</option>
-              <option value="demark">DeMark</option>
-              <option value="classic">Classic</option>
-            </select>
-            <span class="level-source" id="pivotSource"></span>
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <!-- HOME TAB                                                       -->
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <section id="tab-home" class="tab-panel active">
+      <div class="home-layout">
+
+        <!-- Left column: AI Suggestions + Pivot Levels -->
+        <div class="home-left">
+
+          <!-- ── AI Strategy Suggestions ──────────────────────────── -->
+          <div class="strategy-suggest-panel" id="strategySuggestPanel">
+            <div class="movers-head">
+              <span class="skew-chart-title">🤖 AI Strategy Suggestions
+                <span style="font-size:10px;color:var(--muted-2);font-weight:400;"> · time-aware · PCR / VIX / IV</span>
+              </span>
+              <button class="btn" id="getSuggestionsBtn" style="font-size:10.5px;padding:5px 14px;">Generate</button>
+            </div>
+            <div id="suggestionsOutput" class="suggestions-output">
+              <div class="movers-loading">Hit Generate for time-aware strategy ideas.</div>
+            </div>
           </div>
-          <label class="level-alert-toggle" title="Beep and flash when price touches a level">
-            <input type="checkbox" id="pivotAlertToggle" checked> 🔔 Price alerts
-          </label>
-        </div>
-        <div class="level-bars-wrap" id="pivotBars"></div>
-      </div>
 
-      <!-- ── Anchored VWAP Bands ──────────────────────────────────── -->
-      <div class="level-panel" id="vwapPanel">
-        <div class="level-panel-head">
-          <span class="skew-chart-title">Anchored VWAP Bands <span style="font-size:9px;color:var(--muted-2);font-weight:400;">(session open)</span></span>
-          <span class="level-source" id="vwapSource"></span>
-        </div>
-        <div class="level-bars-wrap" id="vwapBars"></div>
-      </div>
+          <!-- ── Pivot Levels ──────────────────────────────────────── -->
+          <div class="level-panel" id="pivotPanel">
+            <div class="level-panel-head">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span class="skew-chart-title">Pivot Levels</span>
+                <select id="pivotTypeSelect" class="level-select">
+                  <option value="fibonacci" selected>Fibonacci</option>
+                  <option value="traditional">Traditional</option>
+                  <option value="woodie">Woodie</option>
+                  <option value="camarilla">Camarilla</option>
+                  <option value="demark">DeMark</option>
+                  <option value="classic">Classic</option>
+                </select>
+                <span class="level-source" id="pivotSource"></span>
+              </div>
+              <div class="alert-controls">
+                <label class="level-alert-toggle" title="Enable price-touch alerts">
+                  <input type="checkbox" id="pivotAlertToggle" checked> 🔔
+                </label>
+                <select id="alertSoundSelect" class="level-select" title="Alert sound type">
+                  <option value="tone">Tone</option>
+                  <option value="chime" selected>Chime</option>
+                  <option value="ping">Ping</option>
+                </select>
+                <input type="range" id="alertVolumeSlider" class="vol-slider" min="0" max="1" step="0.01" value="1" title="Volume">
+                <label class="alert-dur-label">
+                  <input type="number" id="alertDurationInput" class="ohlc-inp" value="2" min="0.2" max="10" step="0.1" style="width:42px;text-align:center;" title="Duration (seconds)">
+                  <span style="font-size:9px;color:var(--muted-2);">s</span>
+                </label>
+                <button class="btn" id="alertTestBtn" style="font-size:10px;padding:3px 9px;" title="Preview sound">▶</button>
+                <label class="level-alert-toggle" title="Speak the level name when touched">
+                  <input type="checkbox" id="voiceToggle" checked> 🗣
+                </label>
+              </div>
+            </div>
+            <div class="ohlc-override-row" id="ohlcOverrideRow">
+              <span class="ohlc-override-label">Prev Day:</span>
+              <label class="ohlc-lbl">H <input type="number" id="ohlcH" class="ohlc-inp" placeholder="High" step="0.05"></label>
+              <label class="ohlc-lbl">L <input type="number" id="ohlcL" class="ohlc-inp" placeholder="Low"  step="0.05"></label>
+              <label class="ohlc-lbl">C <input type="number" id="ohlcC" class="ohlc-inp" placeholder="Close" step="0.05"></label>
+              <label class="ohlc-lbl">O <input type="number" id="ohlcO" class="ohlc-inp" placeholder="Open (Woodie/DM)" step="0.05"></label>
+              <button class="btn" id="ohlcApplyBtn" style="font-size:10px;padding:3px 10px;">Apply</button>
+            </div>
+            <div class="level-bars-wrap" id="pivotBars"></div>
+          </div>
+
+        </div><!-- /.home-left -->
+
+        <!-- Right column: Nifty 50 Constituents -->
+        <div class="home-right">
+          <div class="nifty-widget" id="niftyWidget">
+            <div class="level-panel-head" style="margin-bottom:10px;">
+              <span class="skew-chart-title">Nifty 50 Constituents</span>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span class="level-source" id="niftyWidgetTime"></span>
+                <button class="btn" id="niftyExpandBtn" style="font-size:10px;padding:3px 9px;">⤢ All 50</button>
+                <button class="btn" id="niftyRefreshBtn" style="font-size:10px;padding:3px 9px;">↻</button>
+              </div>
+            </div>
+            <div id="niftyWidgetBody">
+              <div class="movers-loading">Loading constituent data…</div>
+            </div>
+            <div class="movers-note" id="niftyWidgetNote"></div>
+          </div>
+
+          <!-- ── F&O Top Movers ─────────────────────────────────────── -->
+          <div class="movers-panel" id="moversPanel">
+            <div class="movers-head">
+              <span class="skew-chart-title">F&amp;O Top Movers <span class="movers-time" id="moversTime"></span></span>
+              <button class="btn" id="moversRefreshBtn" style="font-size:10.5px;padding:4px 10px;">↻</button>
+            </div>
+            <div class="movers-grid" id="moversGrid">
+              <div class="movers-col">
+                <div class="movers-col-head gainers-head">▲ Top 5 Gainers</div>
+                <div class="movers-list" id="gainersList">
+                  <div class="movers-loading">Loading…</div>
+                </div>
+              </div>
+              <div class="movers-col">
+                <div class="movers-col-head losers-head">▼ Top 5 Losers</div>
+                <div class="movers-list" id="losersList">
+                  <div class="movers-loading">Loading…</div>
+                </div>
+              </div>
+            </div>
+            <div class="movers-note">Click any stock to load its option chain.</div>
+          </div>
+
+        </div><!-- /.home-right -->
+
+      </div><!-- /.home-layout -->
+    </section><!-- #tab-home -->
+
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <!-- OPTION CHAIN TAB                                               -->
+    <!-- ══════════════════════════════════════════════════════════════ -->
+    <section id="tab-chain" class="tab-panel">
 
       <div class="stat-grid" id="statGrid"></div>
       <div class="pcr-trend-wrap" id="pcrTrendWrap">
@@ -1191,18 +1353,6 @@
         every input and threshold is visible above, nothing is a hidden formula. It's a rule-based read, not a
         prediction. Treat it as one input alongside your own analysis.
       </div>
-
-      <div class="strategy-suggest-panel" id="strategySuggestPanel">
-        <div class="movers-head">
-          <span class="skew-chart-title">🤖 AI Strategy Suggestions
-            <span style="font-size:10px;color:var(--muted-2);font-weight:400;"> · based on current market data + time of day</span>
-          </span>
-          <button class="btn" id="getSuggestionsBtn" style="font-size:10.5px;padding:5px 14px;">Generate</button>
-        </div>
-        <div id="suggestionsOutput" class="suggestions-output">
-          <div class="movers-loading">Hit Generate to get time-aware strategy ideas grounded in the current regime, PCR, VIX, and IV data.</div>
-        </div>
-      </div>
     </section>
 
     <section id="tab-paper" class="tab-panel">
@@ -1224,38 +1374,14 @@
 
     <section id="tab-flow" class="tab-panel">
 
-      <div class="movers-panel" id="moversPanel">
-        <div class="movers-head">
-          <span class="skew-chart-title">F&amp;O Top Movers <span class="movers-time" id="moversTime"></span></span>
-          <button class="btn" id="moversRefreshBtn" style="font-size:10.5px;padding:4px 10px;">↻ Refresh</button>
-        </div>
-        <div class="movers-grid" id="moversGrid">
-          <div class="movers-col">
-            <div class="movers-col-head gainers-head">▲ Top 5 Gainers</div>
-            <div class="movers-list" id="gainersList">
-              <div class="movers-loading">Loading…</div>
-            </div>
-          </div>
-          <div class="movers-col">
-            <div class="movers-col-head losers-head">▼ Top 5 Losers</div>
-            <div class="movers-list" id="losersList">
-              <div class="movers-loading">Loading…</div>
-            </div>
-          </div>
-        </div>
-        <div class="movers-note">Click any stock to load its option chain. F&amp;O stocks only.</div>
-      </div>
-
-      <div style="margin-top:20px;">
-        <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
-        <div class="flow-table-wrap">
-          <table>
-            <thead><tr><th>Strike</th><th>Side</th><th>ΔOI</th><th>Read</th></tr></thead>
-            <tbody id="flagsBody">
-              <tr><td colspan="4" class="empty-state">No data yet.</td></tr>
-            </tbody>
-          </table>
-        </div>
+      <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
+      <div class="flow-table-wrap">
+        <table>
+          <thead><tr><th>Strike</th><th>Side</th><th>ΔOI</th><th>Read</th></tr></thead>
+          <tbody id="flagsBody">
+            <tr><td colspan="4" class="empty-state">No data yet.</td></tr>
+          </tbody>
+        </table>
       </div>
 
     </section>
@@ -1374,9 +1500,13 @@
       els.panels.forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+      if (tab.dataset.tab === 'home') {
+        fetchAndRenderNiftyConstituents();
+        fetchAndRenderMovers();
+        if (!state_ohlc.high) fetchOhlcForPivots();
+      }
       if (tab.dataset.tab === 'market') {
         fetchAndRenderHistoryTrend();
-        // Flush any dirty Market View render that was skipped during background refreshes
         if (state.marketViewDirty && state.lastData) {
           renderMarketView(state.lastData);
           renderGainPainChart(state.lastData);
@@ -1396,7 +1526,6 @@
         }
       }
       if (tab.dataset.tab === 'paper') fetchAndRenderPaperTrades();
-      if (tab.dataset.tab === 'flow') fetchAndRenderMovers();
     });
   });
 
@@ -1426,9 +1555,14 @@
     state.shouldScrollToAtm = true;
     state.sessionHistory = [];
     _chainRowState.clear();
-    _touchedLevels.clear();  // reset alerts for new symbol
+    _touchedLevels.clear();
+    delete _frozenOhlc[state.symbol];
     Object.assign(state_ohlc, {open:null,high:null,low:null,close:null,prev_close:null,source:null});
-    setTimeout(() => fetchOhlcForPivots(), 1500);  // after chain warms
+    ['ohlcH','ohlcL','ohlcC','ohlcO'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.value = ''; el.classList.remove('has-value'); }
+    });
+    setTimeout(() => fetchOhlcForPivots(), 1500);
     renderWatchlist();
     fetchChain();
   });
@@ -1609,7 +1743,6 @@
 
     renderStatCards(data);
     renderPivotLevels();
-    renderVwapBands();
 
     // ─── Determine which tab is currently active ──────────────────────────
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -1656,7 +1789,12 @@
       state.builderDirty = true;
     }
 
-    // ─── Restore scroll position AFTER all DOM mutations ─────────────────
+    // After the very first render, kick off OHLC fetch now that the session
+    // is warmed — if fetchOhlcForPivots already ran and got no_data,
+    // the session wasn't ready; fetching again now will succeed.
+    if (isFirstRender) {
+      setTimeout(() => { if (!state_ohlc.high) fetchOhlcForPivots(); }, 500);
+    }
     // Use setTimeout(0) as a cross-environment fallback — requestAnimationFrame
     // isn't available in all non-browser environments (e.g. Node.js test runners).
     const _restore = () => {
@@ -1683,81 +1821,227 @@
   }
 
   // ====================================================================
-  // PIVOT LEVELS  — 6 types, P + S1-S5 + R1-R5, visually striking bars
+  // PIVOT LEVELS — 6 types matching TradingView "Pivot Points Standard"
+  // Key fix: R3+ = PP + n*(H-L), NOT the classical H + n*(PP-L)
+  // Source: TradingView Pine Script for Pivot Points Standard indicator
   // ====================================================================
   const PIVOT_TYPES = {
-    fibonacci: (H, L, C, O) => {
+    fibonacci: (H, L, C) => {
       const P = (H + L + C) / 3, r = H - L;
-      return { P, R1: P+0.382*r, R2: P+0.618*r, R3: P+r, R4: P+1.618*r, R5: P+2.618*r,
-                    S1: P-0.382*r, S2: P-0.618*r, S3: P-r, S4: P-1.618*r, S5: P-2.618*r };
+      // TradingView Fibonacci ratios: 0.382, 0.618, 1.000, 1.272, 1.618
+      return { P,
+        R1: P+0.382*r, R2: P+0.618*r, R3: P+1.000*r, R4: P+1.272*r, R5: P+1.618*r,
+        S1: P-0.382*r, S2: P-0.618*r, S3: P-1.000*r, S4: P-1.272*r, S5: P-1.618*r };
     },
-    traditional: (H, L, C, O) => {
+    traditional: (H, L, C) => {
       const P = (H + L + C) / 3, r = H - L;
-      return { P, R1: 2*P-L, R2: P+r, R3: H+2*(P-L), R4: H+3*(P-L), R5: H+4*(P-L),
-                    S1: 2*P-H, S2: P-r, S3: L-2*(H-P), S4: L-3*(H-P), S5: L-4*(H-P) };
+      // TradingView Traditional: R3 = PP + 2*(H-L), NOT H + 2*(PP-L)
+      return { P,
+        R1: 2*P-L,  R2: P+r,    R3: P+2*r,  R4: P+3*r,  R5: P+4*r,
+        S1: 2*P-H,  S2: P-r,    S3: P-2*r,  S4: P-3*r,  S5: P-4*r };
     },
-    classic: (H, L, C, O) => PIVOT_TYPES.traditional(H, L, C, O),
+    classic: (H, L, C) => PIVOT_TYPES.traditional(H, L, C),
     woodie: (H, L, C, O) => {
       const P = (H + L + 2*C) / 4, r = H - L;
-      return { P, R1: 2*P-L, R2: P+r, R3: H+2*(P-L), R4: H+3*(P-L), R5: H+4*(P-L),
-                    S1: 2*P-H, S2: P-r, S3: L-2*(H-P), S4: L-3*(H-P), S5: L-4*(H-P) };
+      // Woodie uses different PP formula but same R3+ pattern
+      return { P,
+        R1: 2*P-L,  R2: P+r,    R3: P+2*r,  R4: P+3*r,  R5: P+4*r,
+        S1: 2*P-H,  S2: P-r,    S3: P-2*r,  S4: P-3*r,  S5: P-4*r };
     },
-    camarilla: (H, L, C, O) => {
+    camarilla: (H, L, C) => {
       const r = H - L;
+      // Camarilla: levels cluster around Close with 1.1 multiplier
       return { P: (H+L+C)/3,
         R1: C+1.1*r/12, R2: C+1.1*r/6, R3: C+1.1*r/4, R4: C+1.1*r/2, R5: C+1.1*r,
         S1: C-1.1*r/12, S2: C-1.1*r/6, S3: C-1.1*r/4, S4: C-1.1*r/2, S5: C-1.1*r };
     },
     demark: (H, L, C, O) => {
+      // TradingView DeMark: X depends on relationship of C vs O
       const X = C < O ? H+2*L+C : (C > O ? 2*H+L+C : H+L+2*C);
-      const P = X/4;
-      return { P, R1: X/2-L, R2: X/2-L+(H-L)*0.5, R3: X/2-L+(H-L), R4: X/2-L+(H-L)*1.5, R5: X/2-L+(H-L)*2,
-                    S1: X/2-H, S2: X/2-H-(H-L)*0.5, S3: X/2-H-(H-L), S4: X/2-H-(H-L)*1.5, S5: X/2-H-(H-L)*2 };
+      const P = X / 4;
+      const r = H - L;
+      // TradingView only shows R1/S1 for DeMark; we extend with the same range pattern
+      return { P,
+        R1: X/2-L,   R2: P+r,     R3: P+2*r,  R4: P+3*r,  R5: P+4*r,
+        S1: X/2-H,   S2: P-r,     S3: P-2*r,  S4: P-3*r,  S5: P-4*r };
     },
   };
 
   // ── OHLC state ──────────────────────────────────────────────────────
   const state_ohlc = { open: null, high: null, low: null, close: null, prev_close: null, source: null };
 
-  async function fetchOhlcForPivots() {
+  async function fetchOhlcForPivots(retryCount = 0) {
     const base = els.serverUrl.value.replace(/\/+$/, '');
     try {
-      const resp = await fetch(`${base}/api/ohlc?symbol=${state.symbol}`, { signal: AbortSignal.timeout(8000) });
+      const resp = await fetch(`${base}/api/ohlc?symbol=${state.symbol}`,
+        { signal: AbortSignal.timeout(15000) });
       const data = await resp.json();
-      if (data.high && data.low && data.open) {
-        Object.assign(state_ohlc, data);
-        renderPivotLevels();
+
+      // If server returned no_data and we still have retries, come back later.
+      // The chain fetch (which warms the NSE session) needs a moment to complete.
+      if ((data.source === 'no_data' || !data.high) && retryCount < 3) {
+        const delay = [8000, 15000, 30000][retryCount] ?? 30000;
+        setTimeout(() => fetchOhlcForPivots(retryCount + 1), delay);
+        return;
       }
-    } catch (e) { /* silently use session-tracked OHLC */ }
+
+      if (data.high && data.low && data.close) {
+        const saved = _loadOhlcOverride();
+        if (!saved) {
+          Object.assign(state_ohlc, data);
+          _fillOhlcInputs(data);
+          renderPivotLevels();
+        } else {
+          Object.assign(state_ohlc, saved, { source: 'manual' });
+          _fillOhlcInputs(saved);
+          renderPivotLevels();
+        }
+      }
+    } catch (_) {
+      // Network error — retry silently
+      if (retryCount < 3) {
+        setTimeout(() => fetchOhlcForPivots(retryCount + 1), 10000);
+      }
+    }
+    // Always check localStorage on boot (works offline too)
+    const saved = _loadOhlcOverride();
+    if (saved && saved.high && !state_ohlc.high) {
+      Object.assign(state_ohlc, saved, { source: 'manual' });
+      _fillOhlcInputs(saved);
+      renderPivotLevels();
+    }
   }
 
-  // ── Beep + alert system ─────────────────────────────────────────────
+  // ── Alert sound engine — 3 distinct types ─────────────────────────────
+  // Each type is synthesised from Web Audio primitives so there are no
+  // file dependencies. The duration comes from the UI input (default 2 s).
   let _audioCtx = null;
-  function beep(freq = 880, duration = 180, vol = 0.25) {
-    if (!document.getElementById('pivotAlertToggle')?.checked) return;
-    try {
-      if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = _audioCtx.createOscillator();
-      const gain = _audioCtx.createGain();
-      osc.connect(gain); gain.connect(_audioCtx.destination);
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(vol, _audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + duration/1000);
-      osc.start(); osc.stop(_audioCtx.currentTime + duration/1000);
-    } catch (e) { /* AudioContext not available */ }
+
+  function _ctx() {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    return _audioCtx;
   }
 
-  const _touchedLevels = new Set();   // label → reset on symbol/day change
+  function _alertEnabled() { return document.getElementById('pivotAlertToggle')?.checked; }
+
+  function _alertDuration() {
+    const v = parseFloat(document.getElementById('alertDurationInput')?.value);
+    return (isFinite(v) && v > 0) ? v : 2.0;
+  }
+
+  function _alertSound() {
+    return document.getElementById('alertSoundSelect')?.value || 'chime';
+  }
+
+  function _alertVolume() {
+    const v = parseFloat(document.getElementById('alertVolumeSlider')?.value);
+    return isFinite(v) ? v : 1.0;
+  }
+
+  function _voiceEnabled() { return document.getElementById('voiceToggle')?.checked; }
+
+  function _speakLevel(label, price) {
+    if (!_voiceEnabled() || !window.speechSynthesis) return;
+    // e.g. "R1" → "Resistance 1", "S3" → "Support 3", "Pivot" → "Pivot"
+    let text = label;
+    if (/^R(\d+)$/.test(label)) text = `Resistance ${label.slice(1)} touched at ${Math.round(price)}`;
+    else if (/^S(\d+)$/.test(label)) text = `Support ${label.slice(1)} touched at ${Math.round(price)}`;
+    else text = `${label} touched at ${Math.round(price)}`;
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 1.1; utter.pitch = 1.0; utter.volume = _alertVolume();
+    window.speechSynthesis.cancel();   // cancel any in-progress speech
+    window.speechSynthesis.speak(utter);
+  }
+
+  // ── TONE: single high sine wave, hard attack, long exponential decay ──
+  function _playTone(freqBase, durationSec, vol) {
+    vol = vol ?? _alertVolume() * 0.30;
+    try {
+      const ctx = _ctx(), t = ctx.currentTime;
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freqBase, t);
+      gain.gain.setValueAtTime(vol, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + durationSec);
+      osc.start(t); osc.stop(t + durationSec);
+    } catch (_) {}
+  }
+
+  // ── CHIME: three harmonically-spaced partials → warm bell tone ────────
+  function _playChime(freqBase, durationSec, vol) {
+    vol = vol ?? _alertVolume() * 0.22;
+    try {
+      const ctx = _ctx(), t = ctx.currentTime;
+      const master = ctx.createGain();
+      master.connect(ctx.destination);
+      master.gain.setValueAtTime(vol, t);
+      master.gain.exponentialRampToValueAtTime(0.001, t + durationSec);
+      [1, 2.76, 5.4].forEach((ratio, i) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(master);
+        osc.type = 'sine';
+        osc.frequency.value = freqBase * ratio;
+        gain.gain.setValueAtTime(1 / (i + 1), t);
+        osc.start(t); osc.stop(t + durationSec);
+      });
+    } catch (_) {}
+  }
+
+  // ── PING: fast frequency sweep + brief sharp attack, quick fade ───────
+  function _playPing(freqStart, durationSec, vol) {
+    vol = vol ?? _alertVolume() * 0.28;
+    try {
+      const ctx = _ctx(), t = ctx.currentTime;
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freqStart, t);
+      osc.frequency.exponentialRampToValueAtTime(freqStart * 0.5, t + durationSec * 0.3);
+      gain.gain.setValueAtTime(vol, t);
+      gain.gain.setValueAtTime(vol, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + durationSec);
+      osc.start(t); osc.stop(t + durationSec);
+    } catch (_) {}
+  }
+
+  // ── Dispatcher: polarity drives pitch; sound type drives timbre ───────
+  // polarity: 'r' = resistance (higher pitch), 's' = support (lower), else neutral
+  function playAlert(polarity) {
+    if (!_alertEnabled()) return;
+    const dur  = _alertDuration();
+    const type = _alertSound();
+    // Base frequencies: resistance = high, support = low, pivot = mid
+    const freqMap = { r: 1400, p: 880, s: 520 };
+    const freq = freqMap[polarity] || freqMap.p;
+    const play = type === 'tone' ? _playTone : (type === 'ping' ? _playPing : _playChime);
+
+    if (polarity === 'r') {
+      // Resistance: two ascending notes
+      play(freq, dur * 0.45);
+      setTimeout(() => play(freq * 1.25, dur * 0.55), dur * 450);
+    } else if (polarity === 's') {
+      // Support: two descending notes
+      play(freq * 1.2, dur * 0.45);
+      setTimeout(() => play(freq, dur * 0.55), dur * 450);
+    } else {
+      play(freq, dur);
+    }
+  }
+
+  const _touchedLevels = new Set();
   const _levelTouchToastEl = () => document.getElementById('levelTouchToast');
   let _levelToastTimer = null;
   function alertLevelTouch(label, price, polarity) {
     const key = `${state.symbol}:${label}`;
     if (_touchedLevels.has(key)) return;
     _touchedLevels.add(key);
-    // beep: two tones for resistance (high-pitched), one for support (lower)
-    if (polarity === 'r') { beep(1046, 150); setTimeout(() => beep(1318, 150), 180); }
-    else if (polarity === 's') { beep(523, 200); }
-    else { beep(660, 200); }
+    playAlert(polarity);
+    _speakLevel(label, price);   // voice announcement if enabled
     const el = _levelTouchToastEl();
     if (el) {
       el.textContent = `⚡ ${label} touched at ${fmtPrice(price)}`;
@@ -1765,7 +2049,6 @@
       clearTimeout(_levelToastTimer);
       _levelToastTimer = setTimeout(() => el.classList.remove('show'), 3500);
     }
-    // flash the bar row
     const row = document.querySelector(`[data-level-label="${label.replace(/"/g, '\\"')}"]`);
     if (row) { row.classList.add('touched'); setTimeout(() => row.classList.remove('touched'), 2000); }
   }
@@ -1780,18 +2063,57 @@
     }
   }
 
+  // ── Pivot freeze ─────────────────────────────────────────────────────
+  // Once we have valid previous-day OHLC for a symbol, freeze the OHLC
+  // so auto-refreshes don't change the pivot levels mid-session.
+  // Levels only reset when: day changes, symbol changes, or manual Apply.
+  const _frozenOhlc = {};  // symbol → { H, L, C, O, source, date }
+
+  function _tryFreeze() {
+    const { high: H, low: L, close: C, open: O, source } = state_ohlc;
+    const isPrevDay = ['daily_chart', 'daily_history', 'history_daily', 'manual'].includes(source);
+    if (!isPrevDay || !H || !L || !C) return;
+    const today = new Date().toDateString();
+    const ex = _frozenOhlc[state.symbol];
+    // Only freeze if: no existing freeze, or it's a new day, or manual override
+    if (!ex || ex.date !== today || source === 'manual') {
+      _frozenOhlc[state.symbol] = { H, L, C, O: O || C, source, date: today };
+    }
+  }
+
   // ── Pivot rendering ──────────────────────────────────────────────────
   function renderPivotLevels() {
-    const { open: O, high: H, low: L, close: C, source } = state_ohlc;
     const spot = state.lastData?.underlying_value;
-    if (!H || !L || !C || !spot) {
-      document.getElementById('pivotBars').innerHTML = '<div class="movers-loading">Loading OHLC data…</div>';
+    if (!spot) {
+      document.getElementById('pivotBars').innerHTML = '<div class="movers-loading">Loading…</div>';
       return;
     }
+
+    // Attempt to freeze if we have valid prev-day data
+    _tryFreeze();
+
+    const frozen = _frozenOhlc[state.symbol];
+    if (!frozen) {
+      // No valid previous-day OHLC yet — tell the user to enter it manually
+      document.getElementById('pivotBars').innerHTML =
+        '<div class="movers-loading">⏳ Enter previous day H / L / C above and click Apply — or start the server during market hours so it records daily data automatically.</div>';
+      const srcEl = document.getElementById('pivotSource');
+      if (srcEl) { srcEl.textContent = '· no prev-day data'; srcEl.style.color = 'var(--gold)'; }
+      return;
+    }
+
+    const { H, L, C, O, source: src } = frozen;
     const pivotType = (document.getElementById('pivotTypeSelect')?.value) || 'fibonacci';
     const fn = PIVOT_TYPES[pivotType] || PIVOT_TYPES.fibonacci;
-    const pv = fn(H, L, C, O || C);
-    document.getElementById('pivotSource').textContent = source ? `· prev day OHLC · H:${fmtInt(H)} L:${fmtInt(L)} C:${fmtInt(C)}` : '';
+    const pv = fn(H, L, C, O);
+
+    const isManual = src === 'manual';
+    const isDaily  = !isManual;
+    const srcEl = document.getElementById('pivotSource');
+    if (srcEl) {
+      srcEl.textContent = `· ${isManual ? 'Manual' : 'Prev day'} · H:${fmtInt(H)} L:${fmtInt(L)} C:${fmtInt(C)}`;
+      srcEl.style.color = 'var(--pos)';
+    }
 
     const levels = [
       ['R5', pv.R5, 'r'], ['R4', pv.R4, 'r'], ['R3', pv.R3, 'r'],
@@ -1804,30 +2126,6 @@
     checkLevelTouches(levels, spot);
     document.getElementById('pivotBars').innerHTML = renderLevelBars(levels, spot, 'pivot');
   }
-
-  // ── VWAP rendering ───────────────────────────────────────────────────
-  function renderVwapBands() {
-    const spot = state.lastData?.underlying_value;
-    const hist = state.sessionHistory;
-    if (!spot || hist.length < 3) {
-      document.getElementById('vwapBars').innerHTML = '<div class="movers-loading">Accumulating session data…</div>';
-      return;
-    }
-    const prices = hist.map(h => h.spot).filter(Boolean);
-    const vwap = prices.reduce((s, p) => s + p, 0) / prices.length;
-    const variance = prices.reduce((s, p) => s + (p-vwap)**2, 0) / prices.length;
-    const sd = Math.sqrt(variance) || (vwap * 0.005);  // fallback 0.5% if no variation yet
-    document.getElementById('vwapSource').textContent = `· ${prices.length} samples · σ=${fmtPrice(sd)}`;
-    const levels = [
-      ['VWAP+2σ', vwap+2*sd, 'vu2'], ['VWAP+1σ', vwap+sd, 'vu1'],
-      ['VWAP', vwap, 'vwap'],
-      ['VWAP-1σ', vwap-sd, 'vd1'], ['VWAP-2σ', vwap-2*sd, 'vd2'],
-    ];
-    checkLevelTouches(levels.map(([l,p]) => [l, p, l.startsWith('VWAP+') ? 'r' : (l.startsWith('VWAP-') ? 's' : 'p')]), spot);
-    document.getElementById('vwapBars').innerHTML = renderLevelBars(levels, spot, 'vwap');
-  }
-
-  // ── Generic bar renderer for both pivot and VWAP ─────────────────────
   function renderLevelBars(levels, spot, type) {
     // Find the range of all level prices to scale the bars
     const prices = levels.map(l => l[1]).filter(Boolean);
@@ -1846,14 +2144,17 @@
       const distStr = (dist >= 0 ? '+' : '') + fmtInt(dist) + ' (' + Math.abs(dist/spot*100).toFixed(2) + '%)';
       const isNear = Math.abs(dist / spot) < 0.002;
       const priceColor = polarity === 'r' ? '#ff6b6b' : (polarity === 's' ? '#51cf66' : (polarity === 'vwap' ? 'var(--accent)' : 'var(--text)'));
+      const distColor  = dist > 0 ? '#ff6b6b' : '#51cf66';
       return `<div class="level-bar-row${isNear ? ' touched' : ''}" data-level-label="${escapeHtml(label)}">
         <span class="level-bar-label ${labelClass}">${escapeHtml(label)}</span>
-        <span class="level-bar-price" style="color:${priceColor};">${fmtPrice(price)}</span>
+        <div class="level-bar-price-block">
+          <span class="level-bar-price" style="color:${priceColor};">${fmtPrice(price)}</span>
+          <span class="level-bar-dist" style="color:${distColor};">${distStr}</span>
+        </div>
         <div class="level-bar-track">
           <div class="level-bar-fill ${fillClass}" style="width:${fillPct.toFixed(1)}%"></div>
           <div class="level-bar-spot" style="left:${spotPct.toFixed(1)}%"></div>
         </div>
-        <span class="level-bar-dist" style="color:${dist>0?'#ff6b6b':'#51cf66'}">${distStr}</span>
       </div>`;
     }).join('');
   }
@@ -4430,11 +4731,167 @@
   els.moversTime = document.getElementById('moversTime');
   els.moversRefreshBtn = document.getElementById('moversRefreshBtn');
 
+  // ====================================================================
+  // NIFTY 50 CONSTITUENTS — top 10 weighted stocks with price, % change,
+  // and estimated points contributed to the Nifty 50 index for the day.
+  // Points contributed ≈ (pChange% × estimated_weight% × Nifty_value) / 100
+  // Weight is approximated from each stock's share of total traded value.
+  // ====================================================================
+  // ====================================================================
+  // NIFTY 50 CONSTITUENTS WIDGET
+  // ====================================================================
+  const niftyState = {
+    stocks: [],      // full list from server
+    niftyValue: 0,
+    sortCol: 'pts_abs',   // initial default: biggest movers (absolute) first
+    sortDir: -1,          // -1 = descending
+    expanded: false,      // false = top 10, true = all 50
+    timer: null,
+  };
+
+  const NIFTY_COLS = [
+    { key: '#',       label: '#',          sort: 'rank',       align: 'center' },
+    { key: 'symbol',  label: 'Symbol',     sort: 'symbol',     align: 'left' },
+    { key: 'ltp',     label: 'LTP',        sort: 'ltp',        align: 'right' },
+    { key: 'pct',     label: '% Chg',      sort: 'pct_change', align: 'right' },
+    { key: 'pts',     label: 'Pts ±',      sort: 'pts_contributed', align: 'right' },
+  ];
+
+  async function fetchAndRenderNiftyConstituents() {
+    const bodyEl = document.getElementById('niftyWidgetBody');
+    const timeEl = document.getElementById('niftyWidgetTime');
+    const noteEl = document.getElementById('niftyWidgetNote');
+    if (!bodyEl) return;
+
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const resp = await fetch(`${base}/api/nifty-constituents`, { signal: AbortSignal.timeout(20000) });
+      const data = await resp.json();
+      if (data.error && !data.stocks?.length) {
+        bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(data.error)}</div>`;
+        return;
+      }
+      niftyState.stocks = data.stocks || [];
+      niftyState.niftyValue = data.nifty_value || 0;
+      if (timeEl) timeEl.textContent = data.as_of ? `· ${data.as_of}` : '';
+      if (noteEl) noteEl.textContent = data.note || '';
+      renderNiftyWidget();
+    } catch (e) {
+      bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Server not reachable. Start nse_chain_server.py first.</div>`;
+    }
+  }
+
+  function _niftySorted() {
+    // Add pts_abs field so the default "sort by absolute points" column works
+    const stocks = niftyState.stocks.map(s => ({ ...s, pts_abs: Math.abs(s.pts_contributed) }));
+    const col = niftyState.sortCol;
+    const dir = niftyState.sortDir;   // -1 = descending, 1 = ascending
+
+    return [...stocks].sort((a, b) => {
+      if (col === 'symbol') {
+        return (a.symbol ?? '').localeCompare(b.symbol ?? '') * dir;
+      }
+      const av = a[col] ?? 0;
+      const bv = b[col] ?? 0;
+      // Subtract and multiply by direction: negative → a before b
+      return (av - bv) * dir;
+    });
+  }
+
+  function renderNiftyWidget() {
+    const bodyEl = document.getElementById('niftyWidgetBody');
+    if (!bodyEl || !niftyState.stocks.length) return;
+
+    const sorted = _niftySorted();
+    const display = niftyState.expanded ? sorted : sorted.slice(0, 10);
+    const maxAbsPts = Math.max(...sorted.map(s => Math.abs(s.pts_contributed)), 1);
+
+    // Build header
+    const headerCells = NIFTY_COLS.map(col => {
+      const isActive = niftyState.sortCol === col.sort;
+      const cls = ['nifty-th', isActive ? 'sort-active' : '', isActive ? (niftyState.sortDir === -1 ? 'sort-desc' : 'sort-asc') : ''].filter(Boolean).join(' ');
+      const style = col.align !== 'right' ? `style="text-align:${col.align}"` : '';
+      return `<th class="${cls}" ${style} data-sort="${col.sort}">${col.label}</th>`;
+    }).join('');
+
+    // Build rows
+    const rows = display.map((s, i) => {
+      const pctCls = s.pct_change >= 0 ? 'pos-txt' : 'neg-txt';
+      const ptsCls = s.pts_contributed >= 0 ? 'pos-txt' : 'neg-txt';
+      const pctSign = s.pct_change >= 0 ? '+' : '';
+      const ptsSign = s.pts_contributed >= 0 ? '+' : '';
+      const barPct = (Math.abs(s.pts_contributed) / maxAbsPts * 72).toFixed(1);
+      const barClass = s.pts_contributed >= 0 ? 'pos' : 'neg';
+      const barStyle = s.pts_contributed >= 0 ? `right:0;width:${barPct}%` : `left:0;width:${barPct}%`;
+      return `<tr>
+        <td style="text-align:center;color:var(--muted-2);font-size:9px;">${i + 1}</td>
+        <td style="font-weight:700;text-align:left;font-size:11.5px;">${escapeHtml(s.symbol)}</td>
+        <td>${fmtPrice(s.ltp)}</td>
+        <td class="${pctCls}">${pctSign}${s.pct_change.toFixed(2)}%</td>
+        <td class="pts-cell" style="position:relative;min-width:80px;">
+          <div class="pts-bar ${barClass}" style="${barStyle}"></div>
+          <span class="${ptsCls}" style="position:relative;">${ptsSign}${Math.abs(s.pts_contributed).toFixed(1)}</span>
+        </td>
+      </tr>`;
+    }).join('');
+
+    bodyEl.innerHTML = `<table class="nifty-table">
+      <thead><tr>${headerCells}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+    // Update expand button label
+    const expandBtn = document.getElementById('niftyExpandBtn');
+    if (expandBtn) expandBtn.textContent = niftyState.expanded ? '⤡ Top 10' : '⤢ All 50';
+  }
+
+  function _niftySetSort(col) {
+    if (niftyState.sortCol === col) {
+      niftyState.sortDir *= -1;
+    } else {
+      niftyState.sortCol = col;
+      // symbols sort ascending by default; everything else descending
+      niftyState.sortDir = col === 'symbol' ? 1 : -1;
+    }
+    renderNiftyWidget();
+  }
+
+  // Single delegated listener on the stable parent — NOT on niftyWidgetBody
+  // (which gets its innerHTML replaced on each render). Using two listeners
+  // on parent+child causes the event to fire twice: once on the body, once
+  // on the widget container after bubbling — doubling every sort click.
+  document.getElementById('niftyWidget')?.addEventListener('click', e => {
+    const th = e.target.closest('th[data-sort]');
+    if (th) _niftySetSort(th.dataset.sort);
+  });
+
+  document.getElementById('niftyExpandBtn')?.addEventListener('click', () => {
+    niftyState.expanded = !niftyState.expanded;
+    renderNiftyWidget();
+  });
+
+  document.getElementById('niftyRefreshBtn')?.addEventListener('click', fetchAndRenderNiftyConstituents);
+
+  // ── 5-second auto-reload for Nifty widget ────────────────────────────
+  function _startNiftyAutoReload() {
+    if (niftyState.timer) clearInterval(niftyState.timer);
+    niftyState.timer = setInterval(() => {
+      const homeActive = document.querySelector('.tab.active')?.dataset.tab === 'home';
+      if (homeActive) fetchAndRenderNiftyConstituents();
+    }, 5000);
+  }
+  _startNiftyAutoReload();
+
   async function fetchAndRenderMovers(force = false) {
     if (!els.gainersList) return;
     const base = els.serverUrl.value.replace(/\/+$/, '');
     try {
       const resp = await fetch(`${base}/api/fno-movers`, { signal: AbortSignal.timeout(20000) });
+      if (!resp.ok) {
+        els.gainersList.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Server returned HTTP ${resp.status}. Check the server console.</div>`;
+        els.losersList.innerHTML = '';
+        return;
+      }
       const data = await resp.json();
       if (data.source === 'pending') {
         els.gainersList.innerHTML = `<div class="movers-loading">⏳ ${escapeHtml(data.error || 'Starting up…')} Load any option chain to warm the session.</div>`;
@@ -4451,7 +4908,11 @@
       renderMovers(data.losers, els.losersList, 'neg');
       if (els.moversTime) els.moversTime.textContent = data.as_of ? `· ${data.as_of}` : '';
     } catch (e) {
-      els.gainersList.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Server not reachable. Start <code>nse_chain_server.py</code> first.</div>`;
+      // Only show "not reachable" for genuine network failures (TypeError = fetch failed)
+      const msg = (e instanceof TypeError)
+        ? `Server not reachable at ${base} — is nse_chain_server.py running?`
+        : `Error fetching movers: ${e.message}`;
+      els.gainersList.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(msg)}</div>`;
       els.losersList.innerHTML = '';
     }
   }
@@ -4517,130 +4978,289 @@
   els.getSuggestionsBtn = document.getElementById('getSuggestionsBtn');
   els.suggestionsOutput = document.getElementById('suggestionsOutput');
 
-  function buildMarketContext() {
-    const d = state.lastData;
-    if (!d) return null;
+  // ====================================================================
+  // AI STRATEGY SUGGESTIONS — rule-based engine, no API key required.
+  // Analyses live market data (PCR, VIX, IV rank, straddle, S/R levels)
+  // and generates two time-appropriate strategy ideas with exact strikes.
+  // ====================================================================
+
+  function _sessionInfo() {
     const now = new Date();
-    const istNow = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
-    const istHour = istNow.getUTCHours();
-    const istMin = istNow.getUTCMinutes();
-    const totalMins = istHour * 60 + istMin;
-
-    let session;
-    if (totalMins < 9*60+15)          session = 'pre-market';
-    else if (totalMins < 11*60+30)    session = 'morning';
-    else if (totalMins < 14*60+30)    session = 'afternoon';
-    else if (totalMins < 15*60+5)     session = 'eod';
-    else                               session = 'post-market';
-
-    const timeStr = `${String(istHour).padStart(2,'0')}:${String(istMin).padStart(2,'0')} IST`;
-    const expMove = d.straddle_premium ? `₹${d.straddle_premium.toFixed(0)} (1-day expected move via ATM straddle)` : 'N/A';
-    const ivRank = d.atm_iv_rank ? `${d.atm_iv_rank.rank_pct.toFixed(0)}th percentile (${d.atm_iv_rank.period_days}d lookback)` : 'insufficient history';
-
-    return {
-      session,
-      timeStr,
-      context: `
-Symbol: ${d.symbol}
-Current time (IST): ${timeStr} — session: ${session}
-Spot: ${d.underlying_value.toFixed(2)}
-ATM: ${d.atm}
-Expiry: ${d.expiry} (${d.dte} DTE)
-PCR (Put-Call Ratio): ${d.pcr}
-ATM IV: ${d.atm_iv}%
-IV Rank: ${ivRank}
-India VIX: ${d.india_vix !== null ? d.india_vix : 'unavailable'}
-Expected move (straddle): ${expMove}
-Market sentiment: ${d.sentiment || 'N/A'}
-Support wall: ${d.support?.strike ? d.support.strike : 'N/A'}
-Resistance wall: ${d.resistance?.strike ? d.resistance.strike : 'N/A'}
-Max pain: ${d.max_pain || 'N/A'}
-Lot size: ${d.lot_size}
-`.trim(),
-    };
+    const ist = new Date(now.getTime() + 5.5 * 3600000);
+    const hh = ist.getUTCHours(), mm = ist.getUTCMinutes();
+    const mins = hh * 60 + mm;
+    const timeStr = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')} IST`;
+    let session = 'post-market';
+    if      (mins < 9*60+15)  session = 'pre-market';
+    else if (mins < 11*60+30) session = 'morning';
+    else if (mins < 14*60+30) session = 'afternoon';
+    else if (mins < 15*60+5)  session = 'eod';
+    return { session, timeStr };
   }
 
-  els.getSuggestionsBtn?.addEventListener('click', async () => {
-    const ctx = buildMarketContext();
-    if (!ctx) {
+  function _roundStrike(n, gap) { return Math.round(n / gap) * gap; }
+
+  function generateStrategySuggestions(d, session) {
+    const spot = d.underlying_value;
+    const atm  = d.atm;
+    const pcr  = parseFloat(d.pcr) || 1.0;
+    const vix  = d.india_vix != null ? parseFloat(d.india_vix) : null;
+    const atmIv = parseFloat(d.atm_iv) || 15;
+    const ivRank = d.atm_iv_rank?.rank_pct ?? null;
+    const straddle = d.straddle_premium || (spot * atmIv / 100 * Math.sqrt(1 / 252));
+    const dte  = parseInt(d.dte) || 7;
+    const sym  = d.symbol;
+    const expiry = d.expiry;
+    const sup  = d.support?.strike  || _roundStrike(spot - straddle, atm < 5000 ? 50 : 100);
+    const res  = d.resistance?.strike || _roundStrike(spot + straddle, atm < 5000 ? 50 : 100);
+    const maxPain = d.max_pain;
+
+    // Strike gap: NIFTY~50, BANKNIFTY~100
+    const gap = atm < 12000 ? 50 : 100;
+    const f = n => fmtInt(_roundStrike(n, gap));
+
+    // Market state
+    const bias    = pcr > 1.2 ? 'bullish' : pcr < 0.8 ? 'bearish' : 'neutral';
+    const volEnv  = vix == null ? 'normal' : vix > 18 ? 'high' : vix < 13 ? 'low' : 'normal';
+    const ivLevel = ivRank == null ? 'normal' : ivRank > 65 ? 'elevated' : ivRank < 30 ? 'low' : 'normal';
+    const movePct = (straddle / spot * 100).toFixed(1);
+    const vixStr  = vix != null ? `VIX ${vix.toFixed(1)}` : 'VIX unavailable';
+    const ivRStr  = ivRank != null ? `IV Rank ${ivRank.toFixed(0)}th pct` : 'IV Rank tracking';
+
+    // ── Strategy builders ──────────────────────────────────────────────
+    const S = [];   // up to 2 strategy objects
+
+    // Helper: push a strategy
+    const push = (name, struct, why, entry, sl, tgt, risk) =>
+      S.push({ name, struct, why, entry, sl, tgt, risk });
+
+    // ── Morning (9:15–11:30) ───────────────────────────────────────────
+    if (session === 'morning' || session === 'pre-market') {
+      if (ivLevel === 'elevated') {
+        if (bias === 'neutral') {
+          // Sell iron condor — elevated IV + neutral PCR
+          push('Iron Condor',
+            `Sell ${f(res+gap)} CE / Buy ${f(res+gap*3)} CE  +  Sell ${f(sup-gap)} PE / Buy ${f(sup-gap*3)} PE  (${expiry})`,
+            `${ivRStr} — premium is expensive vs history. PCR ${pcr.toFixed(2)} neutral → range-bound likely. Expected intraday move ±₹${fmtInt(straddle)} (${movePct}%).`,
+            `Enter within first 30 min if ${sym} between ${f(sup-gap)} and ${f(res+gap)}.`,
+            `Exit if spot closes beyond ${f(sup-gap*2)} or ${f(res+gap*2)}.`,
+            `Target 40% of net credit collected. Trail after IV drops 20%.`,
+            `Gap-open or FII block deal can violently breach either wing.`);
+        } else if (bias === 'bullish') {
+          push('Bull Put Spread',
+            `Sell ${f(sup)} PE / Buy ${f(sup-gap*2)} PE  (${expiry})`,
+            `PCR ${pcr.toFixed(2)} bullish + ${ivRStr}. ${vixStr}. Support wall at ${f(sup)} holds on OI data. Selling elevated put premium with defined risk.`,
+            `Enter if spot is holding above ${f(sup+gap/2)} after open.`,
+            `Close if spot falls and closes below ${f(sup-gap)}.`,
+            `Target full credit at expiry or 50% profit exit.`,
+            `A negative macro event can gap through support and spike PE premium.`);
+        } else {
+          push('Bear Call Spread',
+            `Sell ${f(res)} CE / Buy ${f(res+gap*2)} CE  (${expiry})`,
+            `PCR ${pcr.toFixed(2)} bearish + ${ivRStr}. ${vixStr}. Resistance wall at ${f(res)} on OI data. Selling elevated call premium.`,
+            `Enter if spot is below ${f(res-gap/2)} after open.`,
+            `Close if spot closes above ${f(res+gap)}.`,
+            `Target full credit or 50% profit exit.`,
+            `Strong FII buying or short-covering can break resistance and widen spread rapidly.`);
+        }
+      } else if (ivLevel === 'low') {
+        push('Long Straddle',
+          `Buy ${f(atm)} CE + Buy ${f(atm)} PE  (${expiry})`,
+          `${ivRStr} — options are historically cheap. Any ±${movePct}% move profits. Straddle cost ≈₹${fmtInt(straddle)}.`,
+          `Enter 9:15–9:30 AM. Prefer the opening candle direction.`,
+          `Exit if straddle value falls below ₹${fmtInt(straddle * 0.6)}.`,
+          `Target 30–40% gain on total premium. Partial exit on first leg up.`,
+          `A sideways day kills theta quickly — this needs a move, not a drift.`);
+      } else {
+        // Normal IV: direction-based spread
+        if (bias !== 'bearish') {
+          push('Bull Call Spread',
+            `Buy ${f(atm)} CE / Sell ${f(res+gap)} CE  (${expiry})`,
+            `PCR ${pcr.toFixed(2)} ${bias}. ${vixStr}. Normal IV keeps debit manageable. Resistance at ${f(res+gap)}.`,
+            `Enter after first 15-min candle confirms bullish close above ${f(atm-gap)}.`,
+            `Exit if spot falls below ${f(atm-gap*2)}.`,
+            `Target ${f(res)} on underlying or 80% of max profit.`,
+            `Failed follow-through after gap-up is the classic trap for call buyers.`);
+        } else {
+          push('Bear Put Spread',
+            `Buy ${f(atm)} PE / Sell ${f(sup-gap)} PE  (${expiry})`,
+            `PCR ${pcr.toFixed(2)} bearish. ${vixStr}. Support at ${f(sup-gap)} to limit debit.`,
+            `Enter after first 15-min candle closes below ${f(atm+gap)}.`,
+            `Exit if spot recovers above ${f(atm+gap*2)}.`,
+            `Target ${f(sup)} on underlying or 80% of max profit.`,
+            `Bear traps near support can quickly turn put spreads negative.`);
+        }
+      }
+      // Always add an intraday scalp as second idea
+      if (S.length < 2) {
+        const dir = bias === 'bearish' ? 'PE' : 'CE';
+        const sk  = dir === 'CE' ? f(atm+gap) : f(atm-gap);
+        push(`Intraday ${dir} Scalp`,
+          `Buy 1× ${sk} ${dir}  (${expiry})`,
+          `Direction play on PCR ${pcr.toFixed(2)} ${bias} bias. ${vixStr}.`,
+          `Enter within first 15 min if spot breaks ${dir === 'CE' ? f(atm+gap/2) : f(atm-gap/2)}.`,
+          `Strict SL: exit if premium falls 40% from entry.`,
+          `Target 20–30% gain on option premium. Partial exit at 15%.`,
+          `Time decay (theta) accelerates after 1 PM — must exit or trail by 2 PM.`);
+      }
+    }
+
+    // ── Afternoon (11:30–14:30) ────────────────────────────────────────
+    else if (session === 'afternoon') {
+      push(ivLevel === 'elevated' ? 'Short Strangle' : 'Iron Condor',
+        ivLevel === 'elevated'
+          ? `Sell ${f(res+gap)} CE + Sell ${f(sup-gap)} PE  (${expiry})`
+          : `Sell ${f(res+gap)} CE / Buy ${f(res+gap*3)} CE + Sell ${f(sup-gap)} PE / Buy ${f(sup-gap*3)} PE`,
+        `Afternoon range established. PCR ${pcr.toFixed(2)} ${bias}. ${ivRStr}, ${vixStr}. Market unlikely to extend ±${movePct}% further.`,
+        `Enter if spot is between ${f(sup-gap)} and ${f(res+gap)} after 12:00 IST.`,
+        `Exit if either sold strike is breached by 50+ points.`,
+        `Target 30–40% of credit collected by 3 PM theta decay.`,
+        `News or FII order flow can reset direction rapidly in afternoon.`);
+      push('Theta Decay Trade',
+        `Sell ${f(atm)} Straddle (${expiry}) — if same-day expiry (0DTE)`,
+        `High theta burn in final session hours. ${vixStr}. ATM straddle ≈₹${fmtInt(straddle)}.`,
+        `Only for 0DTE / weekly expiry. Enter after 1:30 PM if spot near ATM.`,
+        `Exit if either leg doubles from entry price.`,
+        `Target 50–60% of premium collected before 3 PM.`,
+        `0DTE gamma spikes near expiry can cause instantaneous losses — position size strictly.`);
+    }
+
+    // ── EOD / Carry forward (14:30–15:05) ─────────────────────────────
+    else {
+      if (volEnv === 'high') {
+        push('Defined-Risk Carry',
+          `Bull Put Spread: Sell ${f(sup)} PE / Buy ${f(sup-gap*2)} PE  OR  Bear Call Spread: Sell ${f(res)} CE / Buy ${f(res+gap*2)} CE  (next expiry)`,
+          `${vixStr} — avoid naked overnight positions. Use defined-risk structure. PCR ${pcr.toFixed(2)} ${bias}.`,
+          `Enter preferred direction spread in last 30 min if spot holds bias.`,
+          `Hard stop: loss = max loss on spread. No adjustment overnight.`,
+          `Target 30–50% of credit on next open if gap is in your direction.`,
+          `Overnight gaps can be violent in high-VIX environments — size conservatively.`);
+      } else {
+        // Low/normal vol carry
+        const preferred = bias === 'bullish'
+          ? `Sell ${f(sup)} PE / Buy ${f(sup-gap*2)} PE`
+          : bias === 'bearish'
+          ? `Sell ${f(res)} CE / Buy ${f(res+gap*2)} CE`
+          : `Sell ${f(res+gap)} CE + Buy ${f(res+gap*3)} CE + Sell ${f(sup-gap)} PE + Buy ${f(sup-gap*3)} PE`;
+        push(bias === 'neutral' ? 'Iron Condor Carry' : (bias === 'bullish' ? 'Bull Put Spread Carry' : 'Bear Call Spread Carry'),
+          `${preferred}  (${expiry})`,
+          `${vixStr} — stable overnight environment. PCR ${pcr.toFixed(2)} ${bias}. Max pain at ${fmtInt(maxPain || atm)}. Support ${f(sup)}, Resistance ${f(res)}.`,
+          `Enter in last 30 min of session. Roll if spot gaps beyond strike at open.`,
+          `Exit next morning if full credit ×40% is collected. Hard SL at max loss.`,
+          `Target 30–50% of credit on next trading day.`,
+          `SGX / Nifty futures gap risk at open can instantly breach the spread.`);
+      }
+      push('Next-Day Directional Setup',
+        bias === 'bullish'
+          ? `Buy ${f(atm)} CE  (next expiry, enter next morning)`
+          : bias === 'bearish'
+          ? `Buy ${f(atm)} PE  (next expiry, enter next morning)`
+          : `Wait for gap-up/gap-down at open to confirm direction`,
+        `PCR ${pcr.toFixed(2)} ${bias} at EOD — directional momentum likely to continue at open. ${ivRStr}.`,
+        `Wait for first 5-min candle direction at 9:15 open before entering.`,
+        `SL: 40% of option premium. No overnight hold on an outright buy.`,
+        `Target: 25% gain on option premium intraday.`,
+        `Pre-open FII/DII data can signal direction reversal — check before entry.`);
+    }
+
+    return S.slice(0, 2);
+  }
+
+  function renderStrategyCards(strategies, timeStr, session) {
+    const labels = {
+      morning: '🌅 Morning Strategies', afternoon: '☀️ Afternoon Strategies',
+      eod: '🌆 EOD Carry Strategies', 'pre-market': '⏰ Pre-Market Setup', 'post-market': '🌙 Next-Day Setup',
+    };
+    const cards = strategies.map((s, i) => `
+      <div class="suggest-strategy">
+        <b>${i + 1}. ${escapeHtml(s.name)}</b><br>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--accent);">${escapeHtml(s.struct)}</span><br><br>
+        <span style="color:var(--muted);">Rationale:</span> ${escapeHtml(s.why)}<br>
+        <span style="color:var(--muted);">Entry:</span> ${escapeHtml(s.entry)}<br>
+        <span style="color:var(--neg);">SL:</span> ${escapeHtml(s.sl)}<br>
+        <span style="color:var(--pos);">Target:</span> ${escapeHtml(s.tgt)}<br>
+        <span style="color:var(--muted-2);font-size:10px;">⚠ Risk: ${escapeHtml(s.risk)}</span>
+      </div>`).join('');
+    return `<div class="suggest-section">
+      <div class="suggest-label">${labels[session] || '📊 Strategies'} · ${timeStr}</div>
+      ${cards}
+      <div class="suggest-caveat">These are rule-based suggestions using live market data — not financial advice. F&amp;O involves substantial risk of loss. Always use proper position sizing.</div>
+    </div>`;
+  }
+
+  els.getSuggestionsBtn?.addEventListener('click', () => {
+    const d = state.lastData;
+    if (!d) {
       els.suggestionsOutput.innerHTML = '<div class="movers-loading">Load the option chain first.</div>';
       return;
     }
-
-    els.suggestionsOutput.innerHTML = '<div class="suggest-loading"><div class="suggest-spinner"></div>Asking Claude for strategy ideas…</div>';
     els.getSuggestionsBtn.disabled = true;
-
-    const sessionGuidance = {
-      'morning':    'Suggest 2 intraday strategies for the morning session (9:15-11:30). Prefer direction-based plays that exploit gap/momentum. Include a scalping idea and a structured options play.',
-      'afternoon':  'Suggest 2 intraday strategies for the afternoon session. Prefer range-bound or premium-selling setups. Mention whether the open straddle/strangle from morning should be adjusted.',
-      'eod':        'Suggest 2 positional strategies for overnight carry-forward (closing around 3pm). Prefer defined-risk setups with clear stop-loss. Include the best strike levels based on the data above.',
-      'pre-market': 'Market hasn\'t opened yet. Suggest 2 strategies to watch for at open based on the previous session data above.',
-      'post-market':'Market is closed. Suggest 2 positional setups to consider for the next day open.',
-    };
-    const guidance = sessionGuidance[ctx.session] || sessionGuidance['afternoon'];
-
-    const prompt = `You are an expert NSE F&O trader advising on Indian derivatives markets. 
-Here is the current live market snapshot:
-
-${ctx.context}
-
-${guidance}
-
-For each strategy, provide:
-1. Strategy name and structure (exact strikes/expiry if possible)
-2. Setup rationale (1-2 sentences tied to the data above)
-3. Entry condition
-4. Stop loss and target in ₹ premium or underlying points
-5. Risk: one honest sentence about what makes this trade wrong
-
-Format as two sections clearly labelled. Keep each strategy concise — no fluff.
-End with a one-sentence caveat about F&O risk.`;
-
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      });
-      const data = await response.json();
-      const text = data.content?.map(b => b.text || '').join('') || '';
-      if (!text) throw new Error('Empty response from API');
-      els.suggestionsOutput.innerHTML = renderSuggestionsMarkdown(text, ctx.timeStr, ctx.session);
+      const { session, timeStr } = _sessionInfo();
+      const strategies = generateStrategySuggestions(d, session);
+      els.suggestionsOutput.innerHTML = renderStrategyCards(strategies, timeStr, session);
     } catch (err) {
-      els.suggestionsOutput.innerHTML = `<div style="color:var(--neg);font-size:11.5px;">Could not get suggestions: ${err.message}</div>`;
+      els.suggestionsOutput.innerHTML = `<div style="color:var(--neg);font-size:11.5px;">Error generating suggestions: ${escapeHtml(err.message)}</div>`;
     } finally {
       els.getSuggestionsBtn.disabled = false;
     }
   });
 
-  function renderSuggestionsMarkdown(text, timeStr, session) {
-    const sessionLabels = {
-      morning: '🌅 Morning Session Strategies',
-      afternoon: '☀️ Afternoon Session Strategies',
-      eod: '🌆 EOD Positional Strategies (Carry)',
-      'pre-market': '⏰ Pre-Market Watch',
-      'post-market': '🌙 Next Day Positioning',
-    };
-    const escaped = text
-      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-      .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
-      .replace(/\*(.*?)\*/g, '<i>$1</i>')
-      .replace(/^#{1,3}\s+(.+)$/gm, '<div class="suggest-label">$1</div>')
-      .replace(/\n\n/g,'</p><p>').replace(/\n/g,'<br>');
-    return `<div class="suggest-section">
-      <div class="suggest-label">${sessionLabels[session] || '📊 Strategy Suggestions'} · ${timeStr}</div>
-      <div class="suggestions-text"><p>${escaped}</p></div>
-      <div class="suggest-caveat">⚠ AI suggestions are not financial advice. F&O trading involves substantial risk of loss, including loss exceeding your investment. Always verify with your own analysis and manage position sizes carefully.</div>
-    </div>`;
+  // ── Manual OHLC override ─────────────────────────────────────────────
+  function _ohlcLsKey() { return `pivot_ohlc_${state.symbol}`; }
+  function _loadOhlcOverride() {
+    try { const s = localStorage.getItem(_ohlcLsKey()); return s ? JSON.parse(s) : null; }
+    catch (_) { return null; }
   }
+  function _saveOhlcOverride(o) {
+    try { localStorage.setItem(_ohlcLsKey(), JSON.stringify(o)); } catch (_) {}
+  }
+  function _fillOhlcInputs(o) {
+    if (!o) return;
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val) { el.value = val; el.classList.add('has-value'); } };
+    set('ohlcH', o.high); set('ohlcL', o.low); set('ohlcC', o.close); set('ohlcO', o.open);
+  }
+  function _applyOhlcOverride() {
+    const v = id => { const el = document.getElementById(id); return el && el.value ? parseFloat(el.value) : null; };
+    const H = v('ohlcH'), L = v('ohlcL'), C = v('ohlcC'), O = v('ohlcO');
+    if (!H || !L || !C) { showToast('Enter H, L and C to compute pivots.'); return; }
+    Object.assign(state_ohlc, { high: H, low: L, close: C, open: O || C, source: 'manual' });
+    delete _frozenOhlc[state.symbol];   // clear freeze so _tryFreeze uses the new values
+    _saveOhlcOverride({ high: H, low: L, close: C, open: O });
+    _touchedLevels.clear();
+    renderPivotLevels();
+  }
+  document.getElementById('ohlcApplyBtn')?.addEventListener('click', _applyOhlcOverride);
+  ['ohlcH','ohlcL','ohlcC','ohlcO'].forEach(id =>
+    document.getElementById(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') _applyOhlcOverride(); })
+  );
 
   document.getElementById('pivotTypeSelect')?.addEventListener('change', renderPivotLevels);
+  // ── Alert controls wiring ─────────────────────────────────────────────
+  // Persist sound type + duration across sessions
+  (() => {
+    const soundEl = document.getElementById('alertSoundSelect');
+    const durEl   = document.getElementById('alertDurationInput');
+    const saved   = (() => { try { return JSON.parse(localStorage.getItem('alertSettings')||'{}'); } catch(_){return{};} })();
+    if (saved.sound && soundEl) soundEl.value = saved.sound;
+    if (saved.dur   && durEl)   durEl.value   = saved.dur;
+    const persist = () => {
+      try { localStorage.setItem('alertSettings', JSON.stringify({ sound: soundEl?.value, dur: durEl?.value })); } catch(_){}
+    };
+    soundEl?.addEventListener('change', persist);
+    durEl?.addEventListener('change', persist);
+  })();
+
+  // Preview button — plays a resistance alert so the user can hear it
+  document.getElementById('alertTestBtn')?.addEventListener('click', () => {
+    const origEnabled = document.getElementById('pivotAlertToggle')?.checked;
+    const toggle = document.getElementById('pivotAlertToggle');
+    if (toggle && !origEnabled) toggle.checked = true;
+    playAlert('r');
+    if (toggle && !origEnabled) setTimeout(() => { toggle.checked = false; }, 500);
+  });
+
   document.getElementById('pivotAlertToggle')?.addEventListener('change', () => {
-    // reset touched levels when alert is re-enabled so levels trigger fresh
     _touchedLevels.clear();
   });
 
@@ -4657,7 +5277,7 @@ End with a one-sentence caveat about F&O risk.`;
   }
   fetchChain();
   setTimeout(() => fetchAndRenderMovers(), 2500);
-  setTimeout(() => fetchOhlcForPivots(), 3000);  // deferred — needs warmed session
+  setTimeout(() => { fetchOhlcForPivots(); fetchAndRenderNiftyConstituents(); }, 5000);
 })();
 </script>
 </body>
