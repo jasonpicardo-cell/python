@@ -248,7 +248,125 @@
   .vs-legend { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; color: var(--muted-2); }
   .vs-gradient { width: 80px; height: 8px; border-radius: 3px; background: linear-gradient(to right, hsl(220,70%,50%), hsl(30,80%,50%), hsl(0,80%,50%)); }
 
-  /* ── Home tab ── */
+  /* ── Stock Pivot Lookup ── */
+  .stock-lookup-panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px; margin-top: 14px;
+  }
+  .lookup-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .lookup-input-wrap { position: relative; flex: 1; min-width: 200px; max-width: 320px; }
+  .lookup-input {
+    width: 100%; box-sizing: border-box;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-size: 13px; padding: 6px 12px; outline: none;
+  }
+  .lookup-input:focus { border-color: var(--accent); }
+  .lookup-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    max-height: 220px; overflow-y: auto; z-index: 100;
+    box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  .lookup-item {
+    padding: 7px 12px; cursor: pointer; display: flex; gap: 10px; align-items: baseline;
+    font-size: 12px;
+  }
+  .lookup-item:hover { background: var(--panel-2); }
+  .lookup-item .li-sym { font-weight: 700; font-size: 12px; color: var(--text); min-width: 80px; }
+  .lookup-item .li-name { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lookup-result {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px;
+    margin-top: 4px;
+  }
+  .lookup-level-card {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 2px; position: relative;
+  }
+  .lookup-level-card.near-r { border-color: #ff6b6b; background: rgba(255,107,107,.07); }
+  .lookup-level-card.near-s { border-color: #51cf66; background: rgba(81,207,102,.07); }
+  .lookup-level-card.near-p { border-color: var(--gold); background: rgba(250,200,88,.07); }
+  .llc-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--muted-2); }
+  .llc-price { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600; }
+  .llc-dist  { font-size: 9px; color: var(--muted-2); font-family: 'IBM Plex Mono', monospace; }
+  .lookup-spot { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .pivot-scanner-panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px; margin-top: 14px;
+  }
+  .scanner-head {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px; margin-bottom: 10px;
+  }
+  .scanner-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .scanner-controls label { display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; }
+  .level-filter-btns { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .lvl-filter-btn {
+    padding: 3px 10px; font-size: 10.5px; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--panel-2); color: var(--muted);
+    cursor: pointer; font-weight: 600; transition: all .15s;
+  }
+  .lvl-filter-btn:hover { color: var(--text); border-color: var(--accent-dim); }
+  .lvl-filter-btn.active { background: var(--accent-dim); color: var(--text); border-color: var(--accent); }
+  .lvl-filter-btn[data-level^="R"].active { background: rgba(255,107,107,.18); border-color: #ff6b6b; color: #ff6b6b; }
+  .lvl-filter-btn[data-level^="S"].active { background: rgba(81,207,102,.18); border-color: #51cf66; color: #51cf66; }
+  .lvl-filter-btn[data-level="P"].active  { background: rgba(250,200,88,.18);  border-color: var(--gold); color: var(--gold); }
+  .scan-status-row { margin-bottom: 6px; }
+  .scan-table-wrap { overflow-x: auto; overflow-y: auto; max-height: 520px; }
+  /* ── Scan search autocomplete ── */
+  #scanSearchWrapper { position: relative; display: inline-block; }
+  .scan-suggest-dropdown {
+    position: absolute; top: calc(100% + 3px); left: 0;
+    min-width: 200px; max-height: 280px; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--accent);
+    border-radius: var(--radius); z-index: 300;
+    box-shadow: 0 6px 20px rgba(0,0,0,.45); display: none;
+  }
+  .scan-suggest-item {
+    padding: 7px 12px; font-size: 11.5px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace;
+    border-bottom: 1px solid var(--border-soft); white-space: nowrap;
+  }
+  .scan-suggest-item:last-child { border-bottom: none; }
+  .scan-suggest-item:hover, .scan-suggest-item.kbd-active { background: var(--panel-3); }
+  .scan-suggest-match { color: var(--accent); font-weight: 700; }
+  .scan-table {
+    width: 100%; border-collapse: collapse; font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .scan-table thead tr { position: sticky; top: 0; z-index: 2; background: var(--panel); }
+  .scan-table th {
+    padding: 5px 8px; font-size: 9.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+    cursor: pointer; user-select: none; text-align: right;
+  }
+  .scan-table th:first-child, .scan-table th:nth-child(2) { text-align: center; }
+  .scan-table th:nth-child(3), .scan-table th.th-sym { text-align: left; }
+  .scan-table th:hover { color: var(--text); }
+  .scan-table th.sort-active { color: var(--accent); }
+  .scan-table th.sort-asc::after  { content: ' ▲'; font-size: 8px; }
+  .scan-table th.sort-desc::after { content: ' ▼'; font-size: 8px; }
+  .scan-table td {
+    padding: 5px 8px; border-bottom: 1px solid var(--border-soft);
+    white-space: nowrap; text-align: right; vertical-align: middle;
+  }
+  .scan-table td.td-rank  { text-align: center; color: var(--muted-2); font-size: 9px; }
+  .scan-table td.td-sym   { text-align: left; font-family: inherit; font-weight: 700; font-size: 11.5px; }
+  .scan-table td.td-price { font-weight: 600; color: var(--text); }
+  .scan-table td.td-price.stale { color: var(--muted); }
+  .scan-table tr:hover td { background: var(--panel-2); }
+  /* Level cells near-highlight */
+  .scan-near-r { background: rgba(255,107,107,.14); color: #ff8080 !important; font-weight: 700; }
+  .scan-near-s { background: rgba(81,207,102,.14);  color: #51cf66 !important; font-weight: 700; }
+  .scan-near-p { background: rgba(250,200,88,.14);  color: var(--gold) !important; font-weight: 700; }
+  .scan-near-badge {
+    display: inline-block; padding: 1px 5px; border-radius: 3px;
+    font-size: 9px; font-weight: 700; margin: 1px;
+  }
+  .scan-near-badge.r { background: rgba(255,107,107,.2); color: #ff8080; }
+  .scan-near-badge.s { background: rgba(81,207,102,.2);  color: #51cf66; }
+  .scan-near-badge.p { background: rgba(250,200,88,.2);  color: var(--gold); }
   .home-layout {
     display: grid; grid-template-columns: 1fr 420px; gap: 16px; align-items: start;
   }
@@ -261,6 +379,14 @@
     background: var(--panel); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 14px 16px;
   }
+  .nifty-index-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 10px; }
+  .nifty-idx-tab {
+    padding: 3px 9px; font-size: 10px; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--panel-2); color: var(--muted);
+    cursor: pointer; font-family: inherit; transition: all .12s ease;
+  }
+  .nifty-idx-tab:hover { color: var(--text); border-color: var(--accent-dim); }
+  .nifty-idx-tab.active { background: var(--accent-dim); color: var(--text); border-color: var(--accent); font-weight: 600; }
   .nifty-table { width: 100%; border-collapse: collapse; font-size: 11px; }
   .nifty-table th {
     padding: 5px 8px; text-align: right; font-size: 9.5px; font-weight: 700;
@@ -1046,13 +1172,20 @@
         <!-- Right column: Nifty 50 Constituents -->
         <div class="home-right">
           <div class="nifty-widget" id="niftyWidget">
-            <div class="level-panel-head" style="margin-bottom:10px;">
-              <span class="skew-chart-title">Nifty 50 Constituents</span>
+            <div class="level-panel-head" style="margin-bottom:6px;">
+              <span class="skew-chart-title" id="niftyWidgetTitle">Nifty 50 Constituents</span>
               <div style="display:flex;align-items:center;gap:8px;">
                 <span class="level-source" id="niftyWidgetTime"></span>
-                <button class="btn" id="niftyExpandBtn" style="font-size:10px;padding:3px 9px;">⤢ All 50</button>
+                <button class="btn" id="niftyExpandBtn" style="font-size:10px;padding:3px 9px;">⤢ All</button>
                 <button class="btn" id="niftyRefreshBtn" style="font-size:10px;padding:3px 9px;">↻</button>
               </div>
+            </div>
+            <!-- Index selector tabs -->
+            <div class="nifty-index-tabs" id="niftyIndexTabs">
+              <button class="nifty-idx-tab active" data-index="NIFTY">Nifty 50</button>
+              <button class="nifty-idx-tab" data-index="BANKNIFTY">BankNifty</button>
+              <button class="nifty-idx-tab" data-index="FINNIFTY">FinNifty</button>
+              <button class="nifty-idx-tab" data-index="MIDCPNIFTY">MidCap</button>
             </div>
             <div id="niftyWidgetBody">
               <div class="movers-loading">Loading constituent data…</div>
@@ -1086,6 +1219,110 @@
         </div><!-- /.home-right -->
 
       </div><!-- /.home-layout -->
+
+      <!-- ── Pivot Scanner — full width ────────────────────────────── -->
+      <div class="pivot-scanner-panel" id="pivotScannerPanel">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">📊 Pivot Scanner — F&amp;O Stocks</span>
+            <select id="scanPivotType" class="level-select">
+              <option value="fibonacci" selected>Fibonacci</option>
+              <option value="traditional">Traditional</option>
+              <option value="classic">Classic</option>
+              <option value="woodie">Woodie</option>
+              <option value="camarilla">Camarilla</option>
+              <option value="demark">DeMark</option>
+            </select>
+            <label class="scanner-controls">
+              <input type="radio" name="scanMode" id="scanModeDaily"     value="daily"     checked> Daily
+            </label>
+            <label class="scanner-controls">
+              <input type="radio" name="scanMode" id="scanModeWeekly"    value="weekly">    Weekly
+            </label>
+            <label class="scanner-controls">
+              <input type="radio" name="scanMode" id="scanModeMonthly"   value="monthly">   Monthly
+            </label>
+            <label class="scanner-controls">
+              <input type="radio" name="scanMode" id="scanModeQuarterly" value="quarterly"> Quarterly
+            </label>
+            <label class="scanner-controls">
+              <input type="radio" name="scanMode" id="scanModeYearly"    value="yearly">    Yearly
+            </label>
+          </div>
+          <div class="scanner-controls">
+            <select id="scanSymbolList" class="level-select" title="Symbol universe to scan">
+              <option value="niftyfno" selected>F&amp;O Stocks</option>
+              <option value="nifty50">Nifty 50</option>
+              <option value="nifty100">Nifty 100</option>
+              <option value="nifty200">Nifty 200</option>
+              <option value="nifty500">Nifty 500</option>
+              <option value="nifty750">Nifty 750</option>
+              <option value="all">All (CSV folder)</option>
+            </select>
+            <div id="scanSearchWrapper">
+              <input type="text" id="scanSearch" placeholder="Search symbol…"
+                     class="ohlc-inp" style="width:140px;" title="Type a symbol name — select from dropdown to see pivot points"
+                     autocomplete="off">
+            </div>
+            <label title="Auto-refresh">
+              <input type="checkbox" id="scanAutoRefresh" checked> Auto
+            </label>
+            <input type="number" id="scanIntervalMins" value="5" min="1" max="60"
+                   class="ohlc-inp" style="width:40px;text-align:center;" title="Interval (minutes)">
+            <span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="scanRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+
+        <!-- Level filter buttons -->
+        <div class="level-filter-btns" id="levelFilterBtns">
+          <button class="lvl-filter-btn active" data-level="">All</button>
+          <button class="lvl-filter-btn" data-level="R5">R5</button>
+          <button class="lvl-filter-btn" data-level="R4">R4</button>
+          <button class="lvl-filter-btn" data-level="R3">R3</button>
+          <button class="lvl-filter-btn" data-level="R2">R2</button>
+          <button class="lvl-filter-btn" data-level="R1">R1</button>
+          <button class="lvl-filter-btn" data-level="P">Pivot</button>
+          <button class="lvl-filter-btn" data-level="S1">S1</button>
+          <button class="lvl-filter-btn" data-level="S2">S2</button>
+          <button class="lvl-filter-btn" data-level="S3">S3</button>
+          <button class="lvl-filter-btn" data-level="S4">S4</button>
+          <button class="lvl-filter-btn" data-level="S5">S5</button>
+        </div>
+
+        <div class="scan-status-row">
+          <span class="level-source" id="scanStatus">Click ▶ Run to load pivot data.</span>
+        </div>
+        <div id="scanTableWrap" class="scan-table-wrap"></div>
+      </div><!-- /.pivot-scanner-panel -->
+
+      <!-- ── Stock Pivot Lookup ────────────────────────────────────── -->
+      <div class="stock-lookup-panel" id="stockLookupPanel">
+        <div class="lookup-head">
+          <span class="skew-chart-title">🔎 Stock Pivot Lookup</span>
+          <div class="lookup-input-wrap">
+            <input type="text" id="stockLookupInput" class="lookup-input"
+                   placeholder="Type symbol or name… (e.g. RELI, Infosys)"
+                   autocomplete="off" spellcheck="false">
+            <div class="lookup-dropdown" id="lookupDropdown" style="display:none;"></div>
+          </div>
+          <select id="lookupPivotType" class="level-select">
+            <option value="fibonacci" selected>Fibonacci</option>
+            <option value="traditional">Traditional</option>
+            <option value="classic">Classic</option>
+            <option value="woodie">Woodie</option>
+            <option value="camarilla">Camarilla</option>
+            <option value="demark">DeMark</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;">
+            <input type="radio" name="lookupMode" value="daily" checked> Daily
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:11px;">
+            <input type="radio" name="lookupMode" value="weekly"> Weekly
+          </label>
+        </div>
+        <div id="lookupResult" style="min-height:40px;"></div>
+      </div>
     </section><!-- #tab-home -->
 
     <!-- ══════════════════════════════════════════════════════════════ -->
@@ -1504,6 +1741,7 @@
         fetchAndRenderNiftyConstituents();
         fetchAndRenderMovers();
         if (!state_ohlc.high) fetchOhlcForPivots();
+        if (!scanState.data)  runPivotScanner(false);
       }
       if (tab.dataset.tab === 'market') {
         fetchAndRenderHistoryTrend();
@@ -1746,11 +1984,17 @@
 
     // ─── Determine which tab is currently active ──────────────────────────
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
-    // On the very first render, we do a full render of all tabs so they're
+    // On the very first render, do a full render of all tabs so they're
     // immediately ready when the user switches to them. From the second fetch
-    // onwards (auto-refresh), we go lazy: only render visible tabs.
+    // onwards (auto-refresh), go lazy: only render visible tabs.
     const isFirstRender = !state.initialRenderDone;
     state.initialRenderDone = true;
+
+    // Auto-sync the Nifty widget to the currently loaded index symbol
+    if (isFirstRender || data.symbol !== niftyState._lastSyncedSymbol) {
+      niftyState._lastSyncedSymbol = data.symbol;
+      _syncNiftyWidgetToSymbol(data.symbol);
+    }
 
     // ─── Chain tab: incremental row updates, never full innerHTML ─────────
     renderChainTable(data, activeTab === 'chain');
@@ -4741,19 +4985,24 @@
   // NIFTY 50 CONSTITUENTS WIDGET
   // ====================================================================
   const niftyState = {
-    stocks: [],      // full list from server
+    stocks: [],
     niftyValue: 0,
-    sortCol: 'pts_abs',   // initial default: biggest movers (absolute) first
-    sortDir: -1,          // -1 = descending
-    expanded: false,      // false = top 10, true = all 50
+    sortCol: 'pts_contributed',   // signed: desc = most positive first, asc = most negative first
+    sortDir: -1,
+    expanded: false,
     timer: null,
+    indexSymbol: 'NIFTY',
+  };
+
+  const NIFTY_INDEX_TITLES = {
+    NIFTY: 'Nifty 50', BANKNIFTY: 'Bank Nifty', FINNIFTY: 'Fin Nifty', MIDCPNIFTY: 'MidCap Select',
   };
 
   const NIFTY_COLS = [
-    { key: '#',       label: '#',          sort: 'rank',       align: 'center' },
-    { key: 'symbol',  label: 'Symbol',     sort: 'symbol',     align: 'left' },
-    { key: 'ltp',     label: 'LTP',        sort: 'ltp',        align: 'right' },
-    { key: 'pct',     label: '% Chg',      sort: 'pct_change', align: 'right' },
+    { key: '#',       label: '#',          sort: 'rank',            align: 'center' },
+    { key: 'symbol',  label: 'Symbol',     sort: 'symbol',          align: 'left' },
+    { key: 'ltp',     label: 'LTP',        sort: 'ltp',             align: 'right' },
+    { key: 'pct',     label: '% Chg',      sort: 'pct_change',      align: 'right' },
     { key: 'pts',     label: 'Pts ±',      sort: 'pts_contributed', align: 'right' },
   ];
 
@@ -4765,20 +5014,54 @@
 
     const base = els.serverUrl.value.replace(/\/+$/, '');
     try {
-      const resp = await fetch(`${base}/api/nifty-constituents`, { signal: AbortSignal.timeout(20000) });
+      const resp = await fetch(
+        `${base}/api/nifty-constituents?symbol=${niftyState.indexSymbol}`,
+        { signal: AbortSignal.timeout(20000) }
+      );
       const data = await resp.json();
       if (data.error && !data.stocks?.length) {
         bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(data.error)}</div>`;
         return;
       }
       niftyState.stocks = data.stocks || [];
-      niftyState.niftyValue = data.nifty_value || 0;
+      niftyState.niftyValue = data.index_value || data.nifty_value || 0;
       if (timeEl) timeEl.textContent = data.as_of ? `· ${data.as_of}` : '';
       if (noteEl) noteEl.textContent = data.note || '';
+      // Update widget title
+      const titleEl = document.getElementById('niftyWidgetTitle');
+      if (titleEl) titleEl.textContent = (NIFTY_INDEX_TITLES[niftyState.indexSymbol] || niftyState.indexSymbol) + ' Constituents';
       renderNiftyWidget();
     } catch (e) {
       bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Server not reachable. Start nse_chain_server.py first.</div>`;
     }
+  }
+
+  // Wire index selector tabs
+  document.getElementById('niftyIndexTabs')?.addEventListener('click', e => {
+    const btn = e.target.closest('.nifty-idx-tab');
+    if (!btn) return;
+    const idx = btn.dataset.index;
+    if (!idx || idx === niftyState.indexSymbol) return;
+    // Update active state
+    document.querySelectorAll('.nifty-idx-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    niftyState.indexSymbol = idx;
+    niftyState.stocks = [];
+    niftyState.expanded = false;
+    // Keep current sort settings — user's chosen column/direction persists across index switches
+    document.getElementById('niftyWidgetBody').innerHTML = '<div class="movers-loading">Loading…</div>';
+    fetchAndRenderNiftyConstituents();
+  });
+
+  // Auto-sync: when option chain symbol is one of the 4 index symbols, switch the widget
+  function _syncNiftyWidgetToSymbol(sym) {
+    const idx = sym?.toUpperCase();
+    if (!NIFTY_INDEX_TITLES[idx] || idx === niftyState.indexSymbol) return;
+    niftyState.indexSymbol = idx;
+    document.querySelectorAll('.nifty-idx-tab').forEach(b => {
+      b.classList.toggle('active', b.dataset.index === idx);
+    });
+    fetchAndRenderNiftyConstituents();
   }
 
   function _niftySorted() {
@@ -4842,7 +5125,7 @@
 
     // Update expand button label
     const expandBtn = document.getElementById('niftyExpandBtn');
-    if (expandBtn) expandBtn.textContent = niftyState.expanded ? '⤡ Top 10' : '⤢ All 50';
+    if (expandBtn) expandBtn.textContent = niftyState.expanded ? '⤡ Top 10' : `⤢ All ${sorted.length}`;
   }
 
   function _niftySetSort(col) {
@@ -4881,6 +5164,535 @@
     }, 5000);
   }
   _startNiftyAutoReload();
+
+  // ====================================================================
+  // PIVOT SCANNER — F&O Stocks
+  // ====================================================================
+  const scanState = {
+    data:          null,
+    pivotType:     'fibonacci',
+    mode:          'daily',
+    source:        'niftyfno',   // niftyfno | nifty50 | nifty100 | nifty200 | nifty500 | nifty750 | all
+    searchText:    '',
+    levelFilter:   '',
+    sortCol:       'symbol',
+    sortDir:       1,
+    timer:         null,
+    intervalMins:  5,
+    autoRefresh:   true,
+  };
+
+  const SCAN_LEVELS = ['R5','R4','R3','R2','R1','P','S1','S2','S3','S4','S5'];
+
+  function _scanLevelClass(level) {
+    if (!level) return '';
+    if (level === 'P') return 'p';
+    return level.startsWith('R') ? 'r' : 's';
+  }
+
+  function _scanCellClass(level) {
+    if (level === 'P') return 'scan-near-p';
+    return level.startsWith('R') ? 'scan-near-r' : 'scan-near-s';
+  }
+
+  function _scanTh(col, label) {
+    const isActive = scanState.sortCol === col;
+    const cls = ['scan-th',
+      isActive ? 'sort-active' : '',
+      isActive ? (scanState.sortDir === 1 ? 'sort-asc' : 'sort-desc') : '',
+    ].filter(Boolean).join(' ');
+    return `<th class="${cls}" data-sort="${escapeHtml(col)}">${escapeHtml(label)}</th>`;
+  }
+
+  function renderPivotScanner() {
+    const wrap    = document.getElementById('scanTableWrap');
+    const statusEl = document.getElementById('scanStatus');
+    if (!wrap) return;
+    const d = scanState.data;
+    if (!d) return;
+
+    let stocks = d.stocks || [];
+
+    // Symbol text search
+    if (scanState.searchText) {
+      const q = scanState.searchText.toUpperCase();
+      stocks = stocks.filter(s => s.symbol.includes(q));
+    }
+
+    // Level filter: show only stocks where price is within ±2% of chosen level
+    if (scanState.levelFilter) {
+      const fl = scanState.levelFilter;
+      stocks = stocks.filter(s => {
+        const v = s.pivots[fl];
+        return v != null && s.price > 0 && Math.abs(s.price - v) / v * 100 <= 2;
+      });
+    }
+
+    // Sort
+    const col = scanState.sortCol;
+    const dir = scanState.sortDir;
+    stocks = [...stocks].sort((a, b) => {
+      if (col === 'symbol')  return a.symbol.localeCompare(b.symbol) * dir;
+      if (col === 'price')   return (a.price - b.price) * dir;
+      if (col === 'near')    return (a.closest_pct - b.closest_pct) * dir;
+      // Pivot level column (R1, S2, P, etc.)
+      const av = a.pivots[col] ?? 0;
+      const bv = b.pivots[col] ?? 0;
+      return (av - bv) * dir;
+    });
+
+    // Status
+    if (statusEl) {
+      const fLabel  = scanState.levelFilter ? ` · Near ${scanState.levelFilter} only` : '';
+      const mkt     = d.market_status || '';
+      const mktIcon = {'open':'🟢','closed':'🔴','pre-market':'🟡','weekend':'⚫'}[mkt] || '';
+      const errInfo = (d.errors?.length || d.skipped?.length)
+        ? ` · ⚠ ${d.errors?.length || 0} errors, ${d.skipped?.length || 0} no-CSV`
+        : '';
+      statusEl.textContent =
+        `${stocks.length}/${d.count} stocks · ${d.mode} · ${d.pivot_type} · ${d.as_of} · EOD from CSV · ${mktIcon} ${mkt}${errInfo}${fLabel}`;
+    }
+
+    if (!stocks.length) {
+      if (d.error) {
+        wrap.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(d.error)}<br><small style="color:var(--muted-2);">data_dir: ${escapeHtml(d.data_dir || '')}</small></div>`;
+      } else {
+        wrap.innerHTML = '<div class="movers-loading">No stocks match the current filter.</div>';
+      }
+      return;
+    }
+
+    // Header
+    const header = [
+      _scanTh('#', '#'),
+      `<th class="th-sym sort-active ${scanState.sortCol==='symbol' ? (scanState.sortDir===1?'sort-asc':'sort-desc') : ''}" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _scanTh('price', 'Price'),
+      ...SCAN_LEVELS.map(l => _scanTh(l, l === 'P' ? 'Pivot' : l)),
+      _scanTh('near', 'Near'),
+    ].join('');
+
+    // Rows
+    const rows = stocks.map((s, i) => {
+      const lvlCells = SCAN_LEVELS.map(l => {
+        const v = s.pivots[l];
+        if (v == null) return '<td style="color:var(--muted-2);">—</td>';
+        const isNear = s.near?.includes(l);
+        const cls = isNear ? _scanCellClass(l) : '';
+        const dist = s.price ? ((s.price - v) / v * 100).toFixed(2) : '—';
+        const sign = s.price > v ? '+' : '';
+        return `<td class="${cls}" title="${sign}${dist}% from ${l}">${fmtPrice(v)}</td>`;
+      }).join('');
+
+      const nearBadges = (s.near?.length > 0)
+        ? s.near.map(l => `<span class="scan-near-badge ${_scanLevelClass(l)}">${l}</span>`).join('')
+        : '<span style="color:var(--muted-2);">—</span>';
+
+      const tvUrl = `https://in.tradingview.com/chart/0dT5rHYi/?symbol=NSE%3A${encodeURIComponent(s.symbol)}`;
+      const ou = s.ohlc_used;
+      const tip = ou ? `${ou.date} | O:${ou.O} H:${ou.H} L:${ou.L} C:${ou.C}` : 'CSV last close';
+      return `<tr>
+        <td class="td-rank">${i + 1}</td>
+        <td class="td-sym"><a href="${tvUrl}" target="_blank" rel="noopener" title="Open ${escapeHtml(s.symbol)} on TradingView" style="color:inherit;text-decoration:none;">${escapeHtml(s.symbol)}<sup style="font-size:7px;color:var(--accent);margin-left:1px;">↗</sup></a></td>
+        <td class="td-price" title="${tip}">${fmtPrice(s.price)}</td>
+        ${lvlCells}
+        <td>${nearBadges}</td>
+      </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `<table class="scan-table">
+      <thead><tr>${header}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  async function runPivotScanner(force = false) {
+    const statusEl = document.getElementById('scanStatus');
+    const wrap     = document.getElementById('scanTableWrap');
+    if (!wrap) return;
+    if (statusEl) statusEl.textContent = 'Scanning…';
+
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    const ttl  = Math.max(30, scanState.intervalMins * 60);
+    const url  = `${base}/api/pivot-scanner?mode=${scanState.mode}&pivot_type=${scanState.pivotType}&source=${scanState.source}&force=${force}&ttl=${ttl}`;
+
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(90000) });
+      const data = await resp.json();
+      if (data.error && !data.stocks?.length) {
+        wrap.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(data.error)}</div>`;
+        if (statusEl) statusEl.textContent = 'Error — see table.';
+        return;
+      }
+      scanState.data = data;
+      renderPivotScanner();
+    } catch (e) {
+      wrap.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Fetch error: ${escapeHtml(e.message)}</div>`;
+      if (statusEl) statusEl.textContent = 'Error.';
+    }
+  }
+
+  // ── Scanner controls wiring ────────────────────────────────────────
+  document.getElementById('scanRunBtn')?.addEventListener('click', () => runPivotScanner(true));
+
+  document.getElementById('scanPivotType')?.addEventListener('change', e => {
+    scanState.pivotType = e.target.value;
+    runPivotScanner(true);
+  });
+
+  document.querySelectorAll('input[name="scanMode"]').forEach(radio => {
+    radio.addEventListener('change', e => {
+      if (e.target.checked) {
+        scanState.mode = e.target.value;
+        runPivotScanner(true);
+      }
+    });
+  });
+
+  document.getElementById('scanSymbolList')?.addEventListener('change', e => {
+    scanState.source = e.target.value;
+    runPivotScanner(true);
+  });
+
+  // ====================================================================
+  // SCAN SEARCH — autocomplete dropdown + single-stock pivot lookup
+  // ====================================================================
+  let _allScanSymbols = [];     // all available CSV symbols (fetched once)
+  let _scanSavedData  = null;   // preserves the full-scan results while searching
+  let _scanSearchTimer = null;
+
+  async function _loadScanSymbols() {
+    if (_allScanSymbols.length > 0) return;
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const r = await fetch(`${base}/api/pivot-scanner/symbols`,
+        { signal: AbortSignal.timeout(10000) });
+      const d = await r.json();
+      _allScanSymbols = d.symbols || [];
+    } catch (_) {
+      // fallback: use the currently loaded scanner stocks
+      _allScanSymbols = (scanState.data?.stocks || []).map(s => s.symbol);
+    }
+  }
+
+  function _getSuggestions(q) {
+    if (!q || q.length < 1) return [];
+    const up = q.toUpperCase();
+    // Starts-with first (ranked highest), then contains
+    const starts   = _allScanSymbols.filter(s => s.startsWith(up));
+    const contains = _allScanSymbols.filter(s => !s.startsWith(up) && s.includes(up));
+    return [...starts, ...contains].slice(0, 15);
+  }
+
+  function _renderSuggestions(q) {
+    const wrapper = document.getElementById('scanSearchWrapper');
+    if (!wrapper) return;
+    let dd = document.getElementById('scanSuggestDD');
+    if (!dd) {
+      dd = Object.assign(document.createElement('div'), { id: 'scanSuggestDD', className: 'scan-suggest-dropdown' });
+      wrapper.appendChild(dd);
+    }
+    const matches = _getSuggestions(q);
+    if (!matches.length) { dd.style.display = 'none'; return; }
+    const up = q.toUpperCase();
+    dd.innerHTML = matches.map((sym, idx) => {
+      // Bold the matching prefix/substring
+      const mi = sym.indexOf(up);
+      const hi = mi >= 0
+        ? escapeHtml(sym.slice(0, mi)) +
+          `<span class="scan-suggest-match">${escapeHtml(sym.slice(mi, mi + up.length))}</span>` +
+          escapeHtml(sym.slice(mi + up.length))
+        : escapeHtml(sym);
+      return `<div class="scan-suggest-item" data-sym="${escapeHtml(sym)}" data-idx="${idx}">${hi}</div>`;
+    }).join('');
+    dd.style.display = 'block';
+  }
+
+  function _hideSuggestions() {
+    const dd = document.getElementById('scanSuggestDD');
+    if (dd) dd.style.display = 'none';
+  }
+
+  async function _doSymbolLookup(symbol) {
+    const statEl = document.getElementById('scanStatus');
+    const wrap   = document.getElementById('scanTableWrap');
+    if (!symbol) return;
+    if (statEl) statEl.textContent = `Looking up ${symbol}…`;
+    if (wrap) wrap.innerHTML = '<div class="movers-loading">Fetching pivot data…</div>';
+
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const r = await fetch(
+        `${base}/api/pivot-scanner/symbol?symbol=${encodeURIComponent(symbol)}&mode=${scanState.mode}&pivot_type=${scanState.pivotType}`,
+        { signal: AbortSignal.timeout(15000) }
+      );
+      const d = await r.json();
+      if (d.error) {
+        if (wrap) wrap.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(d.error)}</div>`;
+        if (statEl) statEl.textContent = `${symbol} — not found`;
+        return;
+      }
+      // Temporarily replace scan data with single-stock result
+      if (scanState.data && !scanState.data._isSearch) _scanSavedData = scanState.data;
+      scanState.data = {
+        _isSearch:  true,
+        stocks:     [d],
+        count:      1, total: 1,
+        mode:       d.mode       || scanState.mode,
+        pivot_type: d.pivot_type || scanState.pivotType,
+        as_of:      new Date().toLocaleTimeString('en-IN'),
+        market_status: '',
+      };
+      scanState.searchText = '';   // no filter needed — data is already the one stock
+      renderPivotScanner();
+      if (statEl) statEl.textContent =
+        `${symbol} · ${d.ohlc_used?.date || 'CSV lookup'} · Clear search to return to scanner`;
+    } catch (err) {
+      if (statEl) statEl.textContent = `Lookup error: ${err.message}`;
+    }
+  }
+
+  // ── Event wiring ────────────────────────────────────────────────────
+
+  // Pre-load symbol list when search box is focused
+  document.getElementById('scanSearch')?.addEventListener('focus', _loadScanSymbols);
+
+  // Input: show suggestions only, never show pivot until selection
+  document.getElementById('scanSearch')?.addEventListener('input', e => {
+    const q = e.target.value.trim();
+    clearTimeout(_scanSearchTimer);
+    if (!q) {
+      _hideSuggestions();
+      // Restore the full scanner results when box is cleared
+      if (_scanSavedData) {
+        scanState.data     = _scanSavedData;
+        scanState.searchText = '';
+        renderPivotScanner();
+      } else if (scanState.data?._isSearch) {
+        // Nothing to restore — just clear the single-stock view
+        scanState.data = null;
+        document.getElementById('scanTableWrap').innerHTML = '';
+        document.getElementById('scanStatus').textContent  = 'Click ▶ Run to load pivot data.';
+      }
+      return;
+    }
+    _renderSuggestions(q);
+    // Load symbols list if not already loaded (first keystroke)
+    if (_allScanSymbols.length === 0) {
+      _scanSearchTimer = setTimeout(_loadScanSymbols, 100);
+    }
+  });
+
+  // Keyboard navigation inside dropdown
+  let _kbIdx = -1;
+  document.getElementById('scanSearch')?.addEventListener('keydown', async e => {
+    const dd = document.getElementById('scanSuggestDD');
+    const items = dd ? [...dd.querySelectorAll('.scan-suggest-item')] : [];
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _kbIdx = Math.min(_kbIdx + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('kbd-active', i === _kbIdx));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _kbIdx = Math.max(_kbIdx - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('kbd-active', i === _kbIdx));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const active = items[_kbIdx] || items[0];
+      if (active) {
+        const sym = active.dataset.sym;
+        e.target.value = sym;
+        _kbIdx = -1;
+        _hideSuggestions();
+        await _doSymbolLookup(sym);
+      } else {
+        // No suggestion highlighted — look up whatever is typed
+        const q = e.target.value.trim().toUpperCase();
+        if (q) { _hideSuggestions(); await _doSymbolLookup(q); }
+      }
+    } else if (e.key === 'Escape') {
+      _hideSuggestions(); _kbIdx = -1;
+    }
+  });
+
+  // Click on a suggestion item
+  document.getElementById('scanSearchWrapper')?.addEventListener('mousedown', async e => {
+    const item = e.target.closest('.scan-suggest-item');
+    if (!item) return;
+    e.preventDefault();   // prevent input blur before we read the symbol
+    const sym = item.dataset.sym;
+    document.getElementById('scanSearch').value = sym;
+    _kbIdx = -1;
+    _hideSuggestions();
+    await _doSymbolLookup(sym);
+  });
+
+  // Hide dropdown when clicking outside
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#scanSearchWrapper')) { _hideSuggestions(); _kbIdx = -1; }
+  });
+
+  // Level filter buttons
+  document.getElementById('levelFilterBtns')?.addEventListener('click', e => {
+    const btn = e.target.closest('.lvl-filter-btn');
+    if (!btn) return;
+    document.querySelectorAll('.lvl-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    scanState.levelFilter = btn.dataset.level;
+    renderPivotScanner();   // re-filter in memory, no server call
+  });
+
+  // Sort click on scanner table
+  document.getElementById('scanTableWrap')?.addEventListener('click', e => {
+    const th = e.target.closest('th[data-sort]');
+    if (!th) return;
+    const col = th.dataset.sort;
+    if (col === scanState.sortCol) {
+      scanState.sortDir *= -1;
+    } else {
+      scanState.sortCol = col;
+      scanState.sortDir = col === 'symbol' ? 1 : -1;
+    }
+    renderPivotScanner();
+  });
+
+  // Auto-refresh (only fires when Home tab is active)
+  function _startScannerAutoReload() {
+    if (scanState.timer) clearInterval(scanState.timer);
+    scanState.timer = setInterval(() => {
+      const isHome = document.querySelector('.tab.active')?.dataset.tab === 'home';
+      if (isHome && scanState.autoRefresh) runPivotScanner(false);
+    }, Math.max(30000, scanState.intervalMins * 60000));
+  }
+
+  document.getElementById('scanAutoRefresh')?.addEventListener('change', e => {
+    scanState.autoRefresh = e.target.checked;
+  });
+
+  document.getElementById('scanIntervalMins')?.addEventListener('change', e => {
+    scanState.intervalMins = Math.max(1, parseInt(e.target.value) || 5);
+    _startScannerAutoReload();
+  });
+
+  _startScannerAutoReload();
+
+  // ====================================================================
+  // STOCK PIVOT LOOKUP — search any NSE stock and show its pivot levels
+  // ====================================================================
+  const lookupState = { debounce: null, selected: '' };
+
+  const lookupInput    = document.getElementById('stockLookupInput');
+  const lookupDropdown = document.getElementById('lookupDropdown');
+  const lookupResult   = document.getElementById('lookupResult');
+
+  function _lookupMode() {
+    return document.querySelector('input[name="lookupMode"]:checked')?.value || 'daily';
+  }
+  function _lookupPivotType() {
+    return document.getElementById('lookupPivotType')?.value || 'fibonacci';
+  }
+
+  async function _loadLookupDropdown(q) {
+    if (!q || q.length < 1) { lookupDropdown.style.display = 'none'; return; }
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const resp = await fetch(`${base}/api/stock-search?q=${encodeURIComponent(q)}`,
+        { signal: AbortSignal.timeout(5000) });
+      const data = await resp.json();
+      const results = data.results || [];
+      if (!results.length) { lookupDropdown.style.display = 'none'; return; }
+      lookupDropdown.innerHTML = results.map(r =>
+        `<div class="lookup-item" data-sym="${escapeHtml(r.s)}">
+          <span class="li-sym">${escapeHtml(r.s)}</span>
+          <span class="li-name">${escapeHtml(r.n !== r.s ? r.n : '')}</span>
+        </div>`
+      ).join('');
+      lookupDropdown.style.display = 'block';
+    } catch (_) { lookupDropdown.style.display = 'none'; }
+  }
+
+  async function _fetchStockPivot(sym) {
+    if (!sym) return;
+    lookupState.selected = sym;
+    lookupDropdown.style.display = 'none';
+    lookupInput.value = sym;
+    lookupResult.innerHTML = '<div class="movers-loading">Loading pivots…</div>';
+
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    const url = `${base}/api/stock-pivot?symbol=${encodeURIComponent(sym)}&mode=${_lookupMode()}&pivot_type=${_lookupPivotType()}`;
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(20000) });
+      const d = await resp.json();
+      if (d.error) {
+        lookupResult.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(d.error)}</div>`;
+        return;
+      }
+      _renderLookupResult(d);
+    } catch (e) {
+      lookupResult.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Error: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  function _renderLookupResult(d) {
+    const { symbol, price, live, pivots, ohlc, mode, pivot_type } = d;
+    const LEVELS = ['R5','R4','R3','R2','R1','P','S1','S2','S3','S4','S5'];
+    const cards = LEVELS.map(l => {
+      const v = pivots[l];
+      if (v == null) return '';
+      const dist   = price ? ((price - v) / v * 100) : 0;
+      const isNear = Math.abs(dist) <= 2;
+      const nearCls = isNear ? (l === 'P' ? 'near-p' : l.startsWith('R') ? 'near-r' : 'near-s') : '';
+      const distStr = price ? `${dist > 0 ? '+' : ''}${dist.toFixed(2)}%` : '—';
+      return `<div class="lookup-level-card ${nearCls}">
+        <span class="llc-label">${l === 'P' ? 'Pivot' : l}</span>
+        <span class="llc-price" style="color:${l.startsWith('R') ? '#ff8080' : l === 'P' ? 'var(--gold)' : '#51cf66'}">${fmtPrice(v)}</span>
+        <span class="llc-dist">${distStr}</span>
+      </div>`;
+    }).join('');
+
+    const prevOhlc = ohlc
+      ? `H:${fmtPrice(ohlc.H)} L:${fmtPrice(ohlc.L)} C:${fmtPrice(ohlc.C)}`
+      : '';
+
+    lookupResult.innerHTML = `
+      <div class="lookup-spot">
+        <b style="font-size:13px;">${escapeHtml(symbol)}</b>
+        <span style="margin-left:10px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:var(--text);">${fmtPrice(price)}</span>
+        <span style="margin-left:6px;font-size:10px;color:var(--muted-2);">${live ? '● live' : '★ prev close'}</span>
+        <span style="margin-left:10px;font-size:10px;color:var(--muted-2);">${mode} · ${pivot_type}</span>
+        ${prevOhlc ? `<span style="margin-left:10px;font-size:10px;color:var(--muted-2);">${prevOhlc}</span>` : ''}
+      </div>
+      <div class="lookup-result">${cards}</div>`;
+  }
+
+  lookupInput?.addEventListener('input', e => {
+    clearTimeout(lookupState.debounce);
+    lookupState.debounce = setTimeout(() => _loadLookupDropdown(e.target.value.trim()), 220);
+  });
+
+  lookupInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const first = lookupDropdown.querySelector('.lookup-item');
+      if (first) _fetchStockPivot(first.dataset.sym);
+      else if (lookupInput.value.trim()) _fetchStockPivot(lookupInput.value.trim().toUpperCase());
+    }
+    if (e.key === 'Escape') lookupDropdown.style.display = 'none';
+  });
+
+  lookupDropdown?.addEventListener('click', e => {
+    const item = e.target.closest('.lookup-item');
+    if (item) _fetchStockPivot(item.dataset.sym);
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.lookup-input-wrap')) lookupDropdown.style.display = 'none';
+  });
+
+  document.querySelectorAll('input[name="lookupMode"]').forEach(r => {
+    r.addEventListener('change', () => { if (lookupState.selected) _fetchStockPivot(lookupState.selected); });
+  });
+  document.getElementById('lookupPivotType')?.addEventListener('change', () => {
+    if (lookupState.selected) _fetchStockPivot(lookupState.selected);
+  });
 
   async function fetchAndRenderMovers(force = false) {
     if (!els.gainersList) return;
@@ -5179,7 +5991,13 @@
         <span style="color:var(--muted);">Entry:</span> ${escapeHtml(s.entry)}<br>
         <span style="color:var(--neg);">SL:</span> ${escapeHtml(s.sl)}<br>
         <span style="color:var(--pos);">Target:</span> ${escapeHtml(s.tgt)}<br>
-        <span style="color:var(--muted-2);font-size:10px;">⚠ Risk: ${escapeHtml(s.risk)}</span>
+        <span style="color:var(--muted-2);font-size:10px;">⚠ Risk: ${escapeHtml(s.risk)}</span><br>
+        <button class="btn suggest-to-builder"
+                data-struct="${escapeHtml(s.struct)}"
+                data-name="${escapeHtml(s.name)}"
+                style="margin-top:8px;font-size:10px;padding:4px 12px;">
+          📐 Customize in Builder
+        </button>
       </div>`).join('');
     return `<div class="suggest-section">
       <div class="suggest-label">${labels[session] || '📊 Strategies'} · ${timeStr}</div>
@@ -5187,6 +6005,46 @@
       <div class="suggest-caveat">These are rule-based suggestions using live market data — not financial advice. F&amp;O involves substantial risk of loss. Always use proper position sizing.</div>
     </div>`;
   }
+
+  // Parse "Sell 24500 CE / Buy 24300 PE ..." into builder legs
+  function _parseStrategyLegs(struct) {
+    const legs = [];
+    const re   = /\b(Buy|Sell)\s+(\d[\d,]*\.?\d*)\s+(CE|PE)\b/gi;
+    let m;
+    while ((m = re.exec(struct)) !== null) {
+      legs.push({
+        action: m[1].toLowerCase(),              // 'buy' | 'sell'
+        strike: parseFloat(m[2].replace(/,/g,'')),
+        type:   m[3].toUpperCase(),              // 'CE' | 'PE'
+        qty:    1,
+      });
+    }
+    return legs;
+  }
+
+  // "Open in Builder" click — delegate from suggestionsOutput
+  document.getElementById('suggestionsOutput')?.addEventListener('click', e => {
+    const btn = e.target.closest('.suggest-to-builder');
+    if (!btn) return;
+    const legs = _parseStrategyLegs(btn.dataset.struct);
+    if (!legs.length) {
+      alert('Could not parse legs from: ' + btn.dataset.struct);
+      return;
+    }
+    // Clear existing builder legs, add the parsed ones
+    builderState.legs = legs.map((l, i) => ({
+      id:     Date.now() + i,
+      action: l.action,
+      type:   l.type,
+      strike: l.strike,
+      qty:    l.qty,
+      expiry: state.lastData?.expiry || state.expiry || '',
+    }));
+    builderState.dirty = true;
+    // Switch to Builder tab
+    const builderTab = document.querySelector('[data-tab="builder"]');
+    if (builderTab) builderTab.dispatchEvent(new Event('click', { bubbles: true }));
+  });
 
   els.getSuggestionsBtn?.addEventListener('click', () => {
     const d = state.lastData;
@@ -5277,7 +6135,7 @@
   }
   fetchChain();
   setTimeout(() => fetchAndRenderMovers(), 2500);
-  setTimeout(() => { fetchOhlcForPivots(); fetchAndRenderNiftyConstituents(); }, 5000);
+  setTimeout(() => { fetchOhlcForPivots(); fetchAndRenderNiftyConstituents(); runPivotScanner(false); }, 5000);
 })();
 </script>
 </body>

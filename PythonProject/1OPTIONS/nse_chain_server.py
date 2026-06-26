@@ -593,27 +593,76 @@ def _fetch_prev_day_ohlc(symbol: str) -> dict:
 
 
 
-_nifty_cache: dict = {"ts": 0, "data": None}
+_nifty_cache: dict[str, dict] = {}   # keyed by index symbol
 _NIFTY_CACHE_TTL = 60
 
+# NSE index names + fallback weights + allIndices name for spot price
+# Weights are approximate free-float cap weights (updated quarterly; these reflect 2025 Q1-Q2)
+_INDEX_CONFIG: dict[str, dict] = {
+    "NIFTY": {
+        "nse_names": ["NIFTY 50", "Nifty 50"],
+        "all_indices_name": "NIFTY 50",
+        "title": "Nifty 50",
+        "fallback_weights": [
+            ("HDFCBANK", 12.5), ("RELIANCE", 9.5), ("ICICIBANK", 8.8),
+            ("INFY", 6.2), ("TCS", 4.8), ("BHARTIARTL", 4.2),
+            ("KOTAKBANK", 3.8), ("LT", 3.2), ("AXISBANK", 3.1), ("SBIN", 3.0),
+        ],
+    },
+    "BANKNIFTY": {
+        "nse_names": ["NIFTY BANK", "Nifty Bank"],
+        "all_indices_name": "NIFTY BANK",
+        "title": "Bank Nifty",
+        "fallback_weights": [
+            ("HDFCBANK", 28.5), ("ICICIBANK", 23.1), ("KOTAKBANK", 12.1),
+            ("AXISBANK", 9.8), ("SBIN", 7.6), ("INDUSINDBK", 5.2),
+            ("BANDHANBNK", 3.5), ("FEDERALBNK", 2.8), ("IDFCFIRSTB", 2.5),
+            ("PNB", 2.1), ("AUBANK", 1.5), ("CUB", 0.9),
+        ],
+    },
+    "FINNIFTY": {
+        "nse_names": ["NIFTY FIN SERVICE", "Nifty Financial Services"],
+        "all_indices_name": "NIFTY FIN SERVICE",
+        "title": "Fin Nifty",
+        "fallback_weights": [
+            ("HDFCBANK", 18.5), ("ICICIBANK", 16.8), ("KOTAKBANK", 8.5),
+            ("AXISBANK", 7.2), ("SBIN", 6.1), ("BAJFINANCE", 5.8),
+            ("HDFCLIFE", 4.2), ("SBILIFE", 3.9), ("ICICIPRULI", 3.1), ("ICICIGI", 2.9),
+        ],
+    },
+    "MIDCPNIFTY": {
+        "nse_names": ["NIFTY MID SELECT", "Nifty Midcap Select"],
+        "all_indices_name": "NIFTY MID SELECT",
+        "title": "MidCap Select",
+        "fallback_weights": [
+            ("PERSISTENT", 6.8), ("ZOMATO", 6.2), ("POLYCAB", 5.4),
+            ("JSWSTEEL", 5.1), ("CANBK", 4.7), ("BHEL", 4.3),
+            ("LICHSGFIN", 4.0), ("ABCAPITAL", 3.8), ("MRF", 3.5), ("MFSL", 3.2),
+        ],
+    },
+}
 
-def _fetch_nifty_constituents() -> dict:
+
+def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
     """
-    Fetch Nifty 50 top-10 weighted stocks.
+    Fetch constituents for NIFTY, BANKNIFTY, FINNIFTY, or MIDCPNIFTY.
 
     Three strategies tried in order:
-      1. equity-stockIndices via params dict  (correct encoding, no %25 double-encode)
-      2. equity-stockIndices via pre-open key (alternate NSE endpoint)
-      3. Individual quote fetches for hardcoded top-10 (reliable final fallback)
+      1. equity-stockIndices with params= dict  (avoids %25 double-encoding)
+      2. market-data-pre-open key (alternate NSE endpoint)
+      3. Individual quote-equity fetches for hardcoded fallback weights
 
-    Weight proxy: each stock's share of total session traded value.
-    Points contributed ≈ (pChange% × est_weight% × nifty_value) / 100
+    Results are cached per index symbol for 60 s.
     """
     from nse_options_strategy import API_HEADERS, NSE_OC_PAGE, NSE_ALL_INDICES_API
 
+    sym = symbol.upper()
+    cfg = _INDEX_CONFIG.get(sym, _INDEX_CONFIG["NIFTY"])
+
     now = time.time()
-    if _nifty_cache["data"] and (now - _nifty_cache["ts"]) < _NIFTY_CACHE_TTL:
-        return _nifty_cache["data"]
+    cached = _nifty_cache.get(sym)
+    if cached and (now - cached.get("ts", 0)) < _NIFTY_CACHE_TTL:
+        return cached["data"]
 
     global _shared_fetcher, _shared_fetcher_ts
     fetcher = (
@@ -630,23 +679,21 @@ def _fetch_nifty_constituents() -> dict:
     h = dict(API_HEADERS)
     h["Referer"] = NSE_OC_PAGE
 
-    # Nifty 50 live index value (from allIndices — known reliable)
-    nifty_value = 24000.0
+    # Get the index spot value from allIndices
+    index_value = 24000.0
     try:
         r = fetcher.session.get(NSE_ALL_INDICES_API, headers=h, timeout=10)
         if r.status_code == 200:
             for row in r.json().get("data", []):
-                if row.get("index") == "NIFTY 50":
-                    nifty_value = float(row.get("last") or row.get("lastPrice") or 24000)
+                if row.get("index") == cfg["all_indices_name"]:
+                    index_value = float(row.get("last") or row.get("lastPrice") or 24000)
                     break
     except Exception:  # noqa: BLE001
         pass
 
-    # ── Strategy 1: equity-stockIndices with params dict ─────────────────
-    # Using params= avoids the %25 double-encoding bug that causes 404 when
-    # the URL string already contains %20 and requests re-encodes the %.
-    raw_stocks = []
-    for idx_name in ("NIFTY 50", "Nifty 50"):
+    # ── Strategy 1: equity-stockIndices with params= ─────────────────
+    raw_stocks: list[dict] = []
+    for idx_name in cfg["nse_names"]:
         try:
             r = fetcher.session.get(
                 "https://www.nseindia.com/api/equity-stockIndices",
@@ -660,55 +707,45 @@ def _fetch_nifty_constituents() -> dict:
         except Exception:  # noqa: BLE001
             continue
 
-    # ── Strategy 2: market-data-pre-open (alternate endpoint) ────────────
+    # ── Strategy 2: market-data-pre-open (NIFTY/BANKNIFTY only) ─────
     if not raw_stocks:
-        try:
-            r = fetcher.session.get(
-                "https://www.nseindia.com/api/market-data-pre-open",
-                params={"key": "NIFTY"},
-                headers=h, timeout=12,
-            )
-            if r.status_code == 200:
-                payload = r.json()
-                # response shape: {"data": [{"metadata": {...}, "detail": {...}}], ...}
-                pre_open = payload.get("data", [])
-                for item in pre_open:
-                    meta = item.get("metadata") or {}
-                    if meta.get("symbol") and meta.get("lastPrice"):
-                        raw_stocks.append({
-                            "symbol":        meta.get("symbol"),
-                            "lastPrice":     meta.get("lastPrice"),
-                            "previousClose": meta.get("previousClose"),
-                            "change":        meta.get("change"),
-                            "pChange":       meta.get("pChange"),
-                            "totalTradedValue":  meta.get("totalTradedValue") or 0,
-                            "totalTradedVolume": meta.get("totalTradedVolume") or 0,
-                        })
-        except Exception:  # noqa: BLE001
-            pass
+        pre_open_key = {"NIFTY": "NIFTY", "BANKNIFTY": "BANKNIFTY"}.get(sym)
+        if pre_open_key:
+            try:
+                r = fetcher.session.get(
+                    "https://www.nseindia.com/api/market-data-pre-open",
+                    params={"key": pre_open_key},
+                    headers=h, timeout=12,
+                )
+                if r.status_code == 200:
+                    for item in r.json().get("data", []):
+                        meta = item.get("metadata") or {}
+                        if meta.get("symbol") and meta.get("lastPrice"):
+                            raw_stocks.append({
+                                "symbol":        meta.get("symbol"),
+                                "lastPrice":     meta.get("lastPrice"),
+                                "previousClose": meta.get("previousClose"),
+                                "change":        meta.get("change"),
+                                "pChange":       meta.get("pChange"),
+                                "totalTradedValue":  meta.get("totalTradedValue") or 0,
+                                "totalTradedVolume": meta.get("totalTradedVolume") or 0,
+                            })
+            except Exception:  # noqa: BLE001
+                pass
 
-    # ── Strategy 3: individual quotes for hardcoded top-10 ───────────────
-    # These are the current Nifty 50 heavyweights by free-float market cap.
-    # Weights are approximate (as of 2025 Q1/Q2) and change each quarterly
-    # rebalancing — but they're stable enough for intraday use.
-    _TOP10_WEIGHTS = [
-        ("HDFCBANK",   12.5), ("RELIANCE",   9.5), ("ICICIBANK",  8.8),
-        ("INFY",        6.2), ("TCS",         4.8), ("BHARTIARTL", 4.2),
-        ("KOTAKBANK",   3.8), ("LT",          3.2), ("AXISBANK",   3.1),
-        ("SBIN",        3.0),
-    ]
+    # ── Strategy 3: individual quote fetches (hardcoded fallback) ────
     if not raw_stocks:
-        for sym, _ in _TOP10_WEIGHTS:
+        for sym_code, _ in cfg["fallback_weights"]:
             try:
                 r = fetcher.session.get(
                     "https://www.nseindia.com/api/quote-equity",
-                    params={"symbol": sym, "series": "EQ"},
+                    params={"symbol": sym_code, "series": "EQ"},
                     headers=h, timeout=8,
                 )
                 if r.status_code == 200:
                     pd = r.json().get("priceInfo") or {}
                     raw_stocks.append({
-                        "symbol":        sym,
+                        "symbol":        sym_code,
                         "lastPrice":     pd.get("lastPrice"),
                         "previousClose": pd.get("previousClose"),
                         "change":        pd.get("change"),
@@ -720,37 +757,30 @@ def _fetch_nifty_constituents() -> dict:
                 continue
 
     if not raw_stocks:
-        raise RuntimeError(
-            "All three NSE data sources failed. "
-            "Check that the session is warmed (load option chain first)."
-        )
+        raise RuntimeError(f"All data sources failed for {sym}. Warm the session by loading the option chain first.")
 
-    # ── Build result ─────────────────────────────────────────────────────
+    # ── Build result ─────────────────────────────────────────────────
+    _weight_map = dict(cfg["fallback_weights"])
     stocks = [
         s for s in raw_stocks
-        if s.get("symbol") not in ("NIFTY 50", "NIFTY50")
+        if s.get("symbol") not in (cfg["nse_names"] + [sym, "NIFTY 50", "NIFTY BANK", "NIFTY FIN SERVICE", "NIFTY MID SELECT"])
         and float(s.get("lastPrice") or 0) > 0
     ]
     stocks.sort(key=lambda s: float(s.get("totalTradedValue") or 0), reverse=True)
-    # Return all stocks — client sorts and limits display to top 10 (or all 50)
-    top_n = stocks  # full list
 
-    # If we used the hardcoded fallback, apply known weights instead of
-    # computing from traded value (which is unreliable for individual fetches)
-    _weight_map = dict(_TOP10_WEIGHTS)
     total_tv = sum(float(s.get("totalTradedValue") or 0) for s in stocks) or 1.0
-    use_fixed_weights = total_tv < 100   # sentinel: individual fetches have tiny tv
+    use_fixed = total_tv < 100   # individual fetch fallback
 
     result = []
-    for rank, s in enumerate(top_n, 1):
-        sym = s.get("symbol", "")
-        wt  = (_weight_map.get(sym, 2.0) if use_fixed_weights
+    for rank, s in enumerate(stocks, 1):
+        stock_sym = s.get("symbol", "")
+        wt  = (_weight_map.get(stock_sym, 2.0) if use_fixed
                else (float(s.get("totalTradedValue") or 0) / total_tv * 100))
         pct = float(s.get("pChange") or 0)
-        pts = round(pct / 100 * wt / 100 * nifty_value, 2)
+        pts = round(pct / 100 * wt / 100 * index_value, 2)
         result.append({
             "rank": rank,
-            "symbol": sym,
+            "symbol": stock_sym,
             "ltp":        round(float(s.get("lastPrice") or 0), 2),
             "prev_close": round(float(s.get("previousClose") or 0), 2),
             "change":     round(float(s.get("change") or 0), 2),
@@ -762,13 +792,76 @@ def _fetch_nifty_constituents() -> dict:
 
     data = {
         "stocks": result,
-        "nifty_value": nifty_value,
+        "index_value": index_value,
+        "nifty_value": index_value,   # keep compat field
+        "index_symbol": sym,
+        "index_title": cfg["title"],
         "as_of": time.strftime("%H:%M:%S"),
-        "note": "Weight estimated from traded value. Points contributed are approximate.",
+        "note": f"Weight from {'hardcoded approx' if use_fixed else 'session traded value'}. Points contributed ≈ pChange × weight × {cfg['title']} value.",
     }
-    _nifty_cache["ts"] = time.time()
-    _nifty_cache["data"] = data
+    _nifty_cache[sym] = {"ts": time.time(), "data": data}
     return data
+
+
+_stock_symbols_cache: dict = {"ts": 0, "symbols": []}
+
+def _stock_search(q: str) -> dict:
+    """
+    Return NSE symbols/names matching the query string.
+    Searches the fno list + NSE equity index data.
+    Results cached for 5 min to avoid repeated NSE calls.
+    """
+    from nse_options_strategy import API_HEADERS, NSE_OC_PAGE  # noqa: PLC0415
+
+    # Build or refresh the symbol+name list
+    now = time.time()
+    sc  = _stock_symbols_cache
+    if not sc["symbols"] or (now - sc["ts"]) > 300:
+        symbols = []
+        # Seed from fno list
+        try:
+            import nse_pivot_scanner as _ps  # noqa: PLC0415
+            for sym in _ps.load_fno_symbols():
+                symbols.append({"s": sym, "n": sym})
+        except Exception:
+            pass
+        # Augment with NSE equity-stockIndices bulk fetch
+        ftch = (
+            _shared_fetcher
+            if (_shared_fetcher and getattr(_shared_fetcher, "_warmed", False)
+                and (now - _shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE)
+            else None
+        )
+        if ftch:
+            h = dict(API_HEADERS); h["Referer"] = NSE_OC_PAGE
+            existing = {d["s"] for d in symbols}
+            for idx in ("NIFTY 500", "NIFTY MIDCAP 100"):
+                try:
+                    r = ftch.session.get(
+                        "https://www.nseindia.com/api/equity-stockIndices",
+                        params={"index": idx}, headers=h, timeout=10,
+                    )
+                    if r.status_code == 200:
+                        for item in r.json().get("data", []):
+                            sym  = (item.get("symbol") or "").strip().upper()
+                            name = (item.get("meta", {}) or {}).get("companyName", sym)
+                            if sym and sym not in existing:
+                                symbols.append({"s": sym, "n": name})
+                                existing.add(sym)
+                except Exception:
+                    pass
+        sc["symbols"] = symbols
+        sc["ts"]      = now
+
+    if not q:
+        return {"results": sc["symbols"][:50]}
+
+    # Filter: match against symbol prefix first, then substring in name
+    q_up = q.upper()
+    prefix = [d for d in sc["symbols"] if d["s"].startswith(q_up)]
+    others = [d for d in sc["symbols"] if not d["s"].startswith(q_up)
+              and (q_up in d["s"] or q_up in d["n"].upper())]
+    return {"results": (prefix + others)[:50]}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -925,14 +1018,147 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"IV rank calculation failed: {e}"}, status=500)
             return
 
-        if parsed.path == "/api/nifty-constituents":
+        if parsed.path == "/api/pivot-scanner":
+            mode       = qs.get("mode",       ["daily"])[0].lower()
+            pivot_type = qs.get("pivot_type", ["fibonacci"])[0].lower()
+            source     = qs.get("source",     ["fno"])[0].lower()   # fno | all
+            force      = qs.get("force",      ["false"])[0].lower() == "true"
+            ttl        = int(qs.get("ttl",    ["300"])[0])
             try:
-                self._send_json(_fetch_nifty_constituents())
+                import nse_pivot_scanner as _ps  # noqa: PLC0415
+                result = _ps.run_scanner(mode=mode, pivot_type=pivot_type,
+                                         source=source, force=force, ttl=ttl)
+                self._send_json(result)
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"stocks": [], "error": str(e), "count": 0, "total": 0})
+            return
+
+        if parsed.path == "/api/pivot-scanner/symbols":
+            try:
+                import nse_pivot_scanner as _ps  # noqa: PLC0415
+                syms = _ps.load_all_csv_symbols()
+                self._send_json({"symbols": syms, "count": len(syms)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"symbols": [], "error": str(e)})
+            return
+
+        if parsed.path == "/api/pivot-scanner/symbol":
+            symbol     = qs.get("symbol",     [""])[0].upper().strip()
+            mode       = qs.get("mode",       ["daily"])[0].lower()
+            pivot_type = qs.get("pivot_type", ["fibonacci"])[0].lower()
+            if not symbol:
+                self._send_json({"error": "symbol parameter required"})
+                return
+            try:
+                import nse_pivot_scanner as _ps  # noqa: PLC0415
+                self._send_json(_ps.lookup_symbol(symbol, mode=mode, pivot_type=pivot_type))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "symbol": symbol})
+            return
+
+        if parsed.path in ("/api/pivot-scanner/debug", "/api/pivot-scanner-debug"):
+            symbol = qs.get("symbol", [""])[0].upper().strip()
+            try:
+                import nse_pivot_scanner as _ps  # noqa: PLC0415
+                if symbol:
+                    self._send_json(_ps.debug_symbol(symbol))
+                else:
+                    # Return global state + first 3 symbols as sample
+                    syms = _ps.load_fno_symbols()
+                    sample = [_ps.debug_symbol(s) for s in syms[:3]]
+                    self._send_json({
+                        "data_dir":        str(_ps.DATA_DIR),
+                        "fno_file":        str(_ps.FNO_FILE),
+                        "data_dir_exists": _ps.DATA_DIR.exists(),
+                        "fno_file_exists": _ps.FNO_FILE.exists(),
+                        "total_symbols":   len(syms),
+                        "first_3_symbols": syms[:3],
+                        "sample_debug":    sample,
+                    })
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)})
+            return
+
+        if parsed.path == "/api/stock-search":
+            q = qs.get("q", [""])[0].strip().upper()
+            try:
+                self._send_json(_stock_search(q))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"results": [], "error": str(e)})
+            return
+
+        if parsed.path == "/api/stock-pivot":
+            sym        = qs.get("symbol", [""])[0].strip().upper()
+            mode       = qs.get("mode",       ["daily"])[0].lower()
+            pivot_type = qs.get("pivot_type", ["fibonacci"])[0].lower()
+            if not sym:
+                self._send_json({"error": "symbol required"}, status=400)
+                return
+            try:
+                import nse_pivot_scanner as _ps  # noqa: PLC0415
+                from nse_options_strategy import API_HEADERS, NSE_OC_PAGE  # noqa: PLC0415
+                h = dict(API_HEADERS)
+                h["Referer"] = NSE_OC_PAGE
+                ftch = (_shared_fetcher
+                        if (_shared_fetcher and getattr(_shared_fetcher, "_warmed", False)
+                            and (time.time() - _shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE)
+                        else None)
+                # OHLC: try CSV first, then NSE quote API
+                ohlc = (_ps.get_weekly_ohlc(sym) if mode == "weekly" else _ps.get_daily_ohlc(sym))
+                if not ohlc and ftch:
+                    r2 = ftch.session.get(
+                        "https://www.nseindia.com/api/quote-equity",
+                        params={"symbol": sym, "series": "EQ"},
+                        headers=h, timeout=10,
+                    )
+                    if r2.status_code == 200:
+                        pi = r2.json().get("priceInfo") or {}
+                        if pi.get("weekHighLow"):
+                            ohlc = {
+                                "H": float(pi.get("intraDayHighLow", {}).get("max") or pi.get("open") or 0),
+                                "L": float(pi.get("intraDayHighLow", {}).get("min") or pi.get("open") or 0),
+                                "C": float(pi.get("previousClose") or 0),
+                                "O": float(pi.get("open") or 0),
+                            }
+                if not ohlc:
+                    self._send_json({"error": f"No OHLC data for {sym}. CSV file missing from nse_data_cache."})
+                    return
+                pivots = _ps.compute_pivots(
+                    H=float(ohlc.get("H", 0)), L=float(ohlc.get("L", 0)),
+                    C=float(ohlc.get("C", 0)), O=float(ohlc.get("O") or ohlc.get("C", 0)),
+                    pivot_type=pivot_type,
+                )
+                # Current price
+                price = 0.0
+                if ftch:
+                    try:
+                        prices = _ps.get_live_prices([sym], ftch, h)
+                        price = prices.get(sym, 0.0)
+                    except Exception:
+                        pass
+                if not price:
+                    price = float(ohlc.get("C", 0))
+                self._send_json({
+                    "symbol": sym, "price": round(price, 2),
+                    "live": bool(ftch), "pivots": pivots,
+                    "ohlc": {k: round(float(v), 2) for k, v in ohlc.items() if k in ("H","L","C","O")},
+                    "mode": mode, "pivot_type": pivot_type,
+                })
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)})
+            return
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            try:
+                self._send_json(_fetch_nifty_constituents(symbol))
             except Exception as e:  # noqa: BLE001
                 self._send_json({"stocks": [], "error": str(e)})
             return
+
+        if parsed.path == "/api/fno-movers":
             self._send_json(nse_fno_movers.get_movers())
             return
+
+        if parsed.path == "/api/straddle-history":
             try:
                 records = nse_history_store.read_history(symbol, days=1)
                 straddle_pts = [{"t": r["t"], "v": r["straddle_premium"]}
