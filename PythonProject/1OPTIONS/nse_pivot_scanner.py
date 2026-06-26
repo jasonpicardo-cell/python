@@ -229,6 +229,8 @@ def _read_rows(path: Path, n: int = 30) -> tuple[list[dict], str | None]:
             col_high   = _col("High",  "HIGH",  "high")
             col_low    = _col("Low",   "LOW",   "low")
             col_close  = _col("Close", "CLOSE", "close")
+            col_vol    = _col("Volume", "VOLUME", "volume", "Vol", "VOL",
+                               "Shares Traded", "shares_traded")
 
             if not all([col_date, col_open, col_high, col_low, col_close]):
                 return [], (
@@ -239,13 +241,17 @@ def _read_rows(path: Path, n: int = 30) -> tuple[list[dict], str | None]:
             parse_errors = 0
             for row in reader:
                 try:
-                    rows.append({
+                    entry = {
                         "date": _to_iso(row[col_date]),
                         "O": float(row[col_open]  or 0),
                         "H": float(row[col_high]  or 0),
                         "L": float(row[col_low]   or 0),
                         "C": float(row[col_close] or 0),
-                    })
+                    }
+                    if col_vol:
+                        raw_v = (row[col_vol] or "0").replace(",", "")
+                        entry["V"] = float(raw_v or 0)
+                    rows.append(entry)
                 except (ValueError, TypeError, KeyError):
                     parse_errors += 1
 
@@ -521,113 +527,105 @@ def load_all_csv_symbols() -> list[str]:
 
 
 def run_scanner(mode="daily", pivot_type="fibonacci",
-                source="fno",                      # "fno" = niftyfno.txt, "all" = all CSVs
+                source="fno",
+                live=False,
                 fetcher=None, headers=None, force=False, ttl=_DEFAULT_TTL) -> dict:
     """
     Run the pivot scanner.
-
-    mode        – "daily" | "weekly"
-    pivot_type  – fibonacci | traditional | classic | woodie | camarilla | demark
-    source      – "fno"  → load symbols from niftyfno.txt (F&O universe)
-                  "all"  → load symbols from all CSV files in nse_data_cache/
-
-    Price = most recent daily close from CSV, regardless of mode.
-    Weekly mode uses last-complete-week H/L/C for pivot levels,
-    but the displayed price is still the latest trading day's close.
+    mode        – daily | weekly | monthly | quarterly | yearly | both (daily+weekly)
+    source      – niftyfno | nifty50 | nifty100 | nifty200 | nifty500 | nifty750 | all
+    live        – fetch NSE live prices when True and market is open
     """
-    key = f"{mode}:{pivot_type}:{source}"
+    key = f"{mode}:{pivot_type}:{source}:{'live' if live else 'eod'}"
     c   = _scan_cache
     if (not force and c["data"] and c["key"] == key
             and (time.time() - c["ts"]) < ttl):
         return c["data"]
 
-    if source == "all":
-        symbols, sym_source = load_symbol_list("all")
-    else:
-        symbols, sym_source = load_symbol_list(source)
-
+    symbols, sym_source = load_symbol_list(source)
     if not symbols:
         path = SYMBOL_LISTS.get(source)
-        return {
-            "stocks": [], "errors": [], "skipped": [], "count": 0, "total": 0,
-            "mode": mode, "pivot_type": pivot_type, "source": source,
-            "as_of": time.strftime("%H:%M:%S"),
-            "market_status": market_status(),
-            "data_dir": str(DATA_DIR),
-            "sym_source": sym_source,
-            "error": (
-                f"No CSV files found in {DATA_DIR}" if source == "all"
-                else f"{path.name if path else source} not found or empty at {path or 'unknown'}"
-            ),
-        }
+        return {"stocks":[], "errors":[], "skipped":[], "count":0, "total":0,
+                "mode":mode, "pivot_type":pivot_type, "source":source,
+                "as_of":time.strftime("%H:%M:%S"), "market_status":market_status(),
+                "data_dir":str(DATA_DIR), "sym_source":sym_source,
+                "error":(f"No CSV files found in {DATA_DIR}" if source=="all"
+                         else f"{getattr(path,'name',source)} not found")}
 
-    stocks: list[dict] = []
-    errors: list[dict] = []
-    skipped: list[str] = []
+    # Live prices (user-enabled, market-hours only)
+    live_prices: dict[str, float] = {}
+    if live and fetcher and headers and is_market_open():
+        for idx in ("NIFTY 500", "NIFTY MIDCAP 100", "NIFTY SMALLCAP 100"):
+            try:
+                r = fetcher.session.get(
+                    "https://www.nseindia.com/api/equity-stockIndices",
+                    params={"index": idx}, headers=headers, timeout=12)
+                if r.status_code == 200:
+                    for item in r.json().get("data", []):
+                        s = (item.get("symbol") or "").strip()
+                        p = float(item.get("lastPrice") or 0)
+                        if s and p > 0:
+                            live_prices[s] = p
+            except Exception:
+                pass
+            if len(live_prices) >= 600:
+                break
+
+    is_both = (mode == "both")
+    primary_mode = "daily" if is_both else mode
+
+    stocks: list[dict] = []; errors: list[dict] = []; skipped: list[str] = []
 
     for sym in symbols:
-        # ── Pivot OHLC — dispatched by mode ────────────────────────────
-        pivot_ohlc, pivot_err = _get_pivot_ohlc(sym, mode)
-
+        pivot_ohlc, pivot_err = _get_pivot_ohlc(sym, primary_mode)
         if pivot_ohlc is None:
             (skipped if pivot_err and "not found" in pivot_err else errors).append(
-                {"symbol": sym, "reason": pivot_err or "no OHLC"}
-            )
+                {"symbol": sym, "reason": pivot_err or "no OHLC"})
             continue
 
-        H = pivot_ohlc.get("H", 0)
-        L = pivot_ohlc.get("L", 0)
-        C = pivot_ohlc.get("C", 0)
-        O = pivot_ohlc.get("O", 0)
-
+        H = float(pivot_ohlc.get("H") or 0); L = float(pivot_ohlc.get("L") or 0)
+        C = float(pivot_ohlc.get("C") or 0); O = float(pivot_ohlc.get("O") or 0)
         if not (H > 0 and L > 0 and C > 0):
-            errors.append({"symbol": sym,
-                           "reason": f"Zero values in pivot OHLC: H={H} L={L} C={C}"})
-            continue
+            errors.append({"symbol": sym, "reason": f"Zero OHLC: H={H} L={L} C={C}"}); continue
 
-        # ── Current price = latest daily close (never the pivot-period close) ─
-        # In non-daily modes the pivot_ohlc["C"] is a historical period close.
-        # Always show the most recent trading day's close as "current price."
-        if mode != "daily":
+        # Current price: (1) live NSE  (2) latest daily CSV close
+        if live and sym in live_prices:
+            price = round(live_prices[sym], 2); is_live = True
+        elif primary_mode != "daily":
             day_ohlc, _ = get_daily_ohlc(sym)
-            price = round((day_ohlc["C"] if day_ohlc and day_ohlc.get("C") else C), 2)
+            price = round(float((day_ohlc.get("C") or C) if day_ohlc else C), 2); is_live = False
         else:
-            price = round(C, 2)
+            price = round(C, 2); is_live = False
 
         pivots     = compute_pivots(H=H, L=L, C=C, O=O, pivot_type=pivot_type)
         cl, cl_pct = closest_level(price, pivots)
 
-        stocks.append({
-            "symbol":      sym,
-            "price":       price,
-            "ohlc_used":   {
-                "date": pivot_ohlc.get("date", ""),
-                "O": round(O, 2), "H": round(H, 2),
-                "L": round(L, 2), "C": round(C, 2),
-            },
-            "pivots":      pivots,
-            "near":        near_levels(price, pivots),
-            "closest":     cl,
-            "closest_pct": cl_pct,
-        })
+        row = {"symbol": sym, "price": price, "live": is_live,
+               "ohlc_used": {"date": pivot_ohlc.get("date",""),
+                             "O":round(O,2),"H":round(H,2),"L":round(L,2),"C":round(C,2)},
+               "pivots": pivots, "near": near_levels(price, pivots),
+               "closest": cl, "closest_pct": cl_pct}
 
-    data = {
-        "stocks":        stocks,
-        "errors":        errors,
-        "skipped":       skipped,
-        "count":         len(stocks),
-        "total":         len(symbols),
-        "mode":          mode,
-        "pivot_type":    pivot_type,
-        "source":        source,
-        "sym_source":    sym_source,
-        "as_of":         time.strftime("%H:%M:%S"),
-        "market_status": market_status(),
-        "data_dir":      str(DATA_DIR),
-        "fno_file":      str(FNO_FILE),
-    }
+        if is_both:
+            w_ohlc, _ = get_weekly_ohlc(sym)
+            if w_ohlc:
+                wH,wL,wC,wO = (float(w_ohlc.get(k) or 0) for k in ("H","L","C","O"))
+                if wH > 0 and wL > 0 and wC > 0:
+                    row["weekly_pivots"] = compute_pivots(H=wH,L=wL,C=wC,O=wO,pivot_type=pivot_type)
+                    row["weekly_ohlc"]   = {"date":w_ohlc.get("date",""),
+                                            "H":round(wH,2),"L":round(wL,2),"C":round(wC,2)}
+
+        stocks.append(row)
+
+    data = {"stocks":stocks, "errors":errors, "skipped":skipped,
+            "count":len(stocks), "total":len(symbols),
+            "mode":mode, "pivot_type":pivot_type, "source":source,
+            "live":live and bool(live_prices), "live_count":len(live_prices),
+            "sym_source":sym_source, "as_of":time.strftime("%H:%M:%S"),
+            "market_status":market_status(), "data_dir":str(DATA_DIR)}
     c["ts"] = time.time(); c["data"] = data; c["key"] = key
     return data
+
 
 
 # ── Debug helper (HTTP endpoint + CLI) ───────────────────────────────────────

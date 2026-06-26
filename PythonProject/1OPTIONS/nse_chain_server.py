@@ -1018,16 +1018,179 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"IV rank calculation failed: {e}"}, status=500)
             return
 
+        # ── RSI Scanner ────────────────────────────────────────────────
+        if parsed.path == "/api/rsi-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            ttl    = int(qs.get("ttl",["300"])[0])
+            try:
+                import nse_rsi_scanner as _rs  # noqa: PLC0415
+                self._send_json(_rs.run_rsi_scanner(source=source,force=force,ttl=ttl))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/rsi-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_rsi_scanner as _rs  # noqa: PLC0415
+                r = _rs.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No data for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── Gap Scanner ─────────────────────────────────────────────────
+        if parsed.path == "/api/gap-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            ttl    = int(qs.get("ttl",["300"])[0])
+            try:
+                import nse_gap_scanner as _gs  # noqa: PLC0415
+                self._send_json(_gs.run_gap_scanner(source=source,force=force,ttl=ttl))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/gap-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_gap_scanner as _gs  # noqa: PLC0415
+                r = _gs.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No data for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── Momentum / ROC Scanner ──────────────────────────────────────
+        if parsed.path == "/api/momentum-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            ttl    = int(qs.get("ttl",["300"])[0])
+            try:
+                import nse_momentum_scanner as _ms  # noqa: PLC0415
+                self._send_json(_ms.run_momentum_scanner(source=source,force=force,ttl=ttl))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/momentum-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_momentum_scanner as _ms  # noqa: PLC0415
+                r = _ms.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No data for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── Candlestick Pattern Scanner ─────────────────────────────────
+        if parsed.path == "/api/candle-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            ttl    = int(qs.get("ttl",["300"])[0])
+            try:
+                import nse_candle_scanner as _cs  # noqa: PLC0415
+                self._send_json(_cs.run_candle_scanner(source=source,force=force,ttl=ttl))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/candle-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_candle_scanner as _cs  # noqa: PLC0415
+                r = _cs.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No pattern detected for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        if parsed.path == "/api/volume-scanner":
+            source = qs.get("source", ["niftyfno"])[0].lower()
+            force  = qs.get("force",  ["false"])[0].lower() == "true"
+            ttl    = int(qs.get("ttl", ["300"])[0])
+            try:
+                import nse_volume_scanner as _vs  # noqa: PLC0415
+                self._send_json(_vs.run_volume_scanner(source=source, force=force, ttl=ttl))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"stocks": [], "error": str(e), "count": 0, "total": 0})
+            return
+
+        if parsed.path == "/api/volume-scanner/symbol":
+            symbol = qs.get("symbol", [""])[0].upper().strip()
+            if not symbol:
+                self._send_json({"error": "symbol parameter required"}); return
+            try:
+                import nse_volume_scanner as _vs  # noqa: PLC0415
+                r = _vs.scan_stock(symbol)
+                self._send_json(r if r else {"error": f"No volume data for {symbol}"})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "symbol": symbol})
+            return
+
+        if parsed.path == "/api/52week-scanner":
+            source = qs.get("source", ["niftyfno"])[0].lower()
+            force  = qs.get("force",  ["false"])[0].lower() == "true"
+            ttl    = int(qs.get("ttl", ["300"])[0])
+            try:
+                import nse_52week_scanner as _wk  # noqa: PLC0415
+                self._send_json(_wk.run_52week_scanner(source=source, force=force, ttl=ttl))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"stocks": [], "error": str(e), "count": 0, "total": 0})
+            return
+
+        if parsed.path == "/api/52week-scanner/symbol":
+            symbol = qs.get("symbol", [""])[0].upper().strip()
+            if not symbol:
+                self._send_json({"error": "symbol parameter required"}); return
+            try:
+                import nse_52week_scanner as _wk  # noqa: PLC0415
+                r = _wk.scan_stock(symbol)
+                self._send_json(r if r else {"error": f"Insufficient history for {symbol}"})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "symbol": symbol})
+            return
+
+        if parsed.path == "/api/trend-scanner/symbol":
+            symbol = qs.get("symbol", [""])[0].upper().strip()
+            if not symbol:
+                self._send_json({"error": "symbol parameter required"})
+                return
+            try:
+                import nse_trend_scanner as _ts  # noqa: PLC0415
+                result = _ts.scan_stock(symbol)
+                if result is None:
+                    self._send_json({"error": f"No data for {symbol} — CSV missing or insufficient rows"})
+                else:
+                    self._send_json(result)
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "symbol": symbol})
+            return
+
+        if parsed.path == "/api/trend-scanner":
+            source = qs.get("source", ["niftyfno"])[0].lower()
+            force  = qs.get("force",  ["false"])[0].lower() == "true"
+            ttl    = int(qs.get("ttl", ["300"])[0])
+            try:
+                import nse_trend_scanner as _ts  # noqa: PLC0415
+                self._send_json(_ts.run_trend_scanner(source=source, force=force, ttl=ttl))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"stocks": [], "error": str(e), "count": 0, "total": 0})
+            return
+
         if parsed.path == "/api/pivot-scanner":
             mode       = qs.get("mode",       ["daily"])[0].lower()
             pivot_type = qs.get("pivot_type", ["fibonacci"])[0].lower()
-            source     = qs.get("source",     ["fno"])[0].lower()   # fno | all
+            source     = qs.get("source",     ["fno"])[0].lower()
+            live       = qs.get("live",       ["false"])[0].lower() == "true"
             force      = qs.get("force",      ["false"])[0].lower() == "true"
             ttl        = int(qs.get("ttl",    ["300"])[0])
             try:
                 import nse_pivot_scanner as _ps  # noqa: PLC0415
-                result = _ps.run_scanner(mode=mode, pivot_type=pivot_type,
-                                         source=source, force=force, ttl=ttl)
+                from nse_options_strategy import API_HEADERS, NSE_OC_PAGE  # noqa: PLC0415
+                ftch = (_shared_fetcher if (
+                    _shared_fetcher and getattr(_shared_fetcher, "_warmed", False)
+                    and (time.time() - _shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE
+                ) else None)
+                h = None
+                if ftch:
+                    h = dict(API_HEADERS); h["Referer"] = NSE_OC_PAGE
+                result = _ps.run_scanner(mode=mode, pivot_type=pivot_type, source=source,
+                                         live=live, fetcher=ftch, headers=h,
+                                         force=force, ttl=ttl)
                 self._send_json(result)
             except Exception as e:  # noqa: BLE001
                 self._send_json({"stocks": [], "error": str(e), "count": 0, "total": 0})
