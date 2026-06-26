@@ -314,7 +314,30 @@
   .scan-status-row { margin-bottom: 6px; }
   .scan-table-wrap { overflow-x: auto; overflow-y: auto; max-height: 520px; }
   /* ── Scan search autocomplete ── */
-  /* ── RSI ── */
+  /* ── BB / MACD / ADX / Breakout / S/R / Pattern / Correlation ── */
+  .bb-squeeze { color:#ffd43b!important; font-weight:700; }
+  .bb-ob      { color:#ff3c3c!important; font-weight:700; }
+  .bb-os      { color:#339af0!important; font-weight:700; }
+  .bb-pct-bar-bg  { display:inline-block;width:50px;height:6px;background:var(--border);border-radius:3px;vertical-align:middle; }
+  .bb-pct-bar     { display:block;height:6px;border-radius:3px; }
+  .adx-strong { color:#1fc93b!important;font-weight:800; }
+  .adx-trend  { color:#51cf66!important;font-weight:600; }
+  .adx-weak   { color:var(--muted)!important; }
+  .adx-range  { color:var(--muted-2)!important; }
+  .bko-up  { color:#1fc93b!important;font-weight:700; }
+  .bko-dn  { color:#ff3c3c!important;font-weight:700; }
+  .sr-res  { color:#ff6b6b!important;font-weight:600; }
+  .sr-sup  { color:#51cf66!important;font-weight:600; }
+  .corr-high { color:#ff9f43!important;font-weight:700; }
+  .corr-mod  { color:#ffd43b!important;font-weight:600; }
+  .corr-low  { color:#51cf66!important; }
+  .corr-ind  { color:#74c0fc!important; }
+  .corr-neg  { color:#cc5de8!important; }
+  .corr-bar-bg  { display:inline-block;width:60px;height:6px;background:var(--border);border-radius:3px;vertical-align:middle; }
+  .corr-bar     { display:block;height:6px;border-radius:3px; }
+  /* All new scanner search wrappers */
+  #bbSearchWrapper,#macdSearchWrapper,#adxSearchWrapper,#bkoSearchWrapper,
+  #srSearchWrapper,#patSearchWrapper,#corrSearchWrapper { position:relative;display:inline-block; }
   .rsi-ob { color:#ff3c3c!important; font-weight:700; }
   .rsi-bull { color:#51cf66!important; font-weight:600; }
   .rsi-bear { color:#ff8080!important; }
@@ -1697,6 +1720,187 @@
         </div>
         <div class="scan-status-row"><span class="level-source" id="camStatus">Click ▶ Run to load Camarilla data.</span></div>
         <div id="camTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- BOLLINGER BANDS -->
+      <div class="pivot-scanner-panel" id="bbScannerPanel" style="margin-top:14px;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">🎯 Bollinger Band Scanner (20,2)</span>
+            <select id="bbSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="bbSearchWrapper"><input type="text" id="bbSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="bbAutoRefresh"> Auto</label>
+            <input type="number" id="bbIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="bbRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="bbFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Squeeze"       style="--fc:#ffd43b;">⚡ Squeeze</button>
+          <button class="lvl-filter-btn" data-sig="Outside Upper" style="--fc:#ff3c3c;">⬆ Outside Upper</button>
+          <button class="lvl-filter-btn" data-sig="Upper Touch"   style="--fc:#ff8080;">↑ Upper Touch</button>
+          <button class="lvl-filter-btn" data-sig="Lower Touch"   style="--fc:#74c0fc;">↓ Lower Touch</button>
+          <button class="lvl-filter-btn" data-sig="Outside Lower" style="--fc:#339af0;">⬇ Outside Lower</button>
+          <button class="lvl-filter-btn" data-sig="Normal"        style="--fc:#888;">Normal</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="bbStatus">Click ▶ Run to load Bollinger data.</span></div>
+        <div id="bbTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- MACD -->
+      <div class="pivot-scanner-panel" id="macdScannerPanel" style="margin-top:14px;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">📉 MACD Scanner (12/26/9)</span>
+            <select id="macdSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="macdSearchWrapper"><input type="text" id="macdSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="macdAutoRefresh"> Auto</label>
+            <input type="number" id="macdIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="macdRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="macdFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Bullish Crossover" style="--fc:#1fc93b;">🟢 Bull Cross</button>
+          <button class="lvl-filter-btn" data-sig="Zero Cross Up"     style="--fc:#51cf66;">↑ Zero Cross Up</button>
+          <button class="lvl-filter-btn" data-sig="Above Zero"        style="--fc:#74c0fc;">+ Above Zero</button>
+          <button class="lvl-filter-btn" data-sig="Bearish Crossover" style="--fc:#ff3c3c;">🔴 Bear Cross</button>
+          <button class="lvl-filter-btn" data-sig="Zero Cross Down"   style="--fc:#ff6b6b;">↓ Zero Cross Down</button>
+          <button class="lvl-filter-btn" data-sig="Below Zero"        style="--fc:#ff8080;">- Below Zero</button>
+          <button class="lvl-filter-btn" data-sig="Neutral"           style="--fc:#888;">Neutral</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="macdStatus">Click ▶ Run to load MACD data.</span></div>
+        <div id="macdTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- ADX -->
+      <div class="pivot-scanner-panel" id="adxScannerPanel" style="margin-top:14px;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">📏 ADX Trend Strength (14)</span>
+            <select id="adxSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="adxSearchWrapper"><input type="text" id="adxSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="adxAutoRefresh"> Auto</label>
+            <input type="number" id="adxIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="adxRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="adxFilterBtns">
+          <button class="lvl-filter-btn active" data-str="">All</button>
+          <button class="lvl-filter-btn" data-str="Strong Trend" style="--fc:#1fc93b;">💪 Strong ≥40</button>
+          <button class="lvl-filter-btn" data-str="Trending"     style="--fc:#51cf66;">↗ Trending 25–40</button>
+          <button class="lvl-filter-btn" data-str="Weak Trend"   style="--fc:#888;">~ Weak 15–25</button>
+          <button class="lvl-filter-btn" data-str="Ranging"      style="--fc:#aaa;">↔ Ranging &lt;15</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="adxStatus">Click ▶ Run to load ADX data.</span></div>
+        <div id="adxTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- BREAKOUT -->
+      <div class="pivot-scanner-panel" id="bkoScannerPanel" style="margin-top:14px;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">🚀 N-Day Breakout Scanner</span>
+            <select id="bkoSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="bkoSearchWrapper"><input type="text" id="bkoSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="bkoAutoRefresh"> Auto</label>
+            <input type="number" id="bkoIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="bkoRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="bkoFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="52W Breakout"  style="--fc:#1fc93b;">🌟 52W Breakout</button>
+          <button class="lvl-filter-btn" data-sig="20D Breakout"  style="--fc:#51cf66;">⬆ 20D Breakout</button>
+          <button class="lvl-filter-btn" data-sig="10D Breakout"  style="--fc:#74c0fc;">↑ 10D Breakout</button>
+          <button class="lvl-filter-btn" data-sig="52W Breakdown" style="--fc:#ff3c3c;">💥 52W Breakdown</button>
+          <button class="lvl-filter-btn" data-sig="20D Breakdown" style="--fc:#ff6b6b;">⬇ 20D Breakdown</button>
+          <button class="lvl-filter-btn" data-sig="10D Breakdown" style="--fc:#ffa94d;">↓ 10D Breakdown</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="bkoStatus">Click ▶ Run to load breakout data.</span></div>
+        <div id="bkoTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- S/R CLUSTER -->
+      <div class="pivot-scanner-panel" id="srScannerPanel" style="margin-top:14px;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">🧱 S/R Cluster Scanner</span>
+            <select id="srSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="srSearchWrapper"><input type="text" id="srSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="srAutoRefresh"> Auto</label>
+            <input type="number" id="srIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="srRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="srFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Near Resistance" style="--fc:#ff6b6b;">🟥 Near Resistance</button>
+          <button class="lvl-filter-btn" data-sig="Near Support"    style="--fc:#51cf66;">🟩 Near Support</button>
+          <button class="lvl-filter-btn" data-sig="At Cluster"      style="--fc:#ffd43b;">🟨 At Cluster</button>
+          <button class="lvl-filter-btn" data-sig="Mid Range"       style="--fc:#888;">Mid Range</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="srStatus">Click ▶ Run to load S/R data.</span></div>
+        <div id="srTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- PRICE PATTERNS -->
+      <div class="pivot-scanner-panel" id="patScannerPanel" style="margin-top:14px;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">🔷 Price Pattern Scanner</span>
+            <select id="patSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="patSearchWrapper"><input type="text" id="patSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="patAutoRefresh"> Auto</label>
+            <input type="number" id="patIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="patRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="patFilterBtns">
+          <button class="lvl-filter-btn active" data-bias="">All</button>
+          <button class="lvl-filter-btn" data-bias="Bullish" style="--fc:#51cf66;">🟢 Bullish</button>
+          <button class="lvl-filter-btn" data-bias="Bearish" style="--fc:#ff6b6b;">🔴 Bearish</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="patStatus">Click ▶ Run to load pattern data.</span></div>
+        <div id="patTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- NIFTY CORRELATION -->
+      <div class="pivot-scanner-panel" id="corrScannerPanel" style="margin-top:14px;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">🔗 Nifty Correlation Scanner (20D)</span>
+            <select id="corrSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="corrSearchWrapper"><input type="text" id="corrSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="corrAutoRefresh"> Auto</label>
+            <input type="number" id="corrIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="corrRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="corrFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="High"        style="--fc:#ff9f43;">🔴 High ≥0.8</button>
+          <button class="lvl-filter-btn" data-sig="Moderate"    style="--fc:#ffd43b;">🟡 Moderate</button>
+          <button class="lvl-filter-btn" data-sig="Low"         style="--fc:#51cf66;">🟢 Low</button>
+          <button class="lvl-filter-btn" data-sig="Independent" style="--fc:#74c0fc;">🔵 Independent</button>
+          <button class="lvl-filter-btn" data-sig="Negative"    style="--fc:#cc5de8;">🟣 Negative</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="corrStatus">Click ▶ Run to load correlation data.</span></div>
+        <div id="corrTableWrap" class="scan-table-wrap"></div>
       </div>
 
       <!-- ── Stock Pivot Lookup ────────────────────────────────────── -->
@@ -7017,6 +7221,283 @@
       }
     }
   });
+
+  // ====================================================================
+  // BB / MACD / ADX / BREAKOUT / SR / PATTERN / CORRELATION SCANNERS
+  // All use _scannerWire + _buildScanSearch for identical UX
+  // ====================================================================
+
+  // ── Bollinger Band ──────────────────────────────────────────────────
+  const bbState = { data:null,source:'niftyfno',sigFilter:'',sortCol:'bw',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'bbStatus',_tableId:'bbTableWrap' };
+  function renderBbScanner() {
+    const wrap=document.getElementById('bbTableWrap'),statEl=document.getElementById('bbStatus');
+    if(!wrap||!bbState.data) return;
+    const d=bbState.data; let stocks=d.stocks||[];
+    if(bbState.sigFilter) stocks=stocks.filter(s=>s.signal===bbState.sigFilter);
+    const col=bbState.sortCol,dir=bbState.sortDir;
+    stocks=[...stocks].sort((a,b)=>{
+      if(col==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      if(col==='bw')     return ((a.bw||0)-(b.bw||0))*dir;
+      if(col==='pct_b')  return ((a.pct_b||50)-(b.pct_b||50))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',bbState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',bbState),`<th class="scan-th">Upper</th>`,`<th class="scan-th">Middle</th>`,`<th class="scan-th">Lower</th>`,
+      _mkTh('bw','BW%',bbState,'Band Width %'),_mkTh('pct_b','%B',bbState,'Position in band 0–100'),
+      `<th class="scan-th">Signal</th>`].join('');
+    const sigBg={Squeeze:'ts-sig-n',['Outside Upper']:'ts-sig-ss',['Upper Touch']:'ts-sig-s',Normal:'ts-sig-n',['Lower Touch']:'ts-sig-b',['Outside Lower']:'ts-sig-sb'};
+    const rows=stocks.map((s,i)=>{
+      const sqTag=s.squeeze?'<span class="rsi-fresh">SQ</span>':'';
+      const pctB=Math.max(0,Math.min(100,s.pct_b||50));
+      const barCol=pctB>80?'#ff3c3c':pctB>60?'#ffa94d':pctB<20?'#339af0':pctB<40?'#74c0fc':'#888';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price" title="${s.price_date||''}">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;color:#ff8080;">${fmtPrice(s.upper)}</td>
+        <td style="text-align:right;color:var(--gold);">${fmtPrice(s.middle)}</td>
+        <td style="text-align:right;color:#74c0fc;">${fmtPrice(s.lower)}</td>
+        <td style="text-align:right;">${s.bw}%${sqTag}</td>
+        <td><span class="bb-pct-bar-bg"><span class="bb-pct-bar" style="width:${Math.round(pctB*0.5)}px;background:${barCol};"></span></span><span style="font-size:9px;margin-left:3px;">${s.pct_b}</span></td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${bbState.sigFilter?' · '+bbState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'bbRunBtn',listId:'bbSymbolList',filterBtnId:'bbFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'bbTableWrap',statusId:'bbStatus',searchId:'bbSearch',searchWrapperId:'bbSearchWrapper',ddId:'bbSuggestDD',
+    lookupEndpoint:'/api/bb-scanner/symbol',state:bbState,renderFn:renderBbScanner,
+    runFn:()=>_runScanner('/api/bb-scanner',bbState,renderBbScanner)});
+
+  // ── MACD ───────────────────────────────────────────────────────────
+  const macdState={data:null,source:'niftyfno',sigFilter:'',sortCol:'signal',sortDir:1,intervalMins:5,autoRefresh:false,_statusId:'macdStatus',_tableId:'macdTableWrap'};
+  function renderMacdScanner() {
+    const wrap=document.getElementById('macdTableWrap'),statEl=document.getElementById('macdStatus');
+    if(!wrap||!macdState.data) return;
+    const d=macdState.data; let stocks=d.stocks||[];
+    if(macdState.sigFilter) stocks=stocks.filter(s=>s.signal===macdState.sigFilter);
+    const sigOrd={'Bullish Crossover':0,'Zero Cross Up':1,'Above Zero':2,'Neutral':3,'Below Zero':4,'Zero Cross Down':5,'Bearish Crossover':6};
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=macdState.sortDir;
+      if(macdState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      if(macdState.sortCol==='signal') return ((sigOrd[a.signal]??3)-(sigOrd[b.signal]??3))*dir;
+      if(macdState.sortCol==='macd')   return ((a.macd||0)-(b.macd||0))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',macdState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',macdState),_mkTh('macd','MACD',macdState),`<th class="scan-th">Signal</th>`,`<th class="scan-th">Hist</th>`,
+      _mkTh('signal','Pattern',macdState)].join('');
+    const sigBg={'Bullish Crossover':'ts-sig-sb','Zero Cross Up':'ts-sig-b','Above Zero':'ts-sig-b','Neutral':'ts-sig-n','Below Zero':'ts-sig-s','Zero Cross Down':'ts-sig-s','Bearish Crossover':'ts-sig-ss'};
+    const rows=stocks.map((s,i)=>{
+      const mCls=s.macd>0?'ts-bull':'ts-bear'; const hCls=s.histogram>0?'ts-bull':'ts-bear';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="${mCls}" style="text-align:right;font-weight:600;">${s.macd}</td>
+        <td style="text-align:right;">${s.signal_line}</td>
+        <td class="${hCls}" style="text-align:right;">${s.histogram}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${macdState.sigFilter?' · '+macdState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'macdRunBtn',listId:'macdSymbolList',filterBtnId:'macdFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'macdTableWrap',statusId:'macdStatus',searchId:'macdSearch',searchWrapperId:'macdSearchWrapper',ddId:'macdSuggestDD',
+    lookupEndpoint:'/api/macd-scanner/symbol',state:macdState,renderFn:renderMacdScanner,
+    runFn:()=>_runScanner('/api/macd-scanner',macdState,renderMacdScanner)});
+
+  // ── ADX ────────────────────────────────────────────────────────────
+  const adxState={data:null,source:'niftyfno',strFilter:'',sortCol:'adx',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'adxStatus',_tableId:'adxTableWrap'};
+  function renderAdxScanner() {
+    const wrap=document.getElementById('adxTableWrap'),statEl=document.getElementById('adxStatus');
+    if(!wrap||!adxState.data) return;
+    const d=adxState.data; let stocks=d.stocks||[];
+    if(adxState.strFilter) stocks=stocks.filter(s=>s.strength===adxState.strFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=adxState.sortDir;
+      if(adxState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      if(adxState.sortCol==='adx')    return ((a.adx||0)-(b.adx||0))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',adxState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',adxState),_mkTh('adx','ADX',adxState,'ADX value — higher = stronger trend'),
+      `<th class="scan-th">+DI</th>`,`<th class="scan-th">-DI</th>`,
+      `<th class="scan-th">Direction</th>`,`<th class="scan-th">Strength</th>`].join('');
+    const strCls={'Strong Trend':'adx-strong','Trending':'adx-trend','Weak Trend':'adx-weak','Ranging':'adx-range'};
+    const strBg={'Strong Trend':'ts-sig-sb','Trending':'ts-sig-b','Weak Trend':'ts-sig-n','Ranging':'ts-sig-n'};
+    const rows=stocks.map((s,i)=>{
+      const freshTag=s.fresh?'<span class="rsi-fresh">NEW</span>':'';
+      const dirCls=s.direction==='Bullish'?'ts-bull':'ts-bear';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="${strCls[s.strength]||''}" style="text-align:right;font-weight:700;">${s.adx}</td>
+        <td class="ts-bull" style="text-align:right;">${s.di_plus??'—'}</td>
+        <td class="ts-bear" style="text-align:right;">${s.di_minus??'—'}</td>
+        <td class="${dirCls}">${s.direction}${freshTag}</td>
+        <td><span class="ts-sig ${strBg[s.strength]||'ts-sig-n'}">${escapeHtml(s.strength)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${adxState.strFilter?' · '+adxState.strFilter:''}`;
+  }
+  _scannerWire({runId:'adxRunBtn',listId:'adxSymbolList',filterBtnId:'adxFilterBtns',filterAttr:'str',filterProp:'strFilter',
+    tableId:'adxTableWrap',statusId:'adxStatus',searchId:'adxSearch',searchWrapperId:'adxSearchWrapper',ddId:'adxSuggestDD',
+    lookupEndpoint:'/api/adx-scanner/symbol',state:adxState,renderFn:renderAdxScanner,
+    runFn:()=>_runScanner('/api/adx-scanner',adxState,renderAdxScanner)});
+
+  // ── Breakout ───────────────────────────────────────────────────────
+  const bkoState={data:null,source:'niftyfno',sigFilter:'',sortCol:'pct_from_hi',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'bkoStatus',_tableId:'bkoTableWrap'};
+  function renderBkoScanner() {
+    const wrap=document.getElementById('bkoTableWrap'),statEl=document.getElementById('bkoStatus');
+    if(!wrap||!bkoState.data) return;
+    const d=bkoState.data; let stocks=d.stocks||[];
+    if(bkoState.sigFilter) stocks=stocks.filter(s=>s.signal===bkoState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=bkoState.sortDir;
+      if(bkoState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      if(bkoState.sortCol==='pct_from_hi') return ((a.pct_from_hi||0)-(b.pct_from_hi||0))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',bkoState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',bkoState),`<th class="scan-th">52W High</th>`,
+      _mkTh('pct_from_hi','% from Hi',bkoState),`<th class="scan-th">52W Low</th>`,`<th class="scan-th">Vol ×</th>`,
+      `<th class="scan-th">Breakout</th>`,`<th class="scan-th">All Signals</th>`].join('');
+    const sigBg={'52W Breakout':'ts-sig-sb','20D Breakout':'ts-sig-b','10D Breakout':'ts-sig-b','52W Breakdown':'ts-sig-ss','20D Breakdown':'ts-sig-s','10D Breakdown':'ts-sig-s'};
+    const rows=stocks.map((s,i)=>{
+      const isUp=s.signal.includes('Breakout');
+      const pctCls=isUp?'bko-up':'bko-dn';
+      const pctSign=s.pct_from_hi>=0?'+':'';
+      const allSigs=(s.all_signals||[]).map(sg=>`<span class="pat-badge ${sg.includes('Breakout')?'pat-bull':'pat-bear'}" style="font-size:8px;">${escapeHtml(sg)}</span>`).join(' ');
+      const volTag=s.vol_ratio?`${s.vol_ratio}×`:'—';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;">${fmtPrice(s.hi_52w)}</td>
+        <td class="${pctCls}" style="text-align:right;font-weight:700;">${pctSign}${s.pct_from_hi}%</td>
+        <td style="text-align:right;">${fmtPrice(s.lo_52w)}</td>
+        <td style="text-align:right;">${volTag}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td>
+        <td>${allSigs}</td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${bkoState.sigFilter?' · '+bkoState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'bkoRunBtn',listId:'bkoSymbolList',filterBtnId:'bkoFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'bkoTableWrap',statusId:'bkoStatus',searchId:'bkoSearch',searchWrapperId:'bkoSearchWrapper',ddId:'bkoSuggestDD',
+    lookupEndpoint:'/api/breakout-scanner/symbol',state:bkoState,renderFn:renderBkoScanner,
+    runFn:()=>_runScanner('/api/breakout-scanner',bkoState,renderBkoScanner)});
+
+  // ── S/R Cluster ────────────────────────────────────────────────────
+  const srState={data:null,source:'niftyfno',sigFilter:'',sortCol:'dist_r',sortDir:1,intervalMins:5,autoRefresh:false,_statusId:'srStatus',_tableId:'srTableWrap'};
+  function renderSrScanner() {
+    const wrap=document.getElementById('srTableWrap'),statEl=document.getElementById('srStatus');
+    if(!wrap||!srState.data) return;
+    const d=srState.data; let stocks=d.stocks||[];
+    if(srState.sigFilter) stocks=stocks.filter(s=>s.signal===srState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=srState.sortDir;
+      if(srState.sortCol==='symbol')  return a.symbol.localeCompare(b.symbol)*dir;
+      if(srState.sortCol==='dist_r')  return ((a.dist_r??99)-(b.dist_r??99))*dir;
+      if(srState.sortCol==='dist_s')  return ((a.dist_s??99)-(b.dist_s??99))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',srState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',srState),
+      `<th class="scan-th">Nearest R</th>`,_mkTh('dist_r','→R%',srState,'Distance to nearest resistance'),
+      `<th class="scan-th">Nearest S</th>`,_mkTh('dist_s','←S%',srState,'Distance to nearest support'),
+      `<th class="scan-th">Signal</th>`].join('');
+    const sigBg={'Near Resistance':'ts-sig-s','Near Support':'ts-sig-b','At Cluster':'ts-sig-n','Mid Range':'ts-sig-n'};
+    const rows=stocks.map((s,i)=>{
+      const res=(s.resistance||[]).slice(0,3).map(c=>`${fmtPrice(c.level)}(${c.touches})`).join(', ')||'—';
+      const sup=(s.support||[]).slice(0,3).map(c=>`${fmtPrice(c.level)}(${c.touches})`).join(', ')||'—';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="sr-res" style="text-align:right;" title="${res}">${s.nearest_r?fmtPrice(s.nearest_r):'—'}</td>
+        <td class="sr-res" style="text-align:right;">${s.dist_r!=null?'+'+s.dist_r+'%':'—'}</td>
+        <td class="sr-sup" style="text-align:right;" title="${sup}">${s.nearest_s?fmtPrice(s.nearest_s):'—'}</td>
+        <td class="sr-sup" style="text-align:right;">${s.dist_s!=null?'-'+s.dist_s+'%':'—'}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${srState.sigFilter?' · '+srState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'srRunBtn',listId:'srSymbolList',filterBtnId:'srFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'srTableWrap',statusId:'srStatus',searchId:'srSearch',searchWrapperId:'srSearchWrapper',ddId:'srSuggestDD',
+    lookupEndpoint:'/api/sr-scanner/symbol',state:srState,renderFn:renderSrScanner,
+    runFn:()=>_runScanner('/api/sr-scanner',srState,renderSrScanner)});
+
+  // ── Price Patterns ─────────────────────────────────────────────────
+  const patState={data:null,source:'niftyfno',biasFilter:'',sortCol:'bias',sortDir:1,intervalMins:5,autoRefresh:false,_statusId:'patStatus',_tableId:'patTableWrap'};
+  function renderPatScanner() {
+    const wrap=document.getElementById('patTableWrap'),statEl=document.getElementById('patStatus');
+    if(!wrap||!patState.data) return;
+    const d=patState.data; let stocks=d.stocks||[];
+    if(patState.biasFilter) stocks=stocks.filter(s=>s.bias===patState.biasFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=patState.sortDir;
+      if(patState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      if(patState.sortCol==='bias')   return a.bias.localeCompare(b.bias)*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',patState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',patState),_mkTh('bias','Bias',patState),
+      `<th class="scan-th" style="min-width:220px;">Patterns (name · confidence · key level)</th>`].join('');
+    const biasBg={Bullish:'ts-sig-b',Bearish:'ts-sig-s'};
+    const patBg=(b)=>b==='Bullish'?'pat-bull':b==='Bearish'?'pat-bear':'pat-neut';
+    const rows=stocks.map((s,i)=>{
+      const pats=(s.patterns||[]).map(p=>
+        `<span class="pat-badge ${patBg(p.bias)}" title="Key level: ${p.key_level||'?'}">${escapeHtml(p.name)} ${p.confidence}%</span>`
+      ).join(' ');
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td><span class="ts-sig ${biasBg[s.bias]||'ts-sig-n'}">${escapeHtml(s.bias)}</span></td>
+        <td>${pats}</td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${patState.biasFilter?' · '+patState.biasFilter:''}`;
+  }
+  _scannerWire({runId:'patRunBtn',listId:'patSymbolList',filterBtnId:'patFilterBtns',filterAttr:'bias',filterProp:'biasFilter',
+    tableId:'patTableWrap',statusId:'patStatus',searchId:'patSearch',searchWrapperId:'patSearchWrapper',ddId:'patSuggestDD',
+    lookupEndpoint:'/api/pattern-scanner/symbol',state:patState,renderFn:renderPatScanner,
+    runFn:()=>_runScanner('/api/pattern-scanner',patState,renderPatScanner)});
+
+  // ── Correlation ────────────────────────────────────────────────────
+  const corrState={data:null,source:'niftyfno',sigFilter:'',sortCol:'correlation',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'corrStatus',_tableId:'corrTableWrap'};
+  function renderCorrScanner() {
+    const wrap=document.getElementById('corrTableWrap'),statEl=document.getElementById('corrStatus');
+    if(!wrap||!corrState.data) return;
+    const d=corrState.data; let stocks=d.stocks||[];
+    if(corrState.sigFilter) stocks=stocks.filter(s=>s.signal===corrState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=corrState.sortDir;
+      if(corrState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      if(corrState.sortCol==='correlation') return ((a.correlation??0)-(b.correlation??0))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',corrState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',corrState),_mkTh('correlation','r (Pearson)',corrState,'20-day correlation with Nifty'),
+      `<th class="scan-th">Bar</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const sigCls={High:'corr-high',Moderate:'corr-mod',Low:'corr-low',Independent:'corr-ind',Negative:'corr-neg'};
+    const sigBg={High:'ts-sig-s',Moderate:'ts-sig-n',Low:'ts-sig-b',Independent:'ts-sig-sb',Negative:'ts-sig-ss'};
+    const rows=stocks.map((s,i)=>{
+      const r=s.correlation??0;
+      const barW=Math.round(Math.abs(r)*60);
+      const barCol=r>=0.8?'#ff9f43':r>=0.5?'#ffd43b':r>=0.2?'#51cf66':r>=0?'#74c0fc':'#cc5de8';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="${sigCls[s.signal]||''}" style="text-align:right;font-weight:700;">${r.toFixed(3)}</td>
+        <td><span class="corr-bar-bg"><span class="corr-bar" style="width:${barW}px;background:${barCol};"></span></span></td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${corrState.sigFilter?' · '+corrState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'corrRunBtn',listId:'corrSymbolList',filterBtnId:'corrFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'corrTableWrap',statusId:'corrStatus',searchId:'corrSearch',searchWrapperId:'corrSearchWrapper',ddId:'corrSuggestDD',
+    lookupEndpoint:'/api/correlation-scanner/symbol',state:corrState,renderFn:renderCorrScanner,
+    runFn:()=>_runScanner('/api/correlation-scanner',corrState,renderCorrScanner)});
 
   const lookupInput    = document.getElementById('stockLookupInput');
   const lookupDropdown = document.getElementById('lookupDropdown');

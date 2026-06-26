@@ -1018,6 +1018,128 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"IV rank calculation failed: {e}"}, status=500)
             return
 
+        # ── Bollinger Band Scanner ────────────────────────────────────
+        if parsed.path in ("/api/bb-scanner", "/api/bollinger-scanner"):
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import nse_bb_scanner as _bb; self._send_json(_bb.run_bb_scanner(source=source,force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/bb-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_bb_scanner as _bb; r = _bb.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No BB data for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── MACD Scanner ───────────────────────────────────────────────
+        if parsed.path == "/api/macd-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import nse_macd_scanner as _mc; self._send_json(_mc.run_macd_scanner(source=source,force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/macd-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_macd_scanner as _mc; r = _mc.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No MACD data for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── ADX Scanner ───────────────────────────────────────────────
+        if parsed.path == "/api/adx-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import nse_adx_scanner as _ax; self._send_json(_ax.run_adx_scanner(source=source,force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/adx-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_adx_scanner as _ax; r = _ax.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No ADX data for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── Breakout Scanner ──────────────────────────────────────────
+        if parsed.path == "/api/breakout-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import nse_breakout_scanner as _bk; self._send_json(_bk.run_breakout_scanner(source=source,force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/breakout-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_breakout_scanner as _bk; r = _bk.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No breakout for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── S/R Cluster Scanner ───────────────────────────────────────
+        if parsed.path == "/api/sr-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import nse_sr_scanner as _sr; self._send_json(_sr.run_sr_scanner(source=source,force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/sr-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_sr_scanner as _sr; r = _sr.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No S/R clusters for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── Price Pattern Scanner ─────────────────────────────────────
+        if parsed.path == "/api/pattern-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import nse_pattern_scanner as _pp; self._send_json(_pp.run_pattern_scanner(source=source,force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/pattern-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_pattern_scanner as _pp; r = _pp.scan_stock(symbol)
+                self._send_json(r if r else {"error":f"No patterns detected for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
+        # ── Correlation Scanner ───────────────────────────────────────
+        if parsed.path == "/api/correlation-scanner":
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import nse_correlation_scanner as _cr; self._send_json(_cr.run_correlation_scanner(source=source,force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+            return
+        if parsed.path == "/api/correlation-scanner/symbol":
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import nse_correlation_scanner as _cr
+                import nse_correlation_scanner as _cr2
+                nr = _cr2._load_nifty_returns()
+                r  = _cr.scan_stock(symbol, nr) if nr else None
+                self._send_json(r if r else {"error":"Nifty CSV not found or insufficient data"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+            return
+
         # ── RSI Scanner ────────────────────────────────────────────────
         if parsed.path == "/api/rsi-scanner":
             source = qs.get("source",["niftyfno"])[0].lower()
