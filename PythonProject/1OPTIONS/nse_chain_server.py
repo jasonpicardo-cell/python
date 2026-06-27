@@ -1018,6 +1018,95 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"IV rank calculation failed: {e}"}, status=500)
             return
 
+        # ── 17 new historical-data scanners (explicit blocks) ────────────────
+        def _scan17(mod_name, run_fn, lbl):
+            source = qs.get("source",["niftyfno"])[0].lower()
+            force  = qs.get("force", ["false"])[0].lower() == "true"
+            try:
+                import importlib; m = importlib.import_module(mod_name)
+                self._send_json(getattr(m, run_fn)(source=source, force=force))
+            except Exception as e: self._send_json({"stocks":[],"error":str(e),"count":0,"total":0})
+        def _sym17(mod_name, lbl):
+            symbol = qs.get("symbol",[""])[0].upper().strip()
+            if not symbol: self._send_json({"error":"symbol required"}); return
+            try:
+                import importlib; m = importlib.import_module(mod_name)
+                if mod_name == "nse_beta_scanner":
+                    nr = m._load_nifty_rets(); r = m.scan_stock(symbol, nr) if nr else None
+                elif mod_name == "nse_momrank_scanner":
+                    r = {"error": "Per-symbol rank not available — run full scan first"}
+                else:
+                    r = m.scan_stock(symbol)
+                self._send_json(r if r else {"error": f"No {lbl} data for {symbol}"})
+            except Exception as e: self._send_json({"error":str(e),"symbol":symbol})
+
+        if parsed.path == "/api/nr7-scanner":          _scan17("nse_nr7_scanner","run_nr7_scanner","NR7"); return
+        if parsed.path == "/api/nr7-scanner/symbol":   _sym17("nse_nr7_scanner","NR7"); return
+        if parsed.path == "/api/insidebar-scanner":    _scan17("nse_insidebar_scanner","run_insidebar_scanner","InsideBar"); return
+        if parsed.path == "/api/insidebar-scanner/symbol": _sym17("nse_insidebar_scanner","InsideBar"); return
+        if parsed.path == "/api/atrpct-scanner":       _scan17("nse_atrpct_scanner","run_atrpct_scanner","ATR%"); return
+        if parsed.path == "/api/atrpct-scanner/symbol": _sym17("nse_atrpct_scanner","ATR%"); return
+        if parsed.path == "/api/zscore-scanner":       _scan17("nse_zscore_scanner","run_zscore_scanner","ZScore"); return
+        if parsed.path == "/api/zscore-scanner/symbol": _sym17("nse_zscore_scanner","ZScore"); return
+        if parsed.path == "/api/consec-scanner":       _scan17("nse_consec_scanner","run_consec_scanner","Consecutive"); return
+        if parsed.path == "/api/consec-scanner/symbol": _sym17("nse_consec_scanner","Consecutive"); return
+        if parsed.path == "/api/madist-scanner":       _scan17("nse_madist_scanner","run_madist_scanner","MADist"); return
+        if parsed.path == "/api/madist-scanner/symbol": _sym17("nse_madist_scanner","MADist"); return
+        if parsed.path == "/api/roundnum-scanner":     _scan17("nse_roundnum_scanner","run_roundnum_scanner","RoundNum"); return
+        if parsed.path == "/api/roundnum-scanner/symbol": _sym17("nse_roundnum_scanner","RoundNum"); return
+        if parsed.path == "/api/sar-scanner":          _scan17("nse_sar_scanner","run_sar_scanner","SAR"); return
+        if parsed.path == "/api/sar-scanner/symbol":   _sym17("nse_sar_scanner","SAR"); return
+        if parsed.path == "/api/donchian-scanner":     _scan17("nse_donchian_scanner","run_donchian_scanner","Donchian"); return
+        if parsed.path == "/api/donchian-scanner/symbol": _sym17("nse_donchian_scanner","Donchian"); return
+        if parsed.path == "/api/aroon-scanner":        _scan17("nse_aroon_scanner","run_aroon_scanner","Aroon"); return
+        if parsed.path == "/api/aroon-scanner/symbol": _sym17("nse_aroon_scanner","Aroon"); return
+        if parsed.path == "/api/hv-scanner":           _scan17("nse_hv_scanner","run_hv_scanner","HV"); return
+        if parsed.path == "/api/hv-scanner/symbol":    _sym17("nse_hv_scanner","HV"); return
+        if parsed.path == "/api/stage-scanner":        _scan17("nse_stage_scanner","run_stage_scanner","Stage"); return
+        if parsed.path == "/api/stage-scanner/symbol": _sym17("nse_stage_scanner","Stage"); return
+        if parsed.path == "/api/beta-scanner":         _scan17("nse_beta_scanner","run_beta_scanner","Beta"); return
+        if parsed.path == "/api/beta-scanner/symbol":  _sym17("nse_beta_scanner","Beta"); return
+        if parsed.path == "/api/squeeze-scanner":      _scan17("nse_squeeze_scanner","run_squeeze_scanner","Squeeze"); return
+        if parsed.path == "/api/squeeze-scanner/symbol": _sym17("nse_squeeze_scanner","Squeeze"); return
+        if parsed.path == "/api/elder-scanner":        _scan17("nse_elder_scanner","run_elder_scanner","Elder"); return
+        if parsed.path == "/api/elder-scanner/symbol": _sym17("nse_elder_scanner","Elder"); return
+        if parsed.path == "/api/swing-scanner":        _scan17("nse_swing_scanner","run_swing_scanner","Swing"); return
+        if parsed.path == "/api/swing-scanner/symbol": _sym17("nse_swing_scanner","Swing"); return
+        if parsed.path == "/api/momrank-scanner":      _scan17("nse_momrank_scanner","run_momrank_scanner","MomRank"); return
+        if parsed.path == "/api/momrank-scanner/symbol": _sym17("nse_momrank_scanner","MomRank"); return
+
+        # ── RS / CPR / Stoch / WilliamsR / CCI / Ichimoku / Darvas / Confluence ──
+        for _path, _mod, _run_fn, _scan_fn, _lbl in [
+            ("/api/rs-scanner",         "nse_rs_scanner",          "run_rs_scanner",          "scan_stock",   "RS"),
+            ("/api/cpr-scanner",        "nse_cpr_scanner",         "run_cpr_scanner",         "scan_stock",   "CPR"),
+            ("/api/stoch-scanner",      "nse_stoch_scanner",       "run_stoch_scanner",       "scan_stock",   "Stochastic"),
+            ("/api/williamsr-scanner",  "nse_williamsr_scanner",   "run_williamsr_scanner",   "scan_stock",   "Williams%R"),
+            ("/api/cci-scanner",        "nse_cci_scanner",         "run_cci_scanner",         "scan_stock",   "CCI"),
+            ("/api/ichimoku-scanner",   "nse_ichimoku_scanner",    "run_ichimoku_scanner",    "scan_stock",   "Ichimoku"),
+            ("/api/darvas-scanner",     "nse_darvas_scanner",      "run_darvas_scanner",      "scan_stock",   "Darvas"),
+            ("/api/confluence-scanner", "nse_confluence_scanner",  "run_confluence_scanner",  None,           "Confluence"),
+        ]:
+            if parsed.path == _path:
+                source = qs.get("source",["niftyfno"])[0].lower()
+                force  = qs.get("force", ["false"])[0].lower() == "true"
+                try:
+                    import importlib as _il; _m = _il.import_module(_mod)
+                    self._send_json(getattr(_m, _run_fn)(source=source, force=force))
+                except Exception as _e: self._send_json({"stocks":[],"error":str(_e),"count":0,"total":0})
+                return
+            if _scan_fn and parsed.path == _path + "/symbol":
+                symbol = qs.get("symbol",[""])[0].upper().strip()
+                if not symbol: self._send_json({"error":"symbol required"}); return
+                try:
+                    import importlib as _il; _m = _il.import_module(_mod)
+                    if _mod == "nse_rs_scanner":
+                        nr = _m._load_nifty_close(); r = _m.scan_stock(symbol, nr) if nr else None
+                    else:
+                        r = getattr(_m, _scan_fn)(symbol)
+                    self._send_json(r if r else {"error":f"No {_lbl} data for {symbol}"})
+                except Exception as _e: self._send_json({"error":str(_e),"symbol":symbol})
+                return
+
         # ── Bollinger Band Scanner ────────────────────────────────────
         if parsed.path in ("/api/bb-scanner", "/api/bollinger-scanner"):
             source = qs.get("source",["niftyfno"])[0].lower()

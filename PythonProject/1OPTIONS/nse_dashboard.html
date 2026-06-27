@@ -314,7 +314,40 @@
   .scan-status-row { margin-bottom: 6px; }
   .scan-table-wrap { overflow-x: auto; overflow-y: auto; max-height: 520px; }
   /* ── Scan search autocomplete ── */
-  /* ── BB / MACD / ADX / Breakout / S/R / Pattern / Correlation ── */
+  #nr7SearchWrapper,#insidebarSearchWrapper,#atrpctSearchWrapper,#zscoreSearchWrapper,
+  #consecSearchWrapper,#madistSearchWrapper,#roundnumSearchWrapper,#sarSearchWrapper,
+  #donchianSearchWrapper,#aroonSearchWrapper,#hvSearchWrapper,#stageSearchWrapper,
+  #betaSearchWrapper,#squeezeSearchWrapper,#elderSearchWrapper,#swingSearchWrapper,
+  #momrankSearchWrapper { position:relative; display:inline-block; }
+  /* Tier 1/2/3 signal colours */
+  .nr7-bull  { color:#51cf66!important; }  .nr7-bear { color:#ff6b6b!important; }
+  .stage-2   { color:#1fc93b!important;font-weight:700; }
+  .stage-1   { color:#ffd43b!important; }
+  .stage-3   { color:#ff9f43!important; }
+  .stage-4   { color:#ff3c3c!important;font-weight:700; }
+  .elder-g   { background:#1fc93b22!important;color:#1fc93b!important;font-weight:700; }
+  .elder-r   { background:#ff3c3c22!important;color:#ff3c3c!important;font-weight:700; }
+  .elder-b   { background:#339af022!important;color:#74c0fc!important; }
+  .sq-fire   { color:#ffd43b!important;font-weight:800; }
+  #scannerBtnBar { display:flex; flex-wrap:wrap; gap:8px; padding:12px 0 10px;
+                   border-bottom:1px solid var(--border); margin-bottom:0; }
+  .sbg { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+  .sbg-lbl { font-size:8px; font-weight:700; color:var(--muted-2); letter-spacing:.08em;
+             text-transform:uppercase; margin-right:2px; white-space:nowrap; }
+  .sbg + .sbg::before { content:''; display:block; width:1px; height:18px;
+                         background:var(--border); margin:0 4px; align-self:center; }
+  .scanner-tab-btn { background:var(--panel); border:1px solid var(--border);
+                     border-radius:5px; color:var(--muted); cursor:pointer;
+                     font-size:10.5px; padding:4px 9px; transition:all .12s;
+                     white-space:nowrap; line-height:1.4; }
+  .scanner-tab-btn:hover { border-color:var(--accent-dim); color:var(--text); }
+  .scanner-tab-btn.active { background:var(--accent-dim); border-color:var(--accent);
+                             color:var(--accent); font-weight:600; }
+  #scannerContainer { padding-top:10px; }
+  /* New scanner search wrappers */
+  #rsSearchWrapper,#cprSearchWrapper,#stochSearchWrapper,#williamsrSearchWrapper,
+  #cciSearchWrapper,#ichimokuSearchWrapper,#darvasSearchWrapper,
+  #confluenceSearchWrapper { position:relative; display:inline-block; }
   .bb-squeeze { color:#ffd43b!important; font-weight:700; }
   .bb-ob      { color:#ff3c3c!important; font-weight:700; }
   .bb-os      { color:#339af0!important; font-weight:700; }
@@ -1335,7 +1368,69 @@
       </div><!-- /.home-layout -->
 
       <!-- ── Pivot Scanner — full width ────────────────────────────── -->
-      <div class="pivot-scanner-panel" id="pivotScannerPanel">
+      
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <!-- SCANNER SELECTOR                                            -->
+      <!-- ═══════════════════════════════════════════════════════════ -->
+      <div id="scannerBtnBar">
+        <div class="sbg"><span class="sbg-lbl">TREND</span>
+          <button class="scanner-tab-btn active" data-scanner="pivot">📊 Pivot</button>
+          <button class="scanner-tab-btn" data-scanner="trend">📈 EMA/ST</button>
+          <button class="scanner-tab-btn" data-scanner="bb">🎯 BB</button>
+          <button class="scanner-tab-btn" data-scanner="macd">📉 MACD</button>
+          <button class="scanner-tab-btn" data-scanner="adx">📏 ADX</button>
+          <button class="scanner-tab-btn" data-scanner="ichimoku">☁️ Ichimoku</button>
+          <button class="scanner-tab-btn" data-scanner="darvas">📦 Darvas</button>
+          <button class="scanner-tab-btn" data-scanner="sar">🔵 SAR</button>
+          <button class="scanner-tab-btn" data-scanner="donchian">📐 Donchian</button>
+          <button class="scanner-tab-btn" data-scanner="squeeze">🗜️ Squeeze</button>
+          <button class="scanner-tab-btn" data-scanner="elder">⚡ Elder</button>
+          <button class="scanner-tab-btn" data-scanner="stage">🏗️ Stage</button>
+        </div>
+        <div class="sbg"><span class="sbg-lbl">MOMENTUM</span>
+          <button class="scanner-tab-btn" data-scanner="rsi">📊 RSI</button>
+          <button class="scanner-tab-btn" data-scanner="stoch">〰 Stoch</button>
+          <button class="scanner-tab-btn" data-scanner="williamsr">⚖️ W%R</button>
+          <button class="scanner-tab-btn" data-scanner="cci">📡 CCI</button>
+          <button class="scanner-tab-btn" data-scanner="mom">🚀 ROC</button>
+          <button class="scanner-tab-btn" data-scanner="aroon">🔄 Aroon</button>
+          <button class="scanner-tab-btn" data-scanner="consec">📅 Streak</button>
+          <button class="scanner-tab-btn" data-scanner="madist">📍 MA Dist</button>
+          <button class="scanner-tab-btn" data-scanner="momrank">🏆 Mom Rank</button>
+        </div>
+        <div class="sbg"><span class="sbg-lbl">VOLATILITY</span>
+          <button class="scanner-tab-btn" data-scanner="nr7">🌀 NR7</button>
+          <button class="scanner-tab-btn" data-scanner="insidebar">📦 Inside Bar</button>
+          <button class="scanner-tab-btn" data-scanner="atrpct">📉 ATR%</button>
+          <button class="scanner-tab-btn" data-scanner="hv">🌡️ Hist Vol</button>
+          <button class="scanner-tab-btn" data-scanner="zscore">📐 Z-Score</button>
+          <button class="scanner-tab-btn" data-scanner="beta">⚡ Beta</button>
+        </div>
+        <div class="sbg"><span class="sbg-lbl">VOLUME/BRK</span>
+          <button class="scanner-tab-btn" data-scanner="vol">🔊 Volume</button>
+          <button class="scanner-tab-btn" data-scanner="gap">🕳️ Gap</button>
+          <button class="scanner-tab-btn" data-scanner="bko">💥 Breakout</button>
+        </div>
+        <div class="sbg"><span class="sbg-lbl">STRUCTURE</span>
+          <button class="scanner-tab-btn" data-scanner="wk">📅 52-Week</button>
+          <button class="scanner-tab-btn" data-scanner="sr">🧱 S/R</button>
+          <button class="scanner-tab-btn" data-scanner="pat">🔷 Patterns</button>
+          <button class="scanner-tab-btn" data-scanner="candle">🕯️ Candle</button>
+          <button class="scanner-tab-btn" data-scanner="cpr">⚡ CPR</button>
+          <button class="scanner-tab-btn" data-scanner="cam">🎯 Camarilla</button>
+          <button class="scanner-tab-btn" data-scanner="roundnum">🔢 Round#</button>
+          <button class="scanner-tab-btn" data-scanner="swing">🔀 Swing</button>
+        </div>
+        <div class="sbg"><span class="sbg-lbl">INDEX</span>
+          <button class="scanner-tab-btn" data-scanner="corr">🔗 Corr</button>
+          <button class="scanner-tab-btn" data-scanner="rs">⭐ Rel Str</button>
+          <button class="scanner-tab-btn" data-scanner="confluence">🎯 Confluence</button>
+        </div>
+      </div>
+
+      <!-- ACTIVE SCANNER CONTAINER -->
+      <div id="scannerContainer">
+<div class="pivot-scanner-panel scanner-panel" id="pivotScannerPanel">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">📊 Pivot Scanner — F&amp;O Stocks</span>
@@ -1425,7 +1520,7 @@
       <!-- ══════════════════════════════════════════════════════════════ -->
       <!-- TREND SCANNER                                                  -->
       <!-- ══════════════════════════════════════════════════════════════ -->
-      <div class="pivot-scanner-panel" id="trendScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="trendScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">📈 Supertrend / EMA Crossover Scanner</span>
@@ -1478,7 +1573,7 @@
       <!-- ══════════════════════════════════════════════════════════════ -->
       <!-- VOLUME ANOMALY SCANNER                                         -->
       <!-- ══════════════════════════════════════════════════════════════ -->
-      <div class="pivot-scanner-panel" id="volScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="volScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🔊 Volume Anomaly Scanner</span>
@@ -1522,7 +1617,7 @@
       <!-- ══════════════════════════════════════════════════════════════ -->
       <!-- 52-WEEK HIGH / LOW SCANNER                                     -->
       <!-- ══════════════════════════════════════════════════════════════ -->
-      <div class="pivot-scanner-panel" id="wkScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="wkScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">📅 52-Week High / Low Scanner</span>
@@ -1562,7 +1657,7 @@
       </div><!-- /.wkScannerPanel -->
 
       <!-- RSI SCANNER -->
-      <div class="pivot-scanner-panel" id="rsiScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="rsiScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">📊 RSI Scanner (14)</span>
@@ -1594,7 +1689,7 @@
       </div>
 
       <!-- GAP SCANNER -->
-      <div class="pivot-scanner-panel" id="gapScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="gapScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🕳️ Gap Scanner</span>
@@ -1624,7 +1719,7 @@
       </div>
 
       <!-- MOMENTUM / ROC SCANNER -->
-      <div class="pivot-scanner-panel" id="momScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="momScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🚀 Momentum / ROC Scanner</span>
@@ -1656,7 +1751,7 @@
       </div>
 
       <!-- CANDLESTICK PATTERN SCANNER -->
-      <div class="pivot-scanner-panel" id="candleScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="candleScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🕯️ Candlestick Pattern Scanner</span>
@@ -1686,7 +1781,7 @@
       </div>
 
       <!-- CAMARILLA BREAKOUT SCANNER -->
-      <div class="pivot-scanner-panel" id="camScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="camScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🎯 Camarilla Breakout Scanner</span>
@@ -1723,7 +1818,7 @@
       </div>
 
       <!-- BOLLINGER BANDS -->
-      <div class="pivot-scanner-panel" id="bbScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="bbScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🎯 Bollinger Band Scanner (20,2)</span>
@@ -1750,7 +1845,7 @@
       </div>
 
       <!-- MACD -->
-      <div class="pivot-scanner-panel" id="macdScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="macdScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">📉 MACD Scanner (12/26/9)</span>
@@ -1778,7 +1873,7 @@
       </div>
 
       <!-- ADX -->
-      <div class="pivot-scanner-panel" id="adxScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="adxScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">📏 ADX Trend Strength (14)</span>
@@ -1803,7 +1898,7 @@
       </div>
 
       <!-- BREAKOUT -->
-      <div class="pivot-scanner-panel" id="bkoScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="bkoScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🚀 N-Day Breakout Scanner</span>
@@ -1830,7 +1925,7 @@
       </div>
 
       <!-- S/R CLUSTER -->
-      <div class="pivot-scanner-panel" id="srScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="srScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🧱 S/R Cluster Scanner</span>
@@ -1855,7 +1950,7 @@
       </div>
 
       <!-- PRICE PATTERNS -->
-      <div class="pivot-scanner-panel" id="patScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="patScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🔷 Price Pattern Scanner</span>
@@ -1878,7 +1973,7 @@
       </div>
 
       <!-- NIFTY CORRELATION -->
-      <div class="pivot-scanner-panel" id="corrScannerPanel" style="margin-top:14px;">
+      <div class="pivot-scanner-panel scanner-panel" id="corrScannerPanel" style="margin-top:0;display:none;">
         <div class="scanner-head">
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <span class="skew-chart-title">🔗 Nifty Correlation Scanner (20D)</span>
@@ -1902,6 +1997,252 @@
         <div class="scan-status-row"><span class="level-source" id="corrStatus">Click ▶ Run to load correlation data.</span></div>
         <div id="corrTableWrap" class="scan-table-wrap"></div>
       </div>
+
+      
+      <!-- RS Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="rsScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">⭐ Relative Strength vs Nifty (20D)</span>
+            <select id="rsSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="rsSearchWrapper"><input type="text" id="rsSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="rsAutoRefresh"> Auto</label>
+            <input type="number" id="rsIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="rsRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="rsFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Strong Outperform" style="--fc:#1fc93b;">💪 Strong Out</button>
+          <button class="lvl-filter-btn" data-sig="Outperform"        style="--fc:#51cf66;">↑ Outperform</button>
+          <button class="lvl-filter-btn" data-sig="In-line"           style="--fc:#888;">↔ In-line</button>
+          <button class="lvl-filter-btn" data-sig="Underperform"      style="--fc:#ff8080;">↓ Underperform</button>
+          <button class="lvl-filter-btn" data-sig="Negative Diverge"  style="--fc:#ff3c3c;">📉 Neg Diverge</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="rsStatus">Click ▶ Run to load RS data.</span></div>
+        <div id="rsTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- CPR Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="cprScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">⚡ CPR Scanner</span>
+            <select id="cprSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="cprSearchWrapper"><input type="text" id="cprSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="cprAutoRefresh"> Auto</label>
+            <input type="number" id="cprIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="cprRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="cprFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Narrow (Trend Day)" style="--fc:#ffd43b;">⚡ Narrow</button>
+          <button class="lvl-filter-btn" data-sig="Normal"             style="--fc:#888;">Normal</button>
+          <button class="lvl-filter-btn" data-sig="Wide"               style="--fc:#74c0fc;">↔ Wide</button>
+          <button class="lvl-filter-btn" data-sig="Very Wide (Sideways)" style="--fc:#339af0;">⇔ Very Wide</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="cprStatus">Click ▶ Run to load CPR data.</span></div>
+        <div id="cprTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- Stochastic Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="stochScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">〰 Stochastic Scanner (14,3,3)</span>
+            <select id="stochSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="stochSearchWrapper"><input type="text" id="stochSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="stochAutoRefresh"> Auto</label>
+            <input type="number" id="stochIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="stochRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="stochFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Oversold"  style="--fc:#74c0fc;">🔵 Oversold ≤20</button>
+          <button class="lvl-filter-btn" data-sig="Bull Cross" style="--fc:#51cf66;">↑ Bull Cross</button>
+          <button class="lvl-filter-btn" data-sig="Bullish"   style="--fc:#888;">Bullish</button>
+          <button class="lvl-filter-btn" data-sig="Overbought" style="--fc:#ff3c3c;">🔴 Overbought ≥80</button>
+          <button class="lvl-filter-btn" data-sig="Bear Cross" style="--fc:#ff6b6b;">↓ Bear Cross</button>
+          <button class="lvl-filter-btn" data-sig="Bearish"   style="--fc:#ff8080;">Bearish</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="stochStatus">Click ▶ Run to load Stochastic data.</span></div>
+        <div id="stochTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- Williams %R Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="williamsrScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">⚖️ Williams %R Scanner (14)</span>
+            <select id="williamsrSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="williamsrSearchWrapper"><input type="text" id="williamsrSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="williamsrAutoRefresh"> Auto</label>
+            <input type="number" id="williamsrIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="williamsrRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="williamsrFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Oversold"    style="--fc:#74c0fc;">🔵 Oversold &lt;-80</button>
+          <button class="lvl-filter-btn" data-sig="Turning Up"  style="--fc:#51cf66;">↑ Turning Up</button>
+          <button class="lvl-filter-btn" data-sig="Bullish"     style="--fc:#888;">Bullish</button>
+          <button class="lvl-filter-btn" data-sig="Overbought"  style="--fc:#ff3c3c;">🔴 Overbought &gt;-20</button>
+          <button class="lvl-filter-btn" data-sig="Turning Down" style="--fc:#ff6b6b;">↓ Turning Down</button>
+          <button class="lvl-filter-btn" data-sig="Bearish"     style="--fc:#ff8080;">Bearish</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="williamsrStatus">Click ▶ Run to load Williams %R data.</span></div>
+        <div id="williamsrTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- CCI Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="cciScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">📡 CCI Scanner (20)</span>
+            <select id="cciSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="cciSearchWrapper"><input type="text" id="cciSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="cciAutoRefresh"> Auto</label>
+            <input type="number" id="cciIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="cciRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="cciFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Extreme Oversold" style="--fc:#339af0;">⬇ Ext. Oversold</button>
+          <button class="lvl-filter-btn" data-sig="Oversold"         style="--fc:#74c0fc;">🔵 Oversold &lt;-100</button>
+          <button class="lvl-filter-btn" data-sig="Zero Cross Up"    style="--fc:#51cf66;">↑ Zero Cross Up</button>
+          <button class="lvl-filter-btn" data-sig="Extreme Overbought" style="--fc:#ff3c3c;">⬆ Ext. Overbought</button>
+          <button class="lvl-filter-btn" data-sig="Overbought"       style="--fc:#ff6b6b;">🔴 Overbought &gt;100</button>
+          <button class="lvl-filter-btn" data-sig="Zero Cross Down"  style="--fc:#ff8080;">↓ Zero Cross Down</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="cciStatus">Click ▶ Run to load CCI data.</span></div>
+        <div id="cciTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- Ichimoku Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="ichimokuScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">☁️ Ichimoku Cloud Scanner</span>
+            <select id="ichimokuSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="ichimokuSearchWrapper"><input type="text" id="ichimokuSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="ichimokuAutoRefresh"> Auto</label>
+            <input type="number" id="ichimokuIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="ichimokuRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="ichimokuFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Strong Bullish" style="--fc:#1fc93b;">💪 Strong Bull</button>
+          <button class="lvl-filter-btn" data-sig="Bullish"        style="--fc:#51cf66;">🟢 Bullish</button>
+          <button class="lvl-filter-btn" data-sig="Weak Bullish"   style="--fc:#74c0fc;">↑ Weak Bull</button>
+          <button class="lvl-filter-btn" data-sig="In Cloud"       style="--fc:#888;">☁️ In Cloud</button>
+          <button class="lvl-filter-btn" data-sig="Weak Bearish"   style="--fc:#ffa94d;">↓ Weak Bear</button>
+          <button class="lvl-filter-btn" data-sig="Bearish"        style="--fc:#ff6b6b;">🔴 Bearish</button>
+          <button class="lvl-filter-btn" data-sig="Strong Bearish" style="--fc:#ff3c3c;">💀 Strong Bear</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="ichimokuStatus">Click ▶ Run to load Ichimoku data.</span></div>
+        <div id="ichimokuTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- Darvas Box Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="darvasScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">📦 Darvas Box Scanner</span>
+            <select id="darvasSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="darvasSearchWrapper"><input type="text" id="darvasSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <label><input type="checkbox" id="darvasAutoRefresh"> Auto</label>
+            <input type="number" id="darvasIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
+            <button class="btn" id="darvasRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="darvasFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Breakout"    style="--fc:#1fc93b;">🚀 Breakout</button>
+          <button class="lvl-filter-btn" data-sig="In Box"      style="--fc:#74c0fc;">📦 In Box</button>
+          <button class="lvl-filter-btn" data-sig="Box Broken"  style="--fc:#ff6b6b;">💥 Box Broken</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="darvasStatus">Click ▶ Run to load Darvas data.</span></div>
+        <div id="darvasTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- Confluence Scanner -->
+      <div class="pivot-scanner-panel scanner-panel" id="confluenceScannerPanel" style="display:none;">
+        <div class="scanner-head">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span class="skew-chart-title">🎯 Multi-Signal Confluence Scanner</span>
+            <select id="confluenceSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
+          </div>
+          <div class="scanner-controls">
+            <div id="confluenceSearchWrapper"><input type="text" id="confluenceSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
+            <button class="btn" id="confluenceRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
+          </div>
+        </div>
+        <div class="level-filter-btns" id="confluenceFilterBtns">
+          <button class="lvl-filter-btn active" data-sig="">All</button>
+          <button class="lvl-filter-btn" data-sig="Strong Bull" style="--fc:#1fc93b;">💪 Strong Bull</button>
+          <button class="lvl-filter-btn" data-sig="Bull"        style="--fc:#51cf66;">🟢 Bull</button>
+          <button class="lvl-filter-btn" data-sig="Neutral"     style="--fc:#888;">⚪ Neutral</button>
+          <button class="lvl-filter-btn" data-sig="Bear"        style="--fc:#ff6b6b;">🔴 Bear</button>
+          <button class="lvl-filter-btn" data-sig="Strong Bear" style="--fc:#ff3c3c;">💀 Strong Bear</button>
+        </div>
+        <div class="scan-status-row"><span class="level-source" id="confluenceStatus">Run other scanners first, then click ▶ Run.</span></div>
+        <div id="confluenceTableWrap" class="scan-table-wrap"></div>
+      </div>
+
+      <!-- ── 17 new scanner panels (Tier 1/2/3) ── -->
+      <div class="pivot-scanner-panel scanner-panel" id="nr7ScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🌀 NR7 / NR4 Volatility Squeeze</span><select id="nr7SymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="nr7SearchWrapper"><input type="text" id="nr7Search" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="nr7AutoRefresh"> Auto</label><input type="number" id="nr7IntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="nr7RunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="nr7FilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="NR7">NR7</button><button class="lvl-filter-btn" data-fv="NR4">NR4</button></div><div class="scan-status-row"><span class="level-source" id="nr7Status">Click ▶ Run.</span></div><div id="nr7TableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="insidebarScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📦 Inside Bar Scanner</span><select id="insidebarSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="insidebarSearchWrapper"><input type="text" id="insidebarSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="insidebarAutoRefresh"> Auto</label><input type="number" id="insidebarIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="insidebarRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="insidebarFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Inside Bar">IB</button><button class="lvl-filter-btn" data-fv="IB+NR7">IB+NR7</button><button class="lvl-filter-btn" data-fv="Double IB">Double IB</button><button class="lvl-filter-btn" data-fv="Double IB+NR7">Dbl+NR7</button></div><div class="scan-status-row"><span class="level-source" id="insidebarStatus">Click ▶ Run.</span></div><div id="insidebarTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="atrpctScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📉 ATR% Volatility Rank</span><select id="atrpctSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="atrpctSearchWrapper"><input type="text" id="atrpctSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="atrpctAutoRefresh"> Auto</label><input type="number" id="atrpctIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="atrpctRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="atrpctFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Compressed">⬇ Compressed</button><button class="lvl-filter-btn" data-fv="Low Vol">Low Vol</button><button class="lvl-filter-btn" data-fv="Normal">Normal</button><button class="lvl-filter-btn" data-fv="High Vol">↑ High Vol</button></div><div class="scan-status-row"><span class="level-source" id="atrpctStatus">Click ▶ Run.</span></div><div id="atrpctTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="zscoreScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📐 Z-Score / Mean Reversion (SMA20)</span><select id="zscoreSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="zscoreSearchWrapper"><input type="text" id="zscoreSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="zscoreAutoRefresh"> Auto</label><input type="number" id="zscoreIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="zscoreRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="zscoreFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Extreme Overbought">⬆ Ext OB</button><button class="lvl-filter-btn" data-fv="Overbought">OB</button><button class="lvl-filter-btn" data-fv="Mean Reversion Range">Range</button><button class="lvl-filter-btn" data-fv="Oversold">OS</button><button class="lvl-filter-btn" data-fv="Extreme Oversold">⬇ Ext OS</button></div><div class="scan-status-row"><span class="level-source" id="zscoreStatus">Click ▶ Run.</span></div><div id="zscoreTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="consecScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📅 Consecutive Days Streak</span><select id="consecSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="consecSearchWrapper"><input type="text" id="consecSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="consecAutoRefresh"> Auto</label><input type="number" id="consecIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="consecRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="consecFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="bull">🟢 Bull</button><button class="lvl-filter-btn" data-fv="bear">🔴 Bear</button></div><div class="scan-status-row"><span class="level-source" id="consecStatus">Click ▶ Run.</span></div><div id="consecTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="madistScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📍 MA Distance (20/50/200)</span><select id="madistSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="madistSearchWrapper"><input type="text" id="madistSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="madistAutoRefresh"> Auto</label><input type="number" id="madistIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="madistRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="madistFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Extended Above">↑↑ Extended</button><button class="lvl-filter-btn" data-fv="Above MA">Above</button><button class="lvl-filter-btn" data-fv="At MA Zone">At MA</button><button class="lvl-filter-btn" data-fv="Below MA">Below</button><button class="lvl-filter-btn" data-fv="Extended Below">↓↓ Extended</button></div><div class="scan-status-row"><span class="level-source" id="madistStatus">Click ▶ Run.</span></div><div id="madistTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="roundnumScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔢 Round Number Proximity</span><select id="roundnumSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="roundnumSearchWrapper"><input type="text" id="roundnumSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="roundnumAutoRefresh"> Auto</label><input type="number" id="roundnumIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="roundnumRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="roundnumFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="true">Above Round#</button><button class="lvl-filter-btn" data-fv="false">Below Round#</button></div><div class="scan-status-row"><span class="level-source" id="roundnumStatus">Click ▶ Run.</span></div><div id="roundnumTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="sarScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔵 Parabolic SAR (0.02, 0.2)</span><select id="sarSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="sarSearchWrapper"><input type="text" id="sarSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="sarAutoRefresh"> Auto</label><input type="number" id="sarIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="sarRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="sarFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="1">🟢 Bullish</button><button class="lvl-filter-btn" data-fv="fresh_bull">🟢 Fresh Flip Up</button><button class="lvl-filter-btn" data-fv="-1">🔴 Bearish</button><button class="lvl-filter-btn" data-fv="fresh_bear">🔴 Fresh Flip Dn</button></div><div class="scan-status-row"><span class="level-source" id="sarStatus">Click ▶ Run.</span></div><div id="sarTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="donchianScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📐 Donchian Channel (20D/55D)</span><select id="donchianSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="donchianSearchWrapper"><input type="text" id="donchianSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="donchianAutoRefresh"> Auto</label><input type="number" id="donchianIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="donchianRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="donchianFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="20D Breakout">⬆ 20D BO</button><button class="lvl-filter-btn" data-fv="55D Breakout">⬆ 55D BO</button><button class="lvl-filter-btn" data-fv="Upper Half">Upper</button><button class="lvl-filter-btn" data-fv="Lower Half">Lower</button><button class="lvl-filter-btn" data-fv="20D Breakdown">⬇ 20D BD</button><button class="lvl-filter-btn" data-fv="55D Breakdown">⬇ 55D BD</button></div><div class="scan-status-row"><span class="level-source" id="donchianStatus">Click ▶ Run.</span></div><div id="donchianTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="aroonScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔄 Aroon Oscillator (25)</span><select id="aroonSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="aroonSearchWrapper"><input type="text" id="aroonSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="aroonAutoRefresh"> Auto</label><input type="number" id="aroonIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="aroonRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="aroonFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Strong Uptrend">💪 Strong Up</button><button class="lvl-filter-btn" data-fv="Bullish">🟢 Bull</button><button class="lvl-filter-btn" data-fv="Weak Bullish">Weak Bull</button><button class="lvl-filter-btn" data-fv="Weak Bearish">Weak Bear</button><button class="lvl-filter-btn" data-fv="Bearish">🔴 Bear</button><button class="lvl-filter-btn" data-fv="Strong Downtrend">💀 Strong Dn</button></div><div class="scan-status-row"><span class="level-source" id="aroonStatus">Click ▶ Run.</span></div><div id="aroonTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="hvScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🌡️ Historical Volatility (20D ann.)</span><select id="hvSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="hvSearchWrapper"><input type="text" id="hvSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="hvAutoRefresh"> Auto</label><input type="number" id="hvIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="hvRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="hvFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Very High Vol">🔴 Very High</button><button class="lvl-filter-btn" data-fv="High Vol">High</button><button class="lvl-filter-btn" data-fv="Normal">Normal</button><button class="lvl-filter-btn" data-fv="Low Vol">Low</button><button class="lvl-filter-btn" data-fv="Very Low Vol">🔵 Very Low</button></div><div class="scan-status-row"><span class="level-source" id="hvStatus">Click ▶ Run.</span></div><div id="hvTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="stageScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🏗️ Weinstein Stage Analysis (150D)</span><select id="stageSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="stageSearchWrapper"><input type="text" id="stageSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="stageAutoRefresh"> Auto</label><input type="number" id="stageIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="stageRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="stageFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="2">Stage 2 Advancing</button><button class="lvl-filter-btn" data-fv="1">Stage 1 Basing</button><button class="lvl-filter-btn" data-fv="3">Stage 3 Topping</button><button class="lvl-filter-btn" data-fv="4">Stage 4 Declining</button></div><div class="scan-status-row"><span class="level-source" id="stageStatus">Click ▶ Run.</span></div><div id="stageTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="betaScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">⚡ Beta vs Nifty (60D)</span><select id="betaSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="betaSearchWrapper"><input type="text" id="betaSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="betaAutoRefresh"> Auto</label><input type="number" id="betaIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="betaRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="betaFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Very High Beta">💥 Very High</button><button class="lvl-filter-btn" data-fv="High Beta">High</button><button class="lvl-filter-btn" data-fv="Market">Market</button><button class="lvl-filter-btn" data-fv="Low Beta">Low</button><button class="lvl-filter-btn" data-fv="Very Low Beta">Very Low</button><button class="lvl-filter-btn" data-fv="Negative Beta">Neg</button></div><div class="scan-status-row"><span class="level-source" id="betaStatus">Click ▶ Run.</span></div><div id="betaTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="squeezeScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🗜️ BB+KC Squeeze (John Carter)</span><select id="squeezeSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="squeezeSearchWrapper"><input type="text" id="squeezeSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="squeezeAutoRefresh"> Auto</label><input type="number" id="squeezeIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="squeezeRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="squeezeFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Squeeze — Bullish Build">🟢 SQ Bull</button><button class="lvl-filter-btn" data-fv="Squeeze — Bearish Build">🔴 SQ Bear</button><button class="lvl-filter-btn" data-fv="Squeeze">⚡ Squeeze</button><button class="lvl-filter-btn" data-fv="Squeeze Released">Released</button><button class="lvl-filter-btn" data-fv="No Squeeze">No SQ</button></div><div class="scan-status-row"><span class="level-source" id="squeezeStatus">Click ▶ Run.</span></div><div id="squeezeTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="elderScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">⚡ Elder Impulse System (EMA13+MACD)</span><select id="elderSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="elderSearchWrapper"><input type="text" id="elderSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="elderAutoRefresh"> Auto</label><input type="number" id="elderIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="elderRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="elderFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Buy Impulse">🟢 Green</button><button class="lvl-filter-btn" data-fv="No Impulse">🔵 Blue</button><button class="lvl-filter-btn" data-fv="Sell Impulse">🔴 Red</button></div><div class="scan-status-row"><span class="level-source" id="elderStatus">Click ▶ Run.</span></div><div id="elderTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="swingScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔀 Swing Quality Counter (HH/HL/LH/LL)</span><select id="swingSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="swingSearchWrapper"><input type="text" id="swingSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="swingAutoRefresh"> Auto</label><input type="number" id="swingIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="swingRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="swingFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Strong Uptrend">💪 Strong Up</button><button class="lvl-filter-btn" data-fv="Uptrend">↑ Uptrend</button><button class="lvl-filter-btn" data-fv="Choppy">↔ Choppy</button><button class="lvl-filter-btn" data-fv="Downtrend">↓ Downtrend</button><button class="lvl-filter-btn" data-fv="Strong Downtrend">💀 Strong Dn</button></div><div class="scan-status-row"><span class="level-source" id="swingStatus">Click ▶ Run.</span></div><div id="swingTableWrap" class="scan-table-wrap"></div></div>
+
+      <div class="pivot-scanner-panel scanner-panel" id="momrankScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🏆 Momentum Percentile Rank (20D)</span><select id="momrankSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="momrankSearchWrapper"><input type="text" id="momrankSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="momrankAutoRefresh"> Auto</label><input type="number" id="momrankIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="momrankRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="momrankFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Top Decile">🥇 Top 10%</button><button class="lvl-filter-btn" data-fv="Top Quartile">Top 25%</button><button class="lvl-filter-btn" data-fv="Above Median">Above Med</button><button class="lvl-filter-btn" data-fv="Below Median">Below Med</button><button class="lvl-filter-btn" data-fv="Bottom Quartile">Bottom 25%</button><button class="lvl-filter-btn" data-fv="Bottom Decile">Bottom 10%</button></div><div class="scan-status-row"><span class="level-source" id="momrankStatus">Click ▶ Run.</span></div><div id="momrankTableWrap" class="scan-table-wrap"></div></div>
+
+      </div><!-- /#scannerContainer -->
 
       <!-- ── Stock Pivot Lookup ────────────────────────────────────── -->
       <div class="stock-lookup-panel" id="stockLookupPanel">
@@ -7498,6 +7839,815 @@
     tableId:'corrTableWrap',statusId:'corrStatus',searchId:'corrSearch',searchWrapperId:'corrSearchWrapper',ddId:'corrSuggestDD',
     lookupEndpoint:'/api/correlation-scanner/symbol',state:corrState,renderFn:renderCorrScanner,
     runFn:()=>_runScanner('/api/correlation-scanner',corrState,renderCorrScanner)});
+
+  // ====================================================================
+  // SCANNER TAB SYSTEM — show one scanner at a time
+  // ====================================================================
+  const _scannerAutoRunMap = {
+    pivot:       () => { if (!scanState.data)         runPivotScanner(false); },
+    trend:       () => { if (!trendState.data)        runTrendScanner(false); },
+    vol:         () => { if (!volState.data)          runVolScanner(false); },
+    wk:          () => { if (!wkState.data)           runWkScanner(false); },
+    rsi:         () => { if (!rsiState.data)          _runScanner('/api/rsi-scanner',rsiState,renderRsiScanner); },
+    gap:         () => { if (!gapState.data)          _runScanner('/api/gap-scanner',gapState,renderGapScanner); },
+    mom:         () => { if (!momState.data)          _runScanner('/api/momentum-scanner',momState,renderMomScanner); },
+    candle:      () => { if (!candleState.data)       _runScanner('/api/candle-scanner',candleState,renderCandleScanner); },
+    cam:         () => { if (!camState.data)          runCamScanner(false); },
+    bb:          () => { if (!bbState.data)           _runScanner('/api/bb-scanner',bbState,renderBbScanner); },
+    macd:        () => { if (!macdState.data)         _runScanner('/api/macd-scanner',macdState,renderMacdScanner); },
+    adx:         () => { if (!adxState.data)          _runScanner('/api/adx-scanner',adxState,renderAdxScanner); },
+    bko:         () => { if (!bkoState.data)          _runScanner('/api/breakout-scanner',bkoState,renderBkoScanner); },
+    sr:          () => { if (!srState.data)           _runScanner('/api/sr-scanner',srState,renderSrScanner); },
+    pat:         () => { if (!patState.data)          _runScanner('/api/pattern-scanner',patState,renderPatScanner); },
+    corr:        () => { if (!corrState.data)         _runScanner('/api/correlation-scanner',corrState,renderCorrScanner); },
+    rs:          () => { if (!rsState.data)           _runScanner('/api/rs-scanner',rsState,renderRsScanner); },
+    cpr:         () => { if (!cprState.data)          _runScanner('/api/cpr-scanner',cprState,renderCprScanner); },
+    stoch:       () => { if (!stochState.data)        _runScanner('/api/stoch-scanner',stochState,renderStochScanner); },
+    williamsr:   () => { if (!williamsrState.data)    _runScanner('/api/williamsr-scanner',williamsrState,renderWilliamsrScanner); },
+    cci:         () => { if (!cciState.data)          _runScanner('/api/cci-scanner',cciState,renderCciScanner); },
+    ichimoku:    () => { if (!ichimokuState.data)     _runScanner('/api/ichimoku-scanner',ichimokuState,renderIchimokuScanner); },
+    darvas:      () => { if (!darvasState.data)       _runScanner('/api/darvas-scanner',darvasState,renderDarvasScanner); },
+    confluence:  () => { if (!confluenceState.data)   _runScanner('/api/confluence-scanner',confluenceState,renderConfluenceScanner); },
+    nr7:         () => { if (!nr7State.data)           _runScanner('/api/nr7-scanner',nr7State,renderNr7Scanner); },
+    insidebar:   () => { if (!insidebarState.data)     _runScanner('/api/insidebar-scanner',insidebarState,renderInsidebarScanner); },
+    atrpct:      () => { if (!atrpctState.data)        _runScanner('/api/atrpct-scanner',atrpctState,renderAtrpctScanner); },
+    zscore:      () => { if (!zscoreState.data)        _runScanner('/api/zscore-scanner',zscoreState,renderZscoreScanner); },
+    consec:      () => { if (!consecState.data)        _runScanner('/api/consec-scanner',consecState,renderConsecScanner); },
+    madist:      () => { if (!madistState.data)        _runScanner('/api/madist-scanner',madistState,renderMadistScanner); },
+    roundnum:    () => { if (!roundnumState.data)      _runScanner('/api/roundnum-scanner',roundnumState,renderRoundnumScanner); },
+    sar:         () => { if (!sarState.data)           _runScanner('/api/sar-scanner',sarState,renderSarScanner); },
+    donchian:    () => { if (!donchianState.data)      _runScanner('/api/donchian-scanner',donchianState,renderDonchianScanner); },
+    aroon:       () => { if (!aroonState.data)         _runScanner('/api/aroon-scanner',aroonState,renderAroonScanner); },
+    hv:          () => { if (!hvState.data)            _runScanner('/api/hv-scanner',hvState,renderHvScanner); },
+    stage:       () => { if (!stageState.data)         _runScanner('/api/stage-scanner',stageState,renderStageScanner); },
+    beta:        () => { if (!betaState.data)          _runScanner('/api/beta-scanner',betaState,renderBetaScanner); },
+    squeeze:     () => { if (!squeezeState.data)       _runScanner('/api/squeeze-scanner',squeezeState,renderSqueezeScanner); },
+    elder:       () => { if (!elderState.data)         _runScanner('/api/elder-scanner',elderState,renderElderScanner); },
+    swing:       () => { if (!swingState.data)         _runScanner('/api/swing-scanner',swingState,renderSwingScanner); },
+    momrank:     () => { if (!momrankState.data)       _runScanner('/api/momrank-scanner',momrankState,renderMomrankScanner); },
+  };
+
+  function _activateScanner(name) {
+    document.querySelectorAll('#scannerContainer .scanner-panel')
+            .forEach(p => { p.style.display = 'none'; });
+    const panel = document.getElementById(name + 'ScannerPanel');
+    if (panel) panel.style.display = '';
+    document.querySelectorAll('#scannerBtnBar .scanner-tab-btn')
+            .forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`#scannerBtnBar [data-scanner="${name}"]`);
+    if (btn) btn.classList.add('active');
+    (_scannerAutoRunMap[name] || (() => {}))();
+  }
+
+  document.getElementById('scannerBtnBar')?.addEventListener('click', e => {
+    const btn = e.target.closest('.scanner-tab-btn');
+    if (!btn) return;
+    _activateScanner(btn.dataset.scanner);
+  });
+
+  // ── RS ──────────────────────────────────────────────────────────────
+  const rsState={data:null,source:'niftyfno',sigFilter:'',sortCol:'rs',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'rsStatus',_tableId:'rsTableWrap'};
+  function renderRsScanner(){
+    const wrap=document.getElementById('rsTableWrap'),statEl=document.getElementById('rsStatus');
+    if(!wrap||!rsState.data) return;
+    const d=rsState.data; let stocks=d.stocks||[];
+    if(rsState.sigFilter) stocks=stocks.filter(s=>s.signal===rsState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=rsState.sortDir;
+      if(rsState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      if(rsState.sortCol==='rs')     return ((a.rs||0)-(b.rs||0))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',rsState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',rsState),_mkTh('rs','RS',rsState,'RS>1 = outperforming Nifty'),
+      `<th class="scan-th">Stock 20D%</th>`,`<th class="scan-th">Nifty 20D%</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const sigBg={'Strong Outperform':'ts-sig-sb','Outperform':'ts-sig-b','In-line':'ts-sig-n','Underperform':'ts-sig-s','Negative Diverge':'ts-sig-ss'};
+    const rows=stocks.map((s,i)=>{
+      const rsCls=s.rs>=1.5?'mom-su':s.rs>=1?'mom-u':s.rs<0?'mom-sd':'mom-d';
+      const sCls=s.stock_ret>=0?'ts-bull':'ts-bear'; const nCls=s.nifty_ret>=0?'ts-bull':'ts-bear';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="${rsCls}" style="text-align:right;font-weight:700;">${s.rs}</td>
+        <td class="${sCls}" style="text-align:right;">${s.stock_ret>=0?'+':''}${s.stock_ret}%</td>
+        <td class="${nCls}" style="text-align:right;">${s.nifty_ret>=0?'+':''}${s.nifty_ret}%</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${rsState.sigFilter?' · '+rsState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'rsRunBtn',listId:'rsSymbolList',filterBtnId:'rsFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'rsTableWrap',statusId:'rsStatus',searchId:'rsSearch',searchWrapperId:'rsSearchWrapper',ddId:'rsSuggestDD',
+    lookupEndpoint:'/api/rs-scanner/symbol',state:rsState,renderFn:renderRsScanner,
+    runFn:()=>_runScanner('/api/rs-scanner',rsState,renderRsScanner)});
+
+  // ── CPR ─────────────────────────────────────────────────────────────
+  const cprState={data:null,source:'niftyfno',sigFilter:'',sortCol:'width_pct',sortDir:1,intervalMins:5,autoRefresh:false,_statusId:'cprStatus',_tableId:'cprTableWrap'};
+  function renderCprScanner(){
+    const wrap=document.getElementById('cprTableWrap'),statEl=document.getElementById('cprStatus');
+    if(!wrap||!cprState.data) return;
+    const d=cprState.data; let stocks=d.stocks||[];
+    if(cprState.sigFilter) stocks=stocks.filter(s=>s.day_type===cprState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=cprState.sortDir;
+      if(cprState.sortCol==='symbol')    return a.symbol.localeCompare(b.symbol)*dir;
+      if(cprState.sortCol==='width_pct') return ((a.width_pct||0)-(b.width_pct||0))*dir;
+      return (a.price-b.price)*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',cprState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',cprState),`<th class="scan-th">Pivot</th>`,`<th class="scan-th">TC</th>`,`<th class="scan-th">BC</th>`,
+      _mkTh('width_pct','Width%',cprState),`<th class="scan-th">Position</th>`,`<th class="scan-th">Virgin</th>`,`<th class="scan-th">Day Type</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const wCls=s.width_pct<0.5?'bb-squeeze':s.width_pct>1.5?'ts-neut':'';
+      const posCls=s.position==='Above CPR'?'ts-bull':s.position==='Below CPR'?'ts-bear':'ts-neut';
+      const virTag=s.virgin?'<span class="rsi-fresh">VIRGIN</span>':'';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;color:var(--gold);">${fmtPrice(s.pivot)}</td>
+        <td style="text-align:right;color:#ff8080;">${fmtPrice(s.tc)}</td>
+        <td style="text-align:right;color:#74c0fc;">${fmtPrice(s.bc)}</td>
+        <td class="${wCls}" style="text-align:right;font-weight:600;">${s.width_pct}%</td>
+        <td class="${posCls}">${s.position}</td>
+        <td>${virTag}</td>
+        <td style="font-size:10px;">${escapeHtml(s.day_type)}</td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${cprState.sigFilter?' · '+cprState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'cprRunBtn',listId:'cprSymbolList',filterBtnId:'cprFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'cprTableWrap',statusId:'cprStatus',searchId:'cprSearch',searchWrapperId:'cprSearchWrapper',ddId:'cprSuggestDD',
+    lookupEndpoint:'/api/cpr-scanner/symbol',state:cprState,renderFn:renderCprScanner,
+    runFn:()=>_runScanner('/api/cpr-scanner',cprState,renderCprScanner)});
+
+  // ── Stochastic ────────────────────────────────────────────────────
+  const stochState={data:null,source:'niftyfno',sigFilter:'',sortCol:'k',sortDir:1,intervalMins:5,autoRefresh:false,_statusId:'stochStatus',_tableId:'stochTableWrap'};
+  function renderStochScanner(){
+    const wrap=document.getElementById('stochTableWrap'),statEl=document.getElementById('stochStatus');
+    if(!wrap||!stochState.data) return;
+    const d=stochState.data; let stocks=d.stocks||[];
+    if(stochState.sigFilter) stocks=stocks.filter(s=>s.signal===stochState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=stochState.sortDir;
+      if(stochState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      return ((a.k||0)-(b.k||0))*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const header=[_mkTh('#','#',stochState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',stochState),_mkTh('k','%K',stochState),`<th class="scan-th">%D</th>`,
+      `<th class="scan-th">Signal</th>`].join('');
+    const sigBg={Oversold:'ts-sig-sb','Bull Cross':'ts-sig-b',Bullish:'ts-sig-n',Overbought:'ts-sig-ss','Bear Cross':'ts-sig-s',Bearish:'ts-sig-n'};
+    const rows=stocks.map((s,i)=>{
+      const kCol=s.k<=20?'#74c0fc':s.k>=80?'#ff3c3c':'var(--text)';
+      const bw=Math.round(s.k*0.5);
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;font-weight:700;color:${kCol};">${s.k}</td>
+        <td style="text-align:right;">${s.d}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${stochState.sigFilter?' · '+stochState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'stochRunBtn',listId:'stochSymbolList',filterBtnId:'stochFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'stochTableWrap',statusId:'stochStatus',searchId:'stochSearch',searchWrapperId:'stochSearchWrapper',ddId:'stochSuggestDD',
+    lookupEndpoint:'/api/stoch-scanner/symbol',state:stochState,renderFn:renderStochScanner,
+    runFn:()=>_runScanner('/api/stoch-scanner',stochState,renderStochScanner)});
+
+  // ── Williams %R ──────────────────────────────────────────────────
+  const williamsrState={data:null,source:'niftyfno',sigFilter:'',sortCol:'wr',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'williamsrStatus',_tableId:'williamsrTableWrap'};
+  function renderWilliamsrScanner(){
+    const wrap=document.getElementById('williamsrTableWrap'),statEl=document.getElementById('williamsrStatus');
+    if(!wrap||!williamsrState.data) return;
+    const d=williamsrState.data; let stocks=d.stocks||[];
+    if(williamsrState.sigFilter) stocks=stocks.filter(s=>s.signal===williamsrState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=williamsrState.sortDir;
+      if(williamsrState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      return ((a.wr||0)-(b.wr||0))*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const sigBg={Oversold:'ts-sig-sb','Turning Up':'ts-sig-b',Bullish:'ts-sig-n',Overbought:'ts-sig-ss','Turning Down':'ts-sig-s',Bearish:'ts-sig-n'};
+    const header=[_mkTh('#','#',williamsrState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',williamsrState),_mkTh('wr','%R',williamsrState,'Range -100 to 0'),`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const wrCol=s.wr>=-20?'#ff3c3c':s.wr<=-80?'#74c0fc':'var(--text)';
+      const barW=Math.round((s.wr+100)*0.6);
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;font-weight:700;color:${wrCol};">${s.wr}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${williamsrState.sigFilter?' · '+williamsrState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'williamsrRunBtn',listId:'williamsrSymbolList',filterBtnId:'williamsrFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'williamsrTableWrap',statusId:'williamsrStatus',searchId:'williamsrSearch',searchWrapperId:'williamsrSearchWrapper',ddId:'williamsrSuggestDD',
+    lookupEndpoint:'/api/williamsr-scanner/symbol',state:williamsrState,renderFn:renderWilliamsrScanner,
+    runFn:()=>_runScanner('/api/williamsr-scanner',williamsrState,renderWilliamsrScanner)});
+
+  // ── CCI ───────────────────────────────────────────────────────────
+  const cciState={data:null,source:'niftyfno',sigFilter:'',sortCol:'cci',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'cciStatus',_tableId:'cciTableWrap'};
+  function renderCciScanner(){
+    const wrap=document.getElementById('cciTableWrap'),statEl=document.getElementById('cciStatus');
+    if(!wrap||!cciState.data) return;
+    const d=cciState.data; let stocks=d.stocks||[];
+    if(cciState.sigFilter) stocks=stocks.filter(s=>s.signal===cciState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=cciState.sortDir;
+      if(cciState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      return ((a.cci||0)-(b.cci||0))*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const sigBg={'Extreme Overbought':'ts-sig-ss',Overbought:'ts-sig-s','Zero Cross Up':'ts-sig-b',Bullish:'ts-sig-n','Extreme Oversold':'ts-sig-sb',Oversold:'ts-sig-b','Zero Cross Down':'ts-sig-s',Bearish:'ts-sig-n'};
+    const header=[_mkTh('#','#',cciState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',cciState),_mkTh('cci','CCI',cciState),`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const cciCol=s.cci>=200?'#ff3c3c':s.cci>=100?'#ff8080':s.cci<=-200?'#339af0':s.cci<=-100?'#74c0fc':'var(--text)';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;font-weight:700;color:${cciCol};">${s.cci}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${cciState.sigFilter?' · '+cciState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'cciRunBtn',listId:'cciSymbolList',filterBtnId:'cciFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'cciTableWrap',statusId:'cciStatus',searchId:'cciSearch',searchWrapperId:'cciSearchWrapper',ddId:'cciSuggestDD',
+    lookupEndpoint:'/api/cci-scanner/symbol',state:cciState,renderFn:renderCciScanner,
+    runFn:()=>_runScanner('/api/cci-scanner',cciState,renderCciScanner)});
+
+  // ── Ichimoku ─────────────────────────────────────────────────────
+  const ichimokuState={data:null,source:'niftyfno',sigFilter:'',sortCol:'signal',sortDir:1,intervalMins:5,autoRefresh:false,_statusId:'ichimokuStatus',_tableId:'ichimokuTableWrap'};
+  function renderIchimokuScanner(){
+    const wrap=document.getElementById('ichimokuTableWrap'),statEl=document.getElementById('ichimokuStatus');
+    if(!wrap||!ichimokuState.data) return;
+    const d=ichimokuState.data; let stocks=d.stocks||[];
+    if(ichimokuState.sigFilter) stocks=stocks.filter(s=>s.signal===ichimokuState.sigFilter);
+    const sigOrd={'Strong Bullish':0,'Bullish':1,'Weak Bullish':2,'In Cloud':3,'Weak Bearish':4,'Bearish':5,'Strong Bearish':6};
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=ichimokuState.sortDir;
+      if(ichimokuState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      return ((sigOrd[a.signal]??3)-(sigOrd[b.signal]??3))*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const sigBg={'Strong Bullish':'ts-sig-sb','Bullish':'ts-sig-b','Weak Bullish':'ts-sig-n','In Cloud':'ts-sig-n','Weak Bearish':'ts-sig-n','Bearish':'ts-sig-s','Strong Bearish':'ts-sig-ss'};
+    const header=[_mkTh('#','#',ichimokuState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',ichimokuState),`<th class="scan-th">Tenkan</th>`,`<th class="scan-th">Kijun</th>`,
+      `<th class="scan-th">Cloud Top</th>`,`<th class="scan-th">Cloud Bot</th>`,_mkTh('signal','Signal',ichimokuState)].join('');
+    const rows=stocks.map((s,i)=>
+      `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;color:#74c0fc;">${fmtPrice(s.tenkan)}</td>
+        <td style="text-align:right;color:#ff9f43;">${fmtPrice(s.kijun)}</td>
+        <td style="text-align:right;color:#51cf66;">${fmtPrice(s.cloud_top)}</td>
+        <td style="text-align:right;color:#ff6b6b;">${fmtPrice(s.cloud_bot)}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`
+    ).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${ichimokuState.sigFilter?' · '+ichimokuState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'ichimokuRunBtn',listId:'ichimokuSymbolList',filterBtnId:'ichimokuFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'ichimokuTableWrap',statusId:'ichimokuStatus',searchId:'ichimokuSearch',searchWrapperId:'ichimokuSearchWrapper',ddId:'ichimokuSuggestDD',
+    lookupEndpoint:'/api/ichimoku-scanner/symbol',state:ichimokuState,renderFn:renderIchimokuScanner,
+    runFn:()=>_runScanner('/api/ichimoku-scanner',ichimokuState,renderIchimokuScanner)});
+
+  // ── Darvas ────────────────────────────────────────────────────────
+  const darvasState={data:null,source:'niftyfno',sigFilter:'',sortCol:'signal',sortDir:1,intervalMins:5,autoRefresh:false,_statusId:'darvasStatus',_tableId:'darvasTableWrap'};
+  function renderDarvasScanner(){
+    const wrap=document.getElementById('darvasTableWrap'),statEl=document.getElementById('darvasStatus');
+    if(!wrap||!darvasState.data) return;
+    const d=darvasState.data; let stocks=d.stocks||[];
+    if(darvasState.sigFilter) stocks=stocks.filter(s=>s.signal===darvasState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=darvasState.sortDir;
+      if(darvasState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      const ord={Breakout:0,'In Box':1,'Box Broken':2};
+      return ((ord[a.signal]??1)-(ord[b.signal]??1))*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const sigBg={Breakout:'ts-sig-sb','In Box':'ts-sig-n','Box Broken':'ts-sig-s'};
+    const header=[_mkTh('#','#',darvasState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',darvasState),`<th class="scan-th">Box Top</th>`,`<th class="scan-th">Box Bot</th>`,
+      `<th class="scan-th">Width%</th>`,_mkTh('signal','Signal',darvasState)].join('');
+    const rows=stocks.map((s,i)=>{
+      const pCls=s.signal==='Breakout'?'bko-up':s.signal==='Box Broken'?'bko-dn':'';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price ${pCls}" style="font-weight:700;">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;color:#ff8080;">${fmtPrice(s.box_top)}</td>
+        <td style="text-align:right;color:#74c0fc;">${fmtPrice(s.box_bot)}</td>
+        <td style="text-align:right;">${s.box_width_pct}%</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${darvasState.sigFilter?' · '+darvasState.sigFilter:''}`;
+  }
+  _scannerWire({runId:'darvasRunBtn',listId:'darvasSymbolList',filterBtnId:'darvasFilterBtns',filterAttr:'sig',filterProp:'sigFilter',
+    tableId:'darvasTableWrap',statusId:'darvasStatus',searchId:'darvasSearch',searchWrapperId:'darvasSearchWrapper',ddId:'darvasSuggestDD',
+    lookupEndpoint:'/api/darvas-scanner/symbol',state:darvasState,renderFn:renderDarvasScanner,
+    runFn:()=>_runScanner('/api/darvas-scanner',darvasState,renderDarvasScanner)});
+
+  // ── Confluence ───────────────────────────────────────────────────
+  const confluenceState={data:null,source:'niftyfno',sigFilter:'',sortCol:'score',sortDir:-1,intervalMins:5,autoRefresh:false,_statusId:'confluenceStatus',_tableId:'confluenceTableWrap'};
+  function renderConfluenceScanner(){
+    const wrap=document.getElementById('confluenceTableWrap'),statEl=document.getElementById('confluenceStatus');
+    if(!wrap||!confluenceState.data) return;
+    const d=confluenceState.data; let stocks=d.stocks||[];
+    if(confluenceState.sigFilter) stocks=stocks.filter(s=>s.signal===confluenceState.sigFilter);
+    stocks=[...stocks].sort((a,b)=>{
+      const dir=confluenceState.sortDir;
+      if(confluenceState.sortCol==='symbol') return a.symbol.localeCompare(b.symbol)*dir;
+      return ((a.score||0)-(b.score||0))*dir;
+    });
+    if(_scanEmpty(wrap,statEl,d,stocks.length)) return;
+    const sigBg={'Strong Bull':'ts-sig-sb','Bull':'ts-sig-b','Neutral':'ts-sig-n','Bear':'ts-sig-s','Strong Bear':'ts-sig-ss'};
+    const header=[_mkTh('#','#',confluenceState),`<th class="th-sym" data-sort="symbol" style="text-align:left">Symbol</th>`,
+      _mkTh('price','Price',confluenceState),_mkTh('score','Score',confluenceState,'Net bull-bear'),
+      `<th class="scan-th">🟢</th>`,`<th class="scan-th">🔴</th>`,`<th class="scan-th">Total</th>`,
+      `<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const scoreCls=s.score>0?'ts-bull':s.score<0?'ts-bear':'ts-neut';
+      const scoreSign=s.score>0?'+':'';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="${scoreCls}" style="text-align:right;font-weight:800;">${scoreSign}${s.score}</td>
+        <td class="ts-bull" style="text-align:right;">${s.bull}</td>
+        <td class="ts-bear" style="text-align:right;">${s.bear}</td>
+        <td style="text-align:right;">${s.total}</td>
+        <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    const note = d.note ? `<div style="font-size:10px;color:var(--muted-2);padding:8px;">${escapeHtml(d.note)}</div>` : '';
+    wrap.innerHTML=note+`<table class="scan-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+    if(statEl) statEl.textContent=`${stocks.length}/${d.count} · ${d.source} · ${d.as_of}${confluenceState.sigFilter?' · '+confluenceState.sigFilter:''}`;
+  }
+  document.getElementById('confluenceRunBtn')?.addEventListener('click',()=>_runScanner('/api/confluence-scanner',confluenceState,renderConfluenceScanner));
+  document.getElementById('confluenceSymbolList')?.addEventListener('change',e=>{confluenceState.source=e.target.value;_runScanner('/api/confluence-scanner',confluenceState,renderConfluenceScanner);});
+  document.getElementById('confluenceFilterBtns')?.addEventListener('click',e=>{
+    const btn=e.target.closest('.lvl-filter-btn');if(!btn) return;
+    document.querySelectorAll('#confluenceFilterBtns .lvl-filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');confluenceState.sigFilter=btn.dataset.sig;renderConfluenceScanner();
+  });
+  _buildScanSearch({inputId:'confluenceSearch',wrapperId:'confluenceSearchWrapper',ddId:'confluenceSuggestDD',
+    statusId:'confluenceStatus',tableId:'confluenceTableWrap',listSelId:'confluenceSymbolList',
+    lookupPath:'/api/confluence-scanner/symbol',stateRef:confluenceState,renderFn:renderConfluenceScanner});
+
+  // ====================================================================
+  // TIER 1/2/3 SCANNERS — state + render + wire (17 scanners)
+  // All use _scannerWire with filterAttr:'fv' (data-fv buttons)
+  // ====================================================================
+
+  // ── Generic helpers for compact renderers ───────────────────────────
+  function _sigBg(sig) {
+    const bull=new Set(['NR7','NR4','Bullish','Strong Uptrend','Above MA','Extended Above',
+      'Top Decile','Top Quartile','Buy Impulse','SAR Bullish','SAR Bullish — Fresh Flip',
+      '20D Breakout','55D Breakout','Uptrend','Strong Uptrend','Squeeze — Bullish Build',
+      'Stage 2 — Advancing','Stage 2 — Early (Below MA)','High Beta','Very High Beta',
+      'Bull','Strong Bull','Oversold','Very Low Vol','Compressed','Low Vol','Green']);
+    const bear=new Set(['Overbought','Bearish','Strong Downtrend','Below MA','Extended Below',
+      'Bottom Decile','Bottom Quartile','Sell Impulse','SAR Bearish','SAR Bearish — Fresh Flip',
+      '20D Breakdown','55D Breakdown','Downtrend','Strong Downtrend','Squeeze — Bearish Build',
+      'Stage 4 — Declining','Negative Beta','Bear','Strong Bear','Very High Vol','High Vol',
+      'Extreme Overbought','Extreme Oversold','Red']);
+    if(bull.has(sig)) return 'ts-sig-b';
+    if(bear.has(sig)) return 'ts-sig-s';
+    return 'ts-sig-n';
+  }
+  function _mkGenericState(id,sortCol='signal',sortDir=1) {
+    return {data:null,source:'niftyfno',fvFilter:'',sortCol,sortDir,intervalMins:5,autoRefresh:false,
+            _statusId:`${id}Status`,_tableId:`${id}TableWrap`};
+  }
+  function _wireGeneric(id,endpoint,state,renderFn) {
+    _scannerWire({runId:`${id}RunBtn`,listId:`${id}SymbolList`,
+      filterBtnId:`${id}FilterBtns`,filterAttr:'fv',filterProp:'fvFilter',
+      tableId:`${id}TableWrap`,statusId:`${id}Status`,
+      searchId:`${id}Search`,searchWrapperId:`${id}SearchWrapper`,ddId:`${id}SuggestDD`,
+      lookupEndpoint:`${endpoint}/symbol`,state,renderFn,
+      runFn:()=>_runScanner(endpoint,state,renderFn)});
+  }
+  function _genStatus(state,d,n) {
+    const el=document.getElementById(state._statusId);
+    if(el) el.textContent=`${n}/${d.count} · ${d.source} · ${d.as_of}${state.fvFilter?' · '+state.fvFilter:''}`;
+  }
+
+  // ── NR7 ─────────────────────────────────────────────────────────────
+  const nr7State=_mkGenericState('nr7','type',-1);
+  function renderNr7Scanner(){
+    const wrap=document.getElementById('nr7TableWrap'); if(!wrap||!nr7State.data) return;
+    const d=nr7State.data; let stocks=d.stocks||[];
+    if(nr7State.fvFilter) stocks=stocks.filter(s=>s.type===nr7State.fvFilter);
+    if(_scanEmpty(wrap,document.getElementById('nr7Status'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',nr7State),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',nr7State),
+      `<th class="scan-th">Range</th>`,`<th class="scan-th">Type</th>`,
+      `<th class="scan-th">Bias</th>`,`<th class="scan-th">Position%</th>`].join('');
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;">${s.range}</td>
+      <td><span class="ts-sig ${s.type==='NR7'?'ts-sig-sb':'ts-sig-b'}">${escapeHtml(s.type)}</span></td>
+      <td class="${s.bias==='Bullish'?'nr7-bull':s.bias==='Bearish'?'nr7-bear':''}">${s.bias}</td>
+      <td style="text-align:right;">${s.pct_pos}%</td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(nr7State,d,stocks.length);
+  }
+  _wireGeneric('nr7','/api/nr7-scanner',nr7State,renderNr7Scanner);
+
+  // ── Inside Bar ───────────────────────────────────────────────────────
+  const insidebarState=_mkGenericState('insidebar','type',-1);
+  function renderInsidebarScanner(){
+    const wrap=document.getElementById('insidebarTableWrap'); if(!wrap||!insidebarState.data) return;
+    const d=insidebarState.data; let stocks=d.stocks||[];
+    if(insidebarState.fvFilter) stocks=stocks.filter(s=>s.type===insidebarState.fvFilter);
+    if(_scanEmpty(wrap,document.getElementById('insidebarStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',insidebarState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',insidebarState),
+      `<th class="scan-th">Mother Hi</th>`,`<th class="scan-th">Mother Lo</th>`,
+      `<th class="scan-th">Type</th>`,`<th class="scan-th">Bias</th>`].join('');
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;color:#ff8080;">${fmtPrice(s.mother_high)}</td>
+      <td style="text-align:right;color:#74c0fc;">${fmtPrice(s.mother_low)}</td>
+      <td><span class="ts-sig ${s.nr7?'ts-sig-sb':s.double?'ts-sig-b':'ts-sig-n'}">${escapeHtml(s.type)}</span></td>
+      <td class="${s.bias==='Bullish'?'nr7-bull':s.bias==='Bearish'?'nr7-bear':''}">${s.bias}</td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(insidebarState,d,stocks.length);
+  }
+  _wireGeneric('insidebar','/api/insidebar-scanner',insidebarState,renderInsidebarScanner);
+
+  // ── ATR% ─────────────────────────────────────────────────────────────
+  const atrpctState=_mkGenericState('atrpct','atr20_pct',-1);
+  function renderAtrpctScanner(){
+    const wrap=document.getElementById('atrpctTableWrap'); if(!wrap||!atrpctState.data) return;
+    const d=atrpctState.data; let stocks=d.stocks||[];
+    if(atrpctState.fvFilter) stocks=stocks.filter(s=>s.vol_state===atrpctState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.atr20_pct||0)-(b.atr20_pct||0))*atrpctState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('atrpctStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',atrpctState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',atrpctState),
+      `<th class="scan-th">ATR5%</th>`,`<th class="scan-th">ATR10%</th>`,
+      _mkTh('atr20_pct','ATR20%',atrpctState),`<th class="scan-th">Expand</th>`,`<th class="scan-th">State</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const expTag=s.expanding?'<span class="rsi-fresh">EXP</span>':'';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;">${s.atr5_pct??'—'}%</td>
+        <td style="text-align:right;">${s.atr10_pct??'—'}%</td>
+        <td style="text-align:right;font-weight:700;">${s.atr20_pct}%</td>
+        <td>${expTag}</td>
+        <td><span class="ts-sig ${_sigBg(s.vol_state)}">${escapeHtml(s.vol_state)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(atrpctState,d,stocks.length);
+  }
+  _wireGeneric('atrpct','/api/atrpct-scanner',atrpctState,renderAtrpctScanner);
+
+  // ── Z-Score ──────────────────────────────────────────────────────────
+  const zscoreState=_mkGenericState('zscore','zscore',-1);
+  function renderZscoreScanner(){
+    const wrap=document.getElementById('zscoreTableWrap'); if(!wrap||!zscoreState.data) return;
+    const d=zscoreState.data; let stocks=d.stocks||[];
+    if(zscoreState.fvFilter) stocks=stocks.filter(s=>s.signal===zscoreState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.zscore||0)-(b.zscore||0))*zscoreState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('zscoreStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',zscoreState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',zscoreState),
+      _mkTh('zscore','Z-Score',zscoreState),`<th class="scan-th">SMA20</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const zCol=s.zscore>=2?'#ff3c3c':s.zscore>=1.5?'#ff9f43':s.zscore<=-2?'#339af0':s.zscore<=-1.5?'#74c0fc':'var(--text)';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;font-weight:800;color:${zCol};">${s.zscore}</td>
+        <td style="text-align:right;">${fmtPrice(s.sma20)}</td>
+        <td><span class="ts-sig ${_sigBg(s.signal)}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(zscoreState,d,stocks.length);
+  }
+  _wireGeneric('zscore','/api/zscore-scanner',zscoreState,renderZscoreScanner);
+
+  // ── Consecutive Days ─────────────────────────────────────────────────
+  const consecState=_mkGenericState('consec','count',-1);
+  function renderConsecScanner(){
+    const wrap=document.getElementById('consecTableWrap'); if(!wrap||!consecState.data) return;
+    const d=consecState.data; let stocks=d.stocks||[];
+    if(consecState.fvFilter) stocks=stocks.filter(s=>s.direction===consecState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.count||0)-(b.count||0))*consecState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('consecStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',consecState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',consecState),
+      _mkTh('count','Days',consecState,'Consecutive days in same direction'),
+      `<th class="scan-th">Direction</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const exhaust=s.exhaustion?'<span class="rsi-fresh">EXH</span>':'';
+      const dCls=s.direction==='bull'?'ts-bull':'ts-bear';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;font-weight:800;" class="${dCls}">${s.count}${exhaust}</td>
+        <td class="${dCls}">${s.direction==='bull'?'🟢 Bull':'🔴 Bear'}</td>
+        <td style="font-size:11px;">${escapeHtml(s.signal)}</td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(consecState,d,stocks.length);
+  }
+  _wireGeneric('consec','/api/consec-scanner',consecState,renderConsecScanner);
+
+  // ── MA Distance ──────────────────────────────────────────────────────
+  const madistState=_mkGenericState('madist','dist200',-1);
+  function renderMadistScanner(){
+    const wrap=document.getElementById('madistTableWrap'); if(!wrap||!madistState.data) return;
+    const d=madistState.data; let stocks=d.stocks||[];
+    if(madistState.fvFilter) stocks=stocks.filter(s=>s.signal===madistState.fvFilter);
+    const key=madistState.sortCol==='dist200'?'dist200':'price';
+    stocks=[...stocks].sort((a,b)=>(((a[key]||0)-(b[key]||0))*madistState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('madistStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',madistState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',madistState),
+      `<th class="scan-th">SMA20</th>`,`<th class="scan-th">D20%</th>`,
+      `<th class="scan-th">SMA50</th>`,`<th class="scan-th">D50%</th>`,
+      `<th class="scan-th">SMA200</th>`,_mkTh('dist200','D200%',madistState),
+      `<th class="scan-th">Signal</th>`].join('');
+    function _dc(v){return v==null?'—':v>=0?`<span class="ts-bull">+${v}%</span>`:`<span class="ts-bear">${v}%</span>`;}
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;">${s.sma20?fmtPrice(s.sma20):'—'}</td>
+      <td style="text-align:right;">${_dc(s.dist20)}</td>
+      <td style="text-align:right;">${s.sma50?fmtPrice(s.sma50):'—'}</td>
+      <td style="text-align:right;">${_dc(s.dist50)}</td>
+      <td style="text-align:right;">${s.sma200?fmtPrice(s.sma200):'—'}</td>
+      <td style="text-align:right;">${_dc(s.dist200)}</td>
+      <td><span class="ts-sig ${_sigBg(s.signal)}">${escapeHtml(s.signal)}</span></td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(madistState,d,stocks.length);
+  }
+  _wireGeneric('madist','/api/madist-scanner',madistState,renderMadistScanner);
+
+  // ── Round Number ─────────────────────────────────────────────────────
+  const roundnumState=_mkGenericState('roundnum','dist_pct',1);
+  function renderRoundnumScanner(){
+    const wrap=document.getElementById('roundnumTableWrap'); if(!wrap||!roundnumState.data) return;
+    const d=roundnumState.data; let stocks=d.stocks||[];
+    if(roundnumState.fvFilter) stocks=stocks.filter(s=>String(s.above).toLowerCase()===roundnumState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.dist_pct||0)-(b.dist_pct||0))*roundnumState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('roundnumStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',roundnumState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',roundnumState),
+      `<th class="scan-th">Level</th>`,_mkTh('dist_pct','Dist%',roundnumState),
+      `<th class="scan-th">Position</th>`].join('');
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;color:var(--gold);font-weight:700;">${fmtPrice(s.level)}</td>
+      <td style="text-align:right;">${s.dist_pct}%</td>
+      <td><span class="ts-sig ${s.above?'ts-sig-b':'ts-sig-s'}">${s.above?'Above':'Below'}</span></td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(roundnumState,d,stocks.length);
+  }
+  _wireGeneric('roundnum','/api/roundnum-scanner',roundnumState,renderRoundnumScanner);
+
+  // ── Parabolic SAR ────────────────────────────────────────────────────
+  const sarState=_mkGenericState('sar','direction',-1);
+  function renderSarScanner(){
+    const wrap=document.getElementById('sarTableWrap'); if(!wrap||!sarState.data) return;
+    const d=sarState.data; let stocks=d.stocks||[];
+    const fv=sarState.fvFilter;
+    if(fv==='1')          stocks=stocks.filter(s=>s.direction===1&&!s.fresh);
+    else if(fv==='-1')    stocks=stocks.filter(s=>s.direction===-1&&!s.fresh);
+    else if(fv==='fresh_bull') stocks=stocks.filter(s=>s.direction===1&&s.fresh);
+    else if(fv==='fresh_bear') stocks=stocks.filter(s=>s.direction===-1&&s.fresh);
+    if(_scanEmpty(wrap,document.getElementById('sarStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',sarState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',sarState),
+      `<th class="scan-th">SAR</th>`,`<th class="scan-th">Dist%</th>`,
+      `<th class="scan-th">Fresh</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const dist=s.price&&s.sar?round2((s.price-s.sar)/s.price*100):null;
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;color:${s.direction===1?'#51cf66':'#ff6b6b'};">${fmtPrice(s.sar)}</td>
+        <td style="text-align:right;">${dist!=null?dist+'%':'—'}</td>
+        <td>${s.fresh?'<span class="rsi-fresh">NEW</span>':''}</td>
+        <td><span class="ts-sig ${s.direction===1?'ts-sig-b':'ts-sig-s'}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(sarState,d,stocks.length);
+  }
+  function round2(v){return Math.round(v*100)/100;}
+  _wireGeneric('sar','/api/sar-scanner',sarState,renderSarScanner);
+
+  // ── Donchian ─────────────────────────────────────────────────────────
+  const donchianState=_mkGenericState('donchian','signal',1);
+  function renderDonchianScanner(){
+    const wrap=document.getElementById('donchianTableWrap'); if(!wrap||!donchianState.data) return;
+    const d=donchianState.data; let stocks=d.stocks||[];
+    if(donchianState.fvFilter) stocks=stocks.filter(s=>s.signal===donchianState.fvFilter);
+    if(_scanEmpty(wrap,document.getElementById('donchianStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',donchianState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',donchianState),
+      `<th class="scan-th">U20</th>`,`<th class="scan-th">L20</th>`,`<th class="scan-th">Mid</th>`,
+      `<th class="scan-th">U55</th>`,`<th class="scan-th">L55</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const sigBg={'20D Breakout':'ts-sig-sb','55D Breakout':'ts-sig-sb','Upper Half':'ts-sig-b',
+      'Lower Half':'ts-sig-s','20D Breakdown':'ts-sig-ss','55D Breakdown':'ts-sig-ss'};
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;color:#ff8080;">${fmtPrice(s.upper_20)}</td>
+      <td style="text-align:right;color:#74c0fc;">${fmtPrice(s.lower_20)}</td>
+      <td style="text-align:right;color:var(--gold);">${fmtPrice(s.mid_20)}</td>
+      <td style="text-align:right;">${s.upper_55?fmtPrice(s.upper_55):'—'}</td>
+      <td style="text-align:right;">${s.lower_55?fmtPrice(s.lower_55):'—'}</td>
+      <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(donchianState,d,stocks.length);
+  }
+  _wireGeneric('donchian','/api/donchian-scanner',donchianState,renderDonchianScanner);
+
+  // ── Aroon ────────────────────────────────────────────────────────────
+  const aroonState=_mkGenericState('aroon','oscillator',-1);
+  function renderAroonScanner(){
+    const wrap=document.getElementById('aroonTableWrap'); if(!wrap||!aroonState.data) return;
+    const d=aroonState.data; let stocks=d.stocks||[];
+    if(aroonState.fvFilter) stocks=stocks.filter(s=>s.signal===aroonState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.oscillator||0)-(b.oscillator||0))*aroonState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('aroonStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',aroonState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',aroonState),
+      `<th class="scan-th">Aroon↑</th>`,`<th class="scan-th">Aroon↓</th>`,
+      _mkTh('oscillator','Osc',aroonState),`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const oCls=s.oscillator>0?'ts-bull':'ts-bear';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="ts-bull" style="text-align:right;">${s.aroon_up}</td>
+        <td class="ts-bear" style="text-align:right;">${s.aroon_dn}</td>
+        <td class="${oCls}" style="text-align:right;font-weight:700;">${s.oscillator>0?'+':''}${s.oscillator}</td>
+        <td><span class="ts-sig ${_sigBg(s.signal)}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(aroonState,d,stocks.length);
+  }
+  _wireGeneric('aroon','/api/aroon-scanner',aroonState,renderAroonScanner);
+
+  // ── Historical Volatility ────────────────────────────────────────────
+  const hvState=_mkGenericState('hv','hv20',-1);
+  function renderHvScanner(){
+    const wrap=document.getElementById('hvTableWrap'); if(!wrap||!hvState.data) return;
+    const d=hvState.data; let stocks=d.stocks||[];
+    if(hvState.fvFilter) stocks=stocks.filter(s=>s.signal===hvState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.hv20||0)-(b.hv20||0))*hvState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('hvStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',hvState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',hvState),
+      `<th class="scan-th">HV5%</th>`,_mkTh('hv20','HV20%',hvState),
+      `<th class="scan-th">Trend</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const hvCol=s.hv20>=60?'#ff3c3c':s.hv20>=40?'#ff9f43':s.hv20<=10?'#339af0':'var(--text)';
+      const trend=s.contracting?'<span class="ts-bear">↓ Contracting</span>':'<span class="ts-bull">↑ Expanding</span>';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;">${s.hv5??'—'}%</td>
+        <td style="text-align:right;font-weight:700;color:${hvCol};">${s.hv20}%</td>
+        <td>${trend}</td>
+        <td><span class="ts-sig ${_sigBg(s.signal)}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(hvState,d,stocks.length);
+  }
+  _wireGeneric('hv','/api/hv-scanner',hvState,renderHvScanner);
+
+  // ── Stage Analysis ───────────────────────────────────────────────────
+  const stageState=_mkGenericState('stage','stage',1);
+  function renderStageScanner(){
+    const wrap=document.getElementById('stageTableWrap'); if(!wrap||!stageState.data) return;
+    const d=stageState.data; let stocks=d.stocks||[];
+    if(stageState.fvFilter) stocks=stocks.filter(s=>String(s.stage)===stageState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.stage||0)-(b.stage||0))*stageState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('stageStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',stageState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',stageState),
+      `<th class="scan-th">SMA150</th>`,`<th class="scan-th">Slope%</th>`,
+      `<th class="scan-th">Dist%</th>`,_mkTh('stage','Stage',stageState)].join('');
+    const sCls={1:'stage-1',2:'stage-2',3:'stage-3',4:'stage-4'};
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;">${fmtPrice(s.sma150)}</td>
+      <td style="text-align:right;" class="${s.slope_pct>0?'ts-bull':'ts-bear'}">${s.slope_pct>0?'+':''}${s.slope_pct}%</td>
+      <td style="text-align:right;" class="${s.dist_pct>0?'ts-bull':'ts-bear'}">${s.dist_pct>0?'+':''}${s.dist_pct}%</td>
+      <td><span class="${sCls[s.stage]||''}">${escapeHtml(s.signal)}</span></td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(stageState,d,stocks.length);
+  }
+  _wireGeneric('stage','/api/stage-scanner',stageState,renderStageScanner);
+
+  // ── Beta ─────────────────────────────────────────────────────────────
+  const betaState=_mkGenericState('beta','beta',-1);
+  function renderBetaScanner(){
+    const wrap=document.getElementById('betaTableWrap'); if(!wrap||!betaState.data) return;
+    const d=betaState.data; let stocks=d.stocks||[];
+    if(betaState.fvFilter) stocks=stocks.filter(s=>s.signal===betaState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.beta||0)-(b.beta||0))*betaState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('betaStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',betaState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',betaState),
+      _mkTh('beta','Beta',betaState,'Beta vs Nifty, 60D'),
+      `<th class="scan-th">Bar</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const bCol=s.beta>=2?'#ff3c3c':s.beta>=1.5?'#ff9f43':s.beta<0?'#cc5de8':'var(--text)';
+      const bw=Math.round(Math.min(Math.abs(s.beta)*30,90));
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td style="text-align:right;font-weight:700;color:${bCol};">${s.beta}</td>
+        <td><span class="corr-bar-bg"><span class="corr-bar" style="width:${bw}px;background:${bCol};"></span></span></td>
+        <td><span class="ts-sig ${_sigBg(s.signal)}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(betaState,d,stocks.length);
+  }
+  _wireGeneric('beta','/api/beta-scanner',betaState,renderBetaScanner);
+
+  // ── BB+KC Squeeze ────────────────────────────────────────────────────
+  const squeezeState=_mkGenericState('squeeze','signal',1);
+  function renderSqueezeScanner(){
+    const wrap=document.getElementById('squeezeTableWrap'); if(!wrap||!squeezeState.data) return;
+    const d=squeezeState.data; let stocks=d.stocks||[];
+    if(squeezeState.fvFilter) stocks=stocks.filter(s=>s.signal===squeezeState.fvFilter);
+    if(_scanEmpty(wrap,document.getElementById('squeezeStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',squeezeState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',squeezeState),
+      `<th class="scan-th">BB Width%</th>`,`<th class="scan-th">KC Width%</th>`,
+      `<th class="scan-th">Squeeze</th>`,`<th class="scan-th">Momentum</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const sigBg={'Squeeze — Bullish Build':'ts-sig-sb','Squeeze — Bearish Build':'ts-sig-ss',
+      'Squeeze':'ts-sig-n','Squeeze Released':'ts-sig-b','No Squeeze':'ts-sig-n'};
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;">${s.bb_width}%</td>
+      <td style="text-align:right;">${s.kc_width}%</td>
+      <td>${s.squeeze?'<span class="sq-fire">🗜️ ON</span>':'<span style="color:var(--muted-2);">off</span>'}</td>
+      <td class="${(s.momentum_val||0)>0?'ts-bull':'ts-bear'}" style="text-align:right;">${s.momentum_val>0?'+':''}${s.momentum_val}</td>
+      <td><span class="ts-sig ${sigBg[s.signal]||'ts-sig-n'}">${escapeHtml(s.signal)}</span></td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(squeezeState,d,stocks.length);
+  }
+  _wireGeneric('squeeze','/api/squeeze-scanner',squeezeState,renderSqueezeScanner);
+
+  // ── Elder Impulse ────────────────────────────────────────────────────
+  const elderState=_mkGenericState('elder','impulse',1);
+  function renderElderScanner(){
+    const wrap=document.getElementById('elderTableWrap'); if(!wrap||!elderState.data) return;
+    const d=elderState.data; let stocks=d.stocks||[];
+    if(elderState.fvFilter) stocks=stocks.filter(s=>s.signal===elderState.fvFilter);
+    if(_scanEmpty(wrap,document.getElementById('elderStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',elderState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',elderState),
+      `<th class="scan-th">EMA13</th>`,`<th class="scan-th">EMA↑</th>`,
+      `<th class="scan-th">Hist</th>`,`<th class="scan-th">Hist↑</th>`,`<th class="scan-th">Impulse</th>`].join('');
+    const iCls={Green:'elder-g',Red:'elder-r',Blue:'elder-b'};
+    const rows=stocks.map((s,i)=>`<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+      <td class="td-price">${fmtPrice(s.price)}</td>
+      <td style="text-align:right;">${fmtPrice(s.ema13)}</td>
+      <td>${s.ema_rising?'<span class="ts-bull">↑</span>':'<span class="ts-bear">↓</span>'}</td>
+      <td class="${s.hist>0?'ts-bull':'ts-bear'}" style="text-align:right;">${s.hist}</td>
+      <td>${s.hist_rising?'<span class="ts-bull">↑</span>':'<span class="ts-bear">↓</span>'}</td>
+      <td><span class="${iCls[s.impulse]||''}">${escapeHtml(s.signal)}</span></td></tr>`).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(elderState,d,stocks.length);
+  }
+  _wireGeneric('elder','/api/elder-scanner',elderState,renderElderScanner);
+
+  // ── Swing Quality ────────────────────────────────────────────────────
+  const swingState=_mkGenericState('swing','score',-1);
+  function renderSwingScanner(){
+    const wrap=document.getElementById('swingTableWrap'); if(!wrap||!swingState.data) return;
+    const d=swingState.data; let stocks=d.stocks||[];
+    if(swingState.fvFilter) stocks=stocks.filter(s=>s.signal===swingState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.score||0)-(b.score||0))*swingState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('swingStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',swingState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',swingState),
+      _mkTh('score','Score',swingState,'HH/HL count − LH/LL count'),
+      `<th class="scan-th">HH</th>`,`<th class="scan-th">HL</th>`,
+      `<th class="scan-th">LH</th>`,`<th class="scan-th">LL</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const sCls=s.score>0?'ts-bull':s.score<0?'ts-bear':'ts-neut';
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="${sCls}" style="text-align:right;font-weight:800;">${s.score>0?'+':''}${s.score}</td>
+        <td class="ts-bull" style="text-align:right;">${s.hh}</td>
+        <td class="ts-bull" style="text-align:right;">${s.hl}</td>
+        <td class="ts-bear" style="text-align:right;">${s.lh}</td>
+        <td class="ts-bear" style="text-align:right;">${s.ll}</td>
+        <td><span class="ts-sig ${_sigBg(s.signal)}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(swingState,d,stocks.length);
+  }
+  _wireGeneric('swing','/api/swing-scanner',swingState,renderSwingScanner);
+
+  // ── Momentum Rank ────────────────────────────────────────────────────
+  const momrankState=_mkGenericState('momrank','pct_rank',-1);
+  function renderMomrankScanner(){
+    const wrap=document.getElementById('momrankTableWrap'); if(!wrap||!momrankState.data) return;
+    const d=momrankState.data; let stocks=d.stocks||[];
+    if(momrankState.fvFilter) stocks=stocks.filter(s=>s.signal===momrankState.fvFilter);
+    stocks=[...stocks].sort((a,b)=>(((a.pct_rank||0)-(b.pct_rank||0))*momrankState.sortDir));
+    if(_scanEmpty(wrap,document.getElementById('momrankStatus'),d,stocks.length)) return;
+    const hdr=[_mkTh('#','#',momrankState),`<th class="th-sym">Symbol</th>`,_mkTh('price','Price',momrankState),
+      `<th class="scan-th">20D Ret%</th>`,_mkTh('pct_rank','Rank%',momrankState),
+      `<th class="scan-th">Bar</th>`,`<th class="scan-th">Signal</th>`].join('');
+    const rows=stocks.map((s,i)=>{
+      const rankCol=s.pct_rank>=90?'#ffd43b':s.pct_rank>=75?'#51cf66':s.pct_rank<=10?'#ff3c3c':s.pct_rank<=25?'#ff6b6b':'var(--muted)';
+      const barW=Math.round(s.pct_rank*0.6);
+      return `<tr><td class="td-rank">${i+1}</td>${_symCell(s.symbol)}
+        <td class="td-price">${fmtPrice(s.price)}</td>
+        <td class="${s.ret20>=0?'ts-bull':'ts-bear'}" style="text-align:right;">${s.ret20>=0?'+':''}${s.ret20}%</td>
+        <td style="text-align:right;font-weight:700;color:${rankCol};">${s.pct_rank}</td>
+        <td><span class="corr-bar-bg"><span class="corr-bar" style="width:${barW}px;background:${rankCol};"></span></span></td>
+        <td><span class="ts-sig ${_sigBg(s.signal)}">${escapeHtml(s.signal)}</span></td></tr>`;
+    }).join('');
+    wrap.innerHTML=`<table class="scan-table"><thead><tr>${hdr}</tr></thead><tbody>${rows}</tbody></table>`;
+    _genStatus(momrankState,d,stocks.length);
+  }
+  _wireGeneric('momrank','/api/momrank-scanner',momrankState,renderMomrankScanner);
 
   const lookupInput    = document.getElementById('stockLookupInput');
   const lookupDropdown = document.getElementById('lookupDropdown');
