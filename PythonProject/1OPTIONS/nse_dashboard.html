@@ -170,6 +170,7 @@
   .table-wrap {
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
     overflow-y: auto; overflow-x: auto; max-height: 70vh;
+    position: relative;
     scrollbar-width: thin; scrollbar-color: var(--border) var(--panel);
   }
   .table-wrap::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -3418,9 +3419,23 @@
 
       // Only scroll ATM into view on first load or explicit user trigger — NEVER on auto-refresh
       if (state.shouldScrollToAtm) {
-        const atmRow = els.chainBody.querySelector('tr.atm-row');
-        if (atmRow) atmRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
         state.shouldScrollToAtm = false;
+        // Use setTimeout(200) — not rAF — so sticky-header layout and all deferred
+        // style recalculations are fully resolved before we measure positions.
+        setTimeout(() => {
+          const wrap   = els.chainBody.closest('.table-wrap');
+          const atmRow = els.chainBody.querySelector('tr.atm-row');
+          if (!wrap || !atmRow) return;
+          const wh = wrap.clientHeight;
+          if (wh === 0) return;
+          // getBoundingClientRect measured 200ms after innerHTML set — layout is done.
+          const wTop = wrap.getBoundingClientRect().top;
+          const rTop = atmRow.getBoundingClientRect().top;
+          const rowH = atmRow.getBoundingClientRect().height || 30;
+          // Current position of row relative to wrap's visible top, adjusted for current scroll
+          const rowPosInContent = rTop - wTop + wrap.scrollTop;
+          wrap.scrollTop = Math.max(0, rowPosInContent - wh / 2 + rowH / 2);
+        }, 200);
       }
       return;
     }

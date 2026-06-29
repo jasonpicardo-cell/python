@@ -446,11 +446,14 @@ def _ohlc_from_history(symbol: str) -> dict | None:
             continue
         if len(spots) < 5:
             continue   # too few observations — probably a partial/corrupt file
+        lo, hi = min(spots), max(spots)
+        if hi == lo:
+            continue   # H=L=C: server was running on a holiday — no price movement
         return {
             "symbol": symbol,
             "open": round(spots[0], 2),
-            "high": round(max(spots), 2),
-            "low":  round(min(spots), 2),
+            "high": round(hi, 2),
+            "low":  round(lo, 2),
             "close": round(spots[-1], 2),
             "source": "history_daily",
             "date": target.isoformat(),
@@ -514,22 +517,29 @@ def _fetch_prev_day_ohlc(symbol: str) -> dict:
                 "source": src}
 
     # ── 1. historical/indicesHistory ────────────────────────────────────
-    # NSE prefixes fields with EOD_ (e.g. EOD_HIGH_INDEX_VAL).
-    # We query the last 5 calendar days to skip weekends / holidays.
+    # Query date_to = yesterday so we NEVER include today's partial intraday data.
+    # Use a 10-day window so extended holiday periods are always covered.
     if symbol in index_map:
         _, idx_name = index_map[symbol]
         idx_enc = idx_name.replace(" ", "%20")
         today     = date.today()
-        date_to   = (today - timedelta(days=1)).strftime("%d-%m-%Y")
-        date_from = (today - timedelta(days=5)).strftime("%d-%m-%Y")
+        date_to   = (today - timedelta(days=1)).strftime("%d-%m-%Y")   # yesterday
+        date_from = (today - timedelta(days=10)).strftime("%d-%m-%Y")  # 10-day window
         try:
             url = (f"https://www.nseindia.com/api/historical/indicesHistory"
                    f"?indexType={idx_enc}&from={date_from}&to={date_to}")
             r = fetcher.session.get(url, headers=h, timeout=12)
             if r.status_code == 200:
-                rows = (r.json().get("data") or {}).get("indexCloseOnlineRecords", [])
+                all_rows = (r.json().get("data") or {}).get("indexCloseOnlineRecords", [])
+                # Keep only rows where H > L (genuine trading day, not a holiday row)
+                trading_rows = [
+                    row for row in all_rows
+                    if _v(row, "EOD_HIGH_INDEX_VAL", "HIGH_INDEX_VAL", "HIGH_INDEX_VALUE") >
+                       _v(row, "EOD_LOW_INDEX_VAL",  "LOW_INDEX_VAL",  "LOW_INDEX_VALUE")
+                ]
+                rows = trading_rows if trading_rows else all_rows
                 if rows:
-                    row = rows[-1]
+                    row = rows[-1]   # last actual completed trading day
                     O = _v(row, "EOD_OPEN_INDEX_VAL",  "OPEN_INDEX_VAL",  "OPEN_INDEX_VALUE")
                     H = _v(row, "EOD_HIGH_INDEX_VAL",  "HIGH_INDEX_VAL",  "HIGH_INDEX_VALUE")
                     L = _v(row, "EOD_LOW_INDEX_VAL",   "LOW_INDEX_VAL",   "LOW_INDEX_VALUE")
@@ -550,8 +560,26 @@ def _fetch_prev_day_ohlc(symbol: str) -> dict:
                 payload = r.json() if isinstance(r.json(), dict) else {}
                 for key in ("grapthData", "graphData"):
                     candles = payload.get(key, [])
-                    if candles and isinstance(candles[-1], (list, tuple)) and len(candles[-1]) >= 5:
-                        prev = candles[-2] if len(candles) >= 2 else candles[-1]
+                    if not candles:
+                        continue
+                    # Determine whether candles[-1] is today's incomplete intraday candle.
+                    # NSE chart candles: [timestamp_ms, O, H, L, C]
+                    # If the last candle's date == today → it's a partial session → use [-2].
+                    # If the last candle's date < today → markets closed → it IS the prev day.
+                    last_ts_ms = candles[-1][0] if isinstance(candles[-1], (list, tuple)) else 0
+                    import datetime as _dt
+                    last_date = _dt.datetime.fromtimestamp(last_ts_ms / 1000).date() if last_ts_ms else None
+                    use_second_last = (last_date == date.today()) and len(candles) >= 2
+                    candidates = [candles[-2]] if use_second_last else []
+                    # Also try walking back to find last candle with H > L
+                    for candle in reversed(candles[:-1] if use_second_last else candles):
+                        if isinstance(candle, (list, tuple)) and len(candle) >= 5:
+                            cH, cL = float(candle[2]), float(candle[3])
+                            if cH > cL:
+                                candidates.insert(0, candle)
+                                break
+                    prev = candidates[0] if candidates else (candles[-2] if len(candles) >= 2 else candles[-1])
+                    if isinstance(prev, (list, tuple)) and len(prev) >= 5:
                         O, H, L, C = float(prev[1]), float(prev[2]), float(prev[3]), float(prev[4])
                         if H > 0 and L > 0 and C > 0:
                             return _ohlc(O, H, L, C, "daily_chart")
@@ -967,6 +995,47 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"trades": trades, "stats": stats})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Could not load paper trades: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/ohlc-debug":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            results = []
+            try:
+                import importlib, nse_chain_server as _self
+                # Try each source in order and record what each returns
+                from datetime import date, timedelta
+                from nse_history_store import HISTORY_DIR
+                import json as _json
+
+                # History files check
+                for delta in range(1, 6):
+                    target = date.today() - timedelta(days=delta)
+                    path = HISTORY_DIR / f"{symbol}_{target.isoformat()}.jsonl"
+                    if path.exists():
+                        spots = []
+                        with open(path) as f:
+                            for line in f:
+                                try:
+                                    r = _json.loads(line.strip())
+                                    s = r.get("spot") or r.get("close")
+                                    if s and float(s) > 0:
+                                        spots.append(float(s))
+                                except Exception:
+                                    pass
+                        hi, lo = (max(spots), min(spots)) if spots else (0, 0)
+                        results.append({
+                            "source": f"history_daily:{target}",
+                            "spots": len(spots),
+                            "high": hi, "low": lo,
+                            "hi_eq_lo": hi == lo,
+                            "would_skip": hi == lo or len(spots) < 5
+                        })
+
+                # Final result
+                ohlc = _fetch_prev_day_ohlc(symbol)
+                self._send_json({"symbol": symbol, "history_check": results, "final": ohlc})
+            except Exception as e:
+                self._send_json({"error": str(e)})
             return
 
         if parsed.path == "/api/ohlc":

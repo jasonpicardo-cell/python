@@ -267,11 +267,19 @@ def _read_rows(path: Path, n: int = 30) -> tuple[list[dict], str | None]:
     return [], f"Could not read {path.name}: {locals().get('last_exc', 'unknown error')}"
 
 
+def _last_trading_row(rows: list[dict]) -> dict | None:
+    """Return most recent row that was an actual trading day (H > L).
+    NSE CSVs sometimes include holiday/non-trading rows where H = L = C = prev_close
+    (zero range). Skip those when computing pivot/CPR levels."""
+    for row in reversed(rows):
+        if row.get("H", 0) > row.get("L", 0):
+            return row
+    return rows[-1] if rows else None   # fallback if all rows have zero range
+
+
 def get_daily_ohlc(symbol: str) -> tuple[dict | None, str | None]:
-    """
-    Return (ohlc_dict, error_string).
-    ohlc_dict is the last completed row (date < today).
-    """
+    """Return (ohlc_dict, error_string).
+    ohlc_dict is the last actual trading session before today (holiday rows skipped)."""
     p = _find_csv(symbol)
     if not p:
         return None, f"CSV not found in {DATA_DIR}"
@@ -282,7 +290,7 @@ def get_daily_ohlc(symbol: str) -> tuple[dict | None, str | None]:
     if not rows:
         return None, f"No rows in {p.name}"
 
-    today = date.today().isoformat()   # "2026-06-26"
+    today = date.today().isoformat()
     past  = [r for r in rows if r["date"] < today]
 
     if not past:
@@ -292,7 +300,7 @@ def get_daily_ohlc(symbol: str) -> tuple[dict | None, str | None]:
             "Check that nse_data_cache contains historical (not future) data."
         )
 
-    return past[-1], None
+    return _last_trading_row(past), None
 
 
 def get_weekly_ohlc(symbol: str) -> tuple[dict | None, str | None]:
@@ -311,23 +319,30 @@ def get_weekly_ohlc(symbol: str) -> tuple[dict | None, str | None]:
     if not rows:
         return None, f"No historical rows before {today}"
 
+    # Find the most recent completed Mon–Fri window that has actual trading data.
+    # Walk back up to 8 weeks so extended holiday periods (Diwali etc.) never
+    # cause an empty-week failure.
     last_fri = date.today() - timedelta(days=1)
-    while last_fri.weekday() != 4:
+    while last_fri.weekday() != 4:          # rewind to nearest Friday
         last_fri -= timedelta(days=1)
-    last_mon = last_fri - timedelta(days=4)
 
-    week = [r for r in rows
-            if last_mon.isoformat() <= r["date"] <= last_fri.isoformat()]
-    if not week:
-        return None, (
-            f"No rows for prev week {last_mon} to {last_fri}. "
-            f"CSV range: {rows[0]['date']} to {rows[-1]['date']}."
-        )
-    return {
-        "date": f"{last_mon} to {last_fri}",
-        "O": week[0]["O"], "H": max(r["H"] for r in week),
-        "L": min(r["L"] for r in week), "C": week[-1]["C"],
-    }, None
+    for _attempt in range(8):
+        last_mon = last_fri - timedelta(days=4)
+        week = [r for r in rows
+                if last_mon.isoformat() <= r["date"] <= last_fri.isoformat()
+                and r.get("H", 0) > r.get("L", 0)]   # skip holiday/zero-range rows
+        if week:
+            return {
+                "date": f"{last_mon} to {last_fri}",
+                "O": week[0]["O"], "H": max(r["H"] for r in week),
+                "L": min(r["L"] for r in week), "C": week[-1]["C"],
+            }, None
+        last_fri -= timedelta(days=7)       # step back one more calendar week
+
+    return None, (
+        f"No trading data found in the last 8 calendar weeks. "
+        f"CSV range: {rows[0]['date']} to {rows[-1]['date']}."
+    )
 
 
 def get_monthly_ohlc(symbol: str) -> tuple[dict | None, str | None]:
@@ -345,7 +360,7 @@ def get_monthly_ohlc(symbol: str) -> tuple[dict | None, str | None]:
 
     prev_end    = date.today().replace(day=1) - timedelta(days=1)
     month_pfx   = prev_end.strftime("%Y-%m")
-    month_rows  = [r for r in rows if r["date"].startswith(month_pfx)]
+    month_rows  = [r for r in rows if r["date"].startswith(month_pfx) and r.get("H",0)>r.get("L",0)]
     if not month_rows:
         return None, (
             f"No rows for {month_pfx}. "
@@ -379,7 +394,7 @@ def get_quarterly_ohlc(symbol: str) -> tuple[dict | None, str | None]:
         pq_s = date(today.year, (q - 1) * 3 + 1, 1)
         pq_e = date(today.year, q * 3, 1) - timedelta(days=1)
 
-    qrows = [r for r in rows if pq_s.isoformat() <= r["date"] <= pq_e.isoformat()]
+    qrows = [r for r in rows if pq_s.isoformat() <= r["date"] <= pq_e.isoformat() and r.get("H",0)>r.get("L",0)]
     if not qrows:
         return None, (
             f"No rows for {pq_s} to {pq_e}. "
@@ -409,7 +424,7 @@ def get_yearly_ohlc(symbol: str) -> tuple[dict | None, str | None]:
         return None, f"No historical rows before {today}"
 
     prev_year = date.today().year - 1
-    yr_rows   = [r for r in rows if r["date"].startswith(str(prev_year))]
+    yr_rows   = [r for r in rows if r["date"].startswith(str(prev_year)) and r.get("H",0)>r.get("L",0)]
     if not yr_rows:
         return None, (
             f"No rows for {prev_year}. "

@@ -11,7 +11,7 @@ Virgin CPR           → price never entered TC-BC range this session
 from __future__ import annotations
 import time
 from datetime import date
-from nse_pivot_scanner import _find_csv, _read_rows, load_symbol_list
+from nse_pivot_scanner import _find_csv, _read_rows, load_symbol_list, _last_trading_row
 
 _cpr_cache: dict = {"ts": 0.0, "data": None, "key": ""}
 _DEFAULT_TTL = 300
@@ -20,19 +20,24 @@ _DEFAULT_TTL = 300
 def scan_stock(symbol: str) -> dict | None:
     p = _find_csv(symbol)
     if not p: return None
-    rows, err = _read_rows(p, n=5)
+    rows, err = _read_rows(p, n=10)
     if err or not rows: return None
     today = date.today().isoformat()
     rows = [r for r in rows if r["date"] < today]
-    if len(rows) < 2: return None
+    if not rows: return None
 
-    prev = rows[-2]; cur = rows[-1]
+    # Use the last ACTUAL trading day — skips holiday rows where H=L=C=prev_close
+    prev = _last_trading_row(rows)
+    if not prev: return None
     H, L, C = prev["H"], prev["L"], prev["C"]
     pivot = (H + L + C) / 3
     tc = (pivot + H) / 2; bc = (pivot + L) / 2
     width_pct = round((tc - bc) / pivot * 100, 3) if pivot else 0
 
-    cur_price = cur["C"]; cur_h = cur["H"]; cur_l = cur["L"]
+    # Price reference: last known close (today's live price unavailable in CSV).
+    cur_price = prev["C"]; cur_h = prev["H"]; cur_l = prev["L"]
+    # Virgin CPR: last session never crossed into the CPR it helped create.
+    # (Meaningful only as a "did YESTERDAY respect the CPR it established" signal.)
     in_cpr = cur_l <= tc and cur_h >= bc
     virgin = not in_cpr
 
@@ -45,7 +50,7 @@ def scan_stock(symbol: str) -> dict | None:
     elif cur_price < bc:    pos = "Below CPR"
     else:                   pos = "Inside CPR"
 
-    return {"symbol": symbol, "price": round(cur_price, 2), "price_date": cur["date"],
+    return {"symbol": symbol, "price": round(cur_price, 2), "price_date": prev["date"],
             "pivot": round(pivot, 2), "tc": round(tc, 2), "bc": round(bc, 2),
             "width_pct": width_pct, "virgin": virgin, "position": pos,
             "day_type": day_type}
