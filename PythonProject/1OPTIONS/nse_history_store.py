@@ -36,17 +36,11 @@ def _file_for(symbol: str, day: date) -> Path:
 
 
 def append_snapshot(symbol: str, snapshot: dict) -> None:
-    """Append one snapshot for today. Silently no-ops on write failure —
-    history tracking should never be allowed to break the live dashboard."""
-    try:
-        today = date.today()
-        path = _file_for(symbol, today)
-        record = {"t": time.time(), **snapshot}
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + "\n")
-        _prune_old_files(symbol)
-    except Exception as e:  # noqa: BLE001 - history is best-effort, never fatal
-        print(f"[!] History write failed for {symbol}: {e}")
+    """Disabled — snapshots are no longer persisted to .jsonl files.
+    Previous-day OHLC for pivot levels is always fetched live from NSE.
+    IV Rank and straddle history are computed from the in-memory session
+    data (_session_ohlc) rather than from disk."""
+    pass  # intentional no-op
 
 
 def _prune_old_files(symbol: str) -> None:

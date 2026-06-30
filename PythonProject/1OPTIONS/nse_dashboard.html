@@ -1324,6 +1324,9 @@
               <span class="skew-chart-title" id="niftyWidgetTitle">Nifty 50 Constituents</span>
               <div style="display:flex;align-items:center;gap:8px;">
                 <span class="level-source" id="niftyWidgetTime"></span>
+                <label style="font-size:10px;color:var(--muted-2);display:flex;align-items:center;gap:3px;cursor:pointer;">
+                  <input type="checkbox" id="niftyAutoRefresh" checked> Auto (5s)
+                </label>
                 <button class="btn" id="niftyExpandBtn" style="font-size:10px;padding:3px 9px;">⤢ All</button>
                 <button class="btn" id="niftyRefreshBtn" style="font-size:10px;padding:3px 9px;">↻</button>
               </div>
@@ -2679,6 +2682,24 @@
     const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML;
   }
 
+  // ---------- ATM scroll helper ----------
+  // Called after chain render (200 ms delay) AND when user activates the chain tab.
+  // Returns true if scroll fired, false if tab not visible yet.
+  function _scrollChainToAtm() {
+    const wrap   = els.chainBody.closest('.table-wrap');
+    const atmRow = els.chainBody.querySelector('tr.atm-row');
+    if (!wrap || !atmRow) return false;
+    // clientHeight === 0 when the tab panel is hidden (display:none)
+    if (wrap.clientHeight === 0) return false;
+    const wTop = wrap.getBoundingClientRect().top;
+    const rTop = atmRow.getBoundingClientRect().top;
+    const rowH = atmRow.getBoundingClientRect().height || 30;
+    const rowPosInContent = rTop - wTop + wrap.scrollTop;
+    wrap.scrollTop = Math.max(0, rowPosInContent - wrap.clientHeight / 2 + rowH / 2);
+    state.shouldScrollToAtm = false;
+    return true;
+  }
+
   // ---------- tabs ----------
   els.tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -2686,6 +2707,10 @@
       els.panels.forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+      if (tab.dataset.tab === 'chain') {
+        // If we have un-fired ATM scroll (data loaded while on a different tab), fire now
+        if (state.shouldScrollToAtm) setTimeout(_scrollChainToAtm, 50);
+      }
       if (tab.dataset.tab === 'home') {
         fetchAndRenderNiftyConstituents();
         fetchAndRenderMovers();
@@ -3079,16 +3104,17 @@
       }
 
       if (data.high && data.low && data.close) {
-        const saved = _loadOhlcOverride();
-        if (!saved) {
-          Object.assign(state_ohlc, data);
-          _fillOhlcInputs(data);
-          renderPivotLevels();
-        } else {
-          Object.assign(state_ohlc, saved, { source: 'manual' });
-          _fillOhlcInputs(saved);
-          renderPivotLevels();
-        }
+        // Live/CSV/bhavcopy data succeeded — this always takes priority over
+        // any previously-saved manual override. A manual override is only a
+        // fallback for when live data is unavailable, never something that
+        // should permanently mask successful fetches.
+        Object.assign(state_ohlc, data);
+        _fillOhlcInputs(data);
+        renderPivotLevels();
+        // Clear any stale manual override now that real data is flowing —
+        // otherwise it would keep being preferred by the boot-time fallback
+        // check below on every future page load, even after live data works.
+        _clearOhlcOverride();
       }
     } catch (_) {
       // Network error — retry silently
@@ -3134,17 +3160,40 @@
 
   function _voiceEnabled() { return document.getElementById('voiceToggle')?.checked; }
 
+  // Chrome has a long-standing bug where speechSynthesis silently stops
+  // working after the queue has been idle for ~15s — calling resume()
+  // periodically is the documented workaround. Harmless on other browsers.
+  setInterval(() => {
+    try { window.speechSynthesis?.resume(); } catch (_) {}
+  }, 10000);
+
   function _speakLevel(label, price) {
-    if (!_voiceEnabled() || !window.speechSynthesis) return;
-    // e.g. "R1" → "Resistance 1", "S3" → "Support 3", "Pivot" → "Pivot"
+    if (!_voiceEnabled()) {
+      console.log('[voice] skipped — voiceToggle checkbox is unchecked');
+      return;
+    }
+    if (!window.speechSynthesis) {
+      console.log('[voice] skipped — window.speechSynthesis not available in this browser');
+      return;
+    }
     let text = label;
     if (/^R(\d+)$/.test(label)) text = `Resistance ${label.slice(1)} touched at ${Math.round(price)}`;
     else if (/^S(\d+)$/.test(label)) text = `Support ${label.slice(1)} touched at ${Math.round(price)}`;
     else text = `${label} touched at ${Math.round(price)}`;
+
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 1.1; utter.pitch = 1.0; utter.volume = _alertVolume();
-    window.speechSynthesis.cancel();   // cancel any in-progress speech
-    window.speechSynthesis.speak(utter);
+    utter.onstart = () => console.log(`[voice] speaking: "${text}"`);
+    utter.onend   = () => console.log('[voice] finished speaking');
+    utter.onerror = (e) => console.log(`[voice] ERROR: ${e.error} — text was "${text}"`);
+
+    try {
+      window.speechSynthesis.cancel();   // cancel any in-progress speech
+      window.speechSynthesis.speak(utter);
+      console.log(`[voice] queued: "${text}" (volume=${utter.volume})`);
+    } catch (e) {
+      console.log(`[voice] EXCEPTION calling speak(): ${e}`);
+    }
   }
 
   // ── TONE: single high sine wave, hard attack, long exponential decay ──
@@ -3231,8 +3280,12 @@
   let _levelToastTimer = null;
   function alertLevelTouch(label, price, polarity) {
     const key = `${state.symbol}:${label}`;
-    if (_touchedLevels.has(key)) return;
+    if (_touchedLevels.has(key)) {
+      console.log(`[touch] ${key} already alerted this session — skipping (dedup)`);
+      return;
+    }
     _touchedLevels.add(key);
+    console.log(`[touch] ALERTING for ${key} at price=${price}`);
     playAlert(polarity);
     _speakLevel(label, price);   // voice announcement if enabled
     const el = _levelTouchToastEl();
@@ -3248,11 +3301,19 @@
 
   function checkLevelTouches(levels, spot) {
     const TOLERANCE_PCT = 0.002;  // 0.2% — "near enough" to trigger
+    let closest = null, closestDist = Infinity;
     for (const [label, price, polarity] of levels) {
       if (!price) continue;
-      if (Math.abs(spot - price) / price < TOLERANCE_PCT) {
+      const distPct = Math.abs(spot - price) / price;
+      if (distPct < closestDist) { closestDist = distPct; closest = [label, price, distPct]; }
+      if (distPct < TOLERANCE_PCT) {
+        console.log(`[touch] ${label}=${price} within ${(distPct*100).toFixed(3)}% of spot=${spot} — triggering alert`);
         alertLevelTouch(label, price, polarity);
       }
+    }
+    if (closest) {
+      console.log(`[touch] spot=${spot} closest level: ${closest[0]}=${closest[1]} `
+        + `(${(closest[2]*100).toFixed(3)}% away, need <${TOLERANCE_PCT*100}%)`);
     }
   }
 
@@ -3264,13 +3325,23 @@
 
   function _tryFreeze() {
     const { high: H, low: L, close: C, open: O, source } = state_ohlc;
-    const isPrevDay = ['daily_chart', 'daily_history', 'history_daily', 'manual'].includes(source);
+    const isPrevDay = ['csv_eod', 'bhavcopy_eod', 'daily_chart', 'daily_history', 'history_daily', 'manual'].includes(source);
     if (!isPrevDay || !H || !L || !C) return;
     const today = new Date().toDateString();
     const ex = _frozenOhlc[state.symbol];
     // Only freeze if: no existing freeze, or it's a new day, or manual override
     if (!ex || ex.date !== today || source === 'manual') {
+      const valuesChanged = !ex || ex.H !== H || ex.L !== L || ex.C !== C;
       _frozenOhlc[state.symbol] = { H, L, C, O: O || C, source, date: today };
+      if (valuesChanged) {
+        // Pivot levels just changed (new day, manual override, or corrected
+        // data) — clear any touch-alert state for this symbol so stale
+        // "already touched" flags from old/incorrect levels don't silently
+        // suppress legitimate alerts on the new levels.
+        for (const key of [..._touchedLevels]) {
+          if (key.startsWith(`${state.symbol}:`)) _touchedLevels.delete(key);
+        }
+      }
     }
   }
 
@@ -3419,23 +3490,7 @@
 
       // Only scroll ATM into view on first load or explicit user trigger — NEVER on auto-refresh
       if (state.shouldScrollToAtm) {
-        state.shouldScrollToAtm = false;
-        // Use setTimeout(200) — not rAF — so sticky-header layout and all deferred
-        // style recalculations are fully resolved before we measure positions.
-        setTimeout(() => {
-          const wrap   = els.chainBody.closest('.table-wrap');
-          const atmRow = els.chainBody.querySelector('tr.atm-row');
-          if (!wrap || !atmRow) return;
-          const wh = wrap.clientHeight;
-          if (wh === 0) return;
-          // getBoundingClientRect measured 200ms after innerHTML set — layout is done.
-          const wTop = wrap.getBoundingClientRect().top;
-          const rTop = atmRow.getBoundingClientRect().top;
-          const rowH = atmRow.getBoundingClientRect().height || 30;
-          // Current position of row relative to wrap's visible top, adjusted for current scroll
-          const rowPosInContent = rTop - wTop + wrap.scrollTop;
-          wrap.scrollTop = Math.max(0, rowPosInContent - wh / 2 + rowH / 2);
-        }, 200);
+        setTimeout(_scrollChainToAtm, 200);
       }
       return;
     }
@@ -5950,7 +6005,7 @@
   const niftyState = {
     stocks: [],
     niftyValue: 0,
-    sortCol: 'pts_contributed',   // signed: desc = most positive first, asc = most negative first
+    sortCol: 'pts_abs',   // sort by |points contributed| — biggest movers first regardless of direction
     sortDir: -1,
     expanded: false,
     timer: null,
@@ -5966,7 +6021,7 @@
     { key: 'symbol',  label: 'Symbol',     sort: 'symbol',          align: 'left' },
     { key: 'ltp',     label: 'LTP',        sort: 'ltp',             align: 'right' },
     { key: 'pct',     label: '% Chg',      sort: 'pct_change',      align: 'right' },
-    { key: 'pts',     label: 'Pts ±',      sort: 'pts_contributed', align: 'right' },
+    { key: 'pts',     label: 'Pts ±',      sort: 'pts_abs',         align: 'right' },
   ];
 
   async function fetchAndRenderNiftyConstituents() {
@@ -5979,7 +6034,7 @@
     try {
       const resp = await fetch(
         `${base}/api/nifty-constituents?symbol=${niftyState.indexSymbol}`,
-        { signal: AbortSignal.timeout(20000) }
+        { signal: AbortSignal.timeout(30000) }
       );
       const data = await resp.json();
       if (data.error && !data.stocks?.length) {
@@ -5989,7 +6044,11 @@
       niftyState.stocks = data.stocks || [];
       niftyState.niftyValue = data.index_value || data.nifty_value || 0;
       if (timeEl) timeEl.textContent = data.as_of ? `· ${data.as_of}` : '';
-      if (noteEl) noteEl.textContent = data.note || '';
+      if (noteEl) {
+        noteEl.textContent = data.note || '';
+        // Pre-open/fallback data means prices are frozen, not live — warn clearly.
+        noteEl.style.color = (data.data_quality === 'pre_open') ? 'var(--gold)' : '';
+      }
       // Update widget title
       const titleEl = document.getElementById('niftyWidgetTitle');
       if (titleEl) titleEl.textContent = (NIFTY_INDEX_TITLES[niftyState.indexSymbol] || niftyState.indexSymbol) + ' Constituents';
@@ -6118,14 +6177,17 @@
 
   document.getElementById('niftyRefreshBtn')?.addEventListener('click', fetchAndRenderNiftyConstituents);
 
-  // ── 5-second auto-reload for Nifty widget ────────────────────────────
+  // ── 5-second auto-reload for Nifty widget — gated by checkbox ─────────
   function _startNiftyAutoReload() {
     if (niftyState.timer) clearInterval(niftyState.timer);
+    const cb = document.getElementById('niftyAutoRefresh');
+    if (!cb || !cb.checked) return;
     niftyState.timer = setInterval(() => {
       const homeActive = document.querySelector('.tab.active')?.dataset.tab === 'home';
       if (homeActive) fetchAndRenderNiftyConstituents();
     }, 5000);
   }
+  document.getElementById('niftyAutoRefresh')?.addEventListener('change', _startNiftyAutoReload);
   _startNiftyAutoReload();
 
   // ====================================================================
@@ -9157,6 +9219,9 @@
   function _saveOhlcOverride(o) {
     try { localStorage.setItem(_ohlcLsKey(), JSON.stringify(o)); } catch (_) {}
   }
+  function _clearOhlcOverride() {
+    try { localStorage.removeItem(_ohlcLsKey()); } catch (_) {}
+  }
   function _fillOhlcInputs(o) {
     if (!o) return;
     const set = (id, val) => { const el = document.getElementById(id); if (el && val) { el.value = val; el.classList.add('has-value'); } };
@@ -9199,6 +9264,10 @@
     const toggle = document.getElementById('pivotAlertToggle');
     if (toggle && !origEnabled) toggle.checked = true;
     playAlert('r');
+    // Also test voice — this was previously untested by this button, so a
+    // user with a broken/blocked speechSynthesis had no way to find out
+    // except by waiting for (and missing) a real pivot touch.
+    _speakLevel('Test Alert', state.lastData?.underlying_value || 24000);
     if (toggle && !origEnabled) setTimeout(() => { toggle.checked = false; }, 500);
   });
 

@@ -54,15 +54,19 @@ def _pv_fibonacci(H, L, C, O):
 
 def _pv_traditional(H, L, C, O):
     r = H - L;  P = (H + L + C) / 3
+    R1 = 2*P - L;  S1 = 2*P - H
+    # R3 = R1 + (H-L) = H + 2*(P-L)    [NOT P + 2*(H-L) which is a common mistake]
+    # S3 = S1 - (H-L) = L - 2*(H-P)
     return dict(P=P,
-        R1=2*P-L, R2=P+r,   R3=P+2*r, R4=P+3*r, R5=P+4*r,
-        S1=2*P-H, S2=P-r,   S3=P-2*r, S4=P-3*r, S5=P-4*r)
+        R1=R1,   R2=P+r,   R3=R1+r,   R4=P+3*r, R5=P+4*r,
+        S1=S1,   S2=P-r,   S3=S1-r,   S4=P-3*r, S5=P-4*r)
 
 def _pv_woodie(H, L, C, O):
-    r = H - L;  P = (H + L + 2*C) / 4
+    r = H - L;  P = (H + L + 2*C) / 4   # close weighted double
+    R1 = 2*P - L;  S1 = 2*P - H
     return dict(P=P,
-        R1=2*P-L, R2=P+r,   R3=P+2*r, R4=P+3*r, R5=P+4*r,
-        S1=2*P-H, S2=P-r,   S3=P-2*r, S4=P-3*r, S5=P-4*r)
+        R1=R1,   R2=P+r,   R3=R1+r,   R4=P+3*r, R5=P+4*r,
+        S1=S1,   S2=P-r,   S3=S1-r,   S4=P-3*r, S5=P-4*r)
 
 def _pv_camarilla(H, L, C, O):
     r = H - L;  P = (H + L + C) / 3
