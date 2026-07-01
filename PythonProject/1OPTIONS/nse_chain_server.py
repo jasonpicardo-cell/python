@@ -140,6 +140,41 @@ _SHARED_FETCHER_MAX_AGE = 270  # seconds — NSE cookies typically expire in ~5 
 VIX_CACHE_TTL_SECONDS = 15.0
 _vix_cache: dict = {"value": None, "fetched_at": 0.0}
 
+# ── Server telemetry ─────────────────────────────────────────────────────────
+_SERVER_START_TIME: float = time.time()
+
+# ── OI session baseline ──────────────────────────────────────────────────────
+# Records the first-observed OI for each strike each day so ce_oi_chg/pe_oi_chg
+# in the chain response shows intraday accumulation/unwinding.
+_oi_baseline: dict[str, dict] = {}
+_oi_baseline_lock = threading.Lock()
+
+def _get_oi_deltas(symbol: str, strikes: list) -> dict:
+    """Return {strike: (ce_chg, pe_chg)} for every strike in the list."""
+    from datetime import date as _dt
+    today = _dt.today().isoformat()
+    sym   = symbol.upper()
+    result: dict[int, tuple[int, int]] = {}
+    with _oi_baseline_lock:
+        bl = _oi_baseline.setdefault(sym, {"_date": today})
+        if bl.get("_date") != today:               # new trading day — reset
+            _oi_baseline[sym] = {"_date": today}
+            bl = _oi_baseline[sym]
+        for s in strikes:
+            k  = s.strike
+            ce = s.ce_oi or 0
+            pe = s.pe_oi or 0
+            if k not in bl:
+                bl[k] = {"ce": ce, "pe": pe}
+                result[k] = (0, 0)
+            else:
+                result[k] = (ce - bl[k]["ce"], pe - bl[k]["pe"])
+    return result
+
+# ── FII/DII cache ────────────────────────────────────────────────────────────
+_fii_dii_cache: dict = {"data": None, "ts": 0.0}
+_FII_DII_TTL = 300   # 5 minutes
+
 # ── Bhavcopy disk cache ──────────────────────────────────────────────────────
 # NSE's archive CSVs are immutable once published, so caching them to disk
 # is safe indefinitely — we never need to re-download a past date's file.
@@ -247,6 +282,19 @@ def _compute_iv_rank(symbol: str, current_iv: float) -> dict | None:
         return None
 
 
+def _enrich_strikes_with_oi_delta(symbol: str, strikes: list) -> list[dict]:
+    """Serialise strikes and add ce_oi_chg / pe_oi_chg intraday deltas."""
+    deltas = _get_oi_deltas(symbol, strikes)
+    result = []
+    for s in strikes:
+        d = asdict(s)
+        ce_chg, pe_chg = deltas.get(s.strike, (0, 0))
+        d["ce_oi_chg"] = ce_chg
+        d["pe_oi_chg"] = pe_chg
+        result.append(d)
+    return result
+
+
 def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
     """Fetch (or reuse a cached) chain, run the full analysis pipeline, and
     shape everything into a single JSON-serializable dict for the frontend."""
@@ -311,7 +359,7 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
             exp_snap = snap if exp == snap.expiry else parse_chain(raw, symbol, exp)
             expiries_data[exp] = {
                 "dte": days_to_expiry(exp),
-                "strikes": [asdict(s) for s in exp_snap.strikes],
+        "strikes": [asdict(s) for s in exp_snap.strikes],
             }
         except NSEFetchError:
             continue  # an individual expiry failing to parse shouldn't break the whole response
@@ -380,7 +428,7 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         "skew_note": skew_note,
         "ideas": [asdict(i) for i in ideas],
         "flags": flags,
-        "strikes": [asdict(s) for s in snap.strikes],
+        "strikes": _enrich_strikes_with_oi_delta(symbol, snap.strikes),
         "expiries_data": expiries_data,
         "strategies": [asdict(s) for s in strategy_list],
         "india_vix": india_vix,
@@ -1525,6 +1573,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e), "partial_results": results})
             return
 
+        if parsed.path == "/api/health":
+            self._send_json(_build_health_response())
+            return
+
+        if parsed.path == "/api/fii-dii":
+            try:
+                self._send_json(_fetch_fii_dii())
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)})
+            return
+
         if parsed.path == "/api/weekly-ohlc":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             try:
@@ -2221,6 +2280,56 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)
+
+
+def _fetch_fii_dii() -> dict:
+    """Fetch FII/DII provisional equity activity from NSE (5-minute cache)."""
+    global _fii_dii_cache, _shared_fetcher
+    now = time.time()
+    if _fii_dii_cache["data"] and (now - _fii_dii_cache["ts"]) < _FII_DII_TTL:
+        return _fii_dii_cache["data"]
+    fetcher = _shared_fetcher
+    if not fetcher:
+        return {"error": "Session not warmed — fetch the chain first."}
+    try:
+        r = fetcher.session.get(
+            "https://www.nseindia.com/api/fiidiiTradeReact",
+            headers={"Accept": "application/json, */*", "Referer": "https://www.nseindia.com/"},
+            timeout=12,
+        )
+        raw = r.json()
+        # NSE returns a list of dicts: date, name, buyValue, sellValue, netValue
+        if not isinstance(raw, list) or not raw:
+            return {"error": f"Unexpected response shape from NSE"}
+        # Most-recent first; take last 5 trading days
+        records = []
+        for row in raw[:10]:
+            records.append({
+                "date":      row.get("date", ""),
+                "category":  row.get("name", ""),
+                "buy":       row.get("buyValue", 0),
+                "sell":      row.get("sellValue", 0),
+                "net":       row.get("netValue", 0),
+            })
+        data = {"records": records, "as_of": time.strftime("%H:%M:%S")}
+        _fii_dii_cache = {"data": data, "ts": now}
+        return data
+    except Exception as e:  # noqa: BLE001
+        stale = _fii_dii_cache.get("data")
+        return stale if stale else {"error": str(e)}
+
+
+def _build_health_response() -> dict:
+    """Return server + session health metrics."""
+    age = time.time() - _shared_fetcher_ts if _shared_fetcher_ts else None
+    return {
+        "status": "ok",
+        "session_warmed":       _shared_fetcher is not None and getattr(_shared_fetcher, "_warmed", False),
+        "session_age_seconds":  round(age) if age is not None else None,
+        "session_fresh":        (age is not None and age < 1500),  # <25 min
+        "bhavcopy_cached":      len(list(_BHAVCOPY_DIR.glob("*.csv"))),
+        "uptime_seconds":       round(time.time() - _SERVER_START_TIME),
+    }
 
 
 def _start_session_rewarm_thread() -> None:

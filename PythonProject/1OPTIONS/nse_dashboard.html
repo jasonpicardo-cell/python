@@ -522,6 +522,37 @@
   .home-left { display: flex; flex-direction: column; gap: 12px; }
   .home-right { display: flex; flex-direction: column; gap: 12px; }
 
+  /* ── Connection health dot ── */
+  .health-dot { font-size:13px; cursor:default; transition:color .4s; line-height:1; }
+  /* ── ATM Greeks card ── */
+  .greeks-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:8px 12px; margin-bottom:10px; display:flex; gap:20px; flex-wrap:wrap; align-items:center; }
+  .greeks-card-title { font-size:10px; color:var(--muted); font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em; margin-right:4px; }
+  .greek-item { display:flex; flex-direction:column; align-items:center; gap:1px; min-width:52px; }
+  .greek-label { font-size:9px; color:var(--muted-2); text-transform:uppercase; letter-spacing:.05em; }
+  .greek-val { font-size:13px; font-weight:700; color:var(--text); }
+  .greek-sub { font-size:9px; color:var(--muted); }
+  /* ── Market breadth bar ── */
+  .breadth-bar-wrap { display:flex; align-items:center; gap:6px; font-size:10px; padding:3px 0; }
+  .breadth-bar { flex:1; height:6px; border-radius:3px; background:var(--panel-2);
+    overflow:hidden; position:relative; }
+  .breadth-bar-fill { height:100%; border-radius:3px; transition:width .4s; }
+  /* ── Custom price alerts ── */
+  .custom-alerts-wrap { border-top:1px solid var(--border); padding:6px; }
+  .custom-alert-row { display:flex; align-items:center; gap:6px; margin-top:4px; }
+  .custom-alert-item { display:flex; align-items:center; gap:4px; padding:2px 6px;
+    background:var(--panel-2); border-radius:4px; font-size:10.5px; }
+  .custom-alert-item.triggered { opacity:.4; text-decoration:line-through; }
+  /* ── FII/DII panel ── */
+  .fiidii-panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:8px 10px; margin-top:10px; }
+  .fiidii-row { display:grid; grid-template-columns:80px 1fr 1fr 1fr; gap:4px;
+    font-size:10.5px; padding:2px 0; border-bottom:1px solid var(--border); }
+  .fiidii-row:last-child { border-bottom:none; }
+  .fiidii-head { font-size:9px; font-weight:700; text-transform:uppercase;
+    color:var(--muted); letter-spacing:.04em; }
+
   /* ── Nifty 50 widget ── */
   .nifty-widget {
     background: var(--panel); border: 1px solid var(--border);
@@ -624,6 +655,7 @@
     height: 7px; border-radius: 3px; background: var(--panel-3); position: relative; overflow: visible; min-width: 0;
   }
   .level-bar-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+  .level-bar-fill.be-line { background: repeating-linear-gradient(90deg,transparent 0,transparent 4px,currentColor 4px,currentColor 8px) !important; opacity:.55; }
   .level-bar-spot {
     position: absolute; top: -3px; width: 13px; height: 13px;
     border-radius: 50%; background: var(--text); border: 2px solid var(--panel);
@@ -1243,6 +1275,7 @@
     <button class="tab" data-tab="market">Market View</button>
     <button class="tab" data-tab="paper">Paper Trades</button>
     <button class="tab" data-tab="flow">OI Flow</button>
+    <span id="healthDot" class="health-dot" title="Checking server…" style="margin-left:auto;margin-right:8px;color:var(--muted);">●</span>
   </nav>
 
   <main>
@@ -1327,6 +1360,28 @@
               </div>
               <div id="alertHistoryList" style="max-height:120px;overflow-y:auto;padding:0 6px 4px;"></div>
             </div>
+            <!-- Custom price level alerts -->
+            <div class="custom-alerts-wrap">
+              <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">📌 Custom Levels</div>
+              <div class="custom-alert-row">
+                <input type="number" id="customAlertPrice" class="ohlc-inp" placeholder="Price" step="0.5" style="width:80px;">
+                <input type="text" id="customAlertLabel" class="ohlc-inp" placeholder="Label (opt)" style="width:90px;">
+                <button class="btn" id="addCustomAlertBtn" style="font-size:10px;padding:3px 9px;">+ Add</button>
+              </div>
+              <div id="customAlertsList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;"></div>
+            </div>
+          </div>
+
+          <!-- ── FII / DII Daily Flow ───────────────────────────────── -->
+          <div class="fiidii-panel" id="fiidiiPanel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <span class="skew-chart-title">FII / DII Daily Flow</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span id="fiidiiTime" style="font-size:9px;color:var(--muted-2);"></span>
+                <button class="btn" id="fiidiiRefreshBtn" style="font-size:10px;padding:2px 8px;">↻</button>
+              </div>
+            </div>
+            <div id="fiidiiBody"><div class="movers-loading">—</div></div>
           </div>
 
         </div><!-- /.home-left -->
@@ -1351,6 +1406,15 @@
               <button class="nifty-idx-tab" data-index="BANKNIFTY">BankNifty</button>
               <button class="nifty-idx-tab" data-index="FINNIFTY">FinNifty</button>
               <button class="nifty-idx-tab" data-index="MIDCPNIFTY">MidCap</button>
+            </div>
+            <!-- Market breadth bar -->
+            <div class="breadth-bar-wrap" id="breadthBarWrap" style="display:none;">
+              <span id="breadthAdvancers" style="color:var(--pos);font-weight:700;min-width:28px;"></span>
+              <div class="breadth-bar">
+                <div class="breadth-bar-fill" id="breadthFill" style="background:var(--pos);width:50%;"></div>
+              </div>
+              <span id="breadthDecliners" style="color:var(--neg);font-weight:700;min-width:28px;text-align:right;"></span>
+              <span id="breadthScore" style="font-size:9px;color:var(--muted);margin-left:4px;"></span>
             </div>
             <div id="niftyWidgetBody">
               <div class="movers-loading">Loading constituent data…</div>
@@ -2329,6 +2393,51 @@
         <div id="straddleChart"></div>
       </div>
 
+      <!-- ATM Greeks summary card -->
+      <div class="greeks-card" id="greeksCard" style="display:none;">
+        <span class="greeks-card-title">ATM Greeks</span>
+        <div class="greek-item">
+          <span class="greek-label">Δ CE</span>
+          <span class="greek-val" id="gCeDelta">—</span>
+        </div>
+        <div class="greek-item">
+          <span class="greek-label">Δ PE</span>
+          <span class="greek-val" id="gPeDelta">—</span>
+        </div>
+        <div class="greek-item">
+          <span class="greek-label">Γ</span>
+          <span class="greek-val" id="gGamma">—</span>
+          <span class="greek-sub">per pt</span>
+        </div>
+        <div class="greek-item">
+          <span class="greek-label">Vega</span>
+          <span class="greek-val" id="gVega">—</span>
+          <span class="greek-sub">per 1% IV</span>
+        </div>
+        <div class="greek-item">
+          <span class="greek-label">Θ CE</span>
+          <span class="greek-val neg-txt" id="gCeTheta">—</span>
+          <span class="greek-sub">per day</span>
+        </div>
+        <div class="greek-item">
+          <span class="greek-label">Θ PE</span>
+          <span class="greek-val neg-txt" id="gPeTheta">—</span>
+          <span class="greek-sub">per day</span>
+        </div>
+        <div class="greek-item" style="border-left:1px solid var(--border);padding-left:12px;">
+          <span class="greek-label">ATM</span>
+          <span class="greek-val" id="gAtmStrike">—</span>
+        </div>
+        <div class="greek-item">
+          <span class="greek-label">IV</span>
+          <span class="greek-val" id="gAtmIv">—</span>
+        </div>
+        <div class="greek-item">
+          <span class="greek-label">DTE</span>
+          <span class="greek-val" id="gDte">—</span>
+        </div>
+      </div>
+
       <div class="table-wrap">
         <table id="chainTable">
           <thead>
@@ -2795,6 +2904,266 @@
     document.getElementById('alertHistoryPanel').style.display = 'none';
   });
 
+  document.getElementById('clearAlertHistoryBtn')?.addEventListener('click', () => {
+    _alertHistory.length = 0;
+    _renderAlertHistory();
+    document.getElementById('alertHistoryPanel').style.display = 'none';
+  });
+
+  // ======================================================================
+  // FEATURE: VIX trend arrow
+  // ======================================================================
+  let _sessionVixOpen = null;
+  function _updateVixTrend(vix) {
+    if (vix == null) return;
+    if (_sessionVixOpen === null) _sessionVixOpen = vix;
+    const chg = vix - _sessionVixOpen;
+    const absChg = Math.abs(chg).toFixed(2);
+    const arrow = chg > 0.05 ? '▲' : chg < -0.05 ? '▼' : '→';
+    const cls   = chg > 0.05 ? 'neg-txt' : chg < -0.05 ? 'pos-txt' : '';
+    if (els.metaVix) els.metaVix.innerHTML =
+      `${vix.toFixed(2)}<span class="${cls}" style="font-size:9px;margin-left:2px;">${arrow}${absChg}</span>`;
+  }
+
+  // ======================================================================
+  // FEATURE: Black-Scholes ATM Greeks (client-side, no extra API calls)
+  // ======================================================================
+  function _ncdf(x) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(x));
+    const p = 0.39894228 * Math.exp(-0.5 * x * x) *
+              t * (0.319381530 + t * (-0.356563782 + t *
+              (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    return x >= 0 ? 1 - p : p;
+  }
+  function _npdf(x) { return Math.exp(-0.5 * x * x) / 2.506628274; }
+
+  function _computeATMGreeks(iv_pct, dte_days, spot, strike) {
+    if (!iv_pct || !dte_days || dte_days <= 0 || !spot || !strike) return null;
+    const T = Math.max(dte_days, 0.5) / 365;
+    const v = iv_pct / 100, r = 0.065, sqrtT = Math.sqrt(T);
+    const d1 = (Math.log(spot / strike) + (r + 0.5 * v * v) * T) / (v * sqrtT);
+    const d2 = d1 - v * sqrtT;
+    const Nd1 = _ncdf(d1), Nd2 = _ncdf(d2), nd1 = _npdf(d1);
+    const gamma = nd1 / (spot * v * sqrtT);
+    const vega  = spot * nd1 * sqrtT / 100;
+    const ce_theta = (-(spot * nd1 * v) / (2 * sqrtT) - r * strike * Math.exp(-r * T) * Nd2) / 365;
+    const pe_theta = (-(spot * nd1 * v) / (2 * sqrtT) + r * strike * Math.exp(-r * T) * _ncdf(-d2)) / 365;
+    return { ce_delta: +Nd1.toFixed(3), pe_delta: +(Nd1 - 1).toFixed(3),
+             gamma: +gamma.toFixed(4), vega: +vega.toFixed(2),
+             ce_theta: +ce_theta.toFixed(2), pe_theta: +pe_theta.toFixed(2) };
+  }
+
+  function _renderGreeksCard(data) {
+    const card = document.getElementById('greeksCard');
+    if (!card) return;
+    const { atm_iv, dte, underlying_value, atm } = data;
+    const g = _computeATMGreeks(atm_iv, dte, underlying_value, atm);
+    if (!g) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    document.getElementById('gCeDelta').textContent  = g.ce_delta;
+    document.getElementById('gPeDelta').textContent  = g.pe_delta;
+    document.getElementById('gGamma').textContent    = g.gamma;
+    document.getElementById('gVega').textContent     = `₹${g.vega.toFixed(2)}`;
+    document.getElementById('gCeTheta').textContent  = `₹${g.ce_theta.toFixed(2)}`;
+    document.getElementById('gPeTheta').textContent  = `₹${g.pe_theta.toFixed(2)}`;
+    document.getElementById('gAtmStrike').textContent = fmtInt(atm);
+    document.getElementById('gAtmIv').textContent    = `${atm_iv.toFixed(1)}%`;
+    document.getElementById('gDte').textContent      = dte;
+  }
+
+  // ======================================================================
+  // FEATURE: Market breadth bar (derived from existing constituents data)
+  // ======================================================================
+  function _renderBreadthBar() {
+    const wrap = document.getElementById('breadthBarWrap');
+    const fill = document.getElementById('breadthFill');
+    if (!wrap || !niftyState.stocks.length) { if (wrap) wrap.style.display = 'none'; return; }
+    const stocks = niftyState.stocks;
+    const adv = stocks.filter(s => s.pct_change > 0);
+    const dec = stocks.filter(s => s.pct_change < 0);
+    const advWt = adv.reduce((s, x) => s + (x.weight_est || 0), 0);
+    const decWt = dec.reduce((s, x) => s + (x.weight_est || 0), 0);
+    const total = advWt + decWt || 1;
+    const advPct = (advWt / total * 100).toFixed(0);
+    const bullish = advWt > decWt;
+    wrap.style.display = 'flex';
+    fill.style.width   = advPct + '%';
+    fill.style.background = bullish ? 'var(--pos)' : 'var(--neg)';
+    document.getElementById('breadthAdvancers').textContent = `${adv.length}↑`;
+    document.getElementById('breadthDecliners').textContent = `${dec.length}↓`;
+    document.getElementById('breadthScore').textContent =
+      `wt: ${advWt.toFixed(0)}% vs ${decWt.toFixed(0)}%`;
+  }
+
+  // ======================================================================
+  // FEATURE: Straddle breakeven overlay on pivot bars
+  // ======================================================================
+  function _renderStraddleBreakeven() {
+    const straddle = state.lastData?.straddle_premium;
+    const spot     = state.lastData?.underlying_value;
+    if (!straddle || !spot) return;
+    const beUp = spot + straddle;
+    const beDn = spot - straddle;
+    // Re-use the existing pivot level system by injecting two synthetic levels
+    // They render as dashed markers in the pivot bar once renderPivotLevels runs.
+    // We store them on the state so renderPivotLevels can pick them up.
+    state._straddleBreakeven = { up: beUp, down: beDn, premium: straddle };
+  }
+
+  // ======================================================================
+  // FEATURE: Custom price level alerts
+  // ======================================================================
+  const _customLevels = [];   // [{label, price, triggered}]
+
+  function _renderCustomLevelsList() {
+    const el = document.getElementById('customAlertsList');
+    if (!el) return;
+    if (!_customLevels.length) { el.innerHTML = ''; return; }
+    el.innerHTML = _customLevels.map((lvl, i) =>
+      `<div class="custom-alert-item${lvl.triggered ? ' triggered' : ''}">
+        <span>${escapeHtml(lvl.label)} <b>${fmtInt(lvl.price)}</b></span>
+        <button onclick="window._removeCustomLevel(${i})" style="background:none;border:none;cursor:pointer;color:var(--neg);font-size:10px;padding:0 2px;">✕</button>
+      </div>`
+    ).join('');
+  }
+  window._removeCustomLevel = (i) => {
+    _customLevels.splice(i, 1);
+    _renderCustomLevelsList();
+  };
+  document.getElementById('addCustomAlertBtn')?.addEventListener('click', () => {
+    const priceEl = document.getElementById('customAlertPrice');
+    const labelEl = document.getElementById('customAlertLabel');
+    const price = parseFloat(priceEl?.value);
+    if (!price) return;
+    const label = labelEl?.value.trim() || `Level ${fmtInt(price)}`;
+    _customLevels.push({ label, price, triggered: false });
+    if (priceEl) priceEl.value = '';
+    if (labelEl) labelEl.value = '';
+    _renderCustomLevelsList();
+  });
+
+  // ======================================================================
+  // FEATURE: Connection health indicator
+  // ======================================================================
+  async function _pollHealth() {
+    const dot = document.getElementById('healthDot');
+    if (!dot) return;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(4000) });
+      const d = await r.json();
+      if (d.status === 'ok') {
+        const ageMins = d.session_age_seconds ? Math.round(d.session_age_seconds / 60) : 0;
+        const fresh   = d.session_fresh;
+        dot.style.color = d.session_warmed ? (fresh ? 'var(--pos)' : 'var(--gold)') : 'var(--muted)';
+        dot.title = `Server OK · Session ${ageMins}m old · ${fresh ? 'Fresh' : 'Stale — rewarm soon'}`
+                  + ` · Bhavcopy: ${d.bhavcopy_cached} files · Up ${Math.round(d.uptime_seconds/60)}m`;
+      } else {
+        dot.style.color = 'var(--neg)';
+        dot.title = `Server error: ${d.status}`;
+      }
+    } catch {
+      const dot2 = document.getElementById('healthDot');
+      if (dot2) { dot2.style.color = 'var(--neg)'; dot2.title = 'Cannot reach server'; }
+    }
+  }
+  setInterval(_pollHealth, 30000);
+  _pollHealth();
+
+  // ======================================================================
+  // FEATURE: FII/DII daily flow
+  // ======================================================================
+  async function fetchFiiDii() {
+    const bodyEl = document.getElementById('fiidiiBody');
+    const timeEl = document.getElementById('fiidiiTime');
+    if (!bodyEl) return;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/fii-dii`, { signal: AbortSignal.timeout(15000) });
+      const d = await r.json();
+      if (d.error) {
+        bodyEl.innerHTML = `<div style="font-size:10px;color:var(--gold);">${escapeHtml(d.error)}</div>`;
+        return;
+      }
+      if (timeEl) timeEl.textContent = d.as_of || '';
+      // Group by date, show FII+DII per date
+      const byDate = {};
+      for (const rec of (d.records || [])) {
+        if (!byDate[rec.date]) byDate[rec.date] = {};
+        byDate[rec.date][rec.category] = rec;
+      }
+      const dates = Object.keys(byDate).sort().reverse().slice(0, 5);
+      let html = `<div class="fiidii-row fiidii-head">
+        <span>Date</span><span>FII Net</span><span>DII Net</span><span>Combined</span></div>`;
+      for (const dt of dates) {
+        const fii = byDate[dt]['FII/FPI'] || byDate[dt]['FII'] || {};
+        const dii = byDate[dt]['DII'] || {};
+        const fiiNet = parseFloat(fii.net || 0);
+        const diiNet = parseFloat(dii.net || 0);
+        const comb   = fiiNet + diiNet;
+        const fc = fiiNet >= 0 ? 'pos-txt' : 'neg-txt';
+        const dc = diiNet >= 0 ? 'pos-txt' : 'neg-txt';
+        const cc = comb   >= 0 ? 'pos-txt' : 'neg-txt';
+        const fmt = v => (v >= 0 ? '+' : '') + (v / 100).toFixed(0) + 'Cr';
+        html += `<div class="fiidii-row">
+          <span style="color:var(--muted-2);">${dt}</span>
+          <span class="${fc}">${fmt(fiiNet)}</span>
+          <span class="${dc}">${fmt(diiNet)}</span>
+          <span class="${cc}" style="font-weight:700;">${fmt(comb)}</span>
+        </div>`;
+      }
+      bodyEl.innerHTML = html;
+    } catch (e) {
+      bodyEl.innerHTML = `<div style="font-size:10px;color:var(--neg);">Failed: ${escapeHtml(String(e))}</div>`;
+    }
+  }
+  document.getElementById('fiidiiRefreshBtn')?.addEventListener('click', fetchFiiDii);
+  fetchFiiDii();   // auto-load on startup
+
+  // ======================================================================
+  // FEATURE: Keyboard shortcuts
+  // ======================================================================
+  document.addEventListener('keydown', e => {
+    const tag = document.activeElement?.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    switch (e.key.toLowerCase()) {
+      case 'n': els.symbolSelect.value = 'NIFTY';     els.symbolSelect.dispatchEvent(new Event('change')); break;
+      case 'b': els.symbolSelect.value = 'BANKNIFTY'; els.symbolSelect.dispatchEvent(new Event('change')); break;
+      case 'f': els.symbolSelect.value = 'FINNIFTY';  els.symbolSelect.dispatchEvent(new Event('change')); break;
+      case 'm': els.symbolSelect.value = 'MIDCPNIFTY';els.symbolSelect.dispatchEvent(new Event('change')); break;
+      case 'r': document.getElementById('refreshBtn')?.click(); break;
+      case 'a': {
+        const cb = document.getElementById('autoRefreshToggle');
+        if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); } break;
+      }
+      case 'h': document.querySelector('.tab[data-tab="home"]')?.click(); break;
+      case 'c': document.querySelector('.tab[data-tab="chain"]')?.click(); break;
+      case '?': _showKeyboardHelp(); break;
+    }
+  });
+
+  function _showKeyboardHelp() {
+    const existing = document.getElementById('kbdHelpOverlay');
+    if (existing) { existing.remove(); return; }
+    const ov = document.createElement('div');
+    ov.id = 'kbdHelpOverlay';
+    ov.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);'
+      + 'background:var(--panel);border:1px solid var(--border);border-radius:8px;'
+      + 'padding:20px 28px;z-index:9999;min-width:260px;box-shadow:0 8px 32px #0006;';
+    ov.innerHTML = `<div style="font-weight:700;margin-bottom:12px;">⌨ Keyboard Shortcuts</div>
+      <table style="font-size:11px;border-collapse:collapse;width:100%;">
+        ${[['N','Switch to Nifty'],['B','Switch to BankNifty'],['F','Switch to FinNifty'],
+           ['M','Switch to MidCap'],['R','Refresh chain'],['A','Toggle auto-refresh'],
+           ['H','Go to Home tab'],['C','Go to Chain tab'],['?','Toggle this help']
+          ].map(([k,v])=>`<tr><td style="padding:3px 12px 3px 0;"><kbd style="background:var(--panel-2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-family:monospace;">${k}</kbd></td><td style="color:var(--muted);">${v}</td></tr>`).join('')}
+      </table>
+      <div style="text-align:right;margin-top:10px;">
+        <button onclick="document.getElementById('kbdHelpOverlay').remove()" class="btn" style="font-size:10px;">Close</button>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+
   // ---------- tabs ----------
   els.tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -2863,6 +3232,9 @@
     state.sessionHistory = [];
     _chainRowState.clear();
     _touchedLevels.clear();
+    _customLevels.forEach(l => l.triggered = false);
+    _renderCustomLevelsList();
+    delete state._straddleBreakeven;
     delete _frozenOhlc[state.symbol];
     Object.assign(state_ohlc, {open:null,high:null,low:null,close:null,prev_close:null,source:null});
     ['ohlcH','ohlcL','ohlcC','ohlcO'].forEach(id => {
@@ -3034,7 +3406,8 @@
     } else {
       els.metaIvRank.textContent = '—';
     }
-    els.metaVix.textContent = (data.india_vix !== null && data.india_vix !== undefined) ? data.india_vix.toFixed(2) : '—';
+    if (data.india_vix != null) _updateVixTrend(data.india_vix);
+    else if (els.metaVix) els.metaVix.textContent = '—';
     els.metaDte.textContent = data.dte >= 0 ? data.dte : '?';
     els.metaTime.textContent = new Date().toLocaleTimeString('en-IN');
 
@@ -3051,6 +3424,8 @@
     renderStatCards(data);
     renderPivotLevels();
     _updateSessionOhlcDisplay();  // show today's live intraday O/H/L/C below prev-day row
+    _renderGreeksCard(data);      // ATM Greeks card in Option Chain tab
+    _renderStraddleBreakeven();   // update breakeven state for pivot bar overlay
 
     // ─── Determine which tab is currently active ──────────────────────────
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -3408,6 +3783,16 @@
         alertLevelTouch(label, price, polarity);
       }
     }
+    // Also check custom price levels
+    for (const lvl of _customLevels) {
+      if (lvl.triggered || !lvl.price) continue;
+      const distPct = Math.abs(spot - lvl.price) / lvl.price;
+      if (distPct < TOLERANCE_PCT) {
+        lvl.triggered = true;
+        _renderCustomLevelsList();
+        alertLevelTouch(`📌 ${lvl.label}`, lvl.price, spot >= lvl.price ? 'r' : 's');
+      }
+    }
     if (closest) {
       console.log(`[touch] spot=${spot} closest level: ${closest[0]}=${closest[1]} `
         + `(${(closest[2]*100).toFixed(3)}% away, need <${TOLERANCE_PCT*100}%)`);
@@ -3485,6 +3870,14 @@
     ].filter(([, p]) => p != null && isFinite(p));
 
     checkLevelTouches(levels, spot);
+
+    // Append straddle breakeven markers if available
+    const be = state._straddleBreakeven;
+    if (be) {
+      levels.push([`BE↑ ±${fmtInt(be.premium)}`, be.up, 'r']);
+      levels.push([`BE↓ ±${fmtInt(be.premium)}`, be.down, 's']);
+    }
+
     document.getElementById('pivotBars').innerHTML = renderLevelBars(levels, spot, 'pivot');
   }
   function renderLevelBars(levels, spot, type) {
@@ -3513,7 +3906,7 @@
           <span class="level-bar-dist" style="color:${distColor};">${distStr}</span>
         </div>
         <div class="level-bar-track">
-          <div class="level-bar-fill ${fillClass}" style="width:${fillPct.toFixed(1)}%"></div>
+          <div class="level-bar-fill ${fillClass}${label.startsWith('BE') ? ' be-line' : ''}" style="width:${fillPct.toFixed(1)}%"></div>
           <div class="level-bar-spot" style="left:${spotPct.toFixed(1)}%"></div>
         </div>
       </div>`;
@@ -6257,6 +6650,7 @@
     // Update expand button label
     const expandBtn = document.getElementById('niftyExpandBtn');
     if (expandBtn) expandBtn.textContent = niftyState.expanded ? '⤡ Top 10' : `⤢ All ${sorted.length}`;
+    _renderBreadthBar();
   }
 
   function _niftySetSort(col) {
