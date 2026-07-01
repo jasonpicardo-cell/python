@@ -65,8 +65,11 @@ ENDPOINTS
 from __future__ import annotations
 
 import argparse
+import csv as _csv_mod
+import io as _io_mod
 import json
 import sys
+import threading
 import time
 import concurrent.futures
 from dataclasses import asdict
@@ -136,6 +139,61 @@ _SHARED_FETCHER_MAX_AGE = 270  # seconds — NSE cookies typically expire in ~5 
 # separately with a longer TTL so we're not re-fetching it on every poll.
 VIX_CACHE_TTL_SECONDS = 15.0
 _vix_cache: dict = {"value": None, "fetched_at": 0.0}
+
+# ── Bhavcopy disk cache ──────────────────────────────────────────────────────
+# NSE's archive CSVs are immutable once published, so caching them to disk
+# is safe indefinitely — we never need to re-download a past date's file.
+from pathlib import Path as _Path
+_BHAVCOPY_DIR = _Path(__file__).parent / "nse_data_cache" / "bhavcopy"
+_BHAVCOPY_DIR.mkdir(parents=True, exist_ok=True)
+
+_BHAV_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/120.0.0.0 Safari/537.36"),
+    "Accept": "text/csv,*/*",
+}
+
+def _bhavcopy_for_date(target_date, fetcher_session) -> str | None:
+    """Return bhavcopy CSV text for target_date from cache, or fetch + cache it."""
+    from datetime import date as _d
+    ddmmyyyy = target_date.strftime("%d%m%Y")
+    cache_file = _BHAVCOPY_DIR / f"{ddmmyyyy}.csv"
+    if cache_file.exists():
+        return cache_file.read_text(encoding="utf-8")
+    url = (f"https://archives.nseindia.com/content/indices/"
+           f"ind_close_all_{ddmmyyyy}.csv")
+    try:
+        r = fetcher_session.get(url, headers=_BHAV_HEADERS, timeout=10)
+        if r.status_code == 200 and r.text.strip():
+            cache_file.write_text(r.text, encoding="utf-8")
+            return r.text
+    except Exception:
+        pass
+    return None
+
+def _parse_bhavcopy_row(csv_text: str, name_aliases: list[str]) -> dict | None:
+    """Extract O/H/L/C for one index from a bhavcopy CSV text blob."""
+    reader = _csv_mod.DictReader(_io_mod.StringIO(csv_text))
+    for row in reader:
+        row_name = (row.get("Index Name") or "").strip().upper()
+        if any(row_name == a.upper() for a in name_aliases):
+            def _bv(*keys):
+                for k in keys:
+                    v = row.get(k, "")
+                    if v:
+                        try:
+                            return float(str(v).replace(",", "").strip())
+                        except ValueError:
+                            continue
+                return 0.0
+            O = _bv("Open Index Value", "Open")
+            H = _bv("High Index Value", "High")
+            L = _bv("Low Index Value", "Low")
+            C = _bv("Closing Index Value", "Close", "Close Index Value")
+            if H > L > 0 and C > 0:
+                return {"O": O or C, "H": H, "L": L, "C": C}
+    return None
 
 
 def _get_india_vix(fetcher: NSESession) -> float | None:
@@ -326,6 +384,7 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         "expiries_data": expiries_data,
         "strategies": [asdict(s) for s in strategy_list],
         "india_vix": india_vix,
+        "session_ohlc": _session_ohlc.get(symbol.upper(), {}),
     }
 
     snapshot = {
@@ -570,18 +629,11 @@ def _fetch_prev_day_ohlc(symbol: str, verbose: bool = True) -> dict:
     except Exception as e:
         _log(f"src0 CSV: exception {e}")
 
-    # ── 0.5 NSE bhavcopy archive (ind_close_all_*.csv) ────────────────────
-    # NSE publishes a single CSV after each market close containing EVERY
-    # index's official EOD Open/High/Low/Close. This is a static archive
-    # file (archives.nseindia.com), NOT a cookie-gated JSON API — it doesn't
-    # need session warm-up and isn't subject to the same rate-limiting that
-    # blocks /api/historical/indicesHistory. This is the single most
-    # reliable source for genuine previous-day OHLC.
+    # ── 0.5 NSE bhavcopy archive ──────────────────────────────────────────────
+    # Static archive CSV — no cookies needed, now cached to disk so the file
+    # is only downloaded once per calendar day, not on every /api/ohlc call.
     if symbol in index_map:
         _, idx_name = index_map[symbol]
-        # Candidate names as they may appear in NSE's "Index Name" column —
-        # exact casing/spacing in the published CSV isn't publicly fixed,
-        # so we try several plausible variants per index.
         name_aliases = {
             "NIFTY":      ["NIFTY 50", "Nifty 50"],
             "BANKNIFTY":  ["NIFTY BANK", "Nifty Bank"],
@@ -590,51 +642,19 @@ def _fetch_prev_day_ohlc(symbol: str, verbose: bool = True) -> dict:
             "MIDCPNIFTY": ["NIFTY MID SELECT", "Nifty Mid Select",
                            "NIFTY MIDCAP SELECT", "Nifty Midcap Select"],
         }.get(symbol, [idx_name])
-
-        bhav_headers = {
-            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/120.0.0.0 Safari/537.36"),
-            "Accept": "text/csv,*/*",
-        }
-        for _delta in range(1, 11):  # walk back up to 10 calendar days
+        for _delta in range(1, 11):
             _target = date.today() - timedelta(days=_delta)
-            _ddmmyyyy = _target.strftime("%d%m%Y")
-            _url = f"https://archives.nseindia.com/content/indices/ind_close_all_{_ddmmyyyy}.csv"
             try:
-                _rb = fetcher.session.get(_url, headers=bhav_headers, timeout=10)
-                if _rb.status_code != 200 or not _rb.text.strip():
-                    continue  # no file for this date (weekend/holiday) — try one day earlier
-                import csv as _csv, io as _io
-                _reader = _csv.DictReader(_io.StringIO(_rb.text))
-                _matched_row = None
-                for _row in _reader:
-                    _row_name = (_row.get("Index Name") or "").strip()
-                    if any(_row_name.upper() == a.upper() for a in name_aliases):
-                        _matched_row = _row
-                        break
-                if not _matched_row:
-                    _log(f"src0.5 bhavcopy {_target}: file found but '{idx_name}' "
-                         f"not in it (checked {_ddmmyyyy})")
+                csv_text = _bhavcopy_for_date(_target, fetcher.session)
+                if not csv_text:
                     continue
-                def _bv(*keys):
-                    for k in keys:
-                        v = _matched_row.get(k)
-                        if v:
-                            try:
-                                return float(str(v).replace(",", "").strip())
-                            except ValueError:
-                                continue
-                    return 0.0
-                Ob = _bv("Open Index Value", "Open")
-                Hb = _bv("High Index Value", "High")
-                Lb = _bv("Low Index Value", "Low")
-                Cb = _bv("Closing Index Value", "Close", "Close Index Value")
-                if Hb > Lb > 0 and Cb > 0:
-                    _log(f"src0.5 bhavcopy {_target}: OK  H={Hb} L={Lb} C={Cb}")
-                    return _ohlc(Ob or Cb, Hb, Lb, Cb, "bhavcopy_eod")
-                _log(f"src0.5 bhavcopy {_target}: matched row but invalid values "
-                     f"O={Ob} H={Hb} L={Lb} C={Cb} raw={dict(_matched_row)}")
+                row = _parse_bhavcopy_row(csv_text, name_aliases)
+                if not row:
+                    _log(f"src0.5 bhavcopy {_target}: file OK but '{idx_name}' not found")
+                    continue
+                Ob, Hb, Lb, Cb = row["O"], row["H"], row["L"], row["C"]
+                _log(f"src0.5 bhavcopy {_target}: OK  H={Hb} L={Lb} C={Cb}")
+                return _ohlc(Ob, Hb, Lb, Cb, "bhavcopy_eod")
             except Exception as e:
                 _log(f"src0.5 bhavcopy {_target}: exception {e}")
         _log(f"src0.5 bhavcopy: no usable file found in last 10 days for {idx_name}")
@@ -826,81 +846,133 @@ _INDEX_CONFIG: dict[str, dict] = {
         "nse_names": ["NIFTY 50", "Nifty 50"],
         "all_indices_name": "NIFTY 50",
         "title": "Nifty 50",
-        # Full 50-constituent list. Weights are APPROXIMATE free-float
-        # market-cap percentages and drift over time — NSE rebalances the
-        # index quarterly (Mar/Jun/Sep/Dec). These are only used as a
-        # fallback for "points contributed" estimation when live traded-
-        # value data isn't available; the actual displayed price always
-        # comes from a live fetch (CSV/option-chain), never from this list.
+        # Approximate free-float market-cap weights (%). Normalised at
+        # calculation time, so the exact sum does not need to be 100.
+        # NSE rebalances quarterly (Mar/Jun/Sep/Dec).
         "fallback_weights": [
-            ("HDFCBANK", 12.5), ("RELIANCE", 9.5), ("ICICIBANK", 8.8),
-            ("INFY", 6.0), ("TCS", 4.5), ("BHARTIARTL", 4.2),
-            ("ITC", 3.9), ("LT", 3.5), ("KOTAKBANK", 3.3), ("AXISBANK", 3.1),
-            ("SBIN", 3.0), ("BAJFINANCE", 2.2), ("HINDUNILVR", 2.1),
-            ("ASIANPAINT", 1.8), ("MARUTI", 1.8), ("M&M", 1.7),
-            ("SUNPHARMA", 1.7), ("TATAMOTORS", 1.6), ("NTPC", 1.5),
-            ("TITAN", 1.5), ("ULTRACEMCO", 1.4), ("ONGC", 1.3),
-            ("ADANIENT", 1.3), ("WIPRO", 1.2), ("POWERGRID", 1.2),
-            ("BAJAJFINSV", 1.1), ("NESTLEIND", 1.1), ("COALINDIA", 1.1),
-            ("JSWSTEEL", 1.0), ("TATASTEEL", 1.0), ("HCLTECH", 1.0),
-            ("INDUSINDBK", 1.0), ("GRASIM", 0.9), ("ADANIPORTS", 0.9),
-            ("TECHM", 0.9), ("CIPLA", 0.9), ("DRREDDY", 0.8),
-            ("EICHERMOT", 0.8), ("BRITANNIA", 0.8), ("APOLLOHOSP", 0.8),
-            ("DIVISLAB", 0.7), ("HEROMOTOCO", 0.7), ("BAJAJ-AUTO", 0.7),
-            ("SBILIFE", 0.7), ("HDFCLIFE", 0.7), ("SHRIRAMFIN", 0.7),
-            ("TATACONSUM", 0.6), ("LTIM", 0.6), ("UPL", 0.5), ("BPCL", 0.5),
+            ("HDFCBANK", 11.5), ("RELIANCE", 9.2),  ("ICICIBANK", 8.5),
+            ("INFY",      5.8), ("TCS",      4.3),  ("BHARTIARTL",4.0),
+            ("ITC",       3.7), ("LT",       3.4),  ("KOTAKBANK", 3.2), ("AXISBANK", 3.0),
+            ("SBIN",      2.9), ("BAJFINANCE",2.1), ("HINDUNILVR",2.0),
+            ("ASIANPAINT",1.7), ("MARUTI",   1.7),  ("M&M",       1.6),
+            ("SUNPHARMA", 1.6), ("TATAMOTORS",1.5), ("NTPC",      1.4),
+            ("TITAN",     1.4), ("ULTRACEMCO",1.3), ("ONGC",      1.2),
+            ("ADANIENT",  1.2), ("WIPRO",    1.1),  ("POWERGRID", 1.1),
+            ("BAJAJFINSV",1.0), ("NESTLEIND",1.0),  ("COALINDIA", 1.0),
+            ("JSWSTEEL",  0.95),("TATASTEEL",0.95), ("HCLTECH",   0.95),
+            ("INDUSINDBK",0.9), ("GRASIM",   0.85), ("ADANIPORTS",0.85),
+            ("TECHM",     0.85),("CIPLA",    0.85), ("DRREDDY",   0.75),
+            ("EICHERMOT", 0.75),("BRITANNIA",0.75), ("APOLLOHOSP",0.75),
+            ("DIVISLAB",  0.65),("HEROMOTOCO",0.65),("BAJAJ-AUTO",0.65),
+            ("SBILIFE",   0.65),("HDFCLIFE", 0.65), ("SHRIRAMFIN",0.65),
+            ("TATACONSUM",0.6), ("LTIM",     0.55), ("UPL",       0.5), ("BPCL",0.5),
         ],
     },
     "BANKNIFTY": {
         "nse_names": ["NIFTY BANK", "Nifty Bank"],
         "all_indices_name": "NIFTY BANK",
         "title": "Bank Nifty",
-        # Bank Nifty has exactly 12 official constituents — this list is
-        # already complete, not a fallback subset.
         "fallback_weights": [
-            ("HDFCBANK", 28.5), ("ICICIBANK", 23.1), ("KOTAKBANK", 12.1),
-            ("AXISBANK", 9.8), ("SBIN", 7.6), ("INDUSINDBK", 5.2),
-            ("BANDHANBNK", 3.5), ("FEDERALBNK", 2.8), ("IDFCFIRSTB", 2.5),
-            ("PNB", 2.1), ("AUBANK", 1.5), ("CUB", 0.9),
+            ("HDFCBANK", 28.8), ("ICICIBANK", 23.4), ("KOTAKBANK", 12.3),
+            ("AXISBANK",  9.9), ("SBIN",       7.8), ("INDUSINDBK", 5.0),
+            ("BANDHANBNK",3.3), ("FEDERALBNK", 2.7), ("IDFCFIRSTB", 2.4),
+            ("PNB",       2.2), ("AUBANK",     1.5), ("CUB",        0.7),
         ],
     },
     "FINNIFTY": {
         "nse_names": ["NIFTY FIN SERVICE", "Nifty Financial Services"],
         "all_indices_name": "NIFTY FIN SERVICE",
         "title": "Fin Nifty",
-        # Full ~20-constituent list (Nifty Financial Services). Weights
-        # approximate — see NIFTY note above.
         "fallback_weights": [
-            ("HDFCBANK", 18.5), ("ICICIBANK", 16.8), ("KOTAKBANK", 8.5),
-            ("AXISBANK", 7.2), ("SBIN", 6.1), ("BAJFINANCE", 5.8),
-            ("BAJAJFINSV", 5.0), ("HDFCLIFE", 4.2), ("SBILIFE", 3.9),
-            ("ICICIPRULI", 3.1), ("ICICIGI", 2.9), ("SHRIRAMFIN", 2.7),
-            ("CHOLAFIN", 2.4), ("PFC", 2.0), ("RECLTD", 1.9),
-            ("MUTHOOTFIN", 1.7), ("LICHSGFIN", 1.5), ("PNBHOUSING", 1.3),
-            ("INDUSINDBK", 1.2), ("IDFCFIRSTB", 1.1),
+            ("HDFCBANK", 18.2), ("ICICIBANK", 16.5), ("KOTAKBANK",  8.3),
+            ("AXISBANK",  7.0), ("SBIN",       6.0), ("BAJFINANCE", 5.6),
+            ("BAJAJFINSV",4.9), ("HDFCLIFE",   4.1), ("SBILIFE",    3.8),
+            ("ICICIPRULI",3.0), ("ICICIGI",    2.8), ("SHRIRAMFIN", 2.6),
+            ("CHOLAFIN",  2.3), ("PFC",        2.0), ("RECLTD",     1.9),
+            ("MUTHOOTFIN",1.7), ("LICHSGFIN",  1.4), ("PNBHOUSING", 1.2),
+            ("INDUSINDBK",1.2), ("IDFCFIRSTB", 1.0),
         ],
     },
     "MIDCPNIFTY": {
         "nse_names": ["NIFTY MID SELECT", "Nifty Midcap Select"],
         "all_indices_name": "NIFTY MID SELECT",
         "title": "MidCap Select",
-        # Full ~25-constituent list (Nifty Midcap Select). Midcap
-        # composition churns more frequently than large-cap indices —
-        # confidence here is lower than the NIFTY/BANKNIFTY/FINNIFTY
-        # lists above. A few names may have rotated since this was written.
         "fallback_weights": [
-            ("PERSISTENT", 6.8), ("ZOMATO", 6.2), ("POLYCAB", 5.4),
-            ("JSWENERGY", 5.1), ("CANBK", 4.7), ("BHEL", 4.3),
-            ("LICHSGFIN", 4.0), ("ABCAPITAL", 3.8), ("MRF", 3.5),
-            ("MFSL", 3.2), ("INDHOTEL", 3.0), ("COFORGE", 2.9),
-            ("AUROPHARMA", 2.7), ("PAGEIND", 2.5), ("BHARATFORG", 2.4),
-            ("GODREJPROP", 2.3), ("SUPREMEIND", 2.2), ("INDUSTOWER", 2.1),
-            ("TATACOMM", 2.0), ("VOLTAS", 1.9), ("BALKRISIND", 1.8),
-            ("FEDERALBNK", 1.7), ("MAXHEALTH", 1.6), ("PIIND", 1.5),
+            ("PERSISTENT", 6.5), ("ZOMATO",    6.0), ("POLYCAB",   5.2),
+            ("JSWENERGY",  4.9), ("CANBK",     4.5), ("BHEL",      4.2),
+            ("LICHSGFIN",  3.9), ("ABCAPITAL", 3.7), ("MRF",       3.5),
+            ("MFSL",       3.1), ("INDHOTEL",  3.0), ("COFORGE",   2.9),
+            ("AUROPHARMA", 2.7), ("PAGEIND",   2.5), ("BHARATFORG",2.4),
+            ("GODREJPROP", 2.3), ("SUPREMEIND",2.2), ("INDUSTOWER",2.1),
+            ("TATACOMM",   2.0), ("VOLTAS",    1.9), ("BALKRISIND",1.8),
+            ("FEDERALBNK", 1.7), ("MAXHEALTH", 1.6), ("PIIND",     1.5),
             ("OBEROIRLTY", 1.4),
         ],
     },
 }
+
+
+def _fetch_prev_week_ohlc(symbol: str) -> dict | None:
+    """Return the previous COMPLETE trading week's O/H/L/C from bhavcopy cache.
+
+    'Previous complete week' = Mon–Fri that ended before today.
+    O = Monday's open, H = week's highest H, L = week's lowest L, C = Friday's close.
+    Uses cached bhavcopy files — no new network calls if the week is already cached.
+    """
+    from datetime import date, timedelta
+
+    index_map_local = {
+        "NIFTY":      ("NIFTY 50",          ["NIFTY 50", "Nifty 50"]),
+        "BANKNIFTY":  ("NIFTY BANK",        ["NIFTY BANK", "Nifty Bank"]),
+        "FINNIFTY":   ("NIFTY FIN SERVICE", ["NIFTY FIN SERVICE", "Nifty Fin Service",
+                                              "NIFTY FINANCIAL SERVICES"]),
+        "MIDCPNIFTY": ("NIFTY MID SELECT",  ["NIFTY MID SELECT", "Nifty Mid Select",
+                                              "NIFTY MIDCAP SELECT"]),
+    }
+    if symbol not in index_map_local:
+        return None
+    _, aliases = index_map_local[symbol]
+
+    global _shared_fetcher
+    fetcher = _shared_fetcher
+    if not fetcher:
+        return None
+    sess = fetcher.session
+
+    today = date.today()
+    # Walk back to find the most recent Friday that is at least 1 day before today
+    friday = today - timedelta(days=1)
+    while friday.weekday() != 4:   # 4 = Friday
+        friday -= timedelta(days=1)
+    monday = friday - timedelta(days=4)
+
+    week_rows: list[dict] = []
+    for d in (monday + timedelta(days=i) for i in range(5)):
+        if d.weekday() >= 5:   # skip Saturday/Sunday
+            continue
+        csv_text = _bhavcopy_for_date(d, sess)
+        if not csv_text:
+            continue
+        row = _parse_bhavcopy_row(csv_text, aliases)
+        if row:
+            week_rows.append({**row, "date": d})
+
+    if not week_rows:
+        return None
+
+    O = week_rows[0]["O"]
+    H = max(r["H"] for r in week_rows)
+    L = min(r["L"] for r in week_rows)
+    C = week_rows[-1]["C"]
+    week_start = week_rows[0]["date"].strftime("%d %b")
+    week_end   = week_rows[-1]["date"].strftime("%d %b")
+    return {
+        "symbol": symbol, "open": round(O, 2), "high": round(H, 2),
+        "low": round(L, 2), "close": round(C, 2),
+        "source": "bhavcopy_week",
+        "date": f"{week_start}–{week_end}",
+        "days": len(week_rows),
+    }
 
 
 def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
@@ -1124,11 +1196,26 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
     total_tv = sum(float(s.get("totalTradedValue") or 0) for s in stocks) or 1.0
     use_fixed = total_tv < 100   # individual fetch fallback
 
+    # Pre-compute raw weights, then NORMALISE to sum to exactly 100%.
+    # This is the critical fix: hardcoded fallback_weights are approximate
+    # and almost never sum to exactly 100 (e.g. NIFTY hardcoded weights
+    # summed to 105.1%, inflating every pts_contributed by 5%). Normalising
+    # ensures the sum of all pts_contributed ≈ actual index point change.
+    raw_weights: dict[str, float] = {}
+    for s in stocks:
+        stock_sym = s.get("symbol", "")
+        if use_fixed:
+            raw_weights[stock_sym] = _weight_map.get(stock_sym, 0.5)
+        else:
+            raw_weights[stock_sym] = float(s.get("totalTradedValue") or 0) / total_tv * 100
+
+    weight_total = sum(raw_weights.values()) or 1.0
+    norm_weights = {k: v / weight_total * 100 for k, v in raw_weights.items()}
+
     result = []
     for rank, s in enumerate(stocks, 1):
         stock_sym = s.get("symbol", "")
-        wt  = (_weight_map.get(stock_sym, 2.0) if use_fixed
-               else (float(s.get("totalTradedValue") or 0) / total_tv * 100))
+        wt  = norm_weights.get(stock_sym, 0.0)
         pct = float(s.get("pChange") or 0)
         pts = round(pct / 100 * wt / 100 * index_value, 2)
         result.append({
@@ -1141,6 +1228,7 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
             "volume":     int(float(s.get("totalTradedVolume") or 0)),
             "weight_est": round(wt, 2),
             "pts_contributed": pts,
+            "pts_abs": abs(pts),
         })
 
     data = {
@@ -1435,6 +1523,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"symbol": symbol, "sources": results})
             except Exception as e:
                 self._send_json({"error": str(e), "partial_results": results})
+            return
+
+        if parsed.path == "/api/weekly-ohlc":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            try:
+                data = _fetch_prev_week_ohlc(symbol)
+                if data:
+                    self._send_json(data)
+                else:
+                    self._send_json({"error": f"No weekly OHLC available for {symbol}. "
+                                              "Bhavcopy files may not be cached yet."})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)})
             return
 
         if parsed.path == "/api/ohlc":
@@ -2122,6 +2223,28 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)
 
 
+def _start_session_rewarm_thread() -> None:
+    """Background thread that re-warms the NSE session every 25 minutes.
+    NSE's cookies typically expire after ~30 minutes of inactivity — re-warming
+    proactively prevents the silent degradation where all API calls start 403ing
+    mid-session without any obvious error until the server is restarted.
+    """
+    def _loop() -> None:
+        while True:
+            time.sleep(25 * 60)
+            global _shared_fetcher, _shared_fetcher_ts
+            fetcher = _shared_fetcher
+            if fetcher and getattr(fetcher, "_warmed", False):
+                try:
+                    fetcher._warm_up()
+                    _shared_fetcher_ts = time.time()
+                    print("[i] Background session re-warm: OK")
+                except Exception as e:  # noqa: BLE001
+                    print(f"[!] Background session re-warm failed (non-fatal): {e}")
+    t = threading.Thread(target=_loop, daemon=True, name="nse-session-rewarm")
+    t.start()
+
+
 def main():
     ap = argparse.ArgumentParser(description="Local API server for the NSE options dashboard")
     ap.add_argument("--port", type=int, default=8765)
@@ -2140,11 +2263,15 @@ def main():
     )
     print("[i] F&O movers background worker started (updates every 90s after first chain fetch)")
 
+    # Start session re-warm thread — prevents silent cookie expiry mid-session
+    _start_session_rewarm_thread()
+
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[i] NSE chain server running at http://{args.host}:{args.port}")
     print(f"[i] Try it: http://{args.host}:{args.port}/api/chain?symbol=NIFTY")
     print(f"[i] Telegram alerts: {alert_status}")
     print(f"[i] .jsonl history writes disabled — prev-day OHLC always fetched live from NSE")
+    print(f"[i] Bhavcopy cache: {_BHAVCOPY_DIR}")
     print("[i] Now open nse_dashboard.html in your browser. Ctrl+C to stop.")
     try:
         server.serve_forever()

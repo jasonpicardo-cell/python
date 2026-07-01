@@ -1282,6 +1282,10 @@
                   <option value="demark">DeMark</option>
                   <option value="classic">Classic</option>
                 </select>
+                <select id="pivotPeriodSelect" class="level-select" title="Daily = prev day OHLC · Weekly = prev complete week OHLC">
+                  <option value="daily" selected>Daily</option>
+                  <option value="weekly">Weekly</option>
+                </select>
                 <span class="level-source" id="pivotSource"></span>
               </div>
               <div class="alert-controls">
@@ -1312,7 +1316,17 @@
               <label class="ohlc-lbl">O <input type="number" id="ohlcO" class="ohlc-inp" placeholder="Open (Woodie/DM)" step="0.05"></label>
               <button class="btn" id="ohlcApplyBtn" style="font-size:10px;padding:3px 10px;">Apply</button>
             </div>
+            <!-- Session OHLC row — today's live intraday range -->
+            <div id="sessionOhlcRow" style="display:none;font-size:10.5px;color:var(--muted);padding:2px 6px;display:flex;gap:12px;align-items:center;border-top:1px solid var(--border);"></div>
             <div class="level-bars-wrap" id="pivotBars"></div>
+            <!-- Alert history — fills when pivot levels are touched -->
+            <div id="alertHistoryPanel" style="display:none;">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
+                <span>🔔 Touch History</span>
+                <button id="clearAlertHistoryBtn" class="btn" style="font-size:9px;padding:1px 7px;">Clear</button>
+              </div>
+              <div id="alertHistoryList" style="max-height:120px;overflow-y:auto;padding:0 6px 4px;"></div>
+            </div>
           </div>
 
         </div><!-- /.home-left -->
@@ -1325,7 +1339,7 @@
               <div style="display:flex;align-items:center;gap:8px;">
                 <span class="level-source" id="niftyWidgetTime"></span>
                 <label style="font-size:10px;color:var(--muted-2);display:flex;align-items:center;gap:3px;cursor:pointer;">
-                  <input type="checkbox" id="niftyAutoRefresh" checked> Auto (5s)
+                  <input type="checkbox" id="niftyAutoRefresh" checked> Auto (30s)
                 </label>
                 <button class="btn" id="niftyExpandBtn" style="font-size:10px;padding:3px 9px;">⤢ All</button>
                 <button class="btn" id="niftyRefreshBtn" style="font-size:10px;padding:3px 9px;">↻</button>
@@ -2700,6 +2714,87 @@
     return true;
   }
 
+  // ---------- weekly pivot fetch ----------------------------------------
+  async function fetchWeeklyOhlcForPivots() {
+    const srcEl = document.getElementById('pivotSource');
+    if (srcEl) { srcEl.textContent = '· Fetching weekly…'; srcEl.style.color = 'var(--muted)'; }
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const resp = await fetch(`${base}/api/weekly-ohlc?symbol=${state.symbol}`,
+                               { signal: AbortSignal.timeout(12000) });
+      const data = await resp.json();
+      if (data.error || !data.high) {
+        if (srcEl) { srcEl.textContent = '· Weekly N/A — ' + (data.error || 'no data'); srcEl.style.color = 'var(--gold)'; }
+        return;
+      }
+      // Inject as state_ohlc and freeze so renderPivotLevels uses it
+      Object.assign(state_ohlc, { high: data.high, low: data.low, close: data.close,
+                                  open: data.open, source: 'bhavcopy_week' });
+      _frozenOhlc[state.symbol] = { H: data.high, L: data.low, C: data.close,
+                                    O: data.open, source: 'bhavcopy_week',
+                                    date: new Date().toDateString() };
+      if (srcEl) {
+        srcEl.textContent = `· Week ${data.date} · H:${fmtInt(data.high)} L:${fmtInt(data.low)} C:${fmtInt(data.close)}`;
+        srcEl.style.color = 'var(--accent)';
+      }
+      renderPivotLevels();
+    } catch (e) {
+      if (srcEl) { srcEl.textContent = '· Weekly fetch failed'; srcEl.style.color = 'var(--neg)'; }
+    }
+  }
+
+  // ---------- session OHLC display --------------------------------------
+  // Shows today's live intraday O/H/L/C below the prev-day override row.
+  // Data comes from state.lastData.session_ohlc which the server populates
+  // via _session_ohlc (accumulated from every chain fetch during the day).
+  function _updateSessionOhlcDisplay() {
+    const row = document.getElementById('sessionOhlcRow');
+    if (!row) return;
+    const so = state.lastData?.session_ohlc;
+    if (!so || !so.open) { row.style.display = 'none'; return; }
+    row.style.display = 'flex';
+    const spot = state.lastData?.underlying_value || 0;
+    const abovePrev = so.close > (so.open || 0);
+    row.innerHTML =
+      `<span style="color:var(--muted);font-size:10px;">Today</span>` +
+      `<span style="color:var(--muted-2);">O:<b style="color:var(--text);">${fmtInt(so.open)}</b></span>` +
+      `<span style="color:var(--pos);">H:<b>${fmtInt(so.high)}</b></span>` +
+      `<span style="color:var(--neg);">L:<b>${fmtInt(so.low)}</b></span>` +
+      `<span style="color:var(--muted-2);">C:<b style="color:var(--text);">${fmtInt(so.close)}</b></span>` +
+      `<span style="font-size:9px;color:var(--muted-2);">range ${fmtInt(so.high - so.low)} pts</span>`;
+  }
+
+  // ---------- alert history ------------------------------------------------
+  const _alertHistory = [];   // { time, label, price, polarity }
+  function _pushAlertHistory(label, price, polarity) {
+    const now = new Date();
+    const t = now.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    _alertHistory.unshift({ time: t, label, price, polarity });
+    if (_alertHistory.length > 30) _alertHistory.pop();
+    _renderAlertHistory();
+  }
+  function _renderAlertHistory() {
+    const panel = document.getElementById('alertHistoryPanel');
+    const list  = document.getElementById('alertHistoryList');
+    if (!list || !panel) return;
+    if (!_alertHistory.length) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    list.innerHTML = _alertHistory.map(h => {
+      const cls   = h.polarity === 'r' ? 'pos-txt' : 'neg-txt';
+      const arrow = h.polarity === 'r' ? '↑' : '↓';
+      return `<div style="display:flex;gap:8px;align-items:center;padding:2px 0;font-size:10.5px;border-bottom:1px solid var(--border);">
+        <span style="color:var(--muted-2);min-width:62px;">${h.time}</span>
+        <span class="${cls}" style="font-weight:700;">${arrow} ${escapeHtml(h.label)}</span>
+        <span style="color:var(--muted);">${fmtPrice(h.price)}</span>
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('clearAlertHistoryBtn')?.addEventListener('click', () => {
+    _alertHistory.length = 0;
+    _renderAlertHistory();
+    document.getElementById('alertHistoryPanel').style.display = 'none';
+  });
+
   // ---------- tabs ----------
   els.tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -2955,6 +3050,7 @@
 
     renderStatCards(data);
     renderPivotLevels();
+    _updateSessionOhlcDisplay();  // show today's live intraday O/H/L/C below prev-day row
 
     // ─── Determine which tab is currently active ──────────────────────────
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -3286,6 +3382,7 @@
     }
     _touchedLevels.add(key);
     console.log(`[touch] ALERTING for ${key} at price=${price}`);
+    _pushAlertHistory(label, price, polarity);   // ← add to history panel
     playAlert(polarity);
     _speakLevel(label, price);   // voice announcement if enabled
     const el = _levelTouchToastEl();
@@ -3325,7 +3422,7 @@
 
   function _tryFreeze() {
     const { high: H, low: L, close: C, open: O, source } = state_ohlc;
-    const isPrevDay = ['csv_eod', 'bhavcopy_eod', 'daily_chart', 'daily_history', 'history_daily', 'manual'].includes(source);
+    const isPrevDay = ['csv_eod', 'bhavcopy_eod', 'bhavcopy_week', 'daily_chart', 'daily_history', 'history_daily', 'manual'].includes(source);
     if (!isPrevDay || !H || !L || !C) return;
     const today = new Date().toDateString();
     const ex = _frozenOhlc[state.symbol];
@@ -6110,6 +6207,7 @@
     const sorted = _niftySorted();
     const display = niftyState.expanded ? sorted : sorted.slice(0, 10);
     const maxAbsPts = Math.max(...sorted.map(s => Math.abs(s.pts_contributed)), 1);
+    const maxAbsPct = Math.max(...sorted.map(s => Math.abs(s.pct_change)), 0.01);
 
     // Build header
     const headerCells = NIFTY_COLS.map(col => {
@@ -6119,22 +6217,33 @@
       return `<th class="${cls}" ${style} data-sort="${col.sort}">${col.label}</th>`;
     }).join('');
 
-    // Build rows
+    // Build rows — sparkline bars on both the % Chg and Pts ± columns
     const rows = display.map((s, i) => {
       const pctCls = s.pct_change >= 0 ? 'pos-txt' : 'neg-txt';
       const ptsCls = s.pts_contributed >= 0 ? 'pos-txt' : 'neg-txt';
       const pctSign = s.pct_change >= 0 ? '+' : '';
       const ptsSign = s.pts_contributed >= 0 ? '+' : '';
-      const barPct = (Math.abs(s.pts_contributed) / maxAbsPts * 72).toFixed(1);
-      const barClass = s.pts_contributed >= 0 ? 'pos' : 'neg';
-      const barStyle = s.pts_contributed >= 0 ? `right:0;width:${barPct}%` : `left:0;width:${barPct}%`;
+
+      // Pts bar — horizontal bar proportional to absolute pts vs max in list
+      const ptsPct = (Math.abs(s.pts_contributed) / maxAbsPts * 68).toFixed(1);
+      const ptsBarDir = s.pts_contributed >= 0 ? 'right:0' : 'left:0';
+      const ptsBarCls = s.pts_contributed >= 0 ? 'pos' : 'neg';
+
+      // Sparkline bar on % Chg — subtle background fill proportional to pct
+      const sBarW = (Math.abs(s.pct_change) / maxAbsPct * 100).toFixed(1);
+      const sBarBg = s.pct_change >= 0 ? 'rgba(46,204,143,0.12)' : 'rgba(255,93,108,0.12)';
+      const sBarDir = s.pct_change >= 0 ? 'right:0' : 'left:0';
+
       return `<tr>
         <td style="text-align:center;color:var(--muted-2);font-size:9px;">${i + 1}</td>
         <td style="font-weight:700;text-align:left;font-size:11.5px;">${escapeHtml(s.symbol)}</td>
         <td>${fmtPrice(s.ltp)}</td>
-        <td class="${pctCls}">${pctSign}${s.pct_change.toFixed(2)}%</td>
+        <td class="${pctCls}" style="position:relative;min-width:68px;">
+          <div style="position:absolute;top:0;${sBarDir};width:${sBarW}%;height:100%;background:${sBarBg};border-radius:2px;"></div>
+          <span style="position:relative;">${pctSign}${s.pct_change.toFixed(2)}%</span>
+        </td>
         <td class="pts-cell" style="position:relative;min-width:80px;">
-          <div class="pts-bar ${barClass}" style="${barStyle}"></div>
+          <div class="pts-bar ${ptsBarCls}" style="${ptsBarDir};width:${ptsPct}%"></div>
           <span class="${ptsCls}" style="position:relative;">${ptsSign}${Math.abs(s.pts_contributed).toFixed(1)}</span>
         </td>
       </tr>`;
@@ -6185,10 +6294,11 @@
     niftyState.timer = setInterval(() => {
       const homeActive = document.querySelector('.tab.active')?.dataset.tab === 'home';
       if (homeActive) fetchAndRenderNiftyConstituents();
-    }, 5000);
+    }, 30000);
   }
   document.getElementById('niftyAutoRefresh')?.addEventListener('change', _startNiftyAutoReload);
   _startNiftyAutoReload();
+
 
   // ====================================================================
   // PIVOT SCANNER — F&O Stocks
@@ -9243,6 +9353,16 @@
   );
 
   document.getElementById('pivotTypeSelect')?.addEventListener('change', renderPivotLevels);
+  document.getElementById('pivotPeriodSelect')?.addEventListener('change', () => {
+    // When switching to Weekly, fetch weekly OHLC from server
+    const period = document.getElementById('pivotPeriodSelect')?.value;
+    if (period === 'weekly') {
+      fetchWeeklyOhlcForPivots();
+    } else {
+      // Switch back to daily — re-run the normal daily fetch
+      fetchOhlcForPivots();
+    }
+  });
   // ── Alert controls wiring ─────────────────────────────────────────────
   // Persist sound type + duration across sessions
   (() => {
