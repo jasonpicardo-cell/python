@@ -522,6 +522,95 @@
   .home-left { display: flex; flex-direction: column; gap: 12px; }
   .home-right { display: flex; flex-direction: column; gap: 12px; }
 
+  /* ── Morning checklist ── */
+  .checklist-panel { background:var(--panel); border:1px solid var(--border);
+    border-radius:var(--radius); padding:8px 10px; margin-bottom:10px; }
+  .checklist-item { display:flex; align-items:center; gap:7px; padding:3px 0;
+    font-size:10.5px; border-bottom:1px solid var(--border); }
+  .checklist-item:last-child { border-bottom:none; }
+  .checklist-item input[type=checkbox] { width:13px; height:13px; cursor:pointer; }
+  .checklist-item.done { color:var(--muted); text-decoration:line-through; }
+  .checklist-progress { height:3px; background:var(--panel-2); border-radius:2px;
+    margin:6px 0 0; overflow:hidden; }
+  .checklist-progress-fill { height:100%; background:var(--pos); border-radius:2px;
+    transition:width .3s; }
+  /* ── Spot intraday sparkline ── */
+  .spot-spark-row { display:flex; align-items:center; gap:8px; font-size:10px;
+    padding:3px 0; }
+  /* ── Options flow timeline ── */
+  .flow-chart-wrap { background:var(--panel); border:1px solid var(--border);
+    border-radius:var(--radius); padding:8px 10px; margin-bottom:10px; }
+  /* ── Level confluence badge ── */
+  .conf-badge { display:inline-block; font-size:8px; font-weight:800;
+    background:var(--gold); color:#000; border-radius:3px; padding:0 3px;
+    margin-left:4px; vertical-align:middle; }
+  .conf-3 { background:var(--neg); color:#fff; }
+  .conf-4 { background:var(--neg); color:#fff; box-shadow:0 0 4px var(--neg); }
+  /* ── Session report modal ── */
+  #sessionReportModal { position:fixed; inset:0; z-index:99990; display:none;
+    background:rgba(0,0,0,.65); align-items:center; justify-content:center; }
+  #sessionReportModal.open { display:flex; }
+  .report-card { background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; padding:20px 24px; max-width:420px; width:90%;
+    box-shadow:0 12px 40px #0009; max-height:80vh; overflow-y:auto; }
+  .report-row { display:flex; justify-content:space-between; padding:4px 0;
+    border-bottom:1px solid var(--border); font-size:11px; }
+  .report-row:last-child { border-bottom:none; }
+  .report-label { color:var(--muted); }
+  /* ── Reversal signal confidence ── */
+  .conf-score { font-size:9px; color:var(--muted-2); margin-left:6px;
+    font-weight:700; }
+  .conf-score.high { color:var(--pos); }
+
+  /* ── CE/PE chain view toggle ── */
+  #chainTable.view-ce th:nth-child(n+6),
+  #chainTable.view-ce td:nth-child(n+6) { display:none; }
+  #chainTable.view-pe th:nth-child(-n+4),
+  #chainTable.view-pe td:nth-child(-n+4) { display:none; }
+  .view-toggle { display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .view-toggle button { padding:2px 8px; font-size:9px; background:var(--panel-2);
+    border:none; cursor:pointer; color:var(--muted); transition:background .15s; }
+  .view-toggle button.active { background:var(--accent); color:#fff; }
+  /* ── Staleness counter ── */
+  .stale-warn { color:var(--gold); }
+  .stale-err  { color:var(--neg); font-weight:700; }
+  /* ── Journal panel ── */
+  .journal-panel { background:var(--panel); border:1px solid var(--border);
+    border-radius:var(--radius); padding:8px 10px; margin-top:10px; }
+  .journal-panel textarea { width:100%; box-sizing:border-box; min-height:90px;
+    background:var(--panel-2); border:1px solid var(--border); border-radius:4px;
+    color:var(--text); font-size:11px; line-height:1.5; padding:6px 8px;
+    resize:vertical; font-family:inherit; margin-top:6px; }
+  .journal-panel textarea:focus { outline:none; border-color:var(--accent); }
+  .journal-footer { display:flex; align-items:center; gap:8px; margin-top:4px;
+    font-size:9px; color:var(--muted-2); }
+  /* ── Expiry calendar ── */
+  .expiry-cal { display:flex; gap:6px; flex-wrap:wrap; padding:6px 0;
+    font-size:9.5px; border-bottom:1px solid var(--border); margin-bottom:8px; }
+  .exp-pill { padding:2px 8px; border-radius:10px; border:1px solid var(--border);
+    cursor:default; white-space:nowrap; }
+  .exp-pill.current  { border-color:var(--gold); color:var(--gold); background:rgba(255,193,7,.08); }
+  .exp-pill.weekly   { border-color:var(--border); color:var(--muted); }
+  .exp-pill.monthly  { border-color:var(--accent); color:var(--accent); background:rgba(61,130,246,.07); }
+  .exp-pill .exp-dte { font-size:8px; opacity:.7; margin-left:3px; }
+  /* ── OI velocity badge ── */
+  .vel-badge { font-size:8px; font-weight:700; margin-left:3px; }
+  .vel-up  { color:var(--pos); }
+  .vel-dn  { color:var(--neg); }
+  /* ── Watchlist alert icon ── */
+  .wc-alert-btn { background:none; border:none; cursor:pointer; font-size:10px;
+    color:var(--muted); padding:0 2px; line-height:1; }
+  .wc-alert-btn.armed { color:var(--gold); }
+  /* ── Strike search ── */
+  .strike-search { width:70px; padding:2px 6px; background:var(--panel-2);
+    border:1px solid var(--border); border-radius:4px; color:var(--text);
+    font-size:10px; }
+  .strike-search:focus { outline:none; border-color:var(--accent); }
+  /* ── Stale cache banner ── */
+  .stale-cache-banner { background:rgba(255,193,7,.12); border:1px solid var(--gold);
+    border-radius:4px; padding:4px 10px; font-size:10px; color:var(--gold);
+    text-align:center; margin-bottom:8px; display:none; }
+
   /* ── Help icons + tooltip ── */
   .hi { display:inline-flex; align-items:center; justify-content:center;
     width:13px; height:13px; border-radius:50%;
@@ -1333,6 +1422,7 @@
         <datalist id="fnoSymbolList"></datalist>
       </div>
     </div>
+    <span style="font-size:9px;color:var(--muted);"><i class="hi" data-h="lot-size">i</i></span><div id="lotSizeStrip" style="font-size:9px;color:var(--muted-2);padding:1px 0 3px;letter-spacing:.02em;"></div>
 
     <div class="controls">
       <select id="expirySelect" title="Expiry"><option>Loading…</option></select>
@@ -1351,7 +1441,7 @@
     <span class="ticker-symbol" id="tickerSymbol">NIFTY</span>
     <span class="ticker-spot num" id="tickerSpot">—</span>
     <span class="ticker-meta">
-      Expiry <b id="metaExpiry">—</b> &nbsp;·&nbsp; <b id="metaDte">—</b> DTE &nbsp;·&nbsp; ⏱ <b id="metaCountdown">—</b> &nbsp;·&nbsp; IV <b id="metaAtmIv">—</b> &nbsp; IVR <b id="metaIvRank">—</b> &nbsp;·&nbsp; VIX <b id="metaVix">—</b> &nbsp;·&nbsp; Updated <b id="metaTime">—</b>
+      Expiry <b id="metaExpiry">—</b> &nbsp;·&nbsp; <b id="metaDte">—</b> DTE &nbsp;·&nbsp; ⏱ <b id="metaCountdown">—</b> &nbsp;·&nbsp; IV <b id="metaAtmIv">—</b> &nbsp; IVR <b id="metaIvRank">—</b> &nbsp;·&nbsp; VIX <b id="metaVix">—</b> &nbsp;·&nbsp; Updated<i class="hi" data-h="staleness-counter">i</i> <b id="metaTime">—</b>
       <i class="hi" data-h="session-phase" style="vertical-align:middle;">i</i><span id="sessionPhaseBadge" class="phase-badge" style="display:none;"></span>
       <i class="hi" data-h="gift-nifty" style="vertical-align:middle;margin-left:4px;">i</i><span id="giftNiftyBadge" style="font-size:9.5px;color:var(--muted);margin-left:2px;"></span>
     </span>
@@ -1368,8 +1458,23 @@
     <button class="tab" data-tab="paper">Paper Trades</button>
     <button class="tab" data-tab="flow">OI Flow</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
+    <button id="sessionReportBtn" class="btn" title="Session statistics report" style="font-size:10px;padding:2px 7px;margin-right:4px;" title="Session statistics report">📊</button>
     <button id="miniHudToggle" class="btn" style="font-size:10px;padding:2px 7px;margin-right:6px;" title="Mini HUD overlay (key: `)">HUD<i class="hi" data-h="mini-hud">i</i></button>
   </nav>
+
+  <!-- Session Report Modal -->
+  <div id="sessionReportModal">
+    <div class="report-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <b style="font-size:13px;">📊 Session Report</b>
+        <div style="display:flex;gap:6px;">
+          <button class="btn" id="sessionLogExportBtn" style="font-size:10px;padding:3px 9px;">📥 JSONL<i class="hi" data-h="session-log">i</i></button>
+          <button onclick="document.getElementById('sessionReportModal').classList.remove('open')" class="btn" style="font-size:10px;">✕</button>
+        </div>
+      </div>
+      <div id="sessionReportBody"></div>
+    </div>
+  </div>
 
   <!-- Mini HUD Overlay -->
   <div id="miniHud">
@@ -1398,6 +1503,15 @@
 
         <!-- Left column: AI Suggestions + Pivot Levels -->
         <div class="home-left">
+          <!-- ── Morning Pre-Session Checklist ─────────────────── -->
+          <div class="checklist-panel" id="checklistPanel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <span class="skew-chart-title">☑ Pre-Session Checklist<i class="hi" data-h="morning-checklist">i</i></span>
+              <span id="checklistProgress" style="font-size:9px;color:var(--muted-2);"></span>
+            </div>
+            <div id="checklistItems"></div>
+            <div class="checklist-progress"><div class="checklist-progress-fill" id="checklistBar" style="width:0%"></div></div>
+          </div>
 
           <!-- ── AI Strategy Suggestions ──────────────────────────── -->
           <div class="strategy-suggest-panel" id="strategySuggestPanel">
@@ -1445,7 +1559,11 @@
                   <input type="number" id="alertDurationInput" class="ohlc-inp" value="2" min="0.2" max="10" step="0.1" style="width:42px;text-align:center;" title="Duration (seconds)">
                   <span style="font-size:9px;color:var(--muted-2);">s</span>
                 </label>
-                <button class="btn" id="alertTestBtn" style="font-size:10px;padding:3px 9px;" title="Preview sound">▶</button>
+                <button class="btn" id="alertTestBtn" style="font-size:10px;padding:3px 9px;" title="Preview sound">▶</button><i class="hi" data-h="browser-notif">i</i>
+                <span style="font-size:9px;color:var(--muted-2);">|</span>
+                <button class="btn" onclick="window._previewSound('tone')"  style="font-size:9px;padding:2px 5px;" title="Preview Tone">Tone▶</button>
+                <button class="btn" onclick="window._previewSound('chime')" style="font-size:9px;padding:2px 5px;" title="Preview Chime">Chime▶</button>
+                <button class="btn" onclick="window._previewSound('ping')"  style="font-size:9px;padding:2px 5px;" title="Preview Ping">Ping▶</button>
                 <label class="level-alert-toggle" title="Speak the level name when touched">
                   <input type="checkbox" id="voiceToggle" checked> 🗣<i class="hi" data-h="voice-alert">i</i>
                 </label>
@@ -1504,7 +1622,26 @@
             <div id="fiidiiBody"><div class="movers-loading">—</div></div>
           </div>
 
-          <!-- ── Position Sizing Calculator ───────────────────────── -->
+          <!-- ── Session Journal ────────────────────────────────── -->
+          <div class="journal-panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span class="skew-chart-title">📓 Session Notes</span>
+              <div style="display:flex;gap:5px;">
+                <span id="journalWordCount" style="font-size:9px;color:var(--muted-2);"></span>
+                <i class="hi" data-h="trade-template">i</i><select id="journalTemplate" class="level-select" style="font-size:9px;" title="Insert trade template">
+                  <option value="">+ Template</option>
+                  <option value="straddle">Short Straddle</option>
+                  <option value="ce_buy">CE Buy</option>
+                  <option value="pe_buy">PE Buy</option>
+                  <option value="iron_condor">Iron Condor</option>
+                  <option value="review">Trade Review</option>
+                </select>
+                <button class="btn" id="journalExportBtn" style="font-size:9px;padding:2px 7px;" title="Download notes as text file">📥</button>
+                <button class="btn" id="journalClearBtn" style="font-size:9px;padding:2px 7px;" title="Clear today's notes">✕</button>
+              </div>
+            </div>
+            <textarea id="journalText" placeholder="Log trades, observations, levels… auto-saved by date."></textarea>
+          </div>
           <div class="pos-sizer">
             <div class="level-panel-head" style="margin-bottom:8px;">
               <span class="skew-chart-title">Position Sizer<i class="hi" data-h="pos-sizer">i</i></span>
@@ -2521,6 +2658,21 @@
     <section id="tab-chain" class="tab-panel">
 
       <div class="stat-grid" id="statGrid"></div>
+      <!-- Straddle premium sparkline (last 30 min) -->
+      <div id="straddleSparkRow" style="display:none;padding:3px 0;display:flex;align-items:center;gap:8px;font-size:10px;">
+        <span style="color:var(--muted);">Straddle 30m<i class="hi" data-h="straddle-sparkline">i</i></span>
+        <svg id="straddleSparkSvg" width="120" height="22" style="display:block;"></svg>
+        <span id="straddleSparkRange" style="font-size:9px;color:var(--muted-2);"></span>
+        <span style="color:var(--muted);">IVP</span>
+        <span id="ivpDisplay" style="font-weight:700;">—</span>
+      </div>
+      <!-- Spot intraday sparkline (session range) -->
+      <div id="spotSparkRow" class="spot-spark-row" style="display:none;">
+        <span style="color:var(--muted);">Spot 60m<i class="hi" data-h="spot-sparkline">i</i></span>
+        <svg id="spotSparkSvg" width="160" height="22" style="display:block;"></svg>
+        <span id="spotSparkRange" style="font-size:9px;color:var(--muted-2);"></span>
+        <i class="hi" data-h="realized-vs-implied">i</i><span id="realizedVsImplied" style="font-size:9px;color:var(--muted-2);"></span>
+      </div>
       <div class="pcr-trend-wrap" id="pcrTrendWrap">
         <div class="skew-chart-head">
           <span class="skew-chart-title">PCR Trend (this session)<i class="hi" data-h="pcr-trend">i</i></span>
@@ -2552,6 +2704,11 @@
         </div>
         <div id="straddleChart"></div>
       </div>
+
+      <!-- Expiry calendar strip -->
+      <div style="font-size:9px;color:var(--muted);padding:2px 0;">📅 Expiry Calendar<i class="hi" data-h="expiry-cal">i</i></div><div id="expiryCal" class="expiry-cal"></div>
+      <!-- Stale cache banner (shown when server is unreachable) -->
+      <div id="staleCacheBanner" class="stale-cache-banner">⚠ Server unreachable — showing cached data from <span id="staleCacheAge"></span> <i class="hi" data-h="offline-cache">i</i></div>
 
       <!-- Theta Decay Projection -->
       <div class="theta-card" id="thetaCard" style="display:none;">
@@ -2606,18 +2763,38 @@
         </div>
       </div>
 
+      <!-- Options Flow Timeline (CE vs PE ₹ flow over the session) -->
+      <div class="flow-chart-wrap" id="flowChartWrap" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span class="skew-chart-title">Options Flow Timeline<i class="hi" data-h="flow-timeline">i</i></span>
+          <span style="font-size:9px;">
+            <span style="color:rgba(255,120,80,.9);">■</span> CE &nbsp;
+            <span style="color:rgba(80,200,120,.9);">■</span> PE
+          </span>
+        </div>
+        <svg id="flowTimelineSvg" width="100%" height="60" style="display:block;"></svg>
+        <div id="flowTimelineLabel" style="font-size:9px;color:var(--muted-2);margin-top:2px;"></div>
+      </div>
+
       <!-- Chain toolbar: snapshot / export / delta mode -->
       <div class="chain-toolbar">
         <button class="btn" id="chainSnapshotBtn" style="font-size:10px;padding:3px 9px;" title="Capture OI snapshot for comparison">📸 Snapshot<i class="hi" data-h="snapshot">i</i></button>
         <button class="btn" id="chainCompareBtn" style="font-size:10px;padding:3px 9px;display:none;" title="Compare vs snapshot">⚡ Compare</button>
+        <button class="btn" id="focusAtmBtn" style="font-size:10px;padding:3px 9px;" title="Show only ±5 strikes around ATM (toggle)">🎯 Focus</button>
         <span id="snapshotLabel" style="font-size:9px;color:var(--muted-2);"></span>
         <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+          <i class="hi" data-h="strike-search">i</i><input type="number" id="strikeSearchInput" class="strike-search" placeholder="Jump to…" title="Type a strike and press Enter to jump to it in the chain table">
+          <i class="hi" data-h="chain-view">i</i><div class="view-toggle" title="Show both sides / calls only / puts only">
+            <button id="btnViewBoth" class="active" onclick="window._setChainView('both')">Both</button>
+            <button id="btnViewCe"   onclick="window._setChainView('ce')">CE</button>
+            <button id="btnViewPe"   onclick="window._setChainView('pe')">PE</button>
+          </div>
           <span style="font-size:9px;color:var(--muted);">ΔOI:<i class="hi" data-h="delta-oi">i</i></span>
           <div class="delta-mode-toggle">
             <button id="deltaModeSession" class="active" onclick="window._setDeltaMode('session')">Session</button>
             <button id="deltaMode15m" onclick="window._setDeltaMode('15m')">15 min</button>
           </div>
-          <button class="btn" id="exportCsvBtn" style="font-size:10px;padding:3px 9px;" title="Export chain to CSV">📥 CSV</button>
+          <button class="btn" id="exportCsvBtnChain" style="font-size:10px;padding:3px 9px;" title="Export chain to CSV">📥 CSV</button>
         </div>
       </div>
 
@@ -3080,6 +3257,7 @@
     _alertHistory.unshift({ time: t, label, price, polarity });
     if (_alertHistory.length > 30) _alertHistory.pop();
     _renderAlertHistory();
+    _saveAlertLog();   // persist to localStorage
   }
   function _renderAlertHistory() {
     const panel = document.getElementById('alertHistoryPanel');
@@ -3382,21 +3560,21 @@
 
     wrap.style.display = '';
     const maxOi = Math.max(1, ...strikesNear.flatMap(s => [s.ce_oi||0, s.pe_oi||0]));
-    const BAR_H = 5, GAP = 1, LABEL_W = 48, BAR_MAX_W = 110;
+    const BAR_H = 10, GAP = 2, LABEL_W = 60, BAR_MAX_W = 220;
     const total = strikesNear.length;
-    const svgH = total * (BAR_H*2 + GAP + 2) + 8;
+    const svgH = total * (BAR_H*2 + GAP + 4) + 10;
 
     let rows = '';
     strikesNear.forEach((s, i) => {
-      const y = i * (BAR_H*2 + GAP + 2) + 4;
+      const y = i * (BAR_H*2 + GAP + 4) + 6;
       const ceW = (s.ce_oi||0) / maxOi * BAR_MAX_W;
       const peW = (s.pe_oi||0) / maxOi * BAR_MAX_W;
       const isAtm = s.strike === atm;
       const strokeCol = isAtm ? 'var(--gold)' : 'none';
       const lbl = fmtInt(s.strike) + (isAtm ? '★' : '');
-      rows += `<text x="${LABEL_W-2}" y="${y+BAR_H}" text-anchor="end" style="font-size:8px;fill:${isAtm?'var(--gold)':'var(--muted)'};">${lbl}</text>
-        <rect x="${LABEL_W}" y="${y}" width="${ceW.toFixed(1)}" height="${BAR_H}" rx="1" fill="rgba(255,120,80,.75)" stroke="${strokeCol}" stroke-width="0.5"/>
-        <rect x="${LABEL_W}" y="${y+BAR_H+1}" width="${peW.toFixed(1)}" height="${BAR_H}" rx="1" fill="rgba(80,200,120,.75)" stroke="${strokeCol}" stroke-width="0.5"/>`;
+      rows += `<text x="${LABEL_W-3}" y="${y+BAR_H}" text-anchor="end" style="font-size:9px;fill:${isAtm?'var(--gold)':'var(--muted)'};">${lbl}</text>
+        <rect x="${LABEL_W}" y="${y}" width="${ceW.toFixed(1)}" height="${BAR_H}" rx="2" fill="rgba(255,120,80,.75)" stroke="${strokeCol}" stroke-width="0.5"/>
+        <rect x="${LABEL_W}" y="${y+BAR_H+2}" width="${peW.toFixed(1)}" height="${BAR_H}" rx="2" fill="rgba(80,200,120,.75)" stroke="${strokeCol}" stroke-width="0.5"/>`;
     });
 
     container.innerHTML = `<svg width="${LABEL_W + BAR_MAX_W + 10}" height="${svgH}" style="display:block;max-width:100%;">${rows}</svg>`;
@@ -4053,7 +4231,801 @@
   // Keyboard shortcut: backtick to toggle HUD
   // (wired into the existing keydown listener below in the keyboard shortcuts section)
 
-  // ---------- tabs ----------
+  // ======================================================================
+  // NEW FEATURE: Sound preview per-type
+  // ======================================================================
+  window._previewSound = function(type) {
+    const sel = document.getElementById('alertSoundSelect');
+    const orig = sel?.value;
+    if (sel) sel.value = type;
+    playAlert('r');
+    setTimeout(() => { if (sel && orig) sel.value = orig; }, 200);
+  };
+
+  // ======================================================================
+  // NEW FEATURE: Gap display (today's open vs prev day close)
+  // ======================================================================
+  function _computeGap() {
+    const prevClose = state_ohlc?.close;                       // yesterday's close from bhavcopy
+    const todayOpen = state.lastData?.session_ohlc?.open;
+    if (!prevClose || !todayOpen) return null;
+    const gap = todayOpen - prevClose;
+    const gapPct = (gap / prevClose * 100).toFixed(2);
+    return { gap: gap.toFixed(0), pct: gapPct, pos: gap >= 0 };
+  }
+
+  // ======================================================================
+  // NEW FEATURE: Lot size cache + strip display
+  // ======================================================================
+  const _lotSizes = {};
+  function _updateLotSizeStrip(symbol, lotSize) {
+    if (lotSize) _lotSizes[symbol] = lotSize;
+    const strip = document.getElementById('lotSizeStrip');
+    if (!strip || !Object.keys(_lotSizes).length) return;
+    const labels = { NIFTY:'N50', BANKNIFTY:'BNF', FINNIFTY:'FIN', MIDCPNIFTY:'MCP' };
+    strip.textContent = Object.entries(_lotSizes)
+      .map(([s, l]) => `${labels[s]||s}: ${l}`)
+      .join('  ·  ');
+  }
+
+  // ======================================================================
+  // NEW FEATURE: Straddle premium sparkline (last 30 min)
+  // ======================================================================
+  const _straddleHistory = [];   // [{ts, val}]
+  const MAX_STRADDLE_HIST = 360; // 30 min at 5s poll
+
+  function _recordStraddle(premium) {
+    if (!premium || premium <= 0) return;
+    _straddleHistory.push({ ts: Date.now(), val: premium });
+    if (_straddleHistory.length > MAX_STRADDLE_HIST) _straddleHistory.shift();
+  }
+
+  function _renderStraddleSparkline() {
+    const svg  = document.getElementById('straddleSparkSvg');
+    const row  = document.getElementById('straddleSparkRow');
+    const rng  = document.getElementById('straddleSparkRange');
+    if (!svg || _straddleHistory.length < 3) { if(row) row.style.display='none'; return; }
+    row.style.display = 'flex';
+    const vals = _straddleHistory.map(h => h.val);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const W = 120, H = 22, PAD = 2;
+    const n = vals.length;
+    const xs = vals.map((_, i) => PAD + (i / (n-1)) * (W - 2*PAD));
+    const ys = vals.map(v => PAD + (1 - (v - lo) / (hi - lo + 0.001)) * (H - 2*PAD));
+    const pts = xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+    const last = vals[vals.length - 1], first = vals[0];
+    const col  = last >= first ? 'var(--pos)' : 'var(--neg)';
+    svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round"/>
+      <circle cx="${xs[n-1].toFixed(1)}" cy="${ys[n-1].toFixed(1)}" r="2" fill="${col}"/>`;
+    if (rng) rng.textContent = `${lo.toFixed(0)}–${hi.toFixed(0)}`;
+  }
+
+  // ======================================================================
+  // NEW FEATURE: IVP — session IV percentile
+  // ======================================================================
+  const _ivHistory = [];
+  function _updateIvp(iv) {
+    if (!iv) return;
+    _ivHistory.push(iv);
+    if (_ivHistory.length > 360) _ivHistory.shift();
+    if (_ivHistory.length < 5) return;
+    const below = _ivHistory.filter(v => v <= iv).length;
+    const ivp   = Math.round(below / _ivHistory.length * 100);
+    const el    = document.getElementById('ivpDisplay');
+    if (!el) return;
+    const cls   = ivp >= 70 ? 'neg-txt' : ivp <= 30 ? 'pos-txt' : '';
+    el.innerHTML = `<span class="${cls}">${ivp}%</span>`;
+    el.title = `IV Percentile (session): ${ivp}% of today's ${_ivHistory.length} readings were ≤ ${iv.toFixed(1)}%`;
+    document.getElementById('straddleSparkRow').style.display = 'flex';
+  }
+
+  // ======================================================================
+  // NEW FEATURE: OI call wall / put wall on pivot bars
+  // ======================================================================
+  function _getOiWalls(data) {
+    const strikes = data.strikes || [];
+    if (!strikes.length) return null;
+    let callWall = strikes[0], putWall = strikes[0];
+    for (const s of strikes) {
+      if ((s.ce_oi||0) > (callWall.ce_oi||0)) callWall = s;
+      if ((s.pe_oi||0) > (putWall.pe_oi||0))  putWall  = s;
+    }
+    return {
+      callStrike: callWall.strike, callOi: callWall.ce_oi,
+      putStrike:  putWall.strike,  putOi:  putWall.pe_oi,
+    };
+  }
+
+  // ======================================================================
+  // NEW FEATURE: Focus ATM ±N filter
+  // ======================================================================
+  let _focusAtm = false;
+  let _focusWing = 5;
+
+  document.getElementById('focusAtmBtn')?.addEventListener('click', () => {
+    _focusAtm = !_focusAtm;
+    const btn = document.getElementById('focusAtmBtn');
+    if (btn) {
+      btn.style.background = _focusAtm ? 'var(--accent)' : '';
+      btn.style.color      = _focusAtm ? '#fff' : '';
+      btn.textContent      = _focusAtm ? `🎯 ±${_focusWing} ATM` : '🎯 Focus';
+    }
+    if (state.lastData) renderChainTable(state.lastData);
+  });
+
+  // ======================================================================
+  // NEW FEATURE: Alerts log persistence (localStorage by date)
+  // ======================================================================
+  const _ALERT_LOG_KEY = 'nse_alert_log_v1';
+
+  function _saveAlertLog() {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const store = JSON.parse(localStorage.getItem(_ALERT_LOG_KEY) || '{}');
+      store[today] = _alertHistory.slice(0, 50);
+      // Keep only last 7 days
+      const keys = Object.keys(store).sort().reverse().slice(0, 7);
+      const pruned = {};
+      keys.forEach(k => pruned[k] = store[k]);
+      localStorage.setItem(_ALERT_LOG_KEY, JSON.stringify(pruned));
+    } catch (_) {}
+  }
+
+  function _loadAlertLog() {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const store = JSON.parse(localStorage.getItem(_ALERT_LOG_KEY) || '{}');
+      const todayLog = store[today];
+      if (todayLog?.length) {
+        _alertHistory.length = 0;
+        _alertHistory.push(...todayLog);
+        _renderAlertHistory();
+      }
+    } catch (_) {}
+  }
+
+  _loadAlertLog();   // restore today's alerts on page load
+
+  // ======================================================================
+  // NEW FEATURE: Auto-export CSV at 15:30 IST on weekdays
+  // ======================================================================
+  let _autoExportDone = false;
+  setInterval(() => {
+    if (_autoExportDone || !state.lastData) return;
+    const now = new Date();
+    const ist = new Date(now.getTime() + (5.5 * 3600 + now.getTimezoneOffset() * 60) * 1000);
+    const h = ist.getHours(), m = ist.getMinutes(), d = ist.getDay();
+    if (h === 15 && m >= 30 && d >= 1 && d <= 5) {
+      _autoExportDone = true;
+      _exportChainCsv();
+      if (typeof showToast === 'function') showToast('📥 Market closed — chain auto-exported');
+    }
+  }, 30000);
+
+  // Reset auto-export flag at midnight
+  (function _scheduleReset() {
+    const now = new Date();
+    const midnight = new Date(now); midnight.setHours(24, 0, 0, 0);
+    setTimeout(() => { _autoExportDone = false; _scheduleReset(); }, midnight - now);
+  })();
+
+  // ======================================================================
+  // FEATURE: Live staleness counter (replaces static timestamp)
+  // ======================================================================
+  let _lastFetchTime = null;
+
+  function _updateStalenessCounter() {
+    const el = document.getElementById('metaTime');
+    if (!el || !_lastFetchTime) return;
+    const secs = Math.floor((Date.now() - _lastFetchTime) / 1000);
+    let cls = '', label = '';
+    if      (secs < 10)  { cls = '';            label = `${secs}s ago`; }
+    else if (secs < 30)  { cls = 'stale-warn';  label = `${secs}s ago`; }
+    else if (secs < 120) { cls = 'stale-warn';  label = `${secs}s ago ⚠`; }
+    else                 { cls = 'stale-err';   label = `${Math.floor(secs/60)}m ago ⛔`; }
+    el.innerHTML = `<span class="${cls}">${label}</span>`;
+  }
+  setInterval(_updateStalenessCounter, 1000);
+
+  // ======================================================================
+  // FEATURE: Offline last-state cache
+  // ======================================================================
+  const _CACHE_KEY_PREFIX = 'nse_chain_cache_';
+
+  function _saveOfflineCache(data) {
+    try {
+      const key = _CACHE_KEY_PREFIX + (data.symbol || state.symbol);
+      localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    } catch (_) {}
+  }
+
+  function _loadOfflineCache(symbol) {
+    try {
+      const item = JSON.parse(localStorage.getItem(_CACHE_KEY_PREFIX + symbol) || 'null');
+      if (!item) return null;
+      const ageMins = (Date.now() - item.ts) / 60000;
+      return { ...item.data, _cacheAge: ageMins, _fromCache: true };
+    } catch (_) { return null; }
+  }
+
+  function _showStaleBanner(ageMins) {
+    const banner = document.getElementById('staleCacheBanner');
+    const age    = document.getElementById('staleCacheAge');
+    if (!banner) return;
+    if (ageMins < 0) { banner.style.display = 'none'; return; }
+    banner.style.display = '';
+    age.textContent = ageMins < 60 ? `${Math.round(ageMins)} min ago` : `${(ageMins/60).toFixed(1)}h ago`;
+  }
+
+  // ======================================================================
+  // FEATURE: PCR by volume
+  // ======================================================================
+  function _computePcrVol(strikes) {
+    if (!strikes?.length) return null;
+    const ceVol = strikes.reduce((s, x) => s + (x.ce_volume||0), 0);
+    const peVol = strikes.reduce((s, x) => s + (x.pe_volume||0), 0);
+    if (!ceVol) return null;
+    return (peVol / ceVol).toFixed(2);
+  }
+
+  // ======================================================================
+  // FEATURE: OI velocity (rate of OI change per minute per strike)
+  // ======================================================================
+  const _oiVelHist = {};  // `sym:strike` → [{ts, ce, pe}]
+
+  function _updateOiVelocity(strikes) {
+    const now = Date.now(), sym = state.symbol;
+    for (const s of strikes) {
+      const key  = `${sym}:${s.strike}`;
+      const hist = _oiVelHist[key] || (_oiVelHist[key] = []);
+      hist.push({ ts: now, ce: s.ce_oi||0, pe: s.pe_oi||0 });
+      if (hist.length > 72) hist.shift();  // keep 6 min at 5s
+    }
+  }
+
+  function _getVelocity(strike) {
+    const key  = `${state.symbol}:${strike}`;
+    const hist = _oiVelHist[key];
+    if (!hist || hist.length < 6) return null;
+    const now  = Date.now();
+    const ref  = hist.find(h => (now - h.ts) >= 55000);  // ~60s ago
+    if (!ref) return null;
+    const cur  = hist[hist.length - 1];
+    const dtM  = (cur.ts - ref.ts) / 60000;
+    if (dtM <= 0) return null;
+    const ceV  = (cur.ce - ref.ce) / dtM;
+    const peV  = (cur.pe - ref.pe) / dtM;
+    return { ce: ceV, pe: peV };
+  }
+
+  // ======================================================================
+  // FEATURE: CE/PE chain view toggle
+  // ======================================================================
+  let _chainView = 'both';
+  window._setChainView = function(view) {
+    _chainView = view;
+    const tbl = document.getElementById('chainTable');
+    if (tbl) { tbl.classList.remove('view-ce', 'view-pe'); if (view !== 'both') tbl.classList.add('view-' + view); }
+    ['btnViewBoth','btnViewCe','btnViewPe'].forEach((id, i) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.classList.toggle('active', i === ['both','ce','pe'].indexOf(view));
+    });
+  };
+
+  // ======================================================================
+  // FEATURE: Strike search / jump
+  // ======================================================================
+  function _jumpToStrike(raw) {
+    const val = parseInt(String(raw).replace(/[^0-9]/g, ''));
+    if (!val) return;
+    // Round to nearest 50 (NIFTY/BANKNIFTY standard)
+    const gap    = state.lastData?.strike_gap || 50;
+    const target = Math.round(val / gap) * gap;
+    const row    = document.querySelector(`#chainBody tr[data-strike="${target}"]`);
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      row.style.outline = '2px solid var(--accent)';
+      setTimeout(() => row.style.outline = '', 1500);
+    } else {
+      showToast(`Strike ${fmtInt(target)} not in current chain (try refreshing or widening band)`);
+    }
+  }
+
+  document.getElementById('strikeSearchInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { _jumpToStrike(e.target.value); e.target.value = ''; }
+  });
+
+  // ======================================================================
+  // FEATURE: Expiry calendar
+  // ======================================================================
+  function _renderExpiryCal(data) {
+    const el = document.getElementById('expiryCal');
+    if (!el) return;
+    const expData = data.expiries_data || {};
+    const keys    = Object.keys(expData).sort();
+    if (!keys.length) { el.innerHTML = ''; return; }
+    const months   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const isMonthly = (dStr) => {
+      const d   = new Date(dStr.split('-').reverse().join('-'));
+      if (isNaN(d)) return false;
+      // Last Thursday of month: check if d.getMonth() !== (d + 7 days).getMonth()
+      const nxt = new Date(d); nxt.setDate(d.getDate() + 7);
+      return nxt.getMonth() !== d.getMonth();
+    };
+    el.innerHTML = keys.map(exp => {
+      const dte     = expData[exp]?.dte ?? '?';
+      const isCur   = exp === data.expiry;
+      const monthly = isMonthly(exp);
+      const cls     = isCur ? 'current' : monthly ? 'monthly' : 'weekly';
+      const badge   = monthly ? 'M' : 'W';
+      return `<span class="exp-pill ${cls}" title="${monthly?'Monthly':'Weekly'} expiry">${exp} <span style="font-size:8px;opacity:.7;">(${badge})</span><span class="exp-dte">${dte}d</span></span>`;
+    }).join('');
+  }
+
+  // ======================================================================
+  // FEATURE: Circuit breaker levels on pivot bar
+  // ======================================================================
+  function _getCircuitBreakers() {
+    const prevClose = state_ohlc?.close;
+    if (!prevClose) return null;
+    return {
+      down10: Math.round(prevClose * 0.90),
+      down15: Math.round(prevClose * 0.85),
+      down20: Math.round(prevClose * 0.80),
+      up10:   Math.round(prevClose * 1.10),
+    };
+  }
+
+  // ======================================================================
+  // FEATURE: Delta-adjusted OI sort
+  // ======================================================================
+  function _getDeltaAdjOi(s, dte, spot) {
+    if (!s.ce_iv || !dte || !spot) return { ce: s.ce_oi||0, pe: s.pe_oi||0 };
+    const T  = Math.max(0.5, dte) / 365;
+    const v  = s.ce_iv / 100, r = 0.065;
+    const d1 = (Math.log(spot / s.strike) + (r + 0.5*v*v)*T) / (v * Math.sqrt(T));
+    const ceDelta = _ncdf(d1);
+    const peDelta = Math.abs(_ncdf(d1) - 1);
+    return { ce: Math.round((s.ce_oi||0) * ceDelta), pe: Math.round((s.pe_oi||0) * peDelta) };
+  }
+
+  // ======================================================================
+  // FEATURE: Watchlist price alerts
+  // ======================================================================
+  const _watchlistAlerts = {};  // sym → target price
+
+  els.watchlistStrip.addEventListener('click', e => {
+    const btn = e.target.closest('[data-wl-alert]');
+    if (!btn) return;
+    e.stopPropagation();
+    const sym = btn.dataset.wlAlert;
+    if (_watchlistAlerts[sym]) {
+      delete _watchlistAlerts[sym];
+      showToast(`Alert removed for ${sym}`);
+    } else {
+      const cur  = state.watchlistData[sym]?.underlying_value || 0;
+      const raw  = prompt(`Set price alert for ${sym} (current: ${fmtInt(cur)}):`, fmtInt(cur));
+      const price = parseFloat(raw);
+      if (price) { _watchlistAlerts[sym] = price; showToast(`Alert set: ${sym} @ ${fmtInt(price)}`); }
+    }
+    renderWatchlist();
+  });
+
+  function _checkWatchlistAlerts() {
+    for (const [sym, target] of Object.entries(_watchlistAlerts)) {
+      const d = state.watchlistData[sym];
+      if (!d) continue;
+      const spot = d.underlying_value;
+      const prev = d._prevSpot;
+      if (!prev || !spot) continue;
+      const lo = Math.min(prev, spot), hi = Math.max(prev, spot);
+      if (lo <= target && target <= hi) {
+        delete _watchlistAlerts[sym];
+        renderWatchlist();
+        alertLevelTouch(`${sym} @ ${fmtInt(target)}`, target, spot >= prev ? 'r' : 's');
+      }
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: Session journal (localStorage by date)
+  // ======================================================================
+  const _JOURNAL_KEY = 'nse_journal_v1';
+
+  function _journalKey() { return new Date().toISOString().slice(0, 10); }
+
+  function _loadJournal() {
+    try {
+      const store = JSON.parse(localStorage.getItem(_JOURNAL_KEY) || '{}');
+      const el    = document.getElementById('journalText');
+      if (el) el.value = store[_journalKey()] || '';
+      _updateJournalCount();
+    } catch (_) {}
+  }
+
+  function _saveJournal() {
+    try {
+      const store = JSON.parse(localStorage.getItem(_JOURNAL_KEY) || '{}');
+      const val   = document.getElementById('journalText')?.value || '';
+      store[_journalKey()] = val;
+      // Keep 30 days
+      const keys = Object.keys(store).sort().reverse().slice(0, 30);
+      const pruned = {};
+      keys.forEach(k => pruned[k] = store[k]);
+      localStorage.setItem(_JOURNAL_KEY, JSON.stringify(pruned));
+    } catch (_) {}
+  }
+
+  function _updateJournalCount() {
+    const el  = document.getElementById('journalText');
+    const cnt = document.getElementById('journalWordCount');
+    if (!el || !cnt) return;
+    const words = el.value.trim().split(/\s+/).filter(Boolean).length;
+    cnt.textContent = words ? `${words} words` : '';
+  }
+
+  document.getElementById('journalText')?.addEventListener('input', () => {
+    _updateJournalCount();
+    _saveJournal();
+  });
+  document.getElementById('journalClearBtn')?.addEventListener('click', () => {
+    if (confirm('Clear today\'s notes?')) {
+      const el = document.getElementById('journalText');
+      if (el) el.value = '';
+      _saveJournal(); _updateJournalCount();
+    }
+  });
+  document.getElementById('journalExportBtn')?.addEventListener('click', () => {
+    const val = document.getElementById('journalText')?.value || '';
+    if (!val.trim()) return;
+    const blob = new Blob([`NSE Session Notes — ${_journalKey()}\n\n${val}`], { type:'text/plain' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `nse_notes_${_journalKey()}.txt` });
+    a.click(); URL.revokeObjectURL(a.href);
+  });
+  document.getElementById('exportCsvBtnChain')?.addEventListener('click', _exportChainCsv);
+  _loadJournal();
+
+  // ======================================================================
+  // FEATURE: Browser notifications for background alerts
+  // ======================================================================
+  (function() {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  })();
+
+  function _sendBrowserNotification(label, price) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (!document.hidden) return;  // only when tab is hidden
+    new Notification(`${state.symbol} Alert`, {
+      body: `${label} @ ${fmtPrice(price)}`,
+      icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="28" font-size="28">🔔</text></svg>',
+      tag:  `nse-alert-${state.symbol}`,
+    });
+  }
+
+  // ======================================================================
+  // FEATURE: Spot intraday sparkline + realized vs implied move
+  // ======================================================================
+  const _spotHistory = [];
+  const MAX_SPOT_HIST = 720;  // 60 min at 5s
+
+  function _recordSpot(spot) {
+    if (!spot) return;
+    _spotHistory.push({ ts: Date.now(), val: spot });
+    if (_spotHistory.length > MAX_SPOT_HIST) _spotHistory.shift();
+  }
+
+  function _renderSpotSparkline() {
+    const svg = document.getElementById('spotSparkSvg');
+    const row = document.getElementById('spotSparkRow');
+    const rng = document.getElementById('spotSparkRange');
+    const rvi = document.getElementById('realizedVsImplied');
+    if (!svg || _spotHistory.length < 5) { if(row) row.style.display='none'; return; }
+    row.style.display = 'flex';
+    const vals = _spotHistory.map(h => h.val);
+    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const W = 160, H = 22, PAD = 2;
+    const n = vals.length;
+    const xs = vals.map((_, i) => PAD + (i/(n-1))*(W-2*PAD));
+    const ys = vals.map(v => PAD + (1-(v-lo)/(hi-lo+0.001))*(H-2*PAD));
+    const pts = xs.map((x,i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+    const last = vals[n-1], first = vals[0];
+    const col = last >= first ? 'var(--pos)' : 'var(--neg)';
+    svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round"/>
+      <circle cx="${xs[n-1].toFixed(1)}" cy="${ys[n-1].toFixed(1)}" r="2.5" fill="${col}"/>`;
+    if (rng) rng.textContent = `${fmtInt(lo)}–${fmtInt(hi)} (${fmtInt(hi-lo)}pts)`;
+    // Realized vs implied
+    const em = state._expectedMoves;
+    if (rvi && em) {
+      const range   = hi - lo;
+      const implied = em.up1 - (em.up1 + em.down1)/2;  // 1σ one-side = half-range
+      const fullImp = implied * 2;  // full implied range
+      const pct     = fullImp > 0 ? Math.round(range / fullImp * 100) : 0;
+      const cls     = pct >= 80 ? 'neg-txt' : pct >= 50 ? '' : 'pos-txt';
+      rvi.innerHTML = `Range used: <span class="${cls}">${pct}%</span> of 1σ`;
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: Level confluence scoring
+  // ======================================================================
+  function _computeConfluence(levels, spot) {
+    // For each level, count how many other levels are within 0.2% of it
+    const scores = new Map();
+    for (const [la, pa] of levels) {
+      if (!pa) continue;
+      let count = 0;
+      for (const [lb, pb] of levels) {
+        if (!pb || la === lb) continue;
+        if (Math.abs(pa - pb) / pa < 0.002) count++;
+      }
+      scores.set(la, count);
+    }
+    return scores;
+  }
+
+  // ======================================================================
+  // FEATURE: Morning pre-session checklist
+  // ======================================================================
+  const _CHECKLIST_KEY = 'nse_checklist_v1';
+  const _CHECKLIST_ITEMS = [
+    'GIFT Nifty direction noted',
+    'Key levels set & alerts armed',
+    'Lot size confirmed for today',
+    'FII/DII bias from yesterday noted',
+    'ATM straddle premium noted',
+    'Today\'s max pain level noted',
+    'Session journal entry started',
+  ];
+
+  function _renderChecklist() {
+    const el = document.getElementById('checklistItems');
+    const bar = document.getElementById('checklistBar');
+    const prog = document.getElementById('checklistProgress');
+    if (!el) return;
+    const today = new Date().toISOString().slice(0,10);
+    const store = JSON.parse(localStorage.getItem(_CHECKLIST_KEY)||'{}');
+    const checked = store[today] || [];
+    el.innerHTML = _CHECKLIST_ITEMS.map((item, i) => {
+      const done = checked.includes(i);
+      return `<label class="checklist-item${done?' done':''}">
+        <input type="checkbox" ${done?'checked':''} onchange="window._toggleCheck(${i})">
+        <span>${item}</span>
+      </label>`;
+    }).join('');
+    const pct = Math.round(checked.length / _CHECKLIST_ITEMS.length * 100);
+    if (bar)  bar.style.width = pct + '%';
+    if (prog) prog.textContent = `${checked.length}/${_CHECKLIST_ITEMS.length}`;
+  }
+
+  window._toggleCheck = function(idx) {
+    const today = new Date().toISOString().slice(0,10);
+    const store = JSON.parse(localStorage.getItem(_CHECKLIST_KEY)||'{}');
+    const checked = new Set(store[today]||[]);
+    checked.has(idx) ? checked.delete(idx) : checked.add(idx);
+    store[today] = [...checked];
+    const keys = Object.keys(store).sort().reverse().slice(0,30);
+    const pruned = {}; keys.forEach(k=>pruned[k]=store[k]);
+    localStorage.setItem(_CHECKLIST_KEY, JSON.stringify(pruned));
+    _renderChecklist();
+  };
+  _renderChecklist();
+
+  // ======================================================================
+  // FEATURE: Multi-symbol watchlist alerts (support/resistance crossings)
+  // ======================================================================
+  const _wlSrAlerted = new Set();  // sym:level to prevent rapid re-fire
+
+  function _checkWatchlistSrCrossings() {
+    for (const sym of state.watchlist) {
+      const d = state.watchlistData[sym];
+      if (!d || !d._prevSpot) continue;
+      const spot = d.underlying_value, prev = d._prevSpot;
+      const lo = Math.min(prev, spot), hi = Math.max(prev, spot);
+      const checks = [
+        [d.support?.strike, `${sym} Support`],
+        [d.resistance?.strike, `${sym} Resist`],
+        [d.max_pain, `${sym} Max Pain`],
+      ];
+      for (const [level, label] of checks) {
+        if (!level) continue;
+        const key = `${sym}:${level}`;
+        if (lo <= level && level <= hi && !_wlSrAlerted.has(key)) {
+          _wlSrAlerted.add(key);
+          setTimeout(() => _wlSrAlerted.delete(key), 300000);  // re-arm after 5 min
+          alertLevelTouch(label, level, spot >= prev ? 'r' : 's');
+        }
+      }
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: Trade journal templates
+  // ======================================================================
+  const _TEMPLATES = {
+    straddle: (d) => {
+      const sym = state.symbol, atm = d?.atm||'—', sp = d?.straddle_premium?.toFixed(0)||'—';
+      return `--- Short Straddle ---\nSymbol: ${sym}\nStrike (ATM): ${atm}\nPremium collected: ₹${sp}/leg\nTotal credit: ₹${sp&&sp!=='—'?sp*2:'—'}\nEntry time: ${new Date().toLocaleTimeString('en-IN')}\nStop: ₹[  ] debit\nTarget: ₹[  ] profit\nReasoning: `;
+    },
+    ce_buy:  (d) => `--- CE Buy ---\nSymbol: ${state.symbol}\nStrike: [  ]\nPremium paid: ₹[  ]\nLots: [  ]\nEntry: ${new Date().toLocaleTimeString('en-IN')}\nStop: ₹[  ]\nTarget: ₹[  ]\nReasoning: `,
+    pe_buy:  (d) => `--- PE Buy ---\nSymbol: ${state.symbol}\nStrike: [  ]\nPremium paid: ₹[  ]\nLots: [  ]\nEntry: ${new Date().toLocaleTimeString('en-IN')}\nStop: ₹[  ]\nTarget: ₹[  ]\nReasoning: `,
+    iron_condor: (d) => `--- Iron Condor ---\nSymbol: ${state.symbol}\nExpiry: ${d?.expiry||'—'}\nUpper wing: [CE sell  ] / [CE buy  ]\nLower wing: [PE sell  ] / [PE buy  ]\nNet credit: ₹[  ]\nEntry: ${new Date().toLocaleTimeString('en-IN')}\nReasoning: `,
+    review:  () => `--- Trade Review ---\nTime: ${new Date().toLocaleTimeString('en-IN')}\nOutcome: ✓ Win / ✗ Loss / → Breakeven\nP&L: ₹[  ]\nWhat went right: \nWhat went wrong: \nAdjustments for next time: `,
+  };
+
+  document.getElementById('journalTemplate')?.addEventListener('change', e => {
+    const key = e.target.value;
+    if (!key) return;
+    const fn = _TEMPLATES[key];
+    if (!fn) return;
+    const el = document.getElementById('journalText');
+    if (!el) return;
+    const insert = '\n\n' + fn(state.lastData) + '\n';
+    const pos = el.selectionStart || el.value.length;
+    el.value = el.value.slice(0, pos) + insert + el.value.slice(pos);
+    el.selectionStart = el.selectionEnd = pos + insert.length;
+    el.focus();
+    _saveJournal(); _updateJournalCount();
+    e.target.value = '';
+  });
+
+  // ======================================================================
+  // FEATURE: Options flow timeline (rolling CE vs PE flow chart)
+  // ======================================================================
+  const _flowHistory = [];
+  const MAX_FLOW_HIST = 360;  // 30 min
+
+  function _recordFlow(data) {
+    const strikes = data.strikes || [];
+    const lot     = data.lot_size || 1;
+    let ceFl = 0, peFl = 0;
+    for (const s of strikes) {
+      ceFl += (s.ce_ltp||0) * (s.ce_volume||0) * lot;
+      peFl += (s.pe_ltp||0) * (s.pe_volume||0) * lot;
+    }
+    _flowHistory.push({ ts: Date.now(), ce: ceFl, pe: peFl });
+    if (_flowHistory.length > MAX_FLOW_HIST) _flowHistory.shift();
+  }
+
+  function _renderFlowTimeline() {
+    const wrap  = document.getElementById('flowChartWrap');
+    const svg   = document.getElementById('flowTimelineSvg');
+    const label = document.getElementById('flowTimelineLabel');
+    if (!wrap || !svg || _flowHistory.length < 4) { if(wrap) wrap.style.display='none'; return; }
+    wrap.style.display = '';
+    const W = 360, H = 58, PAD = 3;
+    const n   = _flowHistory.length;
+    const ceV = _flowHistory.map(h => h.ce);
+    const peV = _flowHistory.map(h => h.pe);
+    const all = [...ceV, ...peV];
+    const lo  = Math.min(...all), hi = Math.max(...all) || 1;
+    const xs  = ceV.map((_, i) => PAD + (i/(n-1))*(W-2*PAD));
+    const y   = v => PAD + (1-(v-lo)/(hi-lo))*(H-2*PAD);
+    const line = (vals, col) => {
+      const pts = vals.map((v,i) => `${xs[i].toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+      return `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round" opacity=".85"/>`;
+    };
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = line(ceV,'rgba(255,120,80,.9)') + line(peV,'rgba(80,200,120,.9)');
+    const last = _flowHistory[_flowHistory.length-1];
+    const fmtCr = v => `₹${(v/1e7).toFixed(1)}Cr`;
+    if (label) label.textContent = `CE ${fmtCr(last.ce)}  ·  PE ${fmtCr(last.pe)}  ·  ${last.ce>last.pe?'CE-heavy 🔴':'PE-heavy 🟢'}`;
+  }
+
+  // ======================================================================
+  // FEATURE: Session log tracking + export
+  // ======================================================================
+  const _sessionLog = [];
+
+  function _recordSessionLog(data) {
+    const strikes = data.strikes || [];
+    const atmS    = strikes.find(s => s.strike === data.atm);
+    _sessionLog.push({
+      ts:     new Date().toISOString(),
+      symbol: data.symbol || state.symbol,
+      spot:   data.underlying_value,
+      atm:    data.atm,
+      pcr:    data.pcr,
+      atm_iv: data.atm_iv,
+      straddle: data.straddle_premium,
+      ce_oi_total: strikes.reduce((s,x)=>s+(x.ce_oi||0),0),
+      pe_oi_total: strikes.reduce((s,x)=>s+(x.pe_oi||0),0),
+      max_pain: data.max_pain,
+      support: data.support?.strike,
+      resistance: data.resistance?.strike,
+    });
+    if (_sessionLog.length > 2000) _sessionLog.splice(0, 100);  // trim oldest
+  }
+
+  function _exportSessionLog() {
+    if (!_sessionLog.length) { showToast('No session data yet'); return; }
+    const jsonl = _sessionLog.map(r => JSON.stringify(r)).join('\n');
+    const date  = new Date().toISOString().slice(0,10);
+    const blob  = new Blob([jsonl], { type:'application/json' });
+    const a     = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob), download: `nse_session_log_${date}.jsonl`
+    });
+    a.click(); URL.revokeObjectURL(a.href);
+    showToast(`Exported ${_sessionLog.length} records`);
+  }
+
+  // ======================================================================
+  // FEATURE: Session statistics report
+  // ======================================================================
+  function _generateSessionReport() {
+    const d = state.lastData;
+    const ivLo = _ivHistory.length ? Math.min(..._ivHistory).toFixed(1) : '—';
+    const ivHi = _ivHistory.length ? Math.max(..._ivHistory).toFixed(1) : '—';
+    const pcrLo = _pcrTrendHistory.length ? Math.min(..._pcrTrendHistory).toFixed(2) : '—';
+    const pcrHi = _pcrTrendHistory.length ? Math.max(..._pcrTrendHistory).toFixed(2) : '—';
+    const stLo  = _straddleHistory.length ? Math.min(..._straddleHistory.map(h=>h.val)).toFixed(0) : '—';
+    const stHi  = _straddleHistory.length ? Math.max(..._straddleHistory.map(h=>h.val)).toFixed(0) : '—';
+    const spotLo = _spotHistory.length ? fmtInt(Math.min(..._spotHistory.map(h=>h.val))) : '—';
+    const spotHi = _spotHistory.length ? fmtInt(Math.max(..._spotHistory.map(h=>h.val))) : '—';
+    const flFi  = _flowHistory.length ? _flowHistory[0] : null;
+    const flLa  = _flowHistory.length ? _flowHistory[_flowHistory.length-1] : null;
+    const rows  = [
+      ['Symbol', state.symbol],
+      ['Alerts fired', _alertHistory.length],
+      ['Session log entries', _sessionLog.length],
+      ['Spot range', `${spotLo} – ${spotHi}`],
+      ['IV range (session)', `${ivLo}% – ${ivHi}%`],
+      ['PCR range', `${pcrLo} – ${pcrHi}`],
+      ['Straddle range', `₹${stLo} – ₹${stHi}`],
+      ['Current PCR', d?.pcr ?? '—'],
+      ['Current ATM IV', d?.atm_iv ? `${d.atm_iv.toFixed(1)}%` : '—'],
+      ['Max Pain', d?.max_pain ? fmtInt(d.max_pain) : '—'],
+      ['CE flow change', flFi&&flLa ? `₹${((flLa.ce-flFi.ce)/1e7).toFixed(1)}Cr` : '—'],
+      ['PE flow change', flFi&&flLa ? `₹${((flLa.pe-flFi.pe)/1e7).toFixed(1)}Cr` : '—'],
+    ];
+    const body = document.getElementById('sessionReportBody');
+    if (body) body.innerHTML = rows.map(([l,v]) =>
+      `<div class="report-row"><span class="report-label">${l}</span><b>${v}</b></div>`
+    ).join('');
+  }
+
+  document.getElementById('sessionReportBtn')?.addEventListener('click', () => {
+    _generateSessionReport();
+    document.getElementById('sessionReportModal').classList.add('open');
+  });
+  document.getElementById('sessionReportModal')?.addEventListener('click', e => {
+    if (e.target.id === 'sessionReportModal')
+      e.target.classList.remove('open');
+  });
+  document.getElementById('sessionLogExportBtn')?.addEventListener('click', _exportSessionLog);
+
+  // ======================================================================
+  // FEATURE: Auto-reconnect when tab becomes visible again
+  // ======================================================================
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    const secs = _lastFetchTime ? (Date.now() - _lastFetchTime) / 1000 : 999;
+    if (secs >= 15 && !state.inFlight) {
+      console.log(`[vis] Tab resumed after ${Math.round(secs)}s — forcing refresh`);
+      fetchChain();
+    }
+  });
+
+  // ======================================================================
+  // FEATURE: Confidence score on reversal signals
+  // ======================================================================
+  // Patch computeReversalSignals to return a count field
+  const _origComputeReversal = typeof computeReversalSignals === 'function' ? computeReversalSignals : null;
+  if (_origComputeReversal) {
+    window.computeReversalSignals = function(data, history) {
+      const signals = _origComputeReversal(data, history);
+      const bullCount = signals.filter(s => s.bullish === true).length;
+      const bearCount = signals.filter(s => s.bullish === false).length;
+      return signals.map(s => ({
+        ...s,
+        _confScore: s.bullish === true ? bullCount : s.bullish === false ? bearCount : 0,
+        _confTotal: signals.length,
+      }));
+    };
+  }
+
+  // ----------- tabs ----------
   els.tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       els.tabs.forEach(t => t.classList.remove('active'));
@@ -4251,6 +5223,9 @@
           `Make sure it's running: <code>python3 nse_chain_server.py</code> ` +
           `(and that nse_options_strategy.py is in the same folder).`
         );
+        // Try showing cached data while server is down
+        const cached = _loadOfflineCache(state.symbol);
+        if (cached) { _showStaleBanner(cached._cacheAge); renderChainTable(cached); renderStatCards(cached); }
       } else {
         showError(escapeHtml(err.message));
       }
@@ -4329,6 +5304,43 @@
     _fetchAndRenderRelativeStrength();
     _updateMiniHud();
     _saveSettings();
+    // Batch 3 new features
+    _recordStraddle(data.straddle_premium);
+    _renderStraddleSparkline();
+    _updateIvp(data.atm_iv);
+    _updateLotSizeStrip(data.symbol || state.symbol, data.lot_size);
+    state._oiWalls = _getOiWalls(data);
+    // Batch 4 — latest features
+    _lastFetchTime = Date.now();
+    _saveOfflineCache(data);
+    _updateOiVelocity(data.strikes || []);
+    _renderExpiryCal(data);
+    _checkWatchlistAlerts();
+    _showStaleBanner(-1);
+    state._circuitBreakers = _getCircuitBreakers();
+    // Batch 5 — newest features
+    _recordSpot(data.underlying_value);
+    _renderSpotSparkline();
+    _recordFlow(data);
+    _renderFlowTimeline();
+    _recordSessionLog(data);
+    _checkWatchlistSrCrossings();
+    // PCR by volume — inject as extra stat card
+    const pcrVol = _computePcrVol(data.strikes);
+    if (pcrVol) {
+      let pvrCard = document.querySelector('.stat-card[data-label="PCR Vol"]');
+      if (!pvrCard) {
+        const grid = document.getElementById('statGrid');
+        if (grid) {
+          grid.insertAdjacentHTML('beforeend', statCard('PCR Vol', pcrVol, parseFloat(pcrVol)>=1?'pos':'neg', 'pcr-vol'));
+          pvrCard = grid.lastElementChild;
+          pvrCard?.setAttribute('data-label', 'PCR Vol');
+        }
+      } else {
+        const valEl = pvrCard.querySelector('.stat-value');
+        if (valEl) { valEl.textContent = pcrVol; valEl.className = `stat-value ${parseFloat(pcrVol)>=1?'pos':'neg'}`; }
+      }
+    }
 
     // ─── Determine which tab is currently active ──────────────────────────
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -4662,6 +5674,7 @@
     _touchedLevels.add(key);
     console.log(`[touch] ALERTING for ${key} at price=${price}`);
     _pushAlertHistory(label, price, polarity);   // ← add to history panel
+    _sendBrowserNotification(label, price);       // ← browser notification if tab hidden
     playAlert(polarity);
     _speakLevel(label, price);   // voice announcement if enabled
     const el = _levelTouchToastEl();
@@ -4826,10 +5839,25 @@
       levels.push([`2σ↑ ${fmtInt(em.up2-spot)}pts`, em.up2, 'em2']);
       levels.push([`2σ↓ ${fmtInt(spot-em.down2)}pts`, em.down2, 'em2']);
     }
+    // Append OI call wall and put wall
+    const walls = state._oiWalls;
+    if (walls) {
+      const oiLbl = v => v >= 1e7 ? `${(v/1e7).toFixed(1)}Cr` : v >= 1e5 ? `${(v/1e5).toFixed(0)}L` : fmtInt(v);
+      levels.push([`Call Wall ${oiLbl(walls.callOi)} OI`, walls.callStrike, 'r']);
+      levels.push([`Put Wall ${oiLbl(walls.putOi)} OI`,  walls.putStrike,  's']);
+    }
+    // Append circuit breakers (10%/15%/20% from prev close)
+    const cb = state._circuitBreakers;
+    if (cb) {
+      levels.push([`CB -10% (${fmtInt(cb.down10)})`, cb.down10, 'em2']);
+      levels.push([`CB -15% (${fmtInt(cb.down15)})`, cb.down15, 'em2']);
+      levels.push([`CB +10% (${fmtInt(cb.up10)})`,   cb.up10,   'em2']);
+    }
 
-    document.getElementById('pivotBars').innerHTML = renderLevelBars(levels, spot, 'pivot');
+    const confluenceScores = _computeConfluence(levels, spot);
+    document.getElementById('pivotBars').innerHTML = renderLevelBars(levels, spot, 'pivot', confluenceScores);
   }
-  function renderLevelBars(levels, spot, type) {
+  function renderLevelBars(levels, spot, type, confluenceScores) {
     // Find the range of all level prices to scale the bars
     const prices = levels.map(l => l[1]).filter(Boolean);
     const allPrices = [...prices, spot];
@@ -4848,10 +5876,12 @@
       const isNear = Math.abs(dist / spot) < 0.002;
       const priceColor = polarity === 'r' ? '#ff6b6b' : (polarity === 's' ? '#51cf66' : (polarity === 'vwap' ? 'var(--accent)' : 'var(--text)'));
       const distColor  = dist > 0 ? '#ff6b6b' : '#51cf66';
-      const labelHelpKey = label.startsWith('BE') ? 'be-levels' : (label.startsWith('1σ') || label.startsWith('2σ')) ? 'sigma-levels' : '';
+      const labelHelpKey = label.startsWith('BE') ? 'be-levels' : (label.startsWith('1σ') || label.startsWith('2σ')) ? 'sigma-levels' : label.startsWith('CB ') ? 'circuit-breaker' : label.includes('Wall') ? 'oi-walls' : '';
       const labelHelpIcon = labelHelpKey ? `<i class="hi" data-h="${labelHelpKey}" style="vertical-align:middle;margin-left:2px;">i</i>` : '';
+      const confCount  = confluenceScores?.get(label) || 0;
+      const confBadge  = confCount >= 1 ? `<span class="conf-badge${confCount>=3?' conf-4':confCount>=2?' conf-3':''}">${confCount+1}× <i class="hi" data-h="confluence" style="vertical-align:middle;background:rgba(0,0,0,.25);border-color:rgba(0,0,0,.2);">i</i></span>` : '';
       return `<div class="level-bar-row${isNear ? ' touched' : ''}" data-level-label="${escapeHtml(label)}">
-        <span class="level-bar-label ${labelClass}">${escapeHtml(label)}${labelHelpIcon}</span>
+        <span class="level-bar-label ${labelClass}">${escapeHtml(label)}${labelHelpIcon}${confBadge}</span>
         <div class="level-bar-price-block">
           <span class="level-bar-price" style="color:${priceColor};">${fmtPrice(price)}</span>
           <span class="level-bar-dist" style="color:${distColor};">${distStr}</span>
@@ -4872,6 +5902,7 @@
       statCard('Max Pain', fmtInt(data.max_pain), 'gold', 'max-pain'),
       statCard('Support', fmtInt(data.support.strike), 'pos'),
       statCard('Resistance', fmtInt(data.resistance.strike), 'neg'),
+      (() => { const g = _computeGap(); return g ? statCard('Gap', `${g.pos?'+':''}${g.gap} (${g.pos?'+':''}${g.pct}%)`, g.pos?'pos':'neg', 'gap-display') : ''; })(),
     ].join('');
   }
 
@@ -4899,6 +5930,12 @@
 
   function renderChainTable(data, isVisible = true) {
     let rows = [...data.strikes];
+    // Focus ATM filter — collapse to ±N strikes around ATM when active
+    if (_focusAtm && data.atm) {
+      const gap = data.strike_gap || 50;
+      const wing = _focusWing * gap;
+      rows = rows.filter(s => Math.abs(s.strike - data.atm) <= wing);
+    }
     if (state.sortCol) {
       rows.sort((a, b) => (a[state.sortCol] - b[state.sortCol]) * state.sortDir);
     }
@@ -4919,16 +5956,20 @@
         const c = _buildChainRow(s, maxOi, atm, support, resistance);
         const ceAlpha = _oiHeatAlpha(s.ce_oi, maxOi).toFixed(3);
         const peAlpha = _oiHeatAlpha(s.pe_oi, maxOi).toFixed(3);
+        // OI velocity badge
+        const vel = _getVelocity(s.strike);
+        const velCe = vel && Math.abs(vel.ce) >= 500 ? `<span class="vel-badge ${vel.ce>0?'vel-up':'vel-dn'}">${vel.ce>0?'▲':'▼'}${Math.round(Math.abs(vel.ce)/100)/10}k/m<i class="hi" data-h="oi-velocity" style="background:none;border:none;color:inherit;font-size:7px;">i</i></span>` : '';
+        const velPe = vel && Math.abs(vel.pe) >= 500 ? `<span class="vel-badge ${vel.pe>0?'vel-up':'vel-dn'}">${vel.pe>0?'▲':'▼'}${Math.round(Math.abs(vel.pe)/100)/10}k/m<i class="hi" data-h="oi-velocity" style="background:none;border:none;color:inherit;font-size:7px;">i</i></span>` : '';
         _chainRowState.set(s.strike, {...s, _maxOi: maxOi, _atm: atm});
         return `<tr class="${c.rowClasses}" data-strike="${s.strike}">
           <td class="oi-bar-wrap ${c.ceItmCls}" style="background:rgba(255,120,80,${ceAlpha})"><div class="oi-bar" style="width:${c.ceBarPct}%"></div><span class="oi-text">${fmtInt(s.ce_oi)}</span></td>
-          <td class="${c.ceChgCls} ${c.ceItmCls}">${fmtSigned(c.ceOiChg)}</td>
+          <td class="${c.ceChgCls} ${c.ceItmCls}">${fmtSigned(c.ceOiChg)}${velCe}</td>
           <td class="${c.ceItmCls}">${fmtIv(s.ce_iv)}</td>
           <td class="${c.ceItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="CE" title="Click to add as a Builder leg">${fmtPrice(s.ce_ltp)}${c.ceBidAsk}</td>
           <td class="strike-cell" style="cursor:pointer;" title="Click to open in Builder">${fmtInt(s.strike)}${c.strikeTag}</td>
           <td class="${c.peItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="PE" title="Click to add as a Builder leg">${fmtPrice(s.pe_ltp)}${c.peBidAsk}</td>
           <td class="${c.peItmCls}">${fmtIv(s.pe_iv)}</td>
-          <td class="${c.peChgCls} ${c.peItmCls}">${fmtSigned(c.peOiChg)}</td>
+          <td class="${c.peChgCls} ${c.peItmCls}">${fmtSigned(c.peOiChg)}${velPe}</td>
           <td class="oi-bar-wrap ${c.peItmCls}" style="background:rgba(80,200,120,${peAlpha})"><div class="oi-bar put" style="width:${c.peBarPct}%"></div><span class="oi-text">${fmtInt(s.pe_oi)}</span></td>
         </tr>`;
       }).join('');
@@ -5516,9 +6557,14 @@
     } else {
       els.reversalWatchPanel.innerHTML = reversals.map(r => {
         const dotCls = r.bullish === null ? '' : (r.bullish ? 'bullish-dot' : 'bearish-dot');
+        const confBadge = r._confScore >= 2
+          ? `<span class="conf-score high">${r._confScore}/${r._confTotal} signals <i class="hi" data-h="signal-confidence">i</i></span>`
+          : r._confScore >= 1
+            ? `<span class="conf-score">${r._confScore}/${r._confTotal} signals <i class="hi" data-h="signal-confidence">i</i></span>`
+            : '';
         return `<div class="reversal-item">
           <span class="reversal-dot ${dotCls}" style="${r.bullish===null?'background:var(--gold)':''}"></span>
-          <span class="reversal-text"><span class="reversal-type-badge">${escapeHtml(r.type)}</span>${escapeHtml(r.text)}</span>
+          <span class="reversal-text"><span class="reversal-type-badge">${escapeHtml(r.type)}</span>${escapeHtml(r.text)}${confBadge}</span>
         </div>`;
       }).join('');
     }
@@ -7360,6 +8406,7 @@
           <span class="${chg>=0?'pos-txt':'neg-txt'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>
           <span class="wc-pcr">PCR ${d.pcr}</span>
           <span class="${sentCls}">${d.sentiment.includes('bullish')?'▲':(d.sentiment.includes('bearish')?'▼':'—')}</span>
+          <button class="wc-alert-btn ${_watchlistAlerts[sym]?'armed':''}" data-wl-alert="${sym}" title="${_watchlistAlerts[sym]?'Alert @ '+fmtInt(_watchlistAlerts[sym])+' (click to remove)':'Set price alert'}">🔔<i class=\"hi\" data-h=\"wl-alerts\">i</i></button>
         </div>
       </div>`;
     }).join('');
@@ -10806,6 +11853,28 @@
     'strike-builder': '<strong>Strike → Builder</strong>Click the strike price cell in any chain row to auto-populate the Strategy Builder as a short straddle at that strike. Switches to the Builder tab automatically.',
     'constituents':   '<strong>Index Constituents</strong>Live prices for every stock in the selected index, fetched via option chain data. Pts ± shows each stock\'s contribution to the index move: (pct_change × normalized_weight × index_level). Sorted by default by absolute pts impact.',
     'max-pain':       '<strong>Max Pain</strong>The strike price where the total P&L loss for all option buyers (CE + PE combined) is maximised — i.e. where option sellers profit most. Computed by summing intrinsic value × OI at each strike. Price tends to gravitate toward max pain approaching expiry.',
+    'morning-checklist': '<strong>Pre-Session Checklist</strong>A structured list to run through before market open each morning. Checks off GIFT direction, alerts, lot size, FII bias, straddle premium, max pain and journal. Saves to localStorage by date — fully reset each new day.',
+    'spot-sparkline':    '<strong>Spot Intraday Sparkline</strong>60-minute rolling chart of index spot price from today\'s session. Green = rising from first reading, red = falling. The "Range used %" compares today\'s actual H–L to the 1σ expected move — shows how much of the day\'s implied range has already been consumed.',
+    'realized-vs-implied': '<strong>Range Used vs Expected Move</strong>Today\'s session H–L as a % of the 1σ IV-implied move. ≥80% = straddle premium is nearly used up. <40% = large implied range still unused. For premium sellers, low % = more buffer remaining; high % = breakeven is close.',
+    'flow-timeline':     '<strong>Options Flow Timeline</strong>30-minute rolling chart of cumulative CE vs PE premium flow in ₹ Cr. CE = orange, PE = green. A consistently rising CE line means persistent call buying; divergence from PCR OI often signals a position shift in progress.',
+    'session-log':       '<strong>Session Log Export (JSONL)</strong>Every chain refresh logs spot, ATM, PCR, IV, straddle, OI totals, max pain and support/resistance. Download as JSONL for post-session backtesting. Up to 2,000 entries per session — one line per refresh.',
+    'confluence':        '<strong>Level Confluence Badge</strong>Shows how many independently-computed levels land within 0.2% of this one. A 3× badge means Fibonacci R1 + BE↑ + call wall all agree on the same zone — far more significant than a lone pivot level. Higher number = stronger expected reaction.',
+    'browser-notif':     '<strong>Browser Notifications</strong>When the dashboard tab is in the background, level-touch alerts also fire as OS-level popups. Permission requested once on load. Works across windows — you see the alert even when entering orders in another application.',
+    'trade-template':    '<strong>Trade Entry Templates</strong>Inserts a structured note at the cursor position. Short Straddle, CE Buy, PE Buy, Iron Condor and Trade Review templates available, each pre-filled with current symbol, ATM strike, straddle premium and time. Complete the blanks for stops, targets and reasoning.',
+    'signal-confidence': '<strong>Signal Confidence Score</strong>"3/5 signals" means 3 of today\'s 5 active reversal signals share this directional bias. Shown in green when a majority agree. A lone signal with 1/5 is much weaker evidence than 4/5. Higher agreement = higher conviction in the setup.',
+    'pcr-vol':           '<strong>PCR by Volume</strong>Put/Call ratio by today\'s traded volume. A leading indicator vs OI-based PCR (lagging). When PCR Vol rises sharply while PCR OI is flat, fresh put buying is happening now. Both above 1 = more put premium transacted than call premium today.',
+    'oi-velocity':       '<strong>OI Velocity</strong>Rate of OI change at a strike over the last ~60 seconds (contracts per minute). ▲ = building fast, ▼ = unwinding. Only shown when ≥500 contracts/minute — filters out noise. Catches large position entries in real time, not just the accumulated session total.',
+    'chain-view':        '<strong>Chain View Mode</strong>Both = full chain. CE = calls side only. PE = puts side only. Hides the opposite side\'s columns to reduce visual load during fast moves. Useful for comparing IV across all call strikes or scanning put OI structure without distraction.',
+    'strike-search':     '<strong>Strike Search</strong>Type any price and press Enter to scroll instantly to that strike (rounded to the nearest standard gap). Faster than scrolling on large chains. Works with exact strikes or approximate prices — it rounds to the nearest valid strike.',
+    'expiry-cal':        '<strong>Expiry Calendar</strong>All available expiries as pills. Grey = Weekly, Blue = Monthly, Gold = current expiry. DTE on each pill. Lets you read the term structure instantly and know whether the next expiry is a weekly or the monthly settlement without checking the date.',
+    'circuit-breaker':   '<strong>Circuit Breaker Levels</strong>NSE index circuit breakers at −10%, −15%, −20% and +10% from yesterday\'s close. Trading halts at these levels (15–45 min pause). Shown on the pivot bar so you always know how many points separate current price from a circuit trigger.',
+    'wl-alerts':         '<strong>Watchlist Price Alert</strong>Set a price target on any watchlist symbol. When spot crosses that level (crossing detection, not nearness), the full alert fires — sound, voice, browser notification, alert history — for that symbol even when it\'s not your active chain.',
+    'gap-display':       '<strong>Today\'s Gap</strong>Today\'s open minus yesterday\'s bhavcopy close. Gap-up = opened above yesterday\'s close; gap-down = below. Gaps above key OI walls or pivot levels tend to be stickier. Appears once both session OHLC and bhavcopy data are available.',
+    'straddle-sparkline': '<strong>Straddle Premium Sparkline</strong>Rolling 30-minute chart of ATM straddle premium (CE + PE LTP). Green line = premium expanding (IV rising), red = contracting (time decay dominant). Min–max range shows today\'s premium band. IVP alongside shows where current IV sits within today\'s own session range.',
+    'lot-size':          '<strong>Lot Size Strip</strong>Current lot sizes for all F&O indices accumulated as you switch symbols. Displayed for quick reference when sizing positions mentally. Auto-updates from each chain response; persists for the browser session.',
+    'offline-cache':     '<strong>Offline Cache</strong>When the server is unreachable, the last successful chain response (saved to localStorage) is shown with this banner. Data is stale but better than a blank screen — use it for reference while troubleshooting the connection.',
+    'staleness-counter': '<strong>Live Staleness Counter</strong>Shows how many seconds/minutes since the last successful chain fetch. Green <10s = fresh. Amber with ⚠ = 10–120s, data may be slightly stale. Red ⛔ = no update in >2 minutes — check server connection or Akamai block.',
+    'oi-walls':          '<strong>OI Call Wall / Put Wall</strong>Strike with highest total CE OI = call wall (likely resistance). Highest PE OI = put wall (likely support). Heavy writing at a strike means sellers are defending it. These shift intraday as large writers roll — watch for the wall moving as a signal of changing sentiment.',
   };
 
   // ── Tooltip engine ───────────────────────────────────────────────────────
