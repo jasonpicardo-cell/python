@@ -522,6 +522,66 @@
   .home-left { display: flex; flex-direction: column; gap: 12px; }
   .home-right { display: flex; flex-direction: column; gap: 12px; }
 
+  /* ── Help icons + tooltip ── */
+  .hi { display:inline-flex; align-items:center; justify-content:center;
+    width:13px; height:13px; border-radius:50%;
+    background:var(--panel-2); border:1px solid var(--border);
+    color:var(--muted); font-size:8px; font-weight:800; font-style:normal;
+    cursor:help; margin:0 3px; vertical-align:middle; flex-shrink:0;
+    transition:background .15s,color .15s,border-color .15s; user-select:none; }
+  .hi:hover { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #helpTip { position:fixed; z-index:99999; max-width:270px; padding:8px 11px;
+    background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    box-shadow:0 6px 24px #0009; font-size:10.5px; line-height:1.55;
+    color:var(--text); pointer-events:none; display:none; }
+  #helpTip strong { color:var(--accent); display:block; margin-bottom:3px; font-size:11px; }
+  /* ── Session phase badge ── */
+  .phase-badge { display:inline-flex; align-items:center; gap:4px; padding:1px 8px;
+    border-radius:10px; font-size:9.5px; font-weight:700; border:1px solid; margin-left:6px; }
+  .phase-normal { border-color:var(--pos); color:var(--pos); background:rgba(46,204,143,.08); }
+  .phase-gold   { border-color:var(--gold); color:var(--gold); background:rgba(255,193,7,.08); }
+  .phase-neg    { border-color:var(--neg); color:var(--neg); background:rgba(255,93,108,.08); }
+  .phase-muted  { border-color:var(--muted); color:var(--muted); background:transparent; }
+  /* ── Theta decay card ── */
+  .theta-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:8px 12px; margin-bottom:10px; display:flex; gap:20px; flex-wrap:wrap; align-items:center; }
+  .theta-item { display:flex; flex-direction:column; gap:2px; min-width:90px; }
+  .theta-lbl  { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .theta-val  { font-size:12px; font-weight:700; color:var(--neg); }
+  /* ── Multi-expiry comparison ── */
+  .expiry-comp { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:8px 10px; margin-bottom:10px; }
+  .exp-grid { display:grid; grid-template-columns:80px 60px 70px 60px 70px 55px;
+    gap:2px; font-size:10.5px; padding:2px 0; border-bottom:1px solid var(--border); }
+  .exp-grid:last-child { border-bottom:none; }
+  .exp-grid-head { font-size:9px; color:var(--muted); font-weight:700; text-transform:uppercase; }
+  /* ── Mini HUD overlay ── */
+  #miniHud { position:fixed; top:60px; right:12px; width:220px; z-index:9000;
+    background:var(--panel); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; box-shadow:0 8px 32px #0008; display:none; cursor:move;
+    font-size:11px; user-select:none; }
+  .hud-spot   { font-size:22px; font-weight:800; line-height:1.1; }
+  .hud-row    { display:flex; justify-content:space-between; align-items:center;
+    padding:2px 0; border-bottom:1px solid var(--border); font-size:10.5px; }
+  .hud-row:last-child { border-bottom:none; }
+  .hud-level  { display:flex; justify-content:space-between; padding:1px 0; font-size:10px; }
+  .hud-level.near { color:var(--gold); font-weight:700; }
+  .hud-sep    { border:none; border-top:1px dashed var(--border); margin:4px 0; }
+  /* ── Expected move bands CSS ── */
+  .label-em  { color:var(--accent); }
+  .label-em2 { color:var(--muted); }
+  .fill-em   { background:rgba(61,130,246,.35) !important; }
+  .fill-em2  { background:rgba(61,130,246,.15) !important; }
+  /* ── OI cell heatmap ── */
+  .oi-heat-ce { background-color: rgba(255,120,80,var(--oi-alpha,0)) !important; }
+  .oi-heat-pe { background-color: rgba(80,200,120,var(--oi-alpha,0)) !important; }
+  /* ── Relative strength bar ── */
+  .rs-bar-wrap { display:flex; align-items:center; gap:5px; font-size:10px; margin-top:6px; }
+  .rs-bar-outer { flex:1; height:6px; border-radius:3px; background:var(--panel-2); overflow:hidden; }
+  .rs-bar-inner { height:100%; border-radius:3px; transition:width .4s; }
+  /* ── Advanced alert settings ── */
+  .adv-alerts { border-top:1px solid var(--border); padding:5px 6px; font-size:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
   /* ── Connection health dot ── */
   .health-dot { font-size:13px; cursor:default; transition:color .4s; line-height:1; }
   /* ── ATM Greeks card ── */
@@ -552,6 +612,36 @@
   .fiidii-row:last-child { border-bottom:none; }
   .fiidii-head { font-size:9px; font-weight:700; text-transform:uppercase;
     color:var(--muted); letter-spacing:.04em; }
+  /* ── OI Concentration Chart ── */
+  .oi-conc-wrap { background:var(--panel); border:1px solid var(--border);
+    border-radius:var(--radius); padding:8px 10px; margin-bottom:10px; }
+  .oi-conc-svg text { font-size:9px; fill:var(--muted); }
+  /* ── GEX indicator ── */
+  .gex-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px;
+    border-radius:20px; font-size:10.5px; font-weight:700; border:1px solid; }
+  .gex-badge.damp { background:rgba(46,204,143,.1); border-color:var(--pos); color:var(--pos); }
+  .gex-badge.amp  { background:rgba(255,93,108,.1);  border-color:var(--neg); color:var(--neg); }
+  /* ── Premium flow ── */
+  .flow-bar-wrap { display:flex; align-items:center; gap:8px; font-size:10.5px; }
+  .flow-bar { flex:1; height:8px; border-radius:4px; background:var(--panel-2); overflow:hidden; }
+  .flow-bar-ce { height:100%; background:rgba(255,120,80,.7); border-radius:4px; transition:width .4s; }
+  /* ── Position sizing calculator ── */
+  .pos-sizer { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:10px; margin-top:10px; }
+  .pos-sizer-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin:8px 0; }
+  .pos-sizer-out { background:var(--panel-2); border-radius:6px; padding:6px 10px;
+    font-size:11px; display:flex; flex-direction:column; gap:2px; }
+  .pos-sizer-out .lbl { font-size:9px; color:var(--muted); text-transform:uppercase; }
+  .pos-sizer-out .val { font-size:15px; font-weight:700; }
+  /* ── Chain toolbar (snapshot / export / delta mode) ── */
+  .chain-toolbar { display:flex; align-items:center; gap:6px; padding:6px 0 4px;
+    flex-wrap:wrap; border-bottom:1px solid var(--border); margin-bottom:6px; }
+  .delta-mode-toggle { display:flex; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .delta-mode-toggle button { padding:2px 8px; font-size:9px; background:var(--panel-2);
+    border:none; cursor:pointer; color:var(--muted); }
+  .delta-mode-toggle button.active { background:var(--accent); color:#fff; }
+  /* ── PCR alert controls ── */
+  .pcr-alert-bar { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:10px; }
 
   /* ── Nifty 50 widget ── */
   .nifty-widget {
@@ -1262,6 +1352,8 @@
     <span class="ticker-spot num" id="tickerSpot">—</span>
     <span class="ticker-meta">
       Expiry <b id="metaExpiry">—</b> &nbsp;·&nbsp; <b id="metaDte">—</b> DTE &nbsp;·&nbsp; ⏱ <b id="metaCountdown">—</b> &nbsp;·&nbsp; IV <b id="metaAtmIv">—</b> &nbsp; IVR <b id="metaIvRank">—</b> &nbsp;·&nbsp; VIX <b id="metaVix">—</b> &nbsp;·&nbsp; Updated <b id="metaTime">—</b>
+      <i class="hi" data-h="session-phase" style="vertical-align:middle;">i</i><span id="sessionPhaseBadge" class="phase-badge" style="display:none;"></span>
+      <i class="hi" data-h="gift-nifty" style="vertical-align:middle;margin-left:4px;">i</i><span id="giftNiftyBadge" style="font-size:9.5px;color:var(--muted);margin-left:2px;"></span>
     </span>
   </div>
 
@@ -1275,8 +1367,26 @@
     <button class="tab" data-tab="market">Market View</button>
     <button class="tab" data-tab="paper">Paper Trades</button>
     <button class="tab" data-tab="flow">OI Flow</button>
-    <span id="healthDot" class="health-dot" title="Checking server…" style="margin-left:auto;margin-right:8px;color:var(--muted);">●</span>
+    <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
+    <button id="miniHudToggle" class="btn" style="font-size:10px;padding:2px 7px;margin-right:6px;" title="Mini HUD overlay (key: `)">HUD<i class="hi" data-h="mini-hud">i</i></button>
   </nav>
+
+  <!-- Mini HUD Overlay -->
+  <div id="miniHud">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span id="hudSymbol" style="font-size:10px;color:var(--muted);font-weight:700;"></span>
+      <button onclick="document.getElementById('miniHud').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;">✕</button>
+    </div>
+    <div class="hud-spot" id="hudSpot">—</div>
+    <div id="hudPctChg" style="font-size:10px;margin-bottom:4px;"></div>
+    <hr class="hud-sep">
+    <div class="hud-row"><span>ATM IV</span><b id="hudIv">—</b></div>
+    <div class="hud-row"><span>PCR</span><b id="hudPcr">—</b></div>
+    <div class="hud-row"><span>Phase</span><b id="hudPhase">—</b></div>
+    <div class="hud-row"><span>Expiry</span><b id="hudCountdown">—</b></div>
+    <hr class="hud-sep">
+    <div id="hudLevels" style="font-size:10px;"></div>
+  </div>
 
   <main>
 
@@ -1306,8 +1416,8 @@
           <div class="level-panel" id="pivotPanel">
             <div class="level-panel-head">
               <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span class="skew-chart-title">Pivot Levels</span>
-                <select id="pivotTypeSelect" class="level-select">
+                <span class="skew-chart-title">Pivot Levels<i class="hi" data-h="pivot-levels">i</i></span>
+                <i class="hi" data-h="pivot-type">i</i><select id="pivotTypeSelect" class="level-select">
                   <option value="fibonacci" selected>Fibonacci</option>
                   <option value="traditional">Traditional</option>
                   <option value="woodie">Woodie</option>
@@ -1315,7 +1425,7 @@
                   <option value="demark">DeMark</option>
                   <option value="classic">Classic</option>
                 </select>
-                <select id="pivotPeriodSelect" class="level-select" title="Daily = prev day OHLC · Weekly = prev complete week OHLC">
+                <i class="hi" data-h="pivot-period">i</i><select id="pivotPeriodSelect" class="level-select" title="Daily = prev day OHLC · Weekly = prev complete week OHLC">
                   <option value="daily" selected>Daily</option>
                   <option value="weekly">Weekly</option>
                 </select>
@@ -1323,46 +1433,56 @@
               </div>
               <div class="alert-controls">
                 <label class="level-alert-toggle" title="Enable price-touch alerts">
-                  <input type="checkbox" id="pivotAlertToggle" checked> 🔔
+                  <input type="checkbox" id="pivotAlertToggle" checked> 🔔<i class="hi" data-h="bell-alert">i</i>
                 </label>
-                <select id="alertSoundSelect" class="level-select" title="Alert sound type">
+                <i class="hi" data-h="alert-sound">i</i><select id="alertSoundSelect" class="level-select" title="Alert sound type">
                   <option value="tone">Tone</option>
                   <option value="chime" selected>Chime</option>
                   <option value="ping">Ping</option>
                 </select>
-                <input type="range" id="alertVolumeSlider" class="vol-slider" min="0" max="1" step="0.01" value="1" title="Volume">
+                <i class="hi" data-h="alert-volume">i</i><input type="range" id="alertVolumeSlider" class="vol-slider" min="0" max="1" step="0.01" value="1" title="Volume">
                 <label class="alert-dur-label">
                   <input type="number" id="alertDurationInput" class="ohlc-inp" value="2" min="0.2" max="10" step="0.1" style="width:42px;text-align:center;" title="Duration (seconds)">
                   <span style="font-size:9px;color:var(--muted-2);">s</span>
                 </label>
                 <button class="btn" id="alertTestBtn" style="font-size:10px;padding:3px 9px;" title="Preview sound">▶</button>
                 <label class="level-alert-toggle" title="Speak the level name when touched">
-                  <input type="checkbox" id="voiceToggle" checked> 🗣
+                  <input type="checkbox" id="voiceToggle" checked> 🗣<i class="hi" data-h="voice-alert">i</i>
                 </label>
               </div>
             </div>
             <div class="ohlc-override-row" id="ohlcOverrideRow">
-              <span class="ohlc-override-label">Prev Day:</span>
+              <span class="ohlc-override-label">Prev Day:<i class="hi" data-h="ohlc-override">i</i></span>
               <label class="ohlc-lbl">H <input type="number" id="ohlcH" class="ohlc-inp" placeholder="High" step="0.05"></label>
               <label class="ohlc-lbl">L <input type="number" id="ohlcL" class="ohlc-inp" placeholder="Low"  step="0.05"></label>
               <label class="ohlc-lbl">C <input type="number" id="ohlcC" class="ohlc-inp" placeholder="Close" step="0.05"></label>
               <label class="ohlc-lbl">O <input type="number" id="ohlcO" class="ohlc-inp" placeholder="Open (Woodie/DM)" step="0.05"></label>
-              <button class="btn" id="ohlcApplyBtn" style="font-size:10px;padding:3px 10px;">Apply</button>
+              <button class="btn" id="ohlcApplyBtn" title="Apply manual OHLC override to pivot calculation" style="font-size:10px;padding:3px 10px;">Apply</button>
             </div>
             <!-- Session OHLC row — today's live intraday range -->
-            <div id="sessionOhlcRow" style="display:none;font-size:10.5px;color:var(--muted);padding:2px 6px;display:flex;gap:12px;align-items:center;border-top:1px solid var(--border);"></div>
+            <div id="sessionOhlcRow" title="Today's live intraday OHLC — see help" style="display:none;font-size:10.5px;color:var(--muted);padding:2px 6px;display:flex;gap:12px;align-items:center;border-top:1px solid var(--border);"></div>
             <div class="level-bars-wrap" id="pivotBars"></div>
             <!-- Alert history — fills when pivot levels are touched -->
             <div id="alertHistoryPanel" style="display:none;">
               <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-top:1px solid var(--border);font-size:10px;color:var(--muted);">
-                <span>🔔 Touch History</span>
+                <span>🔔 Touch History<i class="hi" data-h="alert-history">i</i></span>
                 <button id="clearAlertHistoryBtn" class="btn" style="font-size:9px;padding:1px 7px;">Clear</button>
               </div>
               <div id="alertHistoryList" style="max-height:120px;overflow-y:auto;padding:0 6px 4px;"></div>
             </div>
+            <!-- Advanced alerts: IV spike + volume spike -->
+            <div class="adv-alerts">
+              <label style="display:flex;align-items:center;gap:3px;"><input type="checkbox" id="ivSpikeEnabled"> IV Spike &gt;<i class="hi" data-h="iv-spike">i</i></label>
+              <input type="number" id="ivSpikeThreshold" class="ohlc-inp" value="15" step="1" style="width:42px;" title="% change in ATM IV per poll">
+              <span style="color:var(--muted-2);font-size:9px;">%/poll</span>
+              <span style="color:var(--border);">|</span>
+              <label style="display:flex;align-items:center;gap:3px;"><input type="checkbox" id="volSpikeEnabled"> Vol Spike &gt;<i class="hi" data-h="vol-spike">i</i></label>
+              <input type="number" id="volSpikeMultiplier" class="ohlc-inp" value="2.5" step="0.5" style="width:42px;" title="Multiplier vs rolling avg volume">
+              <span style="color:var(--muted-2);font-size:9px;">×avg</span>
+            </div>
             <!-- Custom price level alerts -->
             <div class="custom-alerts-wrap">
-              <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">📌 Custom Levels</div>
+              <div style="font-size:10px;color:var(--muted);margin-bottom:4px;">📌 Custom Levels<i class="hi" data-h="custom-alerts">i</i></div>
               <div class="custom-alert-row">
                 <input type="number" id="customAlertPrice" class="ohlc-inp" placeholder="Price" step="0.5" style="width:80px;">
                 <input type="text" id="customAlertLabel" class="ohlc-inp" placeholder="Label (opt)" style="width:90px;">
@@ -1375,13 +1495,48 @@
           <!-- ── FII / DII Daily Flow ───────────────────────────────── -->
           <div class="fiidii-panel" id="fiidiiPanel">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-              <span class="skew-chart-title">FII / DII Daily Flow</span>
+              <span class="skew-chart-title">FII / DII Daily Flow<i class="hi" data-h="fii-dii">i</i></span>
               <div style="display:flex;align-items:center;gap:6px;">
                 <span id="fiidiiTime" style="font-size:9px;color:var(--muted-2);"></span>
                 <button class="btn" id="fiidiiRefreshBtn" style="font-size:10px;padding:2px 8px;">↻</button>
               </div>
             </div>
             <div id="fiidiiBody"><div class="movers-loading">—</div></div>
+          </div>
+
+          <!-- ── Position Sizing Calculator ───────────────────────── -->
+          <div class="pos-sizer">
+            <div class="level-panel-head" style="margin-bottom:8px;">
+              <span class="skew-chart-title">Position Sizer<i class="hi" data-h="pos-sizer">i</i></span>
+              <select id="psSide" class="level-select">
+                <option value="buy_option">Buy Option</option>
+                <option value="sell_option">Sell Option (margin)</option>
+                <option value="straddle">Straddle (Buy)</option>
+              </select>
+            </div>
+            <div class="pos-sizer-grid">
+              <label class="ohlc-lbl" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                <span style="font-size:9px;color:var(--muted);">Max Risk (₹)</span>
+                <input type="number" id="psMaxRisk" class="ohlc-inp" value="10000" step="1000" style="width:100%;">
+              </label>
+              <label class="ohlc-lbl" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                <span style="font-size:9px;color:var(--muted);">Premium (₹/lot)</span>
+                <input type="number" id="psPremium" class="ohlc-inp" placeholder="e.g. 150" step="0.5" style="width:100%;">
+              </label>
+              <label class="ohlc-lbl" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                <span style="font-size:9px;color:var(--muted);">Lot Size</span>
+                <input type="number" id="psLotSize" class="ohlc-inp" value="75" step="1" style="width:100%;">
+              </label>
+              <label class="ohlc-lbl" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                <span style="font-size:9px;color:var(--muted);">Margin/Lot (₹, sellers)</span>
+                <input type="number" id="psMargin" class="ohlc-inp" placeholder="e.g. 85000" step="1000" style="width:100%;">
+              </label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:4px;" id="psSizerOutput">
+              <div class="pos-sizer-out"><span class="lbl">Lots</span><span class="val" id="psOutLots">—</span></div>
+              <div class="pos-sizer-out"><span class="lbl">Capital</span><span class="val" id="psOutCapital">—</span></div>
+              <div class="pos-sizer-out"><span class="lbl">Breakeven</span><span class="val" id="psOutBe">—</span></div>
+            </div>
           </div>
 
         </div><!-- /.home-left -->
@@ -1396,25 +1551,30 @@
                 <label style="font-size:10px;color:var(--muted-2);display:flex;align-items:center;gap:3px;cursor:pointer;">
                   <input type="checkbox" id="niftyAutoRefresh" checked> Auto (30s)
                 </label>
-                <button class="btn" id="niftyExpandBtn" style="font-size:10px;padding:3px 9px;">⤢ All</button>
+                <button class="btn" id="niftyExpandBtn" title="Click to toggle between top 10 and full list" style="font-size:10px;padding:3px 9px;">⤢ All</button>
                 <button class="btn" id="niftyRefreshBtn" style="font-size:10px;padding:3px 9px;">↻</button>
               </div>
             </div>
             <!-- Index selector tabs -->
-            <div class="nifty-index-tabs" id="niftyIndexTabs">
+            <div style="font-size:10px;font-weight:700;color:var(--muted);padding:4px 0 2px;">Constituents<i class="hi" data-h="constituents">i</i></div><div class="nifty-index-tabs" id="niftyIndexTabs">
               <button class="nifty-idx-tab active" data-index="NIFTY">Nifty 50</button>
               <button class="nifty-idx-tab" data-index="BANKNIFTY">BankNifty</button>
               <button class="nifty-idx-tab" data-index="FINNIFTY">FinNifty</button>
               <button class="nifty-idx-tab" data-index="MIDCPNIFTY">MidCap</button>
             </div>
             <!-- Market breadth bar -->
-            <div class="breadth-bar-wrap" id="breadthBarWrap" style="display:none;">
-              <span id="breadthAdvancers" style="color:var(--pos);font-weight:700;min-width:28px;"></span>
+            <div class="breadth-bar-wrap" id="breadthBarWrap" title="Market breadth — hover ℹ for details" style="display:none;">
+              <i class="hi" data-h="breadth">i</i><span id="breadthAdvancers" style="color:var(--pos);font-weight:700;min-width:28px;"></span>
               <div class="breadth-bar">
                 <div class="breadth-bar-fill" id="breadthFill" style="background:var(--pos);width:50%;"></div>
               </div>
               <span id="breadthDecliners" style="color:var(--neg);font-weight:700;min-width:28px;text-align:right;"></span>
               <span id="breadthScore" style="font-size:9px;color:var(--muted);margin-left:4px;"></span>
+            </div>
+            <!-- Index relative strength vs open -->
+            <div class="rs-bar-wrap" id="rsBarWrap" style="display:none;">
+              <span style="font-size:9px;color:var(--muted);min-width:36px;">vs open<i class="hi" data-h="rel-strength">i</i></span>
+              <div id="rsBarItems" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
             </div>
             <div id="niftyWidgetBody">
               <div class="movers-loading">Loading constituent data…</div>
@@ -2363,8 +2523,8 @@
       <div class="stat-grid" id="statGrid"></div>
       <div class="pcr-trend-wrap" id="pcrTrendWrap">
         <div class="skew-chart-head">
-          <span class="skew-chart-title">PCR Trend (this session)</span>
-          <span class="pcr-trend-current" id="pcrTrendCurrent"></span>
+          <span class="skew-chart-title">PCR Trend (this session)<i class="hi" data-h="pcr-trend">i</i></span>
+          <span class="pcr-trend-current" id="pcrTrendCurrent" title="PCR trend arrow — see help"></span>
         </div>
         <div id="pcrTrendChart"></div>
       </div>
@@ -2393,63 +2553,102 @@
         <div id="straddleChart"></div>
       </div>
 
+      <!-- Theta Decay Projection -->
+      <div class="theta-card" id="thetaCard" style="display:none;">
+        <span class="greeks-card-title">Θ Decay<i class="hi" data-h="theta-decay">i</i></span>
+        <div class="theta-item"><span class="theta-lbl">Per day (straddle)</span><span class="theta-val" id="thetaPerDay">—</span></div>
+        <div class="theta-item"><span class="theta-lbl">EOD premium est.</span><span class="theta-val" id="thetaEod">—</span></div>
+        <div class="theta-item"><span class="theta-lbl">Tomorrow est.</span><span class="theta-val" id="thetaTomorrow">—</span></div>
+        <div class="theta-item"><span class="theta-lbl">Current straddle</span><span class="theta-val" style="color:var(--text);" id="thetaCurrent">—</span></div>
+      </div>
+
+      <!-- Multi-Expiry ATM Premium Comparison -->
+      <div class="expiry-comp" id="multiExpiryComp" style="display:none;">
+        <div style="font-weight:700;font-size:11px;margin-bottom:6px;color:var(--muted);">ATM Premium Across Expiries<i class="hi" data-h="multi-expiry">i</i></div>
+        <div id="multiExpiryBody"></div>
+      </div>
+
       <!-- ATM Greeks summary card -->
       <div class="greeks-card" id="greeksCard" style="display:none;">
-        <span class="greeks-card-title">ATM Greeks</span>
-        <div class="greek-item">
-          <span class="greek-label">Δ CE</span>
-          <span class="greek-val" id="gCeDelta">—</span>
-        </div>
-        <div class="greek-item">
-          <span class="greek-label">Δ PE</span>
-          <span class="greek-val" id="gPeDelta">—</span>
-        </div>
-        <div class="greek-item">
-          <span class="greek-label">Γ</span>
-          <span class="greek-val" id="gGamma">—</span>
-          <span class="greek-sub">per pt</span>
-        </div>
-        <div class="greek-item">
-          <span class="greek-label">Vega</span>
-          <span class="greek-val" id="gVega">—</span>
-          <span class="greek-sub">per 1% IV</span>
-        </div>
-        <div class="greek-item">
-          <span class="greek-label">Θ CE</span>
-          <span class="greek-val neg-txt" id="gCeTheta">—</span>
-          <span class="greek-sub">per day</span>
-        </div>
-        <div class="greek-item">
-          <span class="greek-label">Θ PE</span>
-          <span class="greek-val neg-txt" id="gPeTheta">—</span>
-          <span class="greek-sub">per day</span>
-        </div>
+        <span class="greeks-card-title">ATM Greeks<i class="hi" data-h="atm-greeks">i</i></span>
+        <div class="greek-item"><span class="greek-label">Δ CE</span><span class="greek-val" id="gCeDelta">—</span></div>
+        <div class="greek-item"><span class="greek-label">Δ PE</span><span class="greek-val" id="gPeDelta">—</span></div>
+        <div class="greek-item"><span class="greek-label">Γ</span><span class="greek-val" id="gGamma">—</span><span class="greek-sub">per pt</span></div>
+        <div class="greek-item"><span class="greek-label">Vega</span><span class="greek-val" id="gVega">—</span><span class="greek-sub">per 1% IV</span></div>
+        <div class="greek-item"><span class="greek-label">Θ CE</span><span class="greek-val neg-txt" id="gCeTheta">—</span><span class="greek-sub">per day</span></div>
+        <div class="greek-item"><span class="greek-label">Θ PE</span><span class="greek-val neg-txt" id="gPeTheta">—</span><span class="greek-sub">per day</span></div>
         <div class="greek-item" style="border-left:1px solid var(--border);padding-left:12px;">
-          <span class="greek-label">ATM</span>
-          <span class="greek-val" id="gAtmStrike">—</span>
+          <span class="greek-label">Synth<i class="hi" data-h="synth-futures">i</i></span><span class="greek-val" id="gSynth">—</span><span class="greek-sub" id="gBasis">basis</span>
         </div>
-        <div class="greek-item">
-          <span class="greek-label">IV</span>
-          <span class="greek-val" id="gAtmIv">—</span>
+        <div class="greek-item"><span class="greek-label">GEX<i class="hi" data-h="gex">i</i></span><span id="gexBadge" style="margin-top:2px;">—</span></div>
+        <div class="greek-item"><span class="greek-label">ATM</span><span class="greek-val" id="gAtmStrike">—</span></div>
+        <div class="greek-item"><span class="greek-label">IV</span><span class="greek-val" id="gAtmIv">—</span></div>
+        <div class="greek-item"><span class="greek-label">DTE</span><span class="greek-val" id="gDte">—</span></div>
+      </div>
+
+      <!-- OI Concentration Chart -->
+      <div class="oi-conc-wrap" id="oiConcWrap" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span class="skew-chart-title">OI by Strike<i class="hi" data-h="oi-chart">i</i></span>
+          <span style="font-size:9px;color:var(--muted-2);">
+            <span style="color:rgba(255,120,80,.8);">■</span> CE &nbsp;
+            <span style="color:rgba(80,200,120,.8);">■</span> PE
+          </span>
         </div>
-        <div class="greek-item">
-          <span class="greek-label">DTE</span>
-          <span class="greek-val" id="gDte">—</span>
+        <div id="oiConcChart"></div>
+        <div style="font-size:9px;color:var(--muted);margin-top:4px;">
+          Premium Flow<i class="hi" data-h="premium-flow">i</i>: <span id="premiumFlowLabel" style="color:var(--text);"></span>
+        </div>
+        <div class="flow-bar-wrap" style="margin-top:4px;">
+          <span id="flowCeLabel" style="color:rgba(255,120,80,.9);min-width:36px;text-align:right;"></span>
+          <div class="flow-bar"><div class="flow-bar-ce" id="flowCeBar" style="width:50%;"></div></div>
+          <span id="flowPeLabel" style="color:rgba(80,200,120,.9);min-width:36px;"></span>
         </div>
       </div>
 
-      <div class="table-wrap">
+      <!-- Chain toolbar: snapshot / export / delta mode -->
+      <div class="chain-toolbar">
+        <button class="btn" id="chainSnapshotBtn" style="font-size:10px;padding:3px 9px;" title="Capture OI snapshot for comparison">📸 Snapshot<i class="hi" data-h="snapshot">i</i></button>
+        <button class="btn" id="chainCompareBtn" style="font-size:10px;padding:3px 9px;display:none;" title="Compare vs snapshot">⚡ Compare</button>
+        <span id="snapshotLabel" style="font-size:9px;color:var(--muted-2);"></span>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;color:var(--muted);">ΔOI:<i class="hi" data-h="delta-oi">i</i></span>
+          <div class="delta-mode-toggle">
+            <button id="deltaModeSession" class="active" onclick="window._setDeltaMode('session')">Session</button>
+            <button id="deltaMode15m" onclick="window._setDeltaMode('15m')">15 min</button>
+          </div>
+          <button class="btn" id="exportCsvBtn" style="font-size:10px;padding:3px 9px;" title="Export chain to CSV">📥 CSV</button>
+        </div>
+      </div>
+
+      <!-- PCR alert controls -->
+      <div class="pcr-alert-bar">
+        <label style="display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="pcrAlertEnabled"> PCR Alert<i class="hi" data-h="pcr-alert">i</i>
+        </label>
+        <label style="display:flex;align-items:center;gap:3px;">
+          Bull &gt;
+          <input type="number" id="pcrBullThreshold" class="ohlc-inp" value="1.5" step="0.05" style="width:48px;">
+        </label>
+        <label style="display:flex;align-items:center;gap:3px;">
+          Bear &lt;
+          <input type="number" id="pcrBearThreshold" class="ohlc-inp" value="0.7" step="0.05" style="width:48px;">
+        </label>
+        <span id="pcrAlertStatus" style="font-size:9px;color:var(--muted-2);"></span>
+      </div>
+
+      <div class="table-wrap" title="Click strike cell to open in Builder">
         <table id="chainTable">
           <thead>
             <tr>
-              <th data-sort="ce_oi">Call OI<span class="arrow"></span></th>
-              <th data-sort="ce_oi_chg">Call ΔOI<span class="arrow"></span></th>
+              <th data-sort="ce_oi">Call OI<i class="hi" data-h="heatmap">i</i><span class="arrow"></span></th>
+              <th data-sort="ce_oi_chg" id="thCeOiChg">Call ΔOI<i class="hi" data-h="delta-oi">i</i><span class="arrow"></span></th>
               <th data-sort="ce_iv">Call IV<span class="arrow"></span></th>
               <th data-sort="ce_ltp">Call LTP<span class="arrow"></span></th>
-              <th class="strike-col">Strike</th>
+              <th class="strike-col">Strike<i class="hi" data-h="strike-builder">i</i></th>
               <th data-sort="pe_ltp">Put LTP<span class="arrow"></span></th>
               <th data-sort="pe_iv">Put IV<span class="arrow"></span></th>
-              <th data-sort="pe_oi_chg">Put ΔOI<span class="arrow"></span></th>
+              <th data-sort="pe_oi_chg" id="thPeOiChg">Put ΔOI<i class="hi" data-h="delta-oi">i</i><span class="arrow"></span></th>
               <th data-sort="pe_oi">Put OI<span class="arrow"></span></th>
             </tr>
           </thead>
@@ -2865,7 +3064,7 @@
     const spot = state.lastData?.underlying_value || 0;
     const abovePrev = so.close > (so.open || 0);
     row.innerHTML =
-      `<span style="color:var(--muted);font-size:10px;">Today</span>` +
+      `<span style="color:var(--muted);font-size:10px;">Today<i class='hi' data-h='session-ohlc'>i</i></span>` +
       `<span style="color:var(--muted-2);">O:<b style="color:var(--text);">${fmtInt(so.open)}</b></span>` +
       `<span style="color:var(--pos);">H:<b>${fmtInt(so.high)}</b></span>` +
       `<span style="color:var(--neg);">L:<b>${fmtInt(so.low)}</b></span>` +
@@ -3139,6 +3338,7 @@
       }
       case 'h': document.querySelector('.tab[data-tab="home"]')?.click(); break;
       case 'c': document.querySelector('.tab[data-tab="chain"]')?.click(); break;
+      case '`': e.preventDefault(); _toggleMiniHud(); break;
       case '?': _showKeyboardHelp(); break;
     }
   });
@@ -3155,7 +3355,7 @@
       <table style="font-size:11px;border-collapse:collapse;width:100%;">
         ${[['N','Switch to Nifty'],['B','Switch to BankNifty'],['F','Switch to FinNifty'],
            ['M','Switch to MidCap'],['R','Refresh chain'],['A','Toggle auto-refresh'],
-           ['H','Go to Home tab'],['C','Go to Chain tab'],['?','Toggle this help']
+           ['H','Go to Home tab'],['C','Go to Chain tab'],['`','Toggle Mini HUD'],['?','Toggle this help']
           ].map(([k,v])=>`<tr><td style="padding:3px 12px 3px 0;"><kbd style="background:var(--panel-2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-family:monospace;">${k}</kbd></td><td style="color:var(--muted);">${v}</td></tr>`).join('')}
       </table>
       <div style="text-align:right;margin-top:10px;">
@@ -3163,6 +3363,695 @@
       </div>`;
     document.body.appendChild(ov);
   }
+
+  // ======================================================================
+  // FEATURE: OI Concentration Chart + Premium Flow
+  // ======================================================================
+  function _renderOiConcentrationChart(data) {
+    const wrap = document.getElementById('oiConcWrap');
+    const container = document.getElementById('oiConcChart');
+    if (!wrap || !container || !data.strikes?.length) { if(wrap) wrap.style.display='none'; return; }
+
+    const spot = data.underlying_value, atm = data.atm, lot = data.lot_size || 1;
+    // Show ±10 strikes from ATM
+    const WING = 7;
+    const strikesNear = data.strikes
+      .filter(s => Math.abs(s.strike - atm) <= WING * (data.strike_gap || 50))
+      .sort((a,b) => a.strike - b.strike);
+    if (!strikesNear.length) { wrap.style.display='none'; return; }
+
+    wrap.style.display = '';
+    const maxOi = Math.max(1, ...strikesNear.flatMap(s => [s.ce_oi||0, s.pe_oi||0]));
+    const BAR_H = 5, GAP = 1, LABEL_W = 48, BAR_MAX_W = 110;
+    const total = strikesNear.length;
+    const svgH = total * (BAR_H*2 + GAP + 2) + 8;
+
+    let rows = '';
+    strikesNear.forEach((s, i) => {
+      const y = i * (BAR_H*2 + GAP + 2) + 4;
+      const ceW = (s.ce_oi||0) / maxOi * BAR_MAX_W;
+      const peW = (s.pe_oi||0) / maxOi * BAR_MAX_W;
+      const isAtm = s.strike === atm;
+      const strokeCol = isAtm ? 'var(--gold)' : 'none';
+      const lbl = fmtInt(s.strike) + (isAtm ? '★' : '');
+      rows += `<text x="${LABEL_W-2}" y="${y+BAR_H}" text-anchor="end" style="font-size:8px;fill:${isAtm?'var(--gold)':'var(--muted)'};">${lbl}</text>
+        <rect x="${LABEL_W}" y="${y}" width="${ceW.toFixed(1)}" height="${BAR_H}" rx="1" fill="rgba(255,120,80,.75)" stroke="${strokeCol}" stroke-width="0.5"/>
+        <rect x="${LABEL_W}" y="${y+BAR_H+1}" width="${peW.toFixed(1)}" height="${BAR_H}" rx="1" fill="rgba(80,200,120,.75)" stroke="${strokeCol}" stroke-width="0.5"/>`;
+    });
+
+    container.innerHTML = `<svg width="${LABEL_W + BAR_MAX_W + 10}" height="${svgH}" style="display:block;max-width:100%;">${rows}</svg>`;
+
+    // Premium flow calculation
+    let ceFl = 0, peFl = 0;
+    for (const s of data.strikes) {
+      ceFl += (s.ce_ltp||0) * (s.ce_volume||0) * lot;
+      peFl += (s.pe_ltp||0) * (s.pe_volume||0) * lot;
+    }
+    const totalFl = ceFl + peFl || 1;
+    const cePct = (ceFl / totalFl * 100).toFixed(0);
+    const fmtCr = v => `₹${(v/1e7).toFixed(1)}Cr`;
+    const flowLbl = document.getElementById('premiumFlowLabel');
+    const ceLbl   = document.getElementById('flowCeLabel');
+    const peLbl   = document.getElementById('flowPeLabel');
+    const ceBr    = document.getElementById('flowCeBar');
+    if (flowLbl) flowLbl.textContent = `CE ${fmtCr(ceFl)} · PE ${fmtCr(peFl)} · Total ${fmtCr(totalFl)}`;
+    if (ceLbl)   ceLbl.textContent   = `CE ${cePct}%`;
+    if (peLbl)   peLbl.textContent   = `PE ${(100-cePct)}%`;
+    if (ceBr)    ceBr.style.width    = cePct + '%';
+  }
+
+  // ======================================================================
+  // FEATURE: GEX (Gamma Exposure) + Synthetic Futures (extends Greeks card)
+  // ======================================================================
+  function _strikeGamma(iv_pct, dte_days, spot, strike) {
+    if (!iv_pct || !dte_days || dte_days <= 0) return 0;
+    const T = dte_days / 365, v = iv_pct / 100, r = 0.065;
+    const d1 = (Math.log(spot/strike) + (r + 0.5*v*v)*T) / (v * Math.sqrt(T));
+    return _npdf(d1) / (spot * v * Math.sqrt(T));
+  }
+
+  function _renderGreeksCard(data) {
+    const card = document.getElementById('greeksCard');
+    if (!card) return;
+    const { atm_iv, dte, underlying_value: spot, atm, strikes, lot_size } = data;
+    const g = _computeATMGreeks(atm_iv, dte, spot, atm);
+    if (!g) { card.style.display = 'none'; return; }
+    card.style.display = '';
+
+    // Standard Greeks
+    document.getElementById('gCeDelta').textContent = g.ce_delta;
+    document.getElementById('gPeDelta').textContent = g.pe_delta;
+    document.getElementById('gGamma').textContent   = g.gamma;
+    document.getElementById('gVega').textContent    = `₹${g.vega.toFixed(2)}`;
+    document.getElementById('gCeTheta').textContent = `₹${g.ce_theta.toFixed(2)}`;
+    document.getElementById('gPeTheta').textContent = `₹${g.pe_theta.toFixed(2)}`;
+    document.getElementById('gAtmStrike').textContent = fmtInt(atm);
+    document.getElementById('gAtmIv').textContent   = `${atm_iv.toFixed(1)}%`;
+    document.getElementById('gDte').textContent     = dte;
+
+    // Synthetic Futures: CE_LTP - PE_LTP + Strike at ATM
+    const atmS = (strikes||[]).find(s => s.strike === atm);
+    if (atmS) {
+      const synth = (atmS.ce_ltp||0) - (atmS.pe_ltp||0) + atm;
+      const basis = synth - spot;
+      const basisCls = basis >= 0 ? 'pos-txt' : 'neg-txt';
+      document.getElementById('gSynth').textContent = fmtInt(synth);
+      document.getElementById('gBasis').innerHTML =
+        `basis: <span class="${basisCls}">${basis>=0?'+':''}${basis.toFixed(0)}</span>`;
+    }
+
+    // GEX
+    if (strikes?.length && lot_size && dte > 0) {
+      let ceGex = 0, peGex = 0;
+      for (const s of strikes) {
+        if (s.ce_iv > 0) ceGex += _strikeGamma(s.ce_iv, dte, spot, s.strike) * (s.ce_oi||0) * lot_size;
+        if (s.pe_iv > 0) peGex += _strikeGamma(s.pe_iv, dte, spot, s.strike) * (s.pe_oi||0) * lot_size;
+      }
+      const scale  = spot * spot / 1e7;
+      const netGex = (ceGex - peGex) * scale;
+      const badge  = document.getElementById('gexBadge');
+      if (badge) {
+        const damp = netGex > 0;
+        badge.className = `gex-badge ${damp ? 'damp' : 'amp'}`;
+        badge.title = `Net GEX: ${netGex.toFixed(1)} Cr  |  CE: ${(ceGex*scale).toFixed(1)}  PE: ${(peGex*scale).toFixed(1)}`;
+        badge.textContent = `${netGex>=0?'+':''}${netGex.toFixed(1)} ${damp ? '⊡ Dampen' : '⊠ Amplify'}`;
+      }
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: PCR threshold alerts
+  // ======================================================================
+  let _pcrAlertedBull = false, _pcrAlertedBear = false;
+  function _checkPcrAlerts(pcr) {
+    const enabled = document.getElementById('pcrAlertEnabled')?.checked;
+    const status  = document.getElementById('pcrAlertStatus');
+    if (!enabled || !pcr) { if(status) status.textContent=''; return; }
+    const bull = parseFloat(document.getElementById('pcrBullThreshold')?.value || 1.5);
+    const bear = parseFloat(document.getElementById('pcrBearThreshold')?.value || 0.7);
+    if (status) status.textContent = `PCR ${pcr.toFixed(2)} | alert > ${bull} or < ${bear}`;
+    if (pcr >= bull && !_pcrAlertedBull) {
+      _pcrAlertedBull = true; _pcrAlertedBear = false;
+      alertLevelTouch(`PCR Bullish ≥ ${bull}`, pcr, 'r');
+    } else if (pcr <= bear && !_pcrAlertedBear) {
+      _pcrAlertedBear = true; _pcrAlertedBull = false;
+      alertLevelTouch(`PCR Bearish ≤ ${bear}`, pcr, 's');
+    } else if (pcr > bear && pcr < bull) {
+      _pcrAlertedBull = false; _pcrAlertedBear = false; // reset for next cross
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: CSV Export
+  // ======================================================================
+  function _exportChainCsv() {
+    const data = state.lastData;
+    if (!data?.strikes?.length) { showToast('No chain data to export'); return; }
+    const cols = ['strike','ce_oi','ce_oi_chg','ce_oi_15m','ce_iv','ce_ltp','ce_volume',
+                  'pe_ltp','pe_iv','pe_oi_15m','pe_oi_chg','pe_oi','pe_volume'];
+    const hdr  = cols.join(',');
+    const rows = data.strikes.map(s => cols.map(c => s[c] ?? '').join(','));
+    const ts   = new Date().toLocaleString('en-IN');
+    const csv  = [
+      `# ${state.symbol} Option Chain - Expiry: ${data.expiry} - ${ts}`,
+      `# Spot: ${data.underlying_value} | ATM: ${data.atm} | PCR: ${data.pcr} | Max Pain: ${data.max_pain}`,
+      `# ΔOI = change since session start | 15m ΔOI = change in last 15 minutes`,
+      hdr, ...rows
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement('a'), {
+      href: url, download: `${state.symbol}_chain_${new Date().toISOString().slice(0,10)}.csv`
+    });
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${data.strikes.length} rows`);
+  }
+  document.getElementById('exportCsvBtn')?.addEventListener('click', _exportChainCsv);
+
+  // ======================================================================
+  // FEATURE: Chain OI Snapshot + Compare mode
+  // ======================================================================
+  let _chainSnapshot = null;
+  let _compareMode   = false;
+
+  function _snapshotChain() {
+    if (!state.lastData?.strikes?.length) { showToast('Fetch chain first'); return; }
+    _chainSnapshot = {
+      ts:   new Date().toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'}),
+      spot: state.lastData.underlying_value,
+      oi:   Object.fromEntries(state.lastData.strikes.map(s => [s.strike, {ce: s.ce_oi||0, pe: s.pe_oi||0}]))
+    };
+    document.getElementById('snapshotLabel').textContent = `📸 ${_chainSnapshot.ts} @ ${fmtInt(_chainSnapshot.spot)}`;
+    document.getElementById('chainCompareBtn').style.display = '';
+    showToast(`Snapshot captured at ${_chainSnapshot.ts}`);
+  }
+
+  function _toggleCompareMode() {
+    if (!_chainSnapshot) { showToast('Capture a snapshot first'); return; }
+    _compareMode = !_compareMode;
+    const btn = document.getElementById('chainCompareBtn');
+    if (btn) btn.style.background = _compareMode ? 'var(--accent)' : '';
+    if (state.lastData) renderChainTable(state.lastData);
+  }
+
+  window._snapshotOiDelta = function(strike) {
+    if (!_chainSnapshot) return {ce:0, pe:0};
+    const prev = _chainSnapshot.oi[strike] || {ce:0, pe:0};
+    const cur  = (state.lastData?.strikes||[]).find(s=>s.strike===strike) || {};
+    return { ce: (cur.ce_oi||0)-prev.ce, pe: (cur.pe_oi||0)-prev.pe };
+  };
+
+  document.getElementById('chainSnapshotBtn')?.addEventListener('click', _snapshotChain);
+  document.getElementById('chainCompareBtn')?.addEventListener('click', _toggleCompareMode);
+
+  // ======================================================================
+  // FEATURE: 15-min ΔOI / Session ΔOI toggle
+  // ======================================================================
+  let _deltaMode = 'session';   // 'session' | '15m'
+  window._setDeltaMode = function(mode) {
+    _deltaMode = mode;
+    document.getElementById('deltaModeSession').classList.toggle('active', mode==='session');
+    document.getElementById('deltaMode15m').classList.toggle('active', mode==='15m');
+    const hiIcon = '<i class="hi" data-h="delta-oi">i</i>';
+    const label = mode === '15m' ? 'Δ15m' : 'ΔSession';
+    const thCe = document.getElementById('thCeOiChg');
+    const thPe = document.getElementById('thPeOiChg');
+    if (thCe) thCe.innerHTML = `Call ${label}${hiIcon}<span class="arrow"></span>`;
+    if (thPe) thPe.innerHTML = `Put ${label}${hiIcon}<span class="arrow"></span>`;
+    if (state.lastData) renderChainTable(state.lastData);
+  };
+
+  // ======================================================================
+  // FEATURE: Position Sizing Calculator
+  // ======================================================================
+  function _updatePositionSizer() {
+    const maxRisk = parseFloat(document.getElementById('psMaxRisk')?.value||0);
+    const premium = parseFloat(document.getElementById('psPremium')?.value||0);
+    const lotSize = parseFloat(document.getElementById('psLotSize')?.value||75);
+    const margin  = parseFloat(document.getElementById('psMargin')?.value||0);
+    const side    = document.getElementById('psSide')?.value||'buy_option';
+
+    const lotsEl  = document.getElementById('psOutLots');
+    const capEl   = document.getElementById('psOutCapital');
+    const beEl    = document.getElementById('psOutBe');
+    if (!lotsEl||!capEl||!beEl) return;
+    if (!maxRisk||!premium||!lotSize) {
+      lotsEl.textContent=capEl.textContent=beEl.textContent='—'; return;
+    }
+
+    let lots, capital, be;
+    if (side === 'buy_option') {
+      const costPerLot = premium * lotSize;
+      lots    = Math.max(0, Math.floor(maxRisk / costPerLot));
+      capital = lots * costPerLot;
+      be      = `${fmtInt(premium)} pts`;
+    } else if (side === 'sell_option') {
+      const effMargin = margin || premium * lotSize * 10;
+      lots    = Math.max(0, Math.floor(maxRisk / (premium * lotSize)));
+      capital = lots * effMargin;
+      be      = `${fmtInt(premium)} pts`;
+    } else {  // straddle
+      const costPerLot = premium * lotSize * 2;
+      lots    = Math.max(0, Math.floor(maxRisk / costPerLot));
+      capital = lots * costPerLot;
+      be      = `±${fmtInt(premium)} pts`;
+    }
+
+    lotsEl.textContent = lots;
+    capEl.textContent  = `₹${fmtInt(capital)}`;
+    beEl.textContent   = be;
+    lotsEl.style.color = lots > 0 ? 'var(--pos)' : 'var(--neg)';
+  }
+
+  ['psMaxRisk','psPremium','psLotSize','psMargin','psSide'].forEach(id =>
+    document.getElementById(id)?.addEventListener('input', _updatePositionSizer)
+  );
+
+  // Auto-fill lot size from chain data when it loads
+  function _syncPosSizerLotSize(lotSize) {
+    const el = document.getElementById('psLotSize');
+    if (el && el.value === '75') { el.value = lotSize; _updatePositionSizer(); }
+  }
+
+  // ======================================================================
+  // FEATURE 1: Settings persistence (localStorage)
+  // ======================================================================
+  const _SETTINGS_KEY = 'nse_dash_v2_settings';
+  function _saveSettings() {
+    try {
+      const get = id => document.getElementById(id);
+      localStorage.setItem(_SETTINGS_KEY, JSON.stringify({
+        symbol:          state.symbol,
+        pivotType:       get('pivotTypeSelect')?.value,
+        pivotPeriod:     get('pivotPeriodSelect')?.value,
+        alertEnabled:    get('pivotAlertToggle')?.checked,
+        alertSound:      get('alertSoundSelect')?.value,
+        alertVolume:     get('alertVolumeSlider')?.value,
+        alertDuration:   get('alertDurationInput')?.value,
+        voiceEnabled:    get('voiceToggle')?.checked,
+        pcrAlertEnabled: get('pcrAlertEnabled')?.checked,
+        pcrBull:         get('pcrBullThreshold')?.value,
+        pcrBear:         get('pcrBearThreshold')?.value,
+        ivSpikeEnabled:  get('ivSpikeEnabled')?.checked,
+        ivSpikePct:      get('ivSpikeThreshold')?.value,
+        volSpikeEnabled: get('volSpikeEnabled')?.checked,
+        volSpikeMult:    get('volSpikeMultiplier')?.value,
+        autoRefresh:     els.autoToggle?.checked,
+        niftyAutoRef:    get('niftyAutoRefresh')?.checked,
+        deltaMode:       _deltaMode,
+        serverUrl:       els.serverUrl?.value,
+      }));
+    } catch (_) {}
+  }
+
+  function _loadSettings() {
+    try {
+      const s = JSON.parse(localStorage.getItem(_SETTINGS_KEY) || '{}');
+      const set = (id, v, prop='value') => {
+        const el = document.getElementById(id);
+        if (el && v !== undefined && v !== null) el[prop] = v;
+      };
+      set('pivotTypeSelect', s.pivotType);
+      set('pivotPeriodSelect', s.pivotPeriod);
+      set('pivotAlertToggle', s.alertEnabled, 'checked');
+      set('alertSoundSelect', s.alertSound);
+      set('alertVolumeSlider', s.alertVolume);
+      set('alertDurationInput', s.alertDuration);
+      set('voiceToggle', s.voiceEnabled, 'checked');
+      set('pcrAlertEnabled', s.pcrAlertEnabled, 'checked');
+      set('pcrBullThreshold', s.pcrBull);
+      set('pcrBearThreshold', s.pcrBear);
+      set('ivSpikeEnabled', s.ivSpikeEnabled, 'checked');
+      set('ivSpikeThreshold', s.ivSpikePct);
+      set('volSpikeEnabled', s.volSpikeEnabled, 'checked');
+      set('volSpikeMultiplier', s.volSpikeMult);
+      if (s.autoRefresh !== undefined && els.autoToggle) els.autoToggle.checked = s.autoRefresh;
+      set('niftyAutoRefresh', s.niftyAutoRef, 'checked');
+      if (s.serverUrl && els.serverUrl) els.serverUrl.value = s.serverUrl;
+      if (s.deltaMode) window._setDeltaMode?.(s.deltaMode);
+      if (s.symbol) {
+        state.symbol = s.symbol;
+        const btn = [...(els.pills?.children||[])].find(b => b.dataset.symbol === s.symbol);
+        if (btn) { [...els.pills.children].forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
+      }
+    } catch (_) {}
+  }
+
+  // Auto-save on any setting change
+  ['pivotTypeSelect','pivotPeriodSelect','alertSoundSelect','alertVolumeSlider',
+   'alertDurationInput','pivotAlertToggle','voiceToggle','pcrAlertEnabled',
+   'pcrBullThreshold','pcrBearThreshold','ivSpikeEnabled','ivSpikeThreshold',
+   'volSpikeEnabled','volSpikeMultiplier','niftyAutoRefresh']
+  .forEach(id => document.getElementById(id)?.addEventListener('change', _saveSettings));
+
+  _loadSettings();   // restore on startup
+
+  // ======================================================================
+  // FEATURE 2: Session phase indicator
+  // ======================================================================
+  function _getSessionPhase() {
+    const now = new Date();
+    const ist = new Date(now.getTime() + (5.5 * 3600 - now.getTimezoneOffset() * 60) * 1000);
+    const mins = ist.getHours() * 60 + ist.getMinutes();
+    const isExpiry = (state.lastData?.dte ?? 99) <= 0;
+    if (mins < 540)  return { label:'Pre-Market', cls:'phase-muted', icon:'🌙' };
+    if (mins < 555)  return { label:'Pre-Open Auction', cls:'phase-gold', icon:'⏳' };
+    if (mins < 570)  return { label:'Market Opening', cls:'phase-gold', icon:'🔔' };
+    if (mins >= 920 && mins < 930) return { label:'Closing Auction', cls:'phase-gold', icon:'🔔' };
+    if (mins >= 930) return { label:'Market Closed', cls:'phase-neg', icon:'🔴' };
+    if (isExpiry && mins >= 870) return { label:'Expiry Final Hour ⚡', cls:'phase-neg', icon:'🔥' };
+    if (mins >= 840) return { label:'Power Hour', cls:'phase-normal', icon:'⚡' };
+    if (mins >= 660 && mins < 720) return { label:'Midday Lull', cls:'phase-muted', icon:'💤' };
+    return { label:'Normal Session', cls:'phase-normal', icon:'🟢' };
+  }
+
+  function _updateSessionPhase() {
+    const el = document.getElementById('sessionPhaseBadge');
+    if (!el) return;
+    const { label, cls, icon } = _getSessionPhase();
+    el.textContent = `${icon} ${label}`;
+    el.className = `phase-badge ${cls}`;
+    el.style.display = '';
+    // Also update HUD
+    const hudPhase = document.getElementById('hudPhase');
+    if (hudPhase) hudPhase.textContent = label;
+  }
+  setInterval(_updateSessionPhase, 10000);
+  _updateSessionPhase();
+
+  // ======================================================================
+  // FEATURE 3: GIFT Nifty display
+  // ======================================================================
+  async function _fetchGiftNifty() {
+    const el = document.getElementById('giftNiftyBadge');
+    if (!el) return;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/gift-nifty`, { signal: AbortSignal.timeout(8000) });
+      const d = await r.json();
+      if (d.error || !d.price) { el.textContent = ''; return; }
+      const sign = d.pChange >= 0 ? '+' : '';
+      const cls  = d.pChange >= 0 ? 'pos-txt' : 'neg-txt';
+      el.innerHTML = `GIFT <b>${fmtInt(d.price)}</b> <span class="${cls}">${sign}${d.pChange?.toFixed(2)||''}%</span>`;
+    } catch { el.textContent = ''; }
+  }
+  setInterval(_fetchGiftNifty, 60000);
+  _fetchGiftNifty();
+
+  // ======================================================================
+  // FEATURE 4: Relative strength (all 4 indices vs their session open)
+  // ======================================================================
+  const _indexPerfCache = {};   // sym → {pct, spot}
+
+  async function _fetchAndRenderRelativeStrength() {
+    const wrap = document.getElementById('rsBarWrap');
+    const items = document.getElementById('rsBarItems');
+    if (!wrap || !items) return;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/relative-strength`, { signal: AbortSignal.timeout(6000) });
+      const d = await r.json();
+      const syms = ['NIFTY','BANKNIFTY','FINNIFTY','MIDCPNIFTY'];
+      const labels = { NIFTY:'N50', BANKNIFTY:'BNF', FINNIFTY:'FIN', MIDCPNIFTY:'MCP' };
+      let html = '';
+      for (const sym of syms) {
+        if (!d[sym]) continue;
+        const { pct } = d[sym];
+        const cls = pct >= 0 ? 'pos-txt' : 'neg-txt';
+        const sign = pct >= 0 ? '+' : '';
+        html += `<span><b style="color:var(--muted-2);">${labels[sym]}</b> <span class="${cls}">${sign}${pct.toFixed(2)}%</span></span>`;
+      }
+      if (html) { items.innerHTML = html; wrap.style.display = 'flex'; }
+    } catch { /* silent */ }
+  }
+  setInterval(_fetchAndRenderRelativeStrength, 30000);
+
+  // ======================================================================
+  // FEATURE 5: IV spike alert
+  // ======================================================================
+  let _prevAtmIv = null, _ivSpikeArmed = true;
+
+  function _checkIvSpikeAlert(iv) {
+    if (!document.getElementById('ivSpikeEnabled')?.checked || iv == null) return;
+    const threshold = parseFloat(document.getElementById('ivSpikeThreshold')?.value || 15);
+    if (_prevAtmIv !== null) {
+      const chgPct = Math.abs(iv - _prevAtmIv) / _prevAtmIv * 100;
+      if (chgPct >= threshold && _ivSpikeArmed) {
+        _ivSpikeArmed = false;
+        const dir = iv > _prevAtmIv ? 'spike ▲' : 'crush ▼';
+        alertLevelTouch(`IV ${dir} ${iv.toFixed(1)}%`, iv, iv > _prevAtmIv ? 'r' : 's');
+      } else if (chgPct < threshold * 0.4) {
+        _ivSpikeArmed = true;   // re-arm once IV settles
+      }
+    }
+    _prevAtmIv = iv;
+  }
+
+  // ======================================================================
+  // FEATURE 6: Volume spike alert
+  // ======================================================================
+  const _volHistory = {};   // `sym:strike` → [{ce, pe}]
+  const _volSpikeArmed = new Set();
+
+  function _checkVolumeSpikes(strikes) {
+    if (!document.getElementById('volSpikeEnabled')?.checked) return;
+    const mult = parseFloat(document.getElementById('volSpikeMultiplier')?.value || 2.5);
+    for (const s of strikes) {
+      const key  = `${state.symbol}:${s.strike}`;
+      const hist = _volHistory[key] || (_volHistory[key] = []);
+      const ce   = s.ce_volume || 0, pe = s.pe_volume || 0;
+      if (hist.length >= 4) {
+        const avgCe = hist.reduce((a,h)=>a+h.ce,0)/hist.length;
+        const avgPe = hist.reduce((a,h)=>a+h.pe,0)/hist.length;
+        const kCe = `${key}:ce`, kPe = `${key}:pe`;
+        if (avgCe > 500 && ce > avgCe * mult && !_volSpikeArmed.has(kCe)) {
+          _volSpikeArmed.add(kCe);
+          alertLevelTouch(`CE Vol Spike ${fmtInt(s.strike)}`, s.ce_ltp || s.strike, 'r');
+        } else if (ce < avgCe * 0.5) _volSpikeArmed.delete(kCe);
+        if (avgPe > 500 && pe > avgPe * mult && !_volSpikeArmed.has(kPe)) {
+          _volSpikeArmed.add(kPe);
+          alertLevelTouch(`PE Vol Spike ${fmtInt(s.strike)}`, s.pe_ltp || s.strike, 's');
+        } else if (pe < avgPe * 0.5) _volSpikeArmed.delete(kPe);
+      }
+      hist.push({ ce, pe });
+      if (hist.length > 18) hist.shift();  // keep ~90s at 5s poll
+    }
+  }
+
+  // ======================================================================
+  // FEATURE 7: PCR trend direction
+  // ======================================================================
+  const _pcrTrendHistory = [];
+
+  function _checkPcrTrend(pcr) {
+    if (!pcr) return;
+    _pcrTrendHistory.push(pcr);
+    if (_pcrTrendHistory.length > 12) _pcrTrendHistory.shift();
+    if (_pcrTrendHistory.length < 4) return;
+    const n = _pcrTrendHistory.length;
+    const xm = (n-1)/2, ym = _pcrTrendHistory.reduce((a,v)=>a+v,0)/n;
+    let num = 0, den = 0;
+    for (let i=0;i<n;i++) { num+=(i-xm)*(_pcrTrendHistory[i]-ym); den+=(i-xm)**2; }
+    const slope = den ? num/den : 0;
+    const trendArrow = slope > 0.003 ? '↑' : slope < -0.003 ? '↓' : '→';
+    const trendCls   = slope > 0.003 ? 'pos-txt' : slope < -0.003 ? 'neg-txt' : '';
+    const el = document.getElementById('pcrTrendCurrent');
+    if (el) el.innerHTML = el.innerHTML.replace(/\s*[↑↓→].*$/, '') +
+      ` <span class="${trendCls}">${trendArrow}</span>`;
+  }
+
+  // ======================================================================
+  // FEATURE 8: Theta decay projection
+  // ======================================================================
+  function _renderThetaDecay(data) {
+    const card = document.getElementById('thetaCard');
+    if (!card) return;
+    const { atm_iv, dte, underlying_value: S, straddle_premium, lot_size } = data;
+    if (!atm_iv || !dte || !S) { card.style.display='none'; return; }
+    card.style.display = '';
+    const v  = atm_iv / 100;
+    const T  = dte / 365;
+    const SP = 2.5066282746;   // √(2π)
+    // ATM straddle approximation: S × σ × √(2T/π)
+    const straddleNow = straddle_premium > 0 ? straddle_premium * 2 : S * v * Math.sqrt(2*T/Math.PI);
+    const straddleEod = S * v * Math.sqrt(2 * Math.max(0.5/365, (dte-1)/365) / Math.PI);
+    const straddleTmr = dte > 1 ? S * v * Math.sqrt(2 * Math.max(0.5/365, (dte-2)/365) / Math.PI) : 0;
+    const decayToday  = straddleNow - straddleEod;
+    document.getElementById('thetaPerDay').textContent  = `₹${decayToday.toFixed(0)}/straddle · ₹${(decayToday*(lot_size||75)).toFixed(0)}/lot`;
+    document.getElementById('thetaEod').textContent     = `₹${straddleEod.toFixed(0)} (Δ-${decayToday.toFixed(0)})`;
+    document.getElementById('thetaTomorrow').textContent = dte > 1 ? `₹${straddleTmr.toFixed(0)}` : 'Expiry today';
+    document.getElementById('thetaCurrent').textContent  = `₹${(straddle_premium||straddleNow/2).toFixed(0)} ATM`;
+  }
+
+  // ======================================================================
+  // FEATURE 9: Expected move bands on pivot bars (1σ and 2σ)
+  // ======================================================================
+  function _updateExpectedMoves(data) {
+    const { atm_iv, dte, underlying_value: spot } = data || {};
+    if (!atm_iv || !dte || !spot) { delete state._expectedMoves; return; }
+    const oneSD = spot * (atm_iv/100) * Math.sqrt(dte/365);
+    state._expectedMoves = {
+      up1: Math.round(spot + oneSD), down1: Math.round(spot - oneSD),
+      up2: Math.round(spot + 2*oneSD), down2: Math.round(spot - 2*oneSD),
+    };
+  }
+
+  // ======================================================================
+  // FEATURE 10: Multi-expiry ATM premium comparison
+  // ======================================================================
+  function _renderMultiExpiryComparison(data) {
+    const panel = document.getElementById('multiExpiryComp');
+    const body  = document.getElementById('multiExpiryBody');
+    if (!panel || !body) return;
+    const expData = data.expiries_data;
+    if (!expData || !Object.keys(expData).length) { panel.style.display='none'; return; }
+    const spot  = data.underlying_value;
+    const entries = Object.entries(expData).slice(0, 5);
+    if (entries.length < 2) { panel.style.display='none'; return; }
+    panel.style.display = '';
+    let html = `<div class="exp-grid exp-grid-head">
+      <span>Expiry</span><span>CE ATM</span><span>Strike</span><span>PE ATM</span><span>Straddle</span><span>IV avg</span></div>`;
+    for (const [exp, edata] of entries) {
+      const strikes = edata.strikes || [];
+      if (!strikes.length) continue;
+      const atm = strikes.reduce((b, s) => Math.abs(s.strike-spot) < Math.abs(b.strike-spot) ? s : b, strikes[0]);
+      const straddle = ((atm.ce_ltp||0) + (atm.pe_ltp||0)).toFixed(0);
+      const iv = (((atm.ce_iv||0)+(atm.pe_iv||0))/2).toFixed(1);
+      const dte_e = edata.dte ?? '?';
+      html += `<div class="exp-grid">
+        <span style="color:var(--muted-2);">${exp}<span style="font-size:8px;color:var(--muted);"> (${dte_e}d)</span></span>
+        <span class="pos-txt">${(atm.ce_ltp||0).toFixed(1)}</span>
+        <span style="color:var(--gold);">${fmtInt(atm.strike)}</span>
+        <span class="neg-txt">${(atm.pe_ltp||0).toFixed(1)}</span>
+        <span style="font-weight:700;">₹${straddle}</span>
+        <span style="color:var(--muted);">${iv}%</span>
+      </div>`;
+    }
+    body.innerHTML = html;
+  }
+
+  // ======================================================================
+  // FEATURE 11: Chain cell heatmap (OI magnitude coloring)
+  // ======================================================================
+  // Injected into renderChainTable via per-cell inline style — see below
+  // _oiHeatAlpha(oi, maxOi) returns a 0..0.45 alpha for the cell background
+  function _oiHeatAlpha(oi, maxOi) {
+    if (!oi || !maxOi) return 0;
+    return Math.pow(oi / maxOi, 0.6) * 0.45;
+  }
+
+  // ======================================================================
+  // FEATURE 12: Strike-to-builder shortcut (click chain row → populate builder)
+  // ======================================================================
+  function _strikeToBuilder(strike, ceLtp, peLtp, ceIv, peIv) {
+    // Switch to Builder tab
+    document.querySelector('.tab[data-tab="builder"]')?.click();
+    // Populate builder legs — CE first, PE second (default straddle setup)
+    const trySet = (idx, field, val) => {
+      const selector = `.leg-row:nth-child(${idx+1}) [data-field="${field}"]`;
+      const el = document.querySelector(selector) || document.querySelectorAll('.leg-row')[idx]?.querySelector(`[data-field="${field}"]`);
+      if (el) { el.value = val; el.dispatchEvent(new Event('input', {bubbles:true})); }
+    };
+    // Row 0: Call side
+    trySet(0, 'strike', strike);
+    trySet(0, 'optionType', 'CE');
+    trySet(0, 'action', 'SELL');
+    if (ceLtp) trySet(0, 'premium', ceLtp.toFixed(2));
+    // Row 1: Put side
+    trySet(1, 'strike', strike);
+    trySet(1, 'optionType', 'PE');
+    trySet(1, 'action', 'SELL');
+    if (peLtp) trySet(1, 'premium', peLtp.toFixed(2));
+    showToast(`📐 Strike ${fmtInt(strike)} loaded in Builder`);
+  }
+
+  // Wire: click on strike cell in chain table
+  document.getElementById('chainBody')?.addEventListener('click', e => {
+    const row = e.target.closest('tr[data-strike]');
+    if (!row) return;
+    const strike  = parseFloat(row.dataset.strike);
+    const strikes = state.lastData?.strikes || [];
+    const s = strikes.find(x => x.strike === strike);
+    if (!s || !strike) return;
+    // Only fire if user clicked the strike column itself
+    const cell = e.target.closest('td');
+    const cells = [...row.cells];
+    const strikeColIdx = cells.findIndex(c => c.classList.contains('strike-col') || c.dataset.col === 'strike');
+    if (cell && (strikeColIdx < 0 || cells.indexOf(cell) === strikeColIdx)) {
+      _strikeToBuilder(strike, s.ce_ltp, s.pe_ltp, s.ce_iv, s.pe_iv);
+    }
+  });
+
+  // ======================================================================
+  // FEATURE 13: Mini HUD overlay
+  // ======================================================================
+  let _hudVisible = false;
+
+  function _updateMiniHud() {
+    if (!_hudVisible) return;
+    const d = state.lastData;
+    if (!d) return;
+    const spot    = d.underlying_value;
+    const prevSp  = _prevSpotForAlerts;
+    const pctChg  = d.session_ohlc?.open ? ((spot - d.session_ohlc.open) / d.session_ohlc.open * 100) : null;
+    const pCls    = pctChg >= 0 ? 'pos-txt' : 'neg-txt';
+    document.getElementById('hudSymbol').textContent    = state.symbol;
+    document.getElementById('hudSpot').textContent      = fmtPrice(spot);
+    document.getElementById('hudPcr').textContent       = d.pcr?.toFixed(2) || '—';
+    document.getElementById('hudIv').textContent        = d.atm_iv ? `${d.atm_iv.toFixed(1)}%` : '—';
+    document.getElementById('hudCountdown').textContent = document.getElementById('metaCountdown')?.textContent || '—';
+    if (pctChg !== null)
+      document.getElementById('hudPctChg').innerHTML = `<span class="${pCls}">${pctChg>=0?'+':''}${pctChg.toFixed(2)}%</span> from open`;
+    _updateSessionPhase();
+    // Nearest levels from current pivot bars
+    const lvlEls = [...document.querySelectorAll('.level-bar-row')];
+    const levels = lvlEls.map(el => {
+      const lbl   = el.querySelector('.level-bar-label')?.textContent || '';
+      const price = parseFloat(el.querySelector('.level-bar-price')?.textContent?.replace(/,/g,'')) || 0;
+      return { lbl, price, dist: price - spot };
+    }).filter(l => l.price);
+    const aboves = levels.filter(l=>l.dist>0).sort((a,b)=>a.dist-b.dist).slice(0,3);
+    const belows = levels.filter(l=>l.dist<0).sort((a,b)=>b.dist-a.dist).slice(0,3);
+    const nearPct = 0.003;
+    const lvlHtml = [
+      ...aboves.reverse().map(l=>`<div class="hud-level${Math.abs(l.dist/spot)<nearPct?' near':''}"><span>${l.lbl}</span><span>${fmtInt(l.price)}<span style="color:var(--pos);font-size:8px;"> +${fmtInt(l.dist)}</span></span></div>`),
+      `<div class="hud-level" style="font-weight:800;color:var(--gold);"><span>● SPOT</span><span>${fmtInt(spot)}</span></div>`,
+      ...belows.map(l=>`<div class="hud-level${Math.abs(l.dist/spot)<nearPct?' near':''}"><span>${l.lbl}</span><span>${fmtInt(l.price)}<span style="color:var(--neg);font-size:8px;"> ${fmtInt(l.dist)}</span></span></div>`),
+    ].join('');
+    document.getElementById('hudLevels').innerHTML = lvlHtml;
+  }
+
+  function _toggleMiniHud() {
+    _hudVisible = !_hudVisible;
+    const el = document.getElementById('miniHud');
+    if (!el) return;
+    el.style.display = _hudVisible ? '' : 'none';
+    if (_hudVisible) _updateMiniHud();
+  }
+
+  // Make HUD draggable
+  (function() {
+    const hud = document.getElementById('miniHud');
+    if (!hud) return;
+    let ox=0, oy=0, sx=0, sy=0, dragging=false;
+    hud.addEventListener('mousedown', e => {
+      if (e.target.tagName === 'BUTTON') return;
+      dragging=true; sx=e.clientX; sy=e.clientY;
+      ox=parseInt(hud.style.right||12); oy=parseInt(hud.style.top||60);
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      hud.style.right = (ox - (e.clientX-sx)) + 'px';
+      hud.style.top   = (oy + (e.clientY-sy)) + 'px';
+    });
+    document.addEventListener('mouseup', () => dragging = false);
+  })();
+
+  document.getElementById('miniHudToggle')?.addEventListener('click', _toggleMiniHud);
+
+  // Keyboard shortcut: backtick to toggle HUD
+  // (wired into the existing keydown listener below in the keyboard shortcuts section)
 
   // ---------- tabs ----------
   els.tabs.forEach(tab => {
@@ -3235,6 +4124,7 @@
     _customLevels.forEach(l => l.triggered = false);
     _renderCustomLevelsList();
     delete state._straddleBreakeven;
+    _prevSpotForAlerts = null;   // reset crossing baseline — new symbol, new levels
     delete _frozenOhlc[state.symbol];
     Object.assign(state_ohlc, {open:null,high:null,low:null,close:null,prev_close:null,source:null});
     ['ohlcH','ohlcL','ohlcC','ohlcO'].forEach(id => {
@@ -3423,9 +4313,22 @@
 
     renderStatCards(data);
     renderPivotLevels();
-    _updateSessionOhlcDisplay();  // show today's live intraday O/H/L/C below prev-day row
-    _renderGreeksCard(data);      // ATM Greeks card in Option Chain tab
-    _renderStraddleBreakeven();   // update breakeven state for pivot bar overlay
+    _updateSessionOhlcDisplay();
+    _renderGreeksCard(data);
+    _renderStraddleBreakeven();
+    _renderOiConcentrationChart(data);
+    _checkPcrAlerts(data.pcr);
+    _syncPosSizerLotSize(data.lot_size || 75);
+    // New features
+    _checkIvSpikeAlert(data.atm_iv);
+    _checkVolumeSpikes(data.strikes || []);
+    _checkPcrTrend(data.pcr);
+    _renderThetaDecay(data);
+    _updateExpectedMoves(data);
+    _renderMultiExpiryComparison(data);
+    _fetchAndRenderRelativeStrength();
+    _updateMiniHud();
+    _saveSettings();
 
     // ─── Determine which tab is currently active ──────────────────────────
     const activeTab = document.querySelector('.tab.active')?.dataset.tab;
@@ -3505,8 +4408,9 @@
     }
   }
 
-  function statCard(label, value, cls) {
-    return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value ${cls || ''}">${value}</div></div>`;
+  function statCard(label, value, cls, helpKey) {
+    const icon = helpKey ? `<i class="hi" data-h="${helpKey}" style="vertical-align:middle;">i</i>` : '';
+    return `<div class="stat-card"><div class="stat-label">${label}${icon}</div><div class="stat-value ${cls || ''}">${value}</div></div>`;
   }
 
   // ====================================================================
@@ -3771,31 +4675,68 @@
     if (row) { row.classList.add('touched'); setTimeout(() => row.classList.remove('touched'), 2000); }
   }
 
+  // _prevSpot tracks the last known spot price so we can detect level crosses
+  // between polls rather than just "nearness" to a level.
+  // Reset to null on symbol change so the first poll after a switch doesn't
+  // generate false crosses from position vs. new levels.
+  let _prevSpotForAlerts = null;
+
   function checkLevelTouches(levels, spot) {
-    const TOLERANCE_PCT = 0.002;  // 0.2% — "near enough" to trigger
-    let closest = null, closestDist = Infinity;
+    const prev = _prevSpotForAlerts;
+    _prevSpotForAlerts = spot;
+
+    if (prev === null) return;   // first reading — no crossing possible yet
+    if (prev === spot)  return;  // price unchanged
+
+    // If spot jumped more than 1% since last poll the server was likely down
+    // for a while — skip this cycle to avoid spurious multi-level alerts on reconnect.
+    if (Math.abs(spot - prev) / prev > 0.01) {
+      console.log(`[touch] gap too large (${((spot-prev)/prev*100).toFixed(2)}%) — skipping cross detection this cycle`);
+      return;
+    }
+
+    const lo     = Math.min(prev, spot);
+    const hi     = Math.max(prev, spot);
+    const rising = spot > prev;
+
     for (const [label, price, polarity] of levels) {
       if (!price) continue;
-      const distPct = Math.abs(spot - price) / price;
-      if (distPct < closestDist) { closestDist = distPct; closest = [label, price, distPct]; }
-      if (distPct < TOLERANCE_PCT) {
-        console.log(`[touch] ${label}=${price} within ${(distPct*100).toFixed(3)}% of spot=${spot} — triggering alert`);
+      const key = `${state.symbol}:${label}`;
+
+      // ── RE-ARM: once the level fired, delete its dedup key as soon as price
+      // moves more than 0.3% away. This allows a meaningful re-test to alert again
+      // without spamming on small oscillations right at the level.
+      if (_touchedLevels.has(key)) {
+        if (Math.abs(spot - price) / price > 0.003) {
+          _touchedLevels.delete(key);
+          console.log(`[touch] ${key} re-armed (spot moved >${(0.003*100).toFixed(1)}% away)`);
+        }
+        continue;   // already fired this pass — skip cross check
+      }
+
+      // ── CROSS CHECK: did the price range [prev → spot] include this level?
+      if (lo <= price && price <= hi) {
+        console.log(`[touch] ${label}=${price} crossed by move ${prev}→${spot}`);
         alertLevelTouch(label, price, polarity);
       }
     }
-    // Also check custom price levels
+
+    // ── Custom levels — same crossing logic ──────────────────────────────
     for (const lvl of _customLevels) {
       if (lvl.triggered || !lvl.price) continue;
-      const distPct = Math.abs(spot - lvl.price) / lvl.price;
-      if (distPct < TOLERANCE_PCT) {
+      if (lo <= lvl.price && lvl.price <= hi) {
         lvl.triggered = true;
         _renderCustomLevelsList();
-        alertLevelTouch(`📌 ${lvl.label}`, lvl.price, spot >= lvl.price ? 'r' : 's');
+        alertLevelTouch(`📌 ${lvl.label}`, lvl.price, rising ? 'r' : 's');
       }
     }
-    if (closest) {
-      console.log(`[touch] spot=${spot} closest level: ${closest[0]}=${closest[1]} `
-        + `(${(closest[2]*100).toFixed(3)}% away, need <${TOLERANCE_PCT*100}%)`);
+
+    // Debug log — closest level for console diagnostics
+    const prices = levels.map(l => l[1]).filter(Boolean);
+    if (prices.length) {
+      const cl = prices.reduce((a, b) => Math.abs(a - spot) < Math.abs(b - spot) ? a : b);
+      const clLabel = levels.find(l => l[1] === cl)?.[0] || '?';
+      console.log(`[touch] spot=${spot} (was ${prev}) — closest untouched: ${clLabel}=${fmtInt(cl)} (${Math.abs(cl-spot).toFixed(0)} pts away)`);
     }
   }
 
@@ -3877,6 +4818,14 @@
       levels.push([`BE↑ ±${fmtInt(be.premium)}`, be.up, 'r']);
       levels.push([`BE↓ ±${fmtInt(be.premium)}`, be.down, 's']);
     }
+    // Append expected move bands (1σ and 2σ from IV × √DTE)
+    const em = state._expectedMoves;
+    if (em) {
+      levels.push([`1σ↑ ${fmtInt(em.up1-spot)}pts`, em.up1, 'em']);
+      levels.push([`1σ↓ ${fmtInt(spot-em.down1)}pts`, em.down1, 'em']);
+      levels.push([`2σ↑ ${fmtInt(em.up2-spot)}pts`, em.up2, 'em2']);
+      levels.push([`2σ↓ ${fmtInt(spot-em.down2)}pts`, em.down2, 'em2']);
+    }
 
     document.getElementById('pivotBars').innerHTML = renderLevelBars(levels, spot, 'pivot');
   }
@@ -3892,15 +4841,17 @@
       const spotPct = Math.max(0, Math.min(100, (spot - minP) / spanP * 100));
       const levPct = Math.max(0, Math.min(100, (price - minP) / spanP * 100));
       const fillPct = polarity === 's' ? levPct : (100 - levPct);
-      const fillClass = polarity === 'r' ? 'fill-r' : (polarity === 's' ? 'fill-s' : (polarity === 'vwap' ? 'fill-vwap' : (polarity?.startsWith('vu') ? 'fill-vu' : (polarity?.startsWith('vd') ? 'fill-vd' : 'fill-pivot'))));
-      const labelClass = polarity === 'r' ? 'label-r' : (polarity === 's' ? 'label-s' : (polarity === 'vwap' ? 'label-vwap' : (polarity?.startsWith('vu') ? 'label-vu1' : (polarity?.startsWith('vd') ? 'label-vd1' : 'label-pivot'))));
+      const fillClass  = polarity === 'r' ? 'fill-r' : (polarity === 's' ? 'fill-s' : (polarity === 'vwap' ? 'fill-vwap' : (polarity === 'em' ? 'fill-em' : (polarity === 'em2' ? 'fill-em2' : (polarity?.startsWith('vu') ? 'fill-vu' : (polarity?.startsWith('vd') ? 'fill-vd' : 'fill-pivot'))))));
+      const labelClass = polarity === 'r' ? 'label-r' : (polarity === 's' ? 'label-s' : (polarity === 'vwap' ? 'label-vwap' : (polarity === 'em' ? 'label-em' : (polarity === 'em2' ? 'label-em2' : (polarity?.startsWith('vu') ? 'label-vu1' : (polarity?.startsWith('vd') ? 'label-vd1' : 'label-pivot'))))));
       const dist = price - spot;
       const distStr = (dist >= 0 ? '+' : '') + fmtInt(dist) + ' (' + Math.abs(dist/spot*100).toFixed(2) + '%)';
       const isNear = Math.abs(dist / spot) < 0.002;
       const priceColor = polarity === 'r' ? '#ff6b6b' : (polarity === 's' ? '#51cf66' : (polarity === 'vwap' ? 'var(--accent)' : 'var(--text)'));
       const distColor  = dist > 0 ? '#ff6b6b' : '#51cf66';
+      const labelHelpKey = label.startsWith('BE') ? 'be-levels' : (label.startsWith('1σ') || label.startsWith('2σ')) ? 'sigma-levels' : '';
+      const labelHelpIcon = labelHelpKey ? `<i class="hi" data-h="${labelHelpKey}" style="vertical-align:middle;margin-left:2px;">i</i>` : '';
       return `<div class="level-bar-row${isNear ? ' touched' : ''}" data-level-label="${escapeHtml(label)}">
-        <span class="level-bar-label ${labelClass}">${escapeHtml(label)}</span>
+        <span class="level-bar-label ${labelClass}">${escapeHtml(label)}${labelHelpIcon}</span>
         <div class="level-bar-price-block">
           <span class="level-bar-price" style="color:${priceColor};">${fmtPrice(price)}</span>
           <span class="level-bar-dist" style="color:${distColor};">${distStr}</span>
@@ -3918,7 +4869,7 @@
       statCard('Spot', fmtPrice(data.underlying_value)),
       statCard('ATM Strike', fmtInt(data.atm)),
       statCard('PCR', data.pcr),
-      statCard('Max Pain', fmtInt(data.max_pain), 'gold'),
+      statCard('Max Pain', fmtInt(data.max_pain), 'gold', 'max-pain'),
       statCard('Support', fmtInt(data.support.strike), 'pos'),
       statCard('Resistance', fmtInt(data.resistance.strike), 'neg'),
     ].join('');
@@ -3930,8 +4881,10 @@
       Math.abs(s.strike - support) < 1e-6 ? 'support-row' : '',
       Math.abs(s.strike - resistance) < 1e-6 ? 'resistance-row' : '',
     ].filter(Boolean).join(' ');
-    const ceChgCls = s.ce_oi_chg > 0 ? 'pos-txt' : (s.ce_oi_chg < 0 ? 'neg-txt' : '');
-    const peChgCls = s.pe_oi_chg > 0 ? 'pos-txt' : (s.pe_oi_chg < 0 ? 'neg-txt' : '');
+    const ceOiChg = _deltaMode === '15m' ? (s.ce_oi_15m||0) : (s.ce_oi_chg||0);
+    const peOiChg = _deltaMode === '15m' ? (s.pe_oi_15m||0) : (s.pe_oi_chg||0);
+    const ceChgCls = ceOiChg > 0 ? 'pos-txt' : (ceOiChg < 0 ? 'neg-txt' : '');
+    const peChgCls = peOiChg > 0 ? 'pos-txt' : (peOiChg < 0 ? 'neg-txt' : '');
     const ceBarPct = Math.min(100, (s.ce_oi / maxOi) * 100);
     const peBarPct = Math.min(100, (s.pe_oi / maxOi) * 100);
     const ceItmCls = s.strike < atm ? 'itm-cell' : '';
@@ -3941,7 +4894,7 @@
     if (Math.abs(s.strike - resistance) < 1e-6) strikeTag = '<span class="badge-tag badge-resistance">RES</span>';
     const ceBidAsk = (s.ce_bid || s.ce_ask) ? `<div class="bid-ask">${fmtPrice(s.ce_bid)} × ${fmtPrice(s.ce_ask)}</div>` : '';
     const peBidAsk = (s.pe_bid || s.pe_ask) ? `<div class="bid-ask">${fmtPrice(s.pe_bid)} × ${fmtPrice(s.pe_ask)}</div>` : '';
-    return { rowClasses, ceChgCls, peChgCls, ceBarPct, peBarPct, ceItmCls, peItmCls, strikeTag, ceBidAsk, peBidAsk };
+    return { rowClasses, ceChgCls, peChgCls, ceBarPct, peBarPct, ceItmCls, peItmCls, strikeTag, ceBidAsk, peBidAsk, ceOiChg, peOiChg };
   }
 
   function renderChainTable(data, isVisible = true) {
@@ -3964,17 +4917,19 @@
       _chainRowState.clear();
       els.chainBody.innerHTML = rows.map(s => {
         const c = _buildChainRow(s, maxOi, atm, support, resistance);
+        const ceAlpha = _oiHeatAlpha(s.ce_oi, maxOi).toFixed(3);
+        const peAlpha = _oiHeatAlpha(s.pe_oi, maxOi).toFixed(3);
         _chainRowState.set(s.strike, {...s, _maxOi: maxOi, _atm: atm});
         return `<tr class="${c.rowClasses}" data-strike="${s.strike}">
-          <td class="oi-bar-wrap ${c.ceItmCls}"><div class="oi-bar" style="width:${c.ceBarPct}%"></div><span class="oi-text">${fmtInt(s.ce_oi)}</span></td>
-          <td class="${c.ceChgCls} ${c.ceItmCls}">${fmtSigned(s.ce_oi_chg)}</td>
+          <td class="oi-bar-wrap ${c.ceItmCls}" style="background:rgba(255,120,80,${ceAlpha})"><div class="oi-bar" style="width:${c.ceBarPct}%"></div><span class="oi-text">${fmtInt(s.ce_oi)}</span></td>
+          <td class="${c.ceChgCls} ${c.ceItmCls}">${fmtSigned(c.ceOiChg)}</td>
           <td class="${c.ceItmCls}">${fmtIv(s.ce_iv)}</td>
           <td class="${c.ceItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="CE" title="Click to add as a Builder leg">${fmtPrice(s.ce_ltp)}${c.ceBidAsk}</td>
-          <td class="strike-cell">${fmtInt(s.strike)}${c.strikeTag}</td>
+          <td class="strike-cell" style="cursor:pointer;" title="Click to open in Builder">${fmtInt(s.strike)}${c.strikeTag}</td>
           <td class="${c.peItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="PE" title="Click to add as a Builder leg">${fmtPrice(s.pe_ltp)}${c.peBidAsk}</td>
           <td class="${c.peItmCls}">${fmtIv(s.pe_iv)}</td>
-          <td class="${c.peChgCls} ${c.peItmCls}">${fmtSigned(s.pe_oi_chg)}</td>
-          <td class="oi-bar-wrap ${c.peItmCls}"><div class="oi-bar put" style="width:${c.peBarPct}%"></div><span class="oi-text">${fmtInt(s.pe_oi)}</span></td>
+          <td class="${c.peChgCls} ${c.peItmCls}">${fmtSigned(c.peOiChg)}</td>
+          <td class="oi-bar-wrap ${c.peItmCls}" style="background:rgba(80,200,120,${peAlpha})"><div class="oi-bar put" style="width:${c.peBarPct}%"></div><span class="oi-text">${fmtInt(s.pe_oi)}</span></td>
         </tr>`;
       }).join('');
 
@@ -4005,8 +4960,8 @@
         if (txt) txt.textContent = fmtInt(s.ce_oi);
       }
       // Cell 1: CE OI change
-      if (prev.ce_oi_chg !== s.ce_oi_chg || prev._atm !== atm) {
-        cells[1].textContent = fmtSigned(s.ce_oi_chg);
+      if (prev.ce_oi_chg !== s.ce_oi_chg || prev.ce_oi_15m !== s.ce_oi_15m || prev._atm !== atm) {
+        cells[1].textContent = fmtSigned(c.ceOiChg);
         cells[1].className = `${c.ceChgCls} ${c.ceItmCls}`.trim();
       }
       // Cell 2: CE IV
@@ -4023,8 +4978,8 @@
       // Cell 6: PE IV
       if (prev.pe_iv !== s.pe_iv) cells[6].textContent = fmtIv(s.pe_iv);
       // Cell 7: PE OI change
-      if (prev.pe_oi_chg !== s.pe_oi_chg || prev._atm !== atm) {
-        cells[7].textContent = fmtSigned(s.pe_oi_chg);
+      if (prev.pe_oi_chg !== s.pe_oi_chg || prev.pe_oi_15m !== s.pe_oi_15m || prev._atm !== atm) {
+        cells[7].textContent = fmtSigned(c.peOiChg);
         cells[7].className = `${c.peChgCls} ${c.peItmCls}`.trim();
       }
       // Cell 8: PE OI bar + text
@@ -9739,6 +10694,7 @@
     delete _frozenOhlc[state.symbol];   // clear freeze so _tryFreeze uses the new values
     _saveOhlcOverride({ high: H, low: L, close: C, open: O });
     _touchedLevels.clear();
+    _prevSpotForAlerts = null;   // new levels — reset crossing baseline
     renderPivotLevels();
   }
   document.getElementById('ohlcApplyBtn')?.addEventListener('click', _applyOhlcOverride);
@@ -9787,6 +10743,7 @@
 
   document.getElementById('pivotAlertToggle')?.addEventListener('change', () => {
     _touchedLevels.clear();
+    _prevSpotForAlerts = null;   // re-arm from fresh position
   });
 
   // Fetch OHLC whenever symbol changes (for pivot accuracy)
@@ -9803,6 +10760,87 @@
   fetchChain();
   setTimeout(() => fetchAndRenderMovers(), 2500);
   setTimeout(() => { fetchOhlcForPivots(); fetchAndRenderNiftyConstituents(); runPivotScanner(false); }, 5000);
+})();
+</script>
+<!-- ── Help tooltip ── -->
+<div id="helpTip"></div>
+<script>
+(function() {
+  // ── Help text library ────────────────────────────────────────────────────
+  const H = {
+    'pivot-levels':   '<strong>Pivot Levels</strong>Calculated from the previous session\'s H/L/C (and Open for Woodie/DeMark). Price approaching these levels often shows natural support or resistance. Recalculated from NSE bhavcopy archive each session.',
+    'pivot-type':     '<strong>Pivot Type</strong><b>Fibonacci</b> — most popular in India; uses Fib ratios (0.382, 0.618, 1.0).<br><b>Traditional/Classic</b> — equal spacing around pivot.<br><b>Woodie</b> — weights the close more heavily.<br><b>Camarilla</b> — tighter intraday bands, popular for scalping.<br><b>DeMark</b> — adjusts pivot based on close vs open relationship.',
+    'pivot-period':   '<strong>Period</strong><b>Daily</b> — uses yesterday\'s OHLC from the NSE bhavcopy archive (most reliable source).<br><b>Weekly</b> — uses the full previous Mon–Fri range: O = Monday open, H = week high, L = week low, C = Friday close.',
+    'bell-alert':     '<strong>Price Touch Alerts</strong>Fires when spot <i>crosses</i> a pivot level between two consecutive polls. Uses proper crossing detection — spot must actually traverse the level, not just approach it. Re-arms once price moves 0.3% away.',
+    'voice-alert':    '<strong>Voice Alerts</strong>Speaks the level name and price aloud using your browser\'s Web Speech API. Works best in Chrome. If voice is silent, check that your system has TTS voices installed and that the browser has audio permission.',
+    'alert-sound':    '<strong>Alert Sound</strong><b>Tone</b> — single sine wave, sharp attack.<br><b>Chime</b> — three sine oscillators at bell-like partial ratios (sounds like a chime).<br><b>Ping</b> — triangle wave with downward pitch sweep.<br>Higher pitch = resistance touched. Lower pitch = support touched.',
+    'alert-volume':   '<strong>Volume / Duration</strong>Volume slider controls amplitude of the generated sound. Duration input (seconds) controls how long the note sustains before fading out.',
+    'custom-alerts':  '<strong>Custom Price Levels</strong>Add your own price targets or stop levels. They join the same touch-detection loop as pivot levels and fire the same sound + voice alert when crossed. Re-armed on symbol change.',
+    'iv-spike':       '<strong>IV Spike Alert</strong>Fires when ATM implied volatility changes by more than the configured % in a single poll cycle. An IV spike often signals upcoming fast directional moves, news, or large hedges being placed. Re-arms when IV settles.',
+    'vol-spike':      '<strong>Volume Spike Alert</strong>Maintains a rolling 18-poll (~90s) volume history per strike. Fires when a strike\'s volume exceeds its rolling average by the multiplier. Unusual OTM volume often precedes institutional directional moves.',
+    'session-ohlc':   '<strong>Today\'s Session O/H/L/C</strong>Live intraday Open, High, Low, Close tracked from the first chain fetch of the day. Shows today\'s range in real time. Useful for seeing where price is relative to the day\'s open and range extremes.',
+    'alert-history':  '<strong>Alert History</strong>Logs every pivot level touch with timestamp and price — newest first. Persists for the full browser session. Useful for reviewing which levels were tested and when during the session.',
+    'ohlc-override':  '<strong>OHLC Override</strong>If the auto-fetched OHLC is wrong (e.g. on a partial holiday), manually enter the correct H/L/C/O here. Click Apply. Live data will reclaim control automatically next time bhavcopy is available.',
+    'be-levels':      '<strong>Straddle Breakeven (BE↑ / BE↓)</strong>BE↑ = Spot + ATM straddle premium, BE↓ = Spot − premium. Price must stay between these for a short straddle to be profitable at expiry. Where the options market prices its "risk begin" zone.',
+    'sigma-levels':   '<strong>Expected Move Bands (1σ / 2σ)</strong>1σ = Spot × IV × √(DTE/365). Under a normal distribution: ~68% probability of staying inside 1σ, ~95% inside 2σ. These compress to zero by expiry. 1σ ≈ straddle breakeven × 1.25.',
+    'atm-greeks':     '<strong>ATM Greeks</strong>Black-Scholes Greeks computed client-side for the ATM strike.<br><b>Δ</b> — P&L per 1-point index move (CE ≈ +0.5, PE ≈ −0.5 at ATM).<br><b>Γ</b> — rate of delta change per point.<br><b>Vega</b> — ₹ P&L per 1% IV change.<br><b>Θ</b> — daily time decay in ₹.',
+    'gex':            '<strong>Gamma Exposure (GEX)</strong>Sum of (Gamma × OI × LotSize) across all strikes, weighted by CE vs PE. Positive GEX (green) → market makers are net long gamma → they buy dips/sell rips → <i>dampens</i> volatility. Negative (red) → MMs amplify moves.',
+    'synth-futures':  '<strong>Synthetic Futures</strong>CE_LTP − PE_LTP + Strike at ATM. Should equal Spot + cost of carry (basis). A diverging basis often indicates large institutional positioning. Useful for detecting when options are pricing a gap different from the cash market.',
+    'theta-decay':    '<strong>Theta Decay Projection</strong>Uses the ATM straddle approximation (S × σ × √(2T/π)) to project how much premium decays by today\'s close and by tomorrow. Helps options sellers decide whether to hold overnight and buyers whether to roll.',
+    'multi-expiry':   '<strong>Multi-Expiry ATM Comparison</strong>ATM Call, Put, combined straddle, and average IV across all available expiries. A steep curve (near IV >> far IV) signals near-term event risk. A flat curve suggests calm expectations. Useful for roll decisions.',
+    'oi-chart':       '<strong>OI by Strike Chart</strong>Open interest bars for each strike near ATM. Orange = CE OI, green = PE OI. Large CE bars = heavy call writing (resistance). Large PE bars = heavy put writing (support). Bars from the chain response, updated every refresh.',
+    'premium-flow':   '<strong>Premium Flow</strong>Total ₹ value traded today per side: LTP × Volume × Lot Size, summed across all strikes. CE-heavy flow = premium being paid for upside protection. PE-heavy = premium paid for downside protection.',
+    'delta-oi':       '<strong>ΔOI Columns</strong><b>Session</b> — change in OI from yesterday\'s close (NSE\'s native changeinOpenInterest field). Shows intraday buildup and unwinding.<br><b>15m</b> — change in the last 15 minutes from periodic server-side snapshots. More actionable for scalping.',
+    'snapshot':       '<strong>OI Snapshot & Compare</strong>📸 Snapshot captures OI for every strike at that instant. ⚡ Compare mode replaces the ΔOI column with delta vs the snapshot instead of the session baseline — useful for "what changed since 10 AM" analysis.',
+    'pcr-alert':      '<strong>PCR Threshold Alerts</strong>Fires when the total PCR (Put/Call OI ratio) crosses configured thresholds. PCR above the bull threshold = extreme put writing, which can be a contrarian bullish signal. Below bear threshold = excessive call writing.',
+    'pcr-trend':      '<strong>PCR Trend Arrow</strong>Linear regression slope over the last 12 PCR readings (~1 minute). ↑ = PCR rising steadily (put OI growing faster — bears becoming more active). ↓ = PCR falling. → = directionless/random. More reliable than a single reading.',
+    'fii-dii':        '<strong>FII / DII Daily Flow</strong>Provisional institutional cash-market activity from NSE, refreshed every 5 minutes. Positive net = net buyers for that day. FII flows are often a leading indicator for the following session\'s direction.',
+    'pos-sizer':      '<strong>Position Sizing Calculator</strong>Enter your max risk (₹) and the current option premium to compute how many lots you can trade while staying within your risk limit. For sellers, add margin per lot. Straddle mode doubles the premium for both legs.',
+    'breadth':        '<strong>Market Breadth</strong>Counts advancing vs declining constituent stocks for the selected index. Weighted breadth uses the constituent weights — if the heavy-weight stocks (HDFCBANK, RELIANCE, ICICIBANK) are advancing, the index is likely to follow regardless of breadth count.',
+    'rel-strength':   '<strong>Relative Strength vs Open</strong>% change from today\'s session open for all four F&O indices. Shows which index is outperforming. If BankNifty is strong while Nifty is flat, a BankNifty CE may offer better risk/reward than a Nifty CE.',
+    'session-phase':  '<strong>Session Phase</strong>Current market phase based on IST. Pre-Open (9:00–9:15) = order matching only, prices are auction-based. Opening (9:15–9:30) = high volatility, gaps fill. Power Hour (14:00+) = trending activity resumes. Closing Auction (15:20+) = settlement pricing.',
+    'gift-nifty':     '<strong>GIFT Nifty</strong>NSE International Exchange futures (formerly SGX Nifty). Trades before 9:15 AM IST and gives an early indication of where NIFTY is likely to open. A strongly positive GIFT Nifty suggests gap-up; negative suggests gap-down.',
+    'health-dot':     '<strong>Server Health</strong>Green = server connected and session cookie fresh (< 25 min old). Amber = session approaching stale — re-warm will happen soon automatically. Red = cannot reach the server at the configured URL. Hover for details.',
+    'mini-hud':       '<strong>Mini HUD</strong>Compact floating overlay showing spot, IV, PCR, session phase, expiry countdown and the nearest 3 support/resistance levels. Designed for use on a secondary monitor. Drag to reposition. Toggle with the ` key.',
+    'heatmap':        '<strong>OI Cell Heatmap</strong>OI cell background intensity is proportional to open interest size — deeper orange = more CE OI, deeper green = more PE OI at that strike. Lets you spot key strikes at a glance without reading every number.',
+    'strike-builder': '<strong>Strike → Builder</strong>Click the strike price cell in any chain row to auto-populate the Strategy Builder as a short straddle at that strike. Switches to the Builder tab automatically.',
+    'constituents':   '<strong>Index Constituents</strong>Live prices for every stock in the selected index, fetched via option chain data. Pts ± shows each stock\'s contribution to the index move: (pct_change × normalized_weight × index_level). Sorted by default by absolute pts impact.',
+    'max-pain':       '<strong>Max Pain</strong>The strike price where the total P&L loss for all option buyers (CE + PE combined) is maximised — i.e. where option sellers profit most. Computed by summing intrinsic value × OI at each strike. Price tends to gravitate toward max pain approaching expiry.',
+  };
+
+  // ── Tooltip engine ───────────────────────────────────────────────────────
+  const tip = document.getElementById('helpTip');
+  if (tip) {
+    const show = (html, target) => {
+      tip.innerHTML = html;
+      tip.style.display = 'block';
+      const r = target.getBoundingClientRect();
+      const tw = 270, th = tip.offsetHeight || 120;
+      let left = r.right + 10;
+      let top  = r.top - 4;
+      if (left + tw > window.innerWidth - 8)  left = r.left - tw - 10;
+      if (top + th  > window.innerHeight - 8) top  = window.innerHeight - th - 8;
+      tip.style.left = Math.max(8, left) + 'px';
+      tip.style.top  = Math.max(8, top)  + 'px';
+    };
+    const hide = () => { tip.style.display = 'none'; };
+
+    document.addEventListener('mouseover', e => {
+      const icon = e.target.closest('.hi[data-h]');
+      if (!icon) return;
+      const txt = H[icon.dataset.h] || icon.dataset.h;
+      show(txt, icon);
+    });
+    document.addEventListener('mouseout', e => {
+      if (!e.target.closest('.hi[data-h]')) hide();
+    });
+    // Touch / click support (mobile)
+    document.addEventListener('click', e => {
+      const icon = e.target.closest('.hi[data-h]');
+      if (icon) { e.stopPropagation(); const txt = H[icon.dataset.h]||icon.dataset.h; show(txt, icon); return; }
+      if (!tip.contains(e.target)) hide();
+    });
+  }
 })();
 </script>
 </body>

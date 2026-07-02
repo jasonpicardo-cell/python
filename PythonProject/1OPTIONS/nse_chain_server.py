@@ -143,37 +143,95 @@ _vix_cache: dict = {"value": None, "fetched_at": 0.0}
 # ── Server telemetry ─────────────────────────────────────────────────────────
 _SERVER_START_TIME: float = time.time()
 
-# ── OI session baseline ──────────────────────────────────────────────────────
-# Records the first-observed OI for each strike each day so ce_oi_chg/pe_oi_chg
-# in the chain response shows intraday accumulation/unwinding.
-_oi_baseline: dict[str, dict] = {}
-_oi_baseline_lock = threading.Lock()
+# ── 15-minute OI momentum snapshots ─────────────────────────────────────────
+# Separate from the session baseline — records a periodic snapshot every
+# 15 minutes so we can show "what changed in the last 15 minutes" per strike,
+# which is far more actionable for scalping than the session total.
+_oi_snapshots: dict[str, list] = {}
+_OI_SNAPSHOT_INTERVAL = 900  # 15 minutes
 
-def _get_oi_deltas(symbol: str, strikes: list) -> dict:
-    """Return {strike: (ce_chg, pe_chg)} for every strike in the list."""
-    from datetime import date as _dt
-    today = _dt.today().isoformat()
-    sym   = symbol.upper()
+def _record_oi_snapshot(symbol: str, strikes: list) -> None:
+    now = time.time()
+    sym = symbol.upper()
+    snaps = _oi_snapshots.setdefault(sym, [])
+    if snaps and (now - snaps[-1]["ts"]) < _OI_SNAPSHOT_INTERVAL:
+        return
+    snaps.append({
+        "ts": now,
+        "oi": {s.strike: {"ce": s.ce_oi or 0, "pe": s.pe_oi or 0} for s in strikes},
+    })
+    if len(snaps) > 20:   # keep up to 5 hours of snapshots
+        snaps.pop(0)
+
+def _get_15m_oi_delta(symbol: str, strikes: list) -> dict:
+    """Return {strike: (ce_15m, pe_15m)} vs the snapshot ≥15 min ago."""
+    sym  = symbol.upper()
+    snaps = _oi_snapshots.get(sym, [])
+    now  = time.time()
+    ref  = next((s for s in reversed(snaps) if (now - s["ts"]) >= _OI_SNAPSHOT_INTERVAL), None)
+    if not ref:
+        return {}
     result: dict[int, tuple[int, int]] = {}
-    with _oi_baseline_lock:
-        bl = _oi_baseline.setdefault(sym, {"_date": today})
-        if bl.get("_date") != today:               # new trading day — reset
-            _oi_baseline[sym] = {"_date": today}
-            bl = _oi_baseline[sym]
-        for s in strikes:
-            k  = s.strike
-            ce = s.ce_oi or 0
-            pe = s.pe_oi or 0
-            if k not in bl:
-                bl[k] = {"ce": ce, "pe": pe}
-                result[k] = (0, 0)
-            else:
-                result[k] = (ce - bl[k]["ce"], pe - bl[k]["pe"])
+    for s in strikes:
+        prev = ref["oi"].get(s.strike, {"ce": 0, "pe": 0})
+        result[s.strike] = ((s.ce_oi or 0) - prev["ce"], (s.pe_oi or 0) - prev["pe"])
     return result
+
 
 # ── FII/DII cache ────────────────────────────────────────────────────────────
 _fii_dii_cache: dict = {"data": None, "ts": 0.0}
 _FII_DII_TTL = 300   # 5 minutes
+
+# ── GIFT Nifty ───────────────────────────────────────────────────────────────
+_gift_nifty_cache: dict = {"data": None, "ts": 0.0}
+_GIFT_NIFTY_TTL = 60   # 1 minute
+
+def _fetch_gift_nifty() -> dict:
+    global _gift_nifty_cache
+    now = time.time()
+    if _gift_nifty_cache["data"] and (now - _gift_nifty_cache["ts"]) < _GIFT_NIFTY_TTL:
+        return _gift_nifty_cache["data"]
+    fetcher = _shared_fetcher
+    if not fetcher:
+        return {"error": "Session not warmed"}
+    urls = [
+        "https://www.nseindia.com/api/gift-nifty",
+        "https://www.nseindia.com/api/getGIFTNifty",
+    ]
+    for url in urls:
+        try:
+            r = fetcher.session.get(url,
+                headers={"Accept": "application/json, */*",
+                         "Referer": "https://www.nseindia.com/"},
+                timeout=8)
+            if r.status_code != 200:
+                continue
+            raw = r.json()
+            # Normalise various response shapes NSE might use
+            if isinstance(raw, dict):
+                price  = (raw.get("last") or raw.get("lastPrice") or
+                          raw.get("close") or raw.get("value"))
+                chg    = (raw.get("change") or raw.get("pChange") or 0)
+                chgPct = raw.get("pChange") or raw.get("percentChange") or 0
+            elif isinstance(raw, list) and raw:
+                item   = raw[0]
+                price  = item.get("last") or item.get("lastPrice")
+                chg    = item.get("change") or 0
+                chgPct = item.get("pChange") or 0
+            else:
+                continue
+            if price:
+                data = {"price": float(price), "change": float(chg),
+                        "pChange": float(chgPct), "as_of": time.strftime("%H:%M")}
+                _gift_nifty_cache = {"data": data, "ts": now}
+                return data
+        except Exception:
+            continue
+    stale = _gift_nifty_cache.get("data")
+    return stale or {"error": "GIFT Nifty unavailable from NSE"}
+
+# ── Multi-index spot cache (for relative strength) ───────────────────────────
+_index_spot_cache: dict[str, float] = {}   # sym → latest spot
 
 # ── Bhavcopy disk cache ──────────────────────────────────────────────────────
 # NSE's archive CSVs are immutable once published, so caching them to disk
@@ -283,14 +341,21 @@ def _compute_iv_rank(symbol: str, current_iv: float) -> dict | None:
 
 
 def _enrich_strikes_with_oi_delta(symbol: str, strikes: list) -> list[dict]:
-    """Serialise strikes and add ce_oi_chg / pe_oi_chg intraday deltas."""
-    deltas = _get_oi_deltas(symbol, strikes)
+    """Serialise strikes and add 15-minute OI momentum fields.
+
+    ce_oi_chg / pe_oi_chg come directly from NSE's changeinOpenInterest
+    (change vs previous day's closing OI) and are already in StrikeData.
+    We add:
+      ce_oi_15m / pe_oi_15m = change in the last 15 minutes (periodic snapshots)
+    """
+    deltas_15m = _get_15m_oi_delta(symbol, strikes)
+    _record_oi_snapshot(symbol, strikes)
     result = []
     for s in strikes:
         d = asdict(s)
-        ce_chg, pe_chg = deltas.get(s.strike, (0, 0))
-        d["ce_oi_chg"] = ce_chg
-        d["pe_oi_chg"] = pe_chg
+        ce_15m, pe_15m = deltas_15m.get(s.strike, (0, 0))
+        d["ce_oi_15m"] = ce_15m
+        d["pe_oi_15m"] = pe_15m
         result.append(d)
     return result
 
@@ -327,6 +392,7 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
     except Exception:  # noqa: BLE001
         pass
     _update_session_ohlc(symbol, snap.underlying_value)
+    _index_spot_cache[symbol] = snap.underlying_value   # for relative strength
     strike_gap = infer_strike_gap(snap)
     atm = find_atm_strike(snap)
     support, resistance, nearby = support_resistance(snap, atm, band, strike_gap)
@@ -433,6 +499,7 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         "strategies": [asdict(s) for s in strategy_list],
         "india_vix": india_vix,
         "session_ohlc": _session_ohlc.get(symbol.upper(), {}),
+        "symbol": symbol,
     }
 
     snapshot = {
@@ -1582,6 +1649,27 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(_fetch_fii_dii())
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": str(e)})
+            return
+
+        if parsed.path == "/api/gift-nifty":
+            try:
+                self._send_json(_fetch_gift_nifty())
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)})
+            return
+
+        if parsed.path == "/api/relative-strength":
+            so = _session_ohlc
+            result = {}
+            for sym, spot in _index_spot_cache.items():
+                entry = so.get(sym, {})
+                open_ = entry.get("open") or spot
+                result[sym] = {
+                    "spot": spot,
+                    "open": open_,
+                    "pct": round((spot - open_) / open_ * 100, 2) if open_ else 0,
+                }
+            self._send_json(result)
             return
 
         if parsed.path == "/api/weekly-ohlc":
