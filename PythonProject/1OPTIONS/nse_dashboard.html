@@ -522,6 +522,156 @@
   .home-left { display: flex; flex-direction: column; gap: 12px; }
   .home-right { display: flex; flex-direction: column; gap: 12px; }
 
+  /* ── Dark → Light mode ── */
+  body.light-mode { --bg:#f3f4f6;--panel:#ffffff;--panel-2:#f9fafb;--text:#111827;
+    --muted:#6b7280;--muted-2:#9ca3af;--border:#e5e7eb;--accent:#2563eb;
+    --pos:#059669;--neg:#dc2626;--gold:#d97706;--warm:#ea580c;
+    --panel-3:#f3f4f6;--border-soft:#f0f1f3;--accent-dim:rgba(37,99,235,.12);
+    --pos-dim:rgba(5,150,105,.12);--neg-dim:rgba(220,38,38,.12); }
+  body.light-mode .hi { background:#e5e7eb; color:#6b7280; }
+  /* ── GEX profile ── */
+  .gex-flip-line { stroke:var(--gold); stroke-width:1.5; stroke-dasharray:4 3; }
+  .gex-summary { display:flex; gap:14px; font-size:10px; color:var(--muted); padding:4px 0; flex-wrap:wrap; }
+  .gex-summary b { color:var(--text); }
+  /* ── IV term structure ── */
+  .term-lbl { font-size:9px; fill:var(--muted); }
+  /* ── Delta picker ── */
+  .delta-picker { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted); flex-wrap:wrap; }
+  .delta-picker input { width:52px; padding:2px 5px; background:var(--panel-2); border:1px solid var(--border); border-radius:4px; color:var(--text); font-size:10px; }
+  .delta-hit td { animation:deltaFlash 1.6s ease; }
+  @keyframes deltaFlash { 0%,60% { background:rgba(37,99,235,.22); } 100% { background:transparent; } }
+  .cell-delta { font-size:8px; color:var(--muted-2); display:block; line-height:1.1; }
+  .voloi-badge { font-size:7.5px; font-weight:700; padding:0 3px; border-radius:2px; margin-left:3px;
+    background:rgba(255,193,7,.18); color:var(--gold); }
+  /* ── Adjustment suggester ── */
+  .adjust-panel { margin-top:8px; padding:7px 10px; background:var(--panel-2); border:1px solid var(--border); border-radius:6px; }
+  .adjust-item { display:flex; gap:7px; align-items:flex-start; font-size:10.5px; padding:3px 0; color:var(--text); }
+  .adjust-item .sev { font-size:8px; font-weight:800; padding:1px 5px; border-radius:3px; flex-shrink:0; margin-top:1px; }
+  .sev-hi { background:rgba(255,80,80,.2); color:var(--neg); }
+  .sev-md { background:rgba(255,193,7,.18); color:var(--gold); }
+  .sev-lo { background:rgba(37,99,235,.15); color:var(--accent); }
+  /* ── Probability cone bands ── */
+  .prob-band-1s { fill:var(--accent); opacity:.09; }
+  .prob-band-2s { fill:var(--accent); opacity:.045; }
+  /* ── OI timeline heatmap ── */
+  .oi-timeline-canvas { width:100%; image-rendering:pixelated; border-radius:4px; }
+  .oi-timeline-legend { display:flex; gap:10px; font-size:9px; color:var(--muted-2); padding:3px 0; }
+  /* ── Export/import ── */
+  .exp-imp-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  /* ── Collapsible panels ── */
+  .collapse-btn { background:none;border:none;color:var(--muted-2);cursor:pointer;font-size:11px;padding:2px 6px; }
+  .collapse-btn:hover { color:var(--text); }
+  .panel-collapsed > *:not(.movers-head):not(.level-panel-head):not(.skew-chart-head) { display:none !important; }
+  /* ── Scenario matrix ── */
+  .scen-matrix { border-collapse:collapse; font-size:9px; width:100%; }
+  .scen-matrix th, .scen-matrix td { padding:2px 4px; text-align:right; border:1px solid var(--border-soft); }
+  .scen-matrix th { color:var(--muted); font-weight:600; background:var(--panel-2); position:sticky; top:0; }
+  .scen-matrix td.spot-row-cell { font-weight:800; }
+  .scen-matrix .strike-lbl { color:var(--muted); text-align:right; font-weight:600; background:var(--panel-2); }
+  /* ── Comparison tray ── */
+  .cmp-table { width:100%; border-collapse:collapse; font-size:10px; }
+  .cmp-table th, .cmp-table td { padding:3px 7px; border-bottom:1px solid var(--border-soft); text-align:right; }
+  .cmp-table th:first-child, .cmp-table td:first-child { text-align:left; color:var(--muted); }
+  .cmp-remove { cursor:pointer; color:var(--neg); font-size:9px; }
+  /* ── Loss guard banner ── */
+  .loss-guard-banner { display:none; position:sticky; top:0; z-index:60; background:rgba(220,38,38,.95);
+    color:#fff; font-weight:800; font-size:12px; text-align:center; padding:7px 10px; border-radius:0 0 8px 8px; }
+  .loss-guard-banner.active { display:block; animation:lgPulse 1.2s ease infinite; }
+  @keyframes lgPulse { 50% { opacity:.82; } }
+  /* ── Theta clock ── */
+  .theta-clock-row { display:flex; gap:12px; font-size:10px; color:var(--muted); padding:3px 0; align-items:center; flex-wrap:wrap; }
+  .theta-clock-row b { color:var(--gold); }
+  /* ── Velocity readout ── */
+  .velo-pill { font-size:9px; font-weight:700; padding:1px 7px; border-radius:8px; border:1px solid var(--border); color:var(--muted); }
+  .velo-pill.burst-up { color:var(--pos); border-color:var(--pos); background:rgba(80,200,120,.12); }
+  .velo-pill.burst-dn { color:var(--neg); border-color:var(--neg); background:rgba(255,80,80,.12); }
+  /* ── Paper stats ── */
+  .pstats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:6px; margin:6px 0; }
+  /* ── Leg LTP sparkline ── */
+  .leg-spark-wrap { margin-top:3px; }
+  .leg-spark-wrap svg { display:block; }
+  /* ── OC Levels (LTP-calculator style) ── */
+  .oc-grid { display:grid; grid-template-columns:auto 1fr; gap:5px 12px; font-size:10.5px; align-items:center; padding:4px 0; }
+  .oc-lbl { color:var(--muted); font-weight:600; white-space:nowrap; }
+  .oc-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .oc-pill { font-size:9px; font-weight:800; padding:1px 8px; border-radius:8px; border:1px solid; }
+  .oc-strong { color:var(--pos); border-color:var(--pos); background:rgba(80,200,120,.1); }
+  .oc-wtt { color:var(--gold); border-color:var(--gold); background:rgba(255,193,7,.1); }
+  .oc-wtb { color:var(--neg); border-color:var(--neg); background:rgba(255,80,80,.1); }
+  .oc-strike { font-weight:800; color:var(--text); }
+  .oc-sub { font-size:9px; color:var(--muted-2); }
+  .oc-diversion { font-size:9.5px; font-weight:800; padding:2px 9px; border-radius:4px; }
+  .oc-div-up { background:rgba(80,200,120,.15); color:var(--pos); border:1px dashed var(--pos); }
+  .oc-div-dn { background:rgba(255,80,80,.15); color:var(--neg); border:1px dashed var(--neg); }
+  .oc-div-in { background:var(--panel-2); color:var(--muted); border:1px solid var(--border); }
+  .oc-bar-wrap { flex:1; min-width:80px; max-width:170px; height:5px; background:var(--panel-2); border-radius:3px; overflow:hidden; }
+  .oc-bar-fill { height:100%; border-radius:3px; transition:width .4s; }
+  /* ── Replay mode ── */
+  .replay-bar { display:none; align-items:center; gap:8px; padding:6px 10px; background:var(--panel-2);
+    border:1px solid var(--gold); border-radius:6px; margin:6px 0; font-size:10px; flex-wrap:wrap; }
+  .replay-bar.active { display:flex; }
+  .replay-bar input[type=range] { flex:1; min-width:140px; }
+  body.replay-mode #powerHourPill, body.replay-mode #veloPill { display:none !important; }
+  .replay-live-pill { font-size:9px; font-weight:800; color:var(--gold); border:1px solid var(--gold);
+    padding:1px 8px; border-radius:8px; background:rgba(255,193,7,.1); }
+  /* ── Dual symbol strip ── */
+  .dual-strip { display:flex; gap:10px; align-items:center; font-size:10px; color:var(--muted);
+    padding:4px 10px; background:var(--panel-2); border:1px solid var(--border); border-radius:6px; margin:4px 0; flex-wrap:wrap; }
+  .dual-strip b { color:var(--text); }
+  /* ── Panel manager ── */
+  .pmgr-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:120; }
+  .pmgr-overlay.open { display:flex; align-items:center; justify-content:center; }
+  .pmgr-box { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px 18px;
+    max-width:340px; width:92%; max-height:70vh; overflow:auto; }
+  .pmgr-box label { display:flex; gap:7px; align-items:center; font-size:11px; padding:3px 0; cursor:pointer; }
+  /* ── Delta templates ── */
+  .dtpl-row { display:flex; gap:5px; flex-wrap:wrap; padding:4px 0; }
+  .dtpl-row .btn { font-size:9.5px; padding:3px 10px; }
+  /* ── Live P&L per leg ── */
+  .leg-entry-row { display:flex;align-items:center;gap:5px;margin-top:4px;font-size:10px;flex-wrap:wrap; }
+  .leg-entry-input { width:68px;padding:2px 5px;background:var(--panel-2);border:1px solid var(--border);
+    border-radius:4px;color:var(--text);font-size:10px;font-family:inherit; }
+  .leg-entry-input:focus { outline:none;border-color:var(--accent); }
+  .leg-live-pnl { font-weight:700;font-size:10.5px; }
+  /* ── Leg notes ── */
+  .leg-note-wrap { margin-top:3px; }
+  .leg-note-input { width:100%;box-sizing:border-box;padding:2px 6px;background:var(--panel-2);
+    border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:9px;font-family:inherit; }
+  .leg-note-input:focus { outline:none;border-color:var(--accent);color:var(--text); }
+  /* ── Drag handle ── */
+  .drag-handle { cursor:grab;color:var(--muted-2);font-size:14px;padding:0 4px;user-select:none;opacity:.6; }
+  .drag-handle:hover { opacity:1; }
+  .leg-row.dragging { opacity:.4;border:1px dashed var(--accent); }
+  /* ── Entry timing score ── */
+  .entry-score-wrap { display:flex;align-items:center;gap:6px;padding:4px 0;font-size:10px; }
+  .entry-score-pill { font-size:11px;font-weight:800;padding:2px 10px;border-radius:4px;border:1px solid; }
+  .entry-score-pill.high  { color:var(--pos);border-color:var(--pos);background:rgba(80,200,120,.1); }
+  .entry-score-pill.mid   { color:var(--gold);border-color:var(--gold);background:rgba(255,193,7,.1); }
+  .entry-score-pill.low   { color:var(--neg);border-color:var(--neg);background:rgba(255,80,80,.1); }
+  /* ── Net portfolio delta ── */
+  .net-delta-row { font-size:10px;padding:3px 0;display:flex;align-items:center;gap:6px; }
+  /* ── Greeks P&L attribution ── */
+  .greeks-attr-row { display:flex;gap:8px;flex-wrap:wrap;padding:4px 0;
+    border-top:1px solid var(--border);margin-top:4px;font-size:9.5px; }
+  .attr-item { display:flex;flex-direction:column;align-items:center;gap:1px;
+    background:var(--panel-2);border-radius:3px;padding:3px 7px;min-width:52px; }
+  .attr-lbl { color:var(--muted);font-size:8.5px; }
+  /* ── Power hour badge ── */
+  .power-hour-pill { font-size:9px;font-weight:700;color:var(--gold);border:1px solid var(--gold);
+    border-radius:3px;padding:0 5px;animation:pulse-gold 1.5s infinite; }
+  @keyframes pulse-gold { 0%,100%{opacity:1}50%{opacity:.55} }
+  /* ── VIX ratio ── */
+  .vix-ratio-badge { font-size:10px;padding:2px 7px;border-radius:4px; }
+  /* ── Spot H/L distance ── */
+  .hl-dist-strip { font-size:9.5px;color:var(--muted-2);padding:2px 0;display:flex;gap:10px; }
+  /* ── PCR divergence ── */
+  .pcr-div-badge { font-size:9px;padding:1px 6px;border-radius:3px;
+    background:rgba(255,193,7,.15);border:1px solid var(--gold);color:var(--gold); }
+  /* ── Retry countdown ── */
+  .retry-countdown { font-size:10px;color:var(--gold);margin-top:4px; }
+  /* ── Spot shift slider ── */
+  .spot-shift-row { display:flex;align-items:center;gap:8px;margin-top:4px;font-size:11px;color:var(--muted); }
+
   /* ── Strategy name badge ── */
   .strat-name-badge { display:inline-flex; align-items:center; gap:5px;
     background:rgba(61,130,246,.12); border:1px solid rgba(61,130,246,.35);
@@ -1430,6 +1580,16 @@
 </style>
 </head>
 <body>
+<div id="lossGuardBanner" class="loss-guard-banner"></div>
+<div id="replayBar" class="replay-bar">
+  <span class="replay-live-pill">⏪ REPLAY<i class="hi" data-h="replay">i</i></span>
+  <select id="replayDate" class="ohlc-inp" style="font-size:10px;"></select>
+  <input type="range" id="replaySlider" min="0" max="0" value="0">
+  <span id="replayTimeLbl" style="min-width:52px;font-weight:700;color:var(--text);">—</span>
+  <button class="btn" id="replayPrevBtn" style="font-size:10px;padding:2px 8px;">◀</button>
+  <button class="btn" id="replayNextBtn" style="font-size:10px;padding:2px 8px;">▶</button>
+  <button class="btn" id="replayExitBtn" style="font-size:10px;padding:2px 10px;">⏹ Live</button>
+</div>
 <div class="app">
   <div class="toast" id="toast"></div>
   <div class="level-touch-toast" id="levelTouchToast"></div>
@@ -1479,6 +1639,9 @@
   </div>
 
   <div id="errorBannerWrap"></div>
+  <div id="retryCountdownWrap" style="display:none;padding:4px 10px;font-size:10px;background:rgba(255,193,7,.08);border-bottom:1px solid var(--border);">
+    <span id="retryCountdown" class="retry-countdown"></span><i class="hi" data-h="auto-retry">i</i>
+  </div>
 
   <nav class="tabs">
     <button class="tab active" data-tab="home">Home</button>
@@ -1489,7 +1652,12 @@
     <button class="tab" data-tab="paper">Paper Trades</button>
     <button class="tab" data-tab="flow">OI Flow</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
-    <button id="sessionReportBtn" class="btn" title="Session statistics report" style="font-size:10px;padding:2px 7px;margin-right:4px;" title="Session statistics report">📊</button>
+    <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
+    <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
+    <button id="replayModeBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Session replay — scrub through recorded days">⏪</button>
+    <button id="panelMgrBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Show / hide panels">🗂<i class="hi" data-h="panel-mgr">i</i></button>
+    <button id="themeToggleBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Toggle dark/light mode">☀️<i class="hi" data-h="theme-toggle">i</i></button>
+    <button id="sessionReportBtn" class="btn" title="Session statistics report" style="font-size:10px;padding:2px 7px;margin-right:4px;">📊</button>
     <button id="miniHudToggle" class="btn" style="font-size:10px;padding:2px 7px;margin-right:6px;" title="Mini HUD overlay (key: `)">HUD<i class="hi" data-h="mini-hud">i</i></button>
   </nav>
 
@@ -1550,7 +1718,24 @@
               <span class="skew-chart-title">🤖 AI Strategy Suggestions
                 <span style="font-size:10px;color:var(--muted-2);font-weight:400;"> · time-aware · PCR / VIX / IV</span>
               </span>
-              <button class="btn" id="getSuggestionsBtn" style="font-size:10.5px;padding:5px 14px;">Generate</button>
+              <span style="display:flex;gap:5px;align-items:center;">
+                <button class="btn" id="getSuggestionsBtn" style="font-size:10.5px;padding:5px 14px;">Generate</button>
+                <button class="collapse-btn" id="suggestCollapseBtn" title="Minimize / expand">▾</button>
+              </span>
+            </div>
+            <div class="dtpl-row" style="align-items:center;">
+              <span style="font-size:9px;color:var(--muted);">My view<i class="hi" data-h="suggest-view">i</i>:</span>
+              <select id="suggestView" class="ohlc-inp" style="font-size:10px;">
+                <option value="auto">Auto (from signals)</option>
+                <option value="bull">Bullish</option>
+                <option value="bear">Bearish</option>
+                <option value="neutral">Neutral / rangebound</option>
+                <option value="bigmove">Big move (either way)</option>
+              </select>
+              <select id="suggestRisk" class="ohlc-inp" style="font-size:10px;">
+                <option value="any">Any risk</option>
+                <option value="defined">Defined-risk only</option>
+              </select>
             </div>
             <div id="suggestionsOutput" class="suggestions-output">
               <div class="movers-loading">Hit Generate for time-aware strategy ideas.</div>
@@ -1657,7 +1842,7 @@
           <!-- ── Session Journal ────────────────────────────────── -->
           <div class="journal-panel">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span class="skew-chart-title">📓 Session Notes</span>
+              <span class="skew-chart-title">📓 Session Notes<i class="hi" data-h="eod-summary">i</i></span>
               <div style="display:flex;gap:5px;">
                 <span id="journalWordCount" style="font-size:9px;color:var(--muted-2);"></span>
                 <i class="hi" data-h="trade-template">i</i><select id="journalTemplate" class="level-select" style="font-size:9px;" title="Insert trade template">
@@ -1669,6 +1854,9 @@
                   <option value="review">Trade Review</option>
                 </select>
                 <button class="btn" id="journalExportBtn" style="font-size:9px;padding:2px 7px;" title="Download notes as text file">📥</button>
+                <button class="btn" id="fullBackupBtn" style="font-size:9px;padding:2px 7px;" title="Export ALL data (journal, settings, checklists, alerts) as JSON backup">💾<i class="hi" data-h="backup">i</i></button>
+                <button class="btn" id="fullRestoreBtn" style="font-size:9px;padding:2px 7px;" title="Restore from JSON backup">📂</button>
+                <input type="file" id="fullRestoreFile" accept=".json" style="display:none;">
                 <button class="btn" id="journalClearBtn" style="font-size:9px;padding:2px 7px;" title="Clear today's notes">✕</button>
               </div>
             </div>
@@ -2698,12 +2886,20 @@
         <span style="color:var(--muted);">IVP</span>
         <span id="ivpDisplay" style="font-weight:700;">—</span>
       </div>
+      <div class="dual-strip" id="dualStrip" style="display:none;"></div>
+      <!-- Entry timing score + H/L distance -->
+      <div id="entryScoreRow" style="display:none;" class="entry-score-wrap">
+        <span style="color:var(--muted);">Entry</span>
+        <span id="entryScorePill" class="entry-score-pill mid">—<i class="hi" data-h="entry-score">i</i></span>
+        <span id="entryScoreSignals" style="font-size:9px;color:var(--muted-2);"></span>
+      </div>
+      <div id="hlDistRow" class="hl-dist-strip" style="display:none;"></div>
       <!-- Max pain drift sparkline -->
       <div id="mpainSparkRow" class="mpain-spark-row" style="display:none;">
         <span style="color:var(--muted);">Max Pain<i class="hi" data-h="mpain-drift">i</i></span>
         <svg id="mpainSparkSvg" width="90" height="18" style="display:block;"></svg>
         <span id="mpainSparkRange" style="font-size:9px;color:var(--muted-2);"></span>
-        <span id="vwapDisplay" style="font-size:10px;color:var(--muted);margin-left:8px;"></span>
+        <span id="vwapDisplay" style="font-size:10px;color:var(--muted);margin-left:8px;"></span><i class="hi" data-h="vwap">i</i>
       </div>
       <!-- Spot intraday sparkline (session range) -->
       <div id="spotSparkRow" class="spot-spark-row" style="display:none;">
@@ -2726,6 +2922,48 @@
           <span class="chart-legend"><span><span class="legend-swatch" style="background:var(--accent)"></span> Call IV</span><span><span class="legend-swatch" style="background:var(--gold)"></span> Put IV</span></span>
         </div>
         <div id="skewChart"></div>
+      </div>
+
+      <div class="skew-chart-wrap" id="ocLevelsWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">📐 OC Levels — Support / Resistance Status<i class="hi" data-h="oc-levels">i</i></span>
+          <span class="chart-legend" id="ocShiftLog" style="font-size:9px;color:var(--muted-2);"></span>
+        </div>
+        <div id="ocLevelsOut"></div>
+      </div>
+
+      <div class="skew-chart-wrap" id="gexPanelWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">Gamma Exposure (GEX)<i class="hi" data-h="gex">i</i></span>
+          <span class="chart-legend"><span><span class="legend-swatch" style="background:var(--pos)"></span> +GEX (pinning)</span><span><span class="legend-swatch" style="background:var(--neg)"></span> −GEX (acceleration)</span></span>
+        </div>
+        <div class="gex-summary" id="gexSummary"></div>
+        <div id="gexChart"></div>
+      </div>
+
+      <div class="skew-chart-wrap" id="termStructWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">IV Term Structure<i class="hi" data-h="iv-term">i</i></span>
+          <span class="chart-legend" id="termStructNote" style="font-size:10px;color:var(--muted-2);"></span>
+        </div>
+        <div id="termStructChart"></div>
+      </div>
+
+      <div class="skew-chart-wrap" id="straddleTrackWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">ATM Straddle — Session<i class="hi" data-h="straddle-track">i</i></span>
+          <span class="chart-legend" id="straddleTrackStats" style="font-size:10px;color:var(--muted-2);"></span>
+        </div>
+        <div class="straddle-spark-wrap"><div id="straddleSpark" style="flex:1;"></div></div>
+      </div>
+
+      <div class="skew-chart-wrap" id="oiTimelineWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">OI Flow Timeline<i class="hi" data-h="oi-timeline">i</i></span>
+          <span class="chart-legend"><button class="btn" id="oiTimelineLoadBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button></span>
+        </div>
+        <div class="oi-timeline-legend"><span>🟥 CE OI building</span><span>🟩 PE OI building</span><span>rows = strikes · cols = time</span></div>
+        <div id="oiTimelineOut"><span style="font-size:10px;color:var(--muted-2);">Requires server support — click Load to try. (See server patch notes.)</span></div>
       </div>
 
       <div class="skew-chart-wrap" id="volSurfaceWrap">
@@ -2850,10 +3088,31 @@
         </div>
       </div>
 
+      <!-- Risk guards -->
+      <div class="pcr-alert-bar" style="margin-bottom:4px;">
+        <label style="display:flex;align-items:center;gap:3px;">
+          🛑 Daily loss limit<i class="hi" data-h="loss-guard">i</i> ₹
+          <input type="number" id="lossLimitInput" class="ohlc-inp" placeholder="off" step="500" style="width:70px;">
+        </label>
+        <label style="display:flex;align-items:center;gap:3px;">
+          📉 Trail-DD alert<i class="hi" data-h="trail-dd">i</i> ₹
+          <input type="number" id="trailDdInput" class="ohlc-inp" placeholder="off" step="500" style="width:70px;">
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="ivAlertEnabled" checked> IV spike/crush<i class="hi" data-h="iv-alert">i</i>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="veloAlertEnabled" checked> Velocity burst<i class="hi" data-h="velo-burst">i</i>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="orbEnabled" checked> ORB levels<i class="hi" data-h="orb">i</i>
+        </label>
+      </div>
+
       <!-- PCR alert controls -->
       <div class="pcr-alert-bar">
         <label style="display:flex;align-items:center;gap:4px;">
-          <input type="checkbox" id="pcrAlertEnabled"> PCR Alert<i class="hi" data-h="pcr-alert">i</i>
+          <input type="checkbox" id="pcrAlertEnabled"> PCR Alert<i class="hi" data-h="pcr-alert">i</i> / Div<i class="hi" data-h="pcr-divergence">i</i>
         </label>
         <label style="display:flex;align-items:center;gap:3px;">
           Bull &gt;
@@ -2867,6 +3126,13 @@
       </div>
 
       <div class="table-wrap" title="Click strike cell to open in Builder">
+        <div class="delta-picker" style="padding:4px 0;">
+          <span>Find Δ<i class="hi" data-h="delta-picker">i</i>:</span>
+          <input type="number" id="deltaPickVal" value="0.25" min="0.02" max="0.98" step="0.05">
+          <button class="btn" id="deltaPickCe" style="font-size:10px;padding:2px 10px;">CE</button>
+          <button class="btn" id="deltaPickPe" style="font-size:10px;padding:2px 10px;">PE</button>
+          <span id="deltaPickResult" style="color:var(--muted-2);"></span>
+        </div>
         <table id="chainTable">
           <thead>
             <tr>
@@ -2877,7 +3143,7 @@
               <th class="strike-col">Strike<i class="hi" data-h="strike-builder">i</i></th>
               <th data-sort="pe_ltp">Put LTP<span class="arrow"></span></th>
               <th data-sort="pe_iv">Put IV<span class="arrow"></span></th>
-              <th data-sort="pe_oi_chg" id="thPeOiChg">Put ΔOI<i class="hi" data-h="delta-oi">i</i><span class="arrow"></span></th>
+              <th data-sort="pe_oi_chg" id="thPeOiChg">Put ΔOI<i class="hi" data-h="delta-oi">i</i> / Scenario<i class="hi" data-h="oi-scenario">i</i><span class="arrow"></span></th>
               <th data-sort="pe_oi">Put OI<span class="arrow"></span></th>
             </tr>
           </thead>
@@ -2936,6 +3202,29 @@
           <div id="stratNameBadge" style="display:none;"></div>
           <div class="legs-list" id="legsList"></div>
           <button class="add-leg-btn" id="addLegBtn">+ Add Leg</button>
+          <div class="dtpl-row">
+            <span style="font-size:9px;color:var(--muted);align-self:center;">Δ-templates<i class="hi" data-h="delta-templates">i</i>:</span>
+            <button class="btn" data-dtpl="strangle20">Strangle 20Δ</button>
+            <button class="btn" data-dtpl="ic2510">Iron Condor 25/10Δ</button>
+            <button class="btn" data-dtpl="straddle">ATM Straddle</button>
+            <button class="btn" data-dtpl="straddle10w">Straddle + 10Δ wings</button>
+            <button class="btn" data-dtpl="bps30">Bull Put Spread 30/15Δ</button>
+            <button class="btn" data-dtpl="bcs30">Bear Call Spread 30/15Δ</button>
+            <button class="btn" data-dtpl="calendar">Calendar (ATM near/far)</button>
+            <button class="btn" data-dtpl="mpfly">Max-Pain Fly</button>
+            <button class="btn" data-dtpl="jade">Jade Lizard</button>
+            <button class="btn" data-dtpl="bwb">Broken-Wing Fly (PE)</button>
+            <button class="btn" data-dtpl="peratio">PE Front-Ratio 1×2</button>
+            <button class="btn" data-dtpl="cebacks">CE Backspread 1×2</button>
+          </div>
+          <label style="display:flex;gap:5px;align-items:center;font-size:9.5px;color:var(--muted);padding:2px 0;">
+            <input type="checkbox" id="checklistGate"> Require pre-trade checklist before Paper Trade<i class="hi" data-h="checklist-gate">i</i>
+          </label>
+          <label style="display:flex;gap:5px;align-items:center;font-size:9.5px;color:var(--muted);padding:2px 0;">
+            Risk per trade<i class="hi" data-h="risk-sizing">i</i> ₹
+            <input type="number" id="riskPerTradeInput" class="ohlc-inp" placeholder="off" step="500" style="width:72px;">
+            <span id="riskSizeOut" style="font-size:9.5px;"></span>
+          </label>
           <div class="builder-stat-grid" id="builderStatGrid"></div>
           <div class="greeks-panel" id="greeksPanel"></div>
 
@@ -2961,10 +3250,12 @@
 
           <div class="date-slider-wrap" style="margin-top:10px;">
             <div class="date-slider-label">
-              <span>What-if IV shift: <b id="ivShiftLabel">0%</b></span>
+              <span>What-if IV shift<i class="hi" data-h="iv-shift">i</i>: <b id="ivShiftLabel">0%</b></span>
               <span style="color:var(--muted-2);font-size:10px;">applies to "as of date" curve &amp; Greeks only</span>
             </div>
             <input type="range" class="date-slider" id="ivShiftSlider" min="-50" max="50" value="0" step="5">
+            <div class="spot-shift-row"><span>Spot shift: <b id="spotShiftLabel">+0pts</b><i class="hi" data-h="spot-shift">i</i></span></div>
+            <input type="range" class="date-slider" id="spotShiftSlider" min="-500" max="500" value="0" step="25">
             <div class="date-slider-ticks"><span>-50%</span><span>0</span><span>+50%</span></div>
           </div>
 
@@ -3100,6 +3391,16 @@
 
     <section id="tab-paper" class="tab-panel">
       <div class="paper-stats-bar" id="paperStatsBar"></div>
+      <div class="adjust-panel" id="portfolioPanel" style="display:none;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">💼 Portfolio (open positions)<i class="hi" data-h="portfolio-agg">i</i></div>
+        <div class="pstats-grid" id="portfolioGrid"></div>
+        <div id="portfolioNote" style="font-size:9px;color:var(--muted-2);"></div>
+      </div>
+      <div class="adjust-panel" id="paperDeepStats" style="display:none;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">📊 Performance Statistics<i class="hi" data-h="paper-stats">i</i></div>
+        <div class="pstats-grid" id="paperDeepStatsGrid"></div>
+        <div id="paperDeepStatsNote" style="font-size:9px;color:var(--muted-2);"></div>
+      </div>
 
       <div class="builder-panel-head"><h3>Open Trades</h3></div>
       <div class="paper-trades-list" id="openTradesList"></div>
@@ -3572,7 +3873,7 @@
       case 'm': els.symbolSelect.value = 'MIDCPNIFTY';els.symbolSelect.dispatchEvent(new Event('change')); break;
       case 'r': document.getElementById('refreshBtn')?.click(); break;
       case 'a': {
-        const cb = document.getElementById('autoRefreshToggle');
+        const cb = document.getElementById('autoToggle');
         if (cb) { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); } break;
       }
       case 'h': document.querySelector('.tab[data-tab="home"]')?.click(); break;
@@ -3890,6 +4191,13 @@
         alertDuration:   get('alertDurationInput')?.value,
         voiceEnabled:    get('voiceToggle')?.checked,
         pcrAlertEnabled: get('pcrAlertEnabled')?.checked,
+        lossLimit:       get('lossLimitInput')?.value,
+        checklistGate:   get('checklistGate')?.checked,
+        riskPerTrade:    get('riskPerTradeInput')?.value,
+        trailDd:         get('trailDdInput')?.value,
+        ivAlertOn:       get('ivAlertEnabled')?.checked,
+        veloAlertOn:     get('veloAlertEnabled')?.checked,
+        orbOn:           get('orbEnabled')?.checked,
         pcrBull:         get('pcrBullThreshold')?.value,
         pcrBear:         get('pcrBearThreshold')?.value,
         ivSpikeEnabled:  get('ivSpikeEnabled')?.checked,
@@ -3924,6 +4232,13 @@
       set('ivSpikeEnabled', s.ivSpikeEnabled, 'checked');
       set('ivSpikeThreshold', s.ivSpikePct);
       set('volSpikeEnabled', s.volSpikeEnabled, 'checked');
+      set('lossLimitInput', s.lossLimit);
+      set('checklistGate', s.checklistGate, 'checked');
+      set('riskPerTradeInput', s.riskPerTrade);
+      set('trailDdInput', s.trailDd);
+      set('ivAlertEnabled', s.ivAlertOn, 'checked');
+      set('veloAlertEnabled', s.veloAlertOn, 'checked');
+      set('orbEnabled', s.orbOn, 'checked');
       set('volSpikeMultiplier', s.volSpikeMult);
       if (s.autoRefresh !== undefined && els.autoToggle) els.autoToggle.checked = s.autoRefresh;
       set('niftyAutoRefresh', s.niftyAutoRef, 'checked');
@@ -4333,7 +4648,7 @@
   // NEW FEATURE: Straddle premium sparkline (last 30 min)
   // ======================================================================
   const _straddleHistory = [];   // [{ts, val}]
-  const MAX_STRADDLE_HIST = 360; // 30 min at 5s poll
+  const MAX_STRADDLE_HIST = 4600; // full session at 5s poll (mini-sparkline slices last 360)
 
   function _recordStraddle(premium) {
     if (!premium || premium <= 0) return;
@@ -4347,7 +4662,7 @@
     const rng  = document.getElementById('straddleSparkRange');
     if (!svg || _straddleHistory.length < 3) { if(row) row.style.display='none'; return; }
     row.style.display = 'flex';
-    const vals = _straddleHistory.map(h => h.val);
+    const vals = _straddleHistory.slice(-360).map(h => h.val);
     const lo = Math.min(...vals), hi = Math.max(...vals);
     const W = 120, H = 22, PAD = 2;
     const n = vals.length;
@@ -4372,6 +4687,7 @@
     if (_ivHistory.length < 5) return;
     const below = _ivHistory.filter(v => v <= iv).length;
     const ivp   = Math.round(below / _ivHistory.length * 100);
+    state._sessionIvp = ivp;   // consumed by Suggester v2 as IV-rank fallback
     const el    = document.getElementById('ivpDisplay');
     if (!el) return;
     const cls   = ivp >= 70 ? 'neg-txt' : ivp <= 30 ? 'pos-txt' : '';
@@ -5269,6 +5585,1715 @@
     }
   });
 
+  // ======================================================================
+  // FEATURE: Dark / light mode toggle
+  // ======================================================================
+  (function() {
+    const saved = localStorage.getItem('nse_theme');
+    if (saved === 'light') { document.body.classList.add('light-mode'); }
+    const btn = document.getElementById('themeToggleBtn');
+    if (btn) btn.innerHTML = (document.body.classList.contains('light-mode') ? '🌙' : '☀️') + '<i class="hi" data-h="theme-toggle">i</i>';
+  })();
+  document.getElementById('themeToggleBtn')?.addEventListener('click', (e) => {
+    if (e.target.closest('.hi')) return;   // clicking the (i) icon shouldn't toggle theme
+    const light = document.body.classList.toggle('light-mode');
+    localStorage.setItem('nse_theme', light ? 'light' : 'dark');
+    document.getElementById('themeToggleBtn').innerHTML = (light ? '🌙' : '☀️') + '<i class="hi" data-h="theme-toggle">i</i>';
+  });
+
+  // ======================================================================
+  // FEATURE: Auto-retry with exponential backoff on fetch failures
+  // ======================================================================
+  let _retryCount = 0, _retryTimer = null, _retryIntervalId = null;
+  const _RETRY_DELAYS = [5, 10, 20, 60];
+
+  function _scheduleRetry() {
+    clearTimeout(_retryTimer);          // prevent stacked retries (auto-refresh also calls fetchChain)
+    const delaySecs = _RETRY_DELAYS[Math.min(_retryCount, _RETRY_DELAYS.length - 1)];
+    _retryCount++;
+    let rem = delaySecs;
+    const wrap = document.getElementById('retryCountdownWrap');
+    const el   = document.getElementById('retryCountdown');
+    if (wrap) wrap.style.display = '';
+    const update = () => { if (el) el.textContent = `Server unreachable — retrying in ${rem}s (attempt ${_retryCount})`; };
+    update();
+    clearInterval(_retryIntervalId);
+    _retryIntervalId = setInterval(() => { rem--; update(); }, 1000);
+    _retryTimer = setTimeout(() => {
+      clearInterval(_retryIntervalId);
+      if (wrap) wrap.style.display = 'none';
+      fetchChain();
+    }, delaySecs * 1000);
+  }
+
+  function _clearRetry() {
+    _retryCount = 0;
+    clearTimeout(_retryTimer); clearInterval(_retryIntervalId);
+    const wrap = document.getElementById('retryCountdownWrap');
+    if (wrap) wrap.style.display = 'none';
+  }
+
+  // ======================================================================
+  // FEATURE: Power Hour auto-accelerate (14:00–15:30 IST → 2s refresh)
+  // ======================================================================
+  function _getAutoInterval() {
+    const now = new Date();
+    const ist  = new Date(now.getTime() + (5.5 * 3600 + now.getTimezoneOffset() * 60) * 1000);
+    const h = ist.getHours(), m = ist.getMinutes();
+    const isPH = (h === 14) || (h === 15 && m < 30);
+    const pill = document.getElementById('powerHourPill');
+    if (pill) pill.style.display = isPH ? '' : 'none';
+    return isPH ? 2000 : 5000;
+  }
+
+  // ======================================================================
+  // FEATURE: Live P&L tracking per leg
+  // ======================================================================
+  function _computeLivePnl() {
+    if (!state.lastData) return null;
+    const lotSize = state.lastData.lot_size || 50;
+    let total = null;
+    for (const leg of builderState.legs) {
+      if (leg.entry_price == null) continue;
+      const chain = findChainStrikeData(leg.strike, leg.expiry);
+      if (!chain) continue;
+      const ltp = leg.option_type === 'CE' ? chain.ce_ltp : chain.pe_ltp;
+      if (!ltp) continue;
+      const legPnl = (leg.action === 'BUY' ? ltp - leg.entry_price : leg.entry_price - ltp)
+                     * leg.qty_lots * lotSize;
+      total = (total ?? 0) + legPnl;
+    }
+    return total;
+  }
+
+  // ======================================================================
+  // FEATURE: Entry timing score (1–10)
+  // ======================================================================
+  function _computeEntryScore(data) {
+    let score = 0, maxScore = 0;
+    const sigs = [];
+
+    // 1. IVP — session IV percentile
+    if (_ivHistory.length >= 10) {
+      maxScore += 2;
+      const ivp = Math.round(_ivHistory.filter(v => v <= data.atm_iv).length / _ivHistory.length * 100);
+      if (ivp > 70) { score += 2; sigs.push(`IV high ${ivp}%`); }
+      else if (ivp < 30) { sigs.push(`IV low ${ivp}%`); }
+      else { score += 1; sigs.push(`IV mid ${ivp}%`); }
+    }
+    // 2. PCR level
+    maxScore += 2;
+    const pcr = parseFloat(data.pcr);
+    if (pcr > 1.2) { score += 2; sigs.push('PCR bullish'); }
+    else if (pcr > 0.8) { score += 1; sigs.push('PCR neutral'); }
+    else { sigs.push('PCR bearish'); }
+    // 3. Spot vs VWAP
+    if (state._sessionVwap && _spotHistory.length >= 20) {
+      maxScore += 1;
+      if (data.underlying_value > state._sessionVwap) { score += 1; sigs.push('Above VWAP'); }
+      else { sigs.push('Below VWAP'); }
+    }
+    // 4. Straddle premium vs 1σ
+    const em = state._expectedMoves;
+    if (em && data.straddle_premium) {
+      maxScore += 2;
+      const ratio = data.straddle_premium / Math.max(1, em.up1 - data.underlying_value);
+      if (ratio > 1.1) { score += 2; sigs.push(`Premium rich (${ratio.toFixed(2)}×)`); }
+      else if (ratio < 0.9) { sigs.push(`Premium cheap (${ratio.toFixed(2)}×)`); }
+      else { score += 1; sigs.push(`Premium fair`); }
+    }
+    // 5. Distance from call/put wall
+    const walls = state._oiWalls;
+    if (walls && data.strike_gap) {
+      maxScore += 1;
+      const distCW = Math.abs(data.underlying_value - walls.callStrike);
+      const distPW = Math.abs(data.underlying_value - walls.putStrike);
+      const g = data.strike_gap;
+      if (distCW > 3 * g && distPW > 3 * g) { score += 1; sigs.push('Away from walls'); }
+      else { sigs.push('Near OI wall'); }
+    }
+    const scaled = maxScore > 0 ? Math.round(score / maxScore * 10) : 5;
+    return { score: scaled, signals: sigs };
+  }
+
+  // ======================================================================
+  // FEATURE: Net portfolio delta display
+  // ======================================================================
+  function _renderNetDelta(legs, lotSize, spot) {
+    const row   = document.getElementById('netDeltaRow');
+    const val   = document.getElementById('netDeltaVal');
+    const rups  = document.getElementById('netDeltaRupees');
+    if (!row || !val || !legs.length) { if(row) row.style.display='none'; return 0; }
+    const netDelta = legs.reduce((s, l) => s + (l._greeks?.delta || 0) * (l.qty_lots || 1), 0);
+    const rsPerPt = netDelta * lotSize;      // P&L per 1-point underlying move
+    row.style.display = 'flex';
+    const cls = netDelta > 0.05 ? 'pos-txt' : netDelta < -0.05 ? 'neg-txt' : '';
+    val.innerHTML = `<span class="${cls}">${netDelta >= 0 ? '+' : ''}${netDelta.toFixed(3)}</span>`;
+    rups.textContent = `≈ ${rsPerPt >= 0 ? '+' : '−'}₹${Math.round(Math.abs(rsPerPt)).toLocaleString('en-IN')} per pt`;
+    return netDelta;
+  }
+
+  // ======================================================================
+  // FEATURE: Greeks P&L attribution
+  // ======================================================================
+  let _prevGreeksSnap = null;
+  function _updateGreeksPnlAttribution(legs, spot, iv, lotSize) {
+    const row = document.getElementById('greeksAttrRow');
+    if (!row || !legs.length) { if(row) row.style.display='none'; return; }
+    const snap = { spot, iv, ts: Date.now() };
+    if (!_prevGreeksSnap) { _prevGreeksSnap = snap; row.style.display='none'; return; }
+    const dS  = spot - _prevGreeksSnap.spot;
+    const dV  = (iv - _prevGreeksSnap.iv);
+    const dT  = (snap.ts - _prevGreeksSnap.ts) / (1000*3600*24);
+    _prevGreeksSnap = snap;
+    if (Math.abs(dS) < 1 && Math.abs(dV) < 0.1 && dT < 0.01) return;  // no meaningful change
+    const nD = legs.reduce((s,l) => s+(l._greeks?.delta||0)*(l.qty_lots||1), 0);
+    const nG = legs.reduce((s,l) => s+(l._greeks?.gamma||0)*(l.qty_lots||1), 0);
+    const nT = legs.reduce((s,l) => s+(l._greeks?.theta||0)*(l.qty_lots||1), 0);
+    const nV = legs.reduce((s,l) => s+(l._greeks?.vega||0)*(l.qty_lots||1), 0);
+    const D = nD * dS * lotSize;
+    const G = 0.5 * nG * dS * dS * lotSize;
+    const T = nT * dT * lotSize;
+    const V = nV * dV * lotSize;
+    const fmt = v => `<span class="${v>=0?'pos-txt':'neg-txt'}">${v>=0?'+':'−'}₹${Math.abs(Math.round(v)).toLocaleString('en-IN')}</span>`;
+    row.style.display = 'flex';
+    row.innerHTML = `
+      <span class="attr-lbl">Greeks P&amp;L<i class="hi" data-h="greeks-pnl">i</i></span>
+      <div class="attr-item"><span class="attr-lbl">Δ Move</span>${fmt(D)}</div>
+      <div class="attr-item"><span class="attr-lbl">Γ Move</span>${fmt(G)}</div>
+      <div class="attr-item"><span class="attr-lbl">Θ Decay</span>${fmt(T)}</div>
+      <div class="attr-item"><span class="attr-lbl">V Move</span>${fmt(V)}</div>
+      <div class="attr-item"><span class="attr-lbl">Total</span>${fmt(D+G+T+V)}</div>`;
+  }
+
+  // ======================================================================
+  // FEATURE: Spot shift slider
+  // ======================================================================
+  // spotShiftPts initialized in builderState declaration
+
+  // ======================================================================
+  // FEATURE: Spot to session H/L distance
+  // ======================================================================
+  function _renderHlDist(data) {
+    const row = document.getElementById('hlDistRow');
+    if (!row) return;
+    const so = data.session_ohlc;
+    if (!so?.high || !so?.low) { row.style.display='none'; return; }
+    const spot = data.underlying_value;
+    const toH  = so.high - spot, toL = spot - so.low;
+    row.style.display = 'flex';
+    row.innerHTML = `<span title="Distance from session high">▼ ${Math.abs(toH).toFixed(0)}pts from H ${fmtInt(so.high)}<i class="hi" data-h="spot-hl-dist">i</i></span>
+      <span title="Distance from session low">▲ ${Math.abs(toL).toFixed(0)}pts to L ${fmtInt(so.low)}</span>`;
+  }
+
+  // ======================================================================
+  // FEATURE: VIX vs straddle ratio
+  // ======================================================================
+  function _computeVixRatio(data) {
+    const vix = data.india_vix || data.vix;
+    if (!vix || !data.straddle_premium || !data.underlying_value) return null;
+    // Expected daily 1σ from VIX: Spot × (VIX/100) × √(1/252)
+    const sigma1d = data.underlying_value * (vix / 100) * Math.sqrt(1 / 252);
+    // Full-day expected move = sigma1d × √252/52 ≈ sigma scaled to DTE ≈ 1
+    const impliedFullDay = sigma1d * 2;  // ±1σ full width
+    return data.straddle_premium / Math.max(1, impliedFullDay);
+  }
+
+  // ======================================================================
+  // FEATURE: Gamma Exposure (GEX) profile + zero-gamma flip level
+  // ======================================================================
+  function _computeGex(data) {
+    const strikes = data.strikes || [];
+    const spot = data.underlying_value, lot = data.lot_size || 50;
+    const dte = Math.max(0.25, data.dte ?? 1);            // avoid T=0 blowup on expiry day
+    const T = dte / 365;
+    if (!strikes.length || !spot) return null;
+    const rows = [];
+    for (const s of strikes) {
+      const ceIv = (s.ce_iv || 0) / 100, peIv = (s.pe_iv || 0) / 100;
+      const gCe = ceIv > 0.01 ? bsGreeks(spot, s.strike, T, ceIv, 0.07, 'CE').gamma : 0;
+      const gPe = peIv > 0.01 ? bsGreeks(spot, s.strike, T, peIv, 0.07, 'PE').gamma : 0;
+      // SpotGamma-style naive dealer convention: long calls (+), long puts (−)
+      // GEX per 1% move, in ₹: gamma × OI × lot × spot² × 0.01
+      const gex = (gCe * (s.ce_oi || 0) - gPe * (s.pe_oi || 0)) * lot * spot * spot * 0.01;
+      rows.push({ strike: s.strike, gex });
+    }
+    rows.sort((a, b) => a.strike - b.strike);
+    // Zero-gamma flip: strike where cumulative GEX crosses zero (neg → pos)
+    let cum = 0, flip = null, prevCum = 0, prevStrike = null;
+    for (const r of rows) {
+      prevCum = cum; cum += r.gex;
+      if (flip === null && prevStrike !== null && prevCum < 0 && cum >= 0) {
+        const frac = Math.abs(prevCum) / Math.max(1e-9, cum - prevCum);
+        flip = prevStrike + (r.strike - prevStrike) * frac;
+      }
+      prevStrike = r.strike;
+    }
+    const total = rows.reduce((s, r) => s + r.gex, 0);
+    return { rows, total, flip };
+  }
+
+  function renderGexChart(data) {
+    const out = document.getElementById('gexChart');
+    const sum = document.getElementById('gexSummary');
+    if (!out) return;
+    const g = _computeGex(data);
+    if (!g || !g.rows.length) { out.innerHTML = ''; if (sum) sum.innerHTML = ''; return; }
+    const spot = data.underlying_value;
+    // Limit to ±12 strikes around ATM for readability
+    const atm = data.atm || spot;
+    const rows = g.rows.filter(r => Math.abs(r.strike - atm) <= 12 * (data.strike_gap || 50));
+    const maxAbs = Math.max(1, ...rows.map(r => Math.abs(r.gex)));
+    const W = 560, rowH = 13, padL = 60, padR = 10, H = rows.length * rowH + 22;
+    const midX = padL + (W - padL - padR) / 2;
+    const halfW = (W - padL - padR) / 2;
+    let bars = '', labels = '';
+    rows.forEach((r, i) => {
+      const y = 12 + i * rowH;
+      const w = Math.abs(r.gex) / maxAbs * halfW;
+      const isPos = r.gex >= 0;
+      const x = isPos ? midX : midX - w;
+      const col = isPos ? 'var(--pos)' : 'var(--neg)';
+      const nearSpot = Math.abs(r.strike - spot) < (data.strike_gap || 50) / 2;
+      bars += `<rect x="${x.toFixed(1)}" y="${y}" width="${Math.max(0.5,w).toFixed(1)}" height="${rowH-3}" fill="${col}" opacity="${nearSpot?1:.72}" rx="1"/>`;
+      labels += `<text x="${padL-4}" y="${y+rowH-5}" text-anchor="end" class="term-lbl" ${nearSpot?'font-weight="800" fill="var(--text)"':''}>${fmtInt(r.strike)}</text>`;
+    });
+    // flip level marker
+    let flipLine = '';
+    if (g.flip !== null && rows.length) {
+      const idx = rows.findIndex(r => r.strike >= g.flip);
+      if (idx > 0) {
+        const y = 12 + idx * rowH - 1.5;
+        flipLine = `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" class="gex-flip-line"/><text x="${W-padR}" y="${y-3}" text-anchor="end" class="term-lbl" fill="var(--gold)">flip ${fmtInt(g.flip)}</text>`;
+      }
+    }
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+      <line x1="${midX}" y1="8" x2="${midX}" y2="${H-6}" stroke="var(--border)" stroke-width="1"/>
+      ${bars}${labels}${flipLine}</svg>`;
+    if (sum) {
+      const regime = g.total >= 0 ? '<b style="color:var(--pos)">+GEX — mean-reversion / pinning regime</b>' : '<b style="color:var(--neg)">−GEX — trend-acceleration regime</b>';
+      state._gexRegime = g.total >= 0 ? 'pos' : 'neg';
+      const totStr = (Math.abs(g.total) >= 1e7 ? (g.total/1e7).toFixed(1)+' Cr' : (g.total/1e5).toFixed(1)+' L');
+      sum.innerHTML = `<span>Net GEX/1%: <b>₹${totStr}</b></span><span>${regime}</span>${g.flip!==null?`<span>Zero-Γ flip: <b>${fmtInt(g.flip)}</b> (spot ${spot>g.flip?'above ✓':'below ⚠'})</span>`:''}`;
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: IV term structure across expiries
+  // ======================================================================
+  function renderTermStructure(data) {
+    const out = document.getElementById('termStructChart');
+    const note = document.getElementById('termStructNote');
+    if (!out) return;
+    const exps = Object.entries(data.expiries_data || {});
+    if (exps.length < 2) { out.innerHTML = '<span style="font-size:10px;color:var(--muted-2);">Need 2+ expiries in payload.</span>'; return; }
+    const spot = data.underlying_value;
+    const pts = [];
+    for (const [exp, info] of exps) {
+      const strikes = info.strikes || [];
+      if (!strikes.length || info.dte == null) continue;
+      let best = null, bestDist = Infinity;
+      for (const s of strikes) {
+        const d = Math.abs(s.strike - spot);
+        if (d < bestDist) { bestDist = d; best = s; }
+      }
+      if (!best) continue;
+      const ivs = [best.ce_iv, best.pe_iv].filter(v => v > 0);
+      if (!ivs.length) continue;
+      pts.push({ exp, dte: info.dte, iv: ivs.reduce((a,b)=>a+b,0)/ivs.length });
+    }
+    pts.sort((a,b) => a.dte - b.dte);
+    if (pts.length < 2) { out.innerHTML = '<span style="font-size:10px;color:var(--muted-2);">Insufficient IV data across expiries.</span>'; return; }
+    const W = 560, H = 110, padL = 38, padR = 14, padY = 18;
+    const minIv = Math.min(...pts.map(p=>p.iv)), maxIv = Math.max(...pts.map(p=>p.iv));
+    const span = Math.max(0.5, maxIv - minIv);
+    const x = i => padL + i / (pts.length-1) * (W-padL-padR);
+    const y = iv => H - padY - (iv - minIv) / span * (H - 2*padY);
+    const line = pts.map((p,i)=>`${x(i).toFixed(1)},${y(p.iv).toFixed(1)}`).join(' ');
+    let dots = '', lbls = '';
+    pts.forEach((p,i) => {
+      dots += `<circle cx="${x(i)}" cy="${y(p.iv)}" r="3" fill="var(--accent)"/>`;
+      lbls += `<text x="${x(i)}" y="${H-3}" text-anchor="middle" class="term-lbl">${p.dte}d</text>
+               <text x="${x(i)}" y="${y(p.iv)-6}" text-anchor="middle" class="term-lbl" fill="var(--text)">${p.iv.toFixed(1)}</text>`;
+    });
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+      <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}${lbls}</svg>`;
+    if (note) {
+      const slope = pts[pts.length-1].iv - pts[0].iv;
+      note.textContent = slope < -0.5 ? `Backwardation (${slope.toFixed(1)}) — event premium in near expiry` :
+                         slope > 0.5  ? `Contango (+${slope.toFixed(1)}) — normal structure` : 'Flat structure';
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: Intraday ATM straddle price tracker (full-session panel)
+  // Reuses existing _straddleHistory (declared above, {ts,val} @ 5s poll)
+  // ======================================================================
+  function renderStraddleSpark() {
+    const out = document.getElementById('straddleSpark');
+    const stats = document.getElementById('straddleTrackStats');
+    if (!out || _straddleHistory.length < 2) return;
+    let vs = _straddleHistory.map(p=>p.val);
+    if (vs.length > 300) {                             // downsample for SVG perf
+      const step = vs.length / 300;
+      vs = Array.from({length: 300}, (_, i) => vs[Math.floor(i * step)]);
+    }
+    const mn = Math.min(...vs), mx = Math.max(...vs), span = Math.max(0.5, mx-mn);
+    const W = 560, H = 64, pad = 6;
+    const x = i => pad + i/(vs.length-1)*(W-2*pad);
+    const y = v => H - pad - (v-mn)/span*(H-2*pad);
+    const line = vs.map((v,i)=>`${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const first = vs[0], curr = vs[vs.length-1];
+    const chg = curr - first, chgPct = (chg/first*100);
+    const col = chg <= 0 ? 'var(--pos)' : 'var(--neg)';   // falling straddle = good for sellers
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+      <polyline points="${line}" fill="none" stroke="${col}" stroke-width="1.5"/>
+      <circle cx="${x(vs.length-1)}" cy="${y(curr)}" r="2.5" fill="${col}"/></svg>`;
+    if (stats) stats.textContent = `${curr.toFixed(1)} · ${chg>=0?'+':''}${chg.toFixed(1)} (${chgPct>=0?'+':''}${chgPct.toFixed(1)}%) window · H ${mx.toFixed(0)} L ${mn.toFixed(0)}`;
+  }
+
+  // ======================================================================
+  // FEATURE: Delta-based strike picker
+  // ======================================================================
+  function _findStrikeByDelta(targetAbs, side) {
+    const data = state.lastData;
+    if (!data?.strikes?.length) return null;
+    const spot = data.underlying_value, T = Math.max(0.25, data.dte ?? 1) / 365;
+    let best = null, bestDiff = Infinity;
+    for (const s of data.strikes) {
+      const iv = (side === 'CE' ? s.ce_iv : s.pe_iv) / 100;
+      if (!iv || iv < 0.005) continue;
+      const d = Math.abs(bsGreeks(spot, s.strike, T, iv, 0.07, side).delta);
+      const diff = Math.abs(d - targetAbs);
+      if (diff < bestDiff) { bestDiff = diff; best = { strike: s.strike, delta: d }; }
+    }
+    return best;
+  }
+  function _deltaPick(side) {
+    const inp = document.getElementById('deltaPickVal');
+    const out = document.getElementById('deltaPickResult');
+    const target = Math.abs(parseFloat(inp?.value) || 0.25);
+    const hit = _findStrikeByDelta(target, side);
+    if (!hit) { if (out) out.textContent = 'Load chain first.'; return; }
+    if (out) out.textContent = `${side} ${fmtInt(hit.strike)} ≈ ${hit.delta.toFixed(2)}Δ`;
+    const tr = els.chainBody.querySelector(`tr[data-strike="${hit.strike}"]`);
+    if (tr) {
+      tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      tr.classList.remove('delta-hit'); void tr.offsetWidth;   // restart animation
+      tr.classList.add('delta-hit');
+    }
+  }
+  document.getElementById('riskPerTradeInput')?.addEventListener('input', () => { if (builderState.legs.length) renderBuilder(); });
+  document.getElementById('deltaPickCe')?.addEventListener('click', () => _deltaPick('CE'));
+  document.getElementById('deltaPickPe')?.addEventListener('click', () => _deltaPick('PE'));
+
+  // ======================================================================
+  // FEATURE: OC Levels — LTP-calculator-style S/R status signals
+  // Support = highest PE OI strike, Resistance = highest CE OI strike.
+  // STRONG = leader unchallenged. WTT/WTB = the strongest challenger strike
+  // sits above/below the leader, with % = challenger ÷ leader ("game of
+  // percentage" — rising % means the level is likely to shift; ≥100% = shift).
+  // Six reversal kinds tracked: Support, Resistance, Extension of Support,
+  // Extension of Resistance, Diversion, End of Diversion.
+  // ======================================================================
+  const _OC_STRONG_BELOW = 70;   // challenger below this % of leader → STRONG
+  const _ocState = { rStrike: null, sStrike: null, diversion: 'in', shifts: [] };
+  let _lastOcAlert = 0;
+
+  function _ocSideStatus(strikes, oiField) {
+    // returns {strike, oi, status:'STRONG'|'WTT'|'WTB', pct, challengerStrike}
+    if (!strikes?.length) return null;
+    let leader = strikes[0];
+    for (const s of strikes) if ((s[oiField] || 0) > (leader[oiField] || 0)) leader = s;
+    if (!leader[oiField]) return null;
+    let challenger = null;
+    for (const s of strikes) {
+      if (s.strike === leader.strike) continue;
+      if (!challenger || (s[oiField] || 0) > (challenger[oiField] || 0)) challenger = s;
+    }
+    const pct = challenger ? (challenger[oiField] || 0) / leader[oiField] * 100 : 0;
+    const status = pct < _OC_STRONG_BELOW ? 'STRONG' : (challenger.strike > leader.strike ? 'WTT' : 'WTB');
+    return { strike: leader.strike, oi: leader[oiField], ltp: oiField === 'ce_oi' ? leader.ce_ltp : leader.pe_ltp,
+             status, pct, challengerStrike: challenger?.strike ?? null };
+  }
+
+  function computeOcLevels(data) {
+    const strikes = data.strikes || [];
+    if (!strikes.length) return null;
+    const res    = _ocSideStatus(strikes, 'ce_oi');       // resistance by OI
+    const sup    = _ocSideStatus(strikes, 'pe_oi');       // support by OI
+    const resVol = _ocSideStatus(strikes, 'ce_volume');   // resistance by volume
+    const supVol = _ocSideStatus(strikes, 'pe_volume');   // support by volume
+    if (!res || !sup) return null;
+    // Reversal prices (writer breakevens of the H-OI strikes)
+    const callHOiRev = res.ltp ? res.strike + res.ltp : null;
+    const putHOiRev  = sup.ltp ? sup.strike - sup.ltp : null;
+    return { res, sup, resVol, supVol, callHOiRev, putHOiRev };
+  }
+
+  function _ocPill(st) {
+    if (!st) return '<span class="oc-sub">n/a</span>';
+    const cls = st.status === 'STRONG' ? 'oc-strong' : st.status === 'WTT' ? 'oc-wtt' : 'oc-wtb';
+    const arrow = st.status === 'WTT' ? '↑' : st.status === 'WTB' ? '↓' : '';
+    const pctStr = st.status === 'STRONG' ? '' : ` ${st.pct.toFixed(1)}% → ${fmtInt(st.challengerStrike)}`;
+    const barCol = st.status === 'STRONG' ? 'var(--pos)' : st.status === 'WTT' ? 'var(--gold)' : 'var(--neg)';
+    return `<span class="oc-pill ${cls}">${st.status}${arrow}${pctStr}</span>
+      <div class="oc-bar-wrap" title="Game of percentage: challenger OI ÷ leader OI. Nears 100% → level about to shift.">
+        <div class="oc-bar-fill" style="width:${Math.min(100, st.pct).toFixed(0)}%;background:${barCol};"></div>
+      </div>`;
+  }
+
+  function renderOcLevels(data) {
+    const out = document.getElementById('ocLevelsOut');
+    if (!out) return;
+    const oc = computeOcLevels(data);
+    if (!oc) { out.innerHTML = ''; return; }
+    const spot = data.underlying_value;
+
+    // ── Six-reversals tracking: shifts + diversion state ──
+    const nowT = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (_ocState.rStrike !== null && oc.res.strike !== _ocState.rStrike) {
+      const up = oc.res.strike > _ocState.rStrike;
+      _ocState.shifts.push(`${nowT} R ${fmtInt(_ocState.rStrike)}→${fmtInt(oc.res.strike)}${up ? ' (Ext of Resistance ▲)' : ' ▼'}`);
+      if (Date.now() - _lastOcAlert > 120000) { _lastOcAlert = Date.now();
+        criticalAlert(up ? `📐 Extension of Resistance: ${fmtInt(_ocState.rStrike)} → ${fmtInt(oc.res.strike)} (bullish room opens)` 
+                     : `📐 Resistance shifted DOWN to ${fmtInt(oc.res.strike)} (writers pressing — bearish)`); }
+    }
+    if (_ocState.sStrike !== null && oc.sup.strike !== _ocState.sStrike) {
+      const up = oc.sup.strike > _ocState.sStrike;
+      _ocState.shifts.push(`${nowT} S ${fmtInt(_ocState.sStrike)}→${fmtInt(oc.sup.strike)}${up ? ' (Ext of Support ▲)' : ' ▼'}`);
+      if (Date.now() - _lastOcAlert > 120000) { _lastOcAlert = Date.now();
+        criticalAlert(up ? `📐 Extension of Support: ${fmtInt(_ocState.sStrike)} → ${fmtInt(oc.sup.strike)} (bullish — floor rising)` 
+                     : `📐 Support shifted DOWN to ${fmtInt(oc.sup.strike)} (bearish — floor dropping)`); }
+    }
+    _ocState.rStrike = oc.res.strike; _ocState.sStrike = oc.sup.strike;
+    if (_ocState.shifts.length > 6) _ocState.shifts = _ocState.shifts.slice(-6);
+
+    const prevDiv = _ocState.diversion;
+    const divNow = spot > oc.res.strike ? 'up' : spot < oc.sup.strike ? 'dn' : 'in';
+    if (divNow !== prevDiv) {
+      if (divNow !== 'in' && Date.now() - _lastOcAlert > 120000) { _lastOcAlert = Date.now();
+        criticalAlert(`📐 DIVERSION: spot ${fmtInt(spot)} is ${divNow === 'up' ? 'ABOVE resistance' : 'BELOW support'} strike — price outside the OI-defined range`); }
+      else if (divNow === 'in' && prevDiv !== 'in' && Date.now() - _lastOcAlert > 120000) { _lastOcAlert = Date.now();
+        criticalAlert(`📐 End of Diversion: spot back inside S/R range`); }
+      _ocState.diversion = divNow;
+    }
+
+    const divBadge = divNow === 'up' ? '<span class="oc-diversion oc-div-up">DIVERSION ▲ — spot above R</span>'
+                   : divNow === 'dn' ? '<span class="oc-diversion oc-div-dn">DIVERSION ▼ — spot below S</span>'
+                   : '<span class="oc-diversion oc-div-in">In range</span>';
+
+    // Combined bias read
+    let bias = 'Neutral / rangebound';
+    if (oc.sup.status === 'WTT' || (oc.res.status === 'STRONG' && oc.sup.status === 'WTT')) bias = 'Bullish lean — support pressing up';
+    if (oc.res.status === 'WTT' && oc.sup.status !== 'WTB') bias = 'Bullish — resistance weakening upward';
+    if (oc.res.status === 'WTB' || (oc.sup.status === 'WTB')) bias = 'Bearish lean — ' + (oc.res.status === 'WTB' ? 'resistance pressing down' : 'support weakening downward');
+    if (oc.res.status === 'STRONG' && oc.sup.status === 'STRONG') bias = 'Rangebound — both walls strong';
+
+    out.innerHTML = `
+      <div class="oc-grid">
+        <span class="oc-lbl">Resistance (OI)</span>
+        <div class="oc-row"><span class="oc-strike">${fmtInt(oc.res.strike)}</span>${_ocPill(oc.res)}<span class="oc-sub">${fmtInt(oc.res.oi)} OI</span></div>
+        <span class="oc-lbl">Support (OI)</span>
+        <div class="oc-row"><span class="oc-strike">${fmtInt(oc.sup.strike)}</span>${_ocPill(oc.sup)}<span class="oc-sub">${fmtInt(oc.sup.oi)} OI</span></div>
+        <span class="oc-lbl">Resistance (Vol)</span>
+        <div class="oc-row"><span class="oc-strike">${oc.resVol ? fmtInt(oc.resVol.strike) : '—'}</span>${_ocPill(oc.resVol)}</div>
+        <span class="oc-lbl">Support (Vol)</span>
+        <div class="oc-row"><span class="oc-strike">${oc.supVol ? fmtInt(oc.supVol.strike) : '—'}</span>${_ocPill(oc.supVol)}</div>
+        <span class="oc-lbl">Reversal prices<i class="hi" data-h="reversal-price">i</i></span>
+        <div class="oc-row"><span class="oc-sub">Call H-OI rev <b style="color:var(--text)">${oc.callHOiRev ? fmtInt(oc.callHOiRev) : '—'}</b> · Put H-OI rev <b style="color:var(--text)">${oc.putHOiRev ? fmtInt(oc.putHOiRev) : '—'}</b></span></div>
+        <span class="oc-lbl">State</span>
+        <div class="oc-row">${divBadge}<span class="oc-sub">${bias}</span></div>
+      </div>`;
+    const log = document.getElementById('ocShiftLog');
+    if (log) log.textContent = _ocState.shifts.length ? 'Shifts: ' + _ocState.shifts.join(' · ') : 'No S/R shifts this session';
+    // expose reversal prices for the pivot bar
+    state._ocReversals = { call: oc.callHOiRev, put: oc.putHOiRev };
+  }
+
+  // ======================================================================
+  // FEATURE: Desktop notifications + Telegram relay for critical alerts
+  // ======================================================================
+  let _notifPermAsked = false;
+  function _ensureNotifPermission() {
+    if (!('Notification' in window) || _notifPermAsked) return;
+    _notifPermAsked = true;
+    if (Notification.permission === 'default') Notification.requestPermission();
+  }
+  async function _relayTelegram(msg) {
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      await fetch(`${base}/api/notify`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }) });
+    } catch (_) {}   // best-effort — never break the UI over a relay failure
+  }
+  function criticalAlert(msg) {
+    showToast(msg);
+    if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+      try { new Notification('NSE Dashboard', { body: msg.replace(/<[^>]+>/g, ''), tag: 'nse-dash' }); } catch (_) {}
+    }
+    _relayTelegram(msg.replace(/<[^>]+>/g, ''));
+  }
+  // Upgrade the highest-stakes alert paths to criticalAlert via wrapper hooks
+  document.addEventListener('visibilitychange', _ensureNotifPermission, { once: true });
+  setTimeout(_ensureNotifPermission, 4000);
+
+  // ======================================================================
+  // FEATURE: Delta-wing strategy templates (one-click multi-leg deploys)
+  // ======================================================================
+  function _mkLegFromChain(strike, type, action) {
+    const d = state.lastData;
+    const sd = (d?.strikes || []).find(s => s.strike === strike);
+    const premium = sd ? (type === 'CE' ? sd.ce_ltp : sd.pe_ltp) : 0;
+    const iv = sd ? (type === 'CE' ? sd.ce_iv : sd.pe_iv) : d?.atm_iv || 15;
+    return { action, option_type: type, strike, qty_lots: 1, premium: premium || 0, iv: iv || 15,
+             expiry: d?.expiry ?? null, instrument_type: 'OPTION', entry_price: null, notes: '' };
+  }
+  const _DTPL = {
+    strangle20: () => {
+      const c = _findStrikeByDelta(0.20, 'CE'), p = _findStrikeByDelta(0.20, 'PE');
+      if (!c || !p) return null;
+      return { name: 'Short Strangle 20Δ', legs: [_mkLegFromChain(c.strike, 'CE', 'SELL'), _mkLegFromChain(p.strike, 'PE', 'SELL')] };
+    },
+    ic2510: () => {
+      const sc = _findStrikeByDelta(0.25, 'CE'), sp = _findStrikeByDelta(0.25, 'PE');
+      const lc = _findStrikeByDelta(0.10, 'CE'), lp = _findStrikeByDelta(0.10, 'PE');
+      if (!sc || !sp || !lc || !lp) return null;
+      return { name: 'Iron Condor 25/10Δ', legs: [
+        _mkLegFromChain(sc.strike, 'CE', 'SELL'), _mkLegFromChain(lc.strike, 'CE', 'BUY'),
+        _mkLegFromChain(sp.strike, 'PE', 'SELL'), _mkLegFromChain(lp.strike, 'PE', 'BUY')] };
+    },
+    straddle: () => {
+      const atm = state.lastData?.atm;
+      if (!atm) return null;
+      return { name: 'Short ATM Straddle', legs: [_mkLegFromChain(atm, 'CE', 'SELL'), _mkLegFromChain(atm, 'PE', 'SELL')] };
+    },
+    straddle10w: () => {
+      const atm = state.lastData?.atm;
+      const wc = _findStrikeByDelta(0.10, 'CE'), wp = _findStrikeByDelta(0.10, 'PE');
+      if (!atm || !wc || !wp) return null;
+      return { name: 'Iron Fly (ATM + 10Δ wings)', legs: [
+        _mkLegFromChain(atm, 'CE', 'SELL'), _mkLegFromChain(atm, 'PE', 'SELL'),
+        _mkLegFromChain(wc.strike, 'CE', 'BUY'), _mkLegFromChain(wp.strike, 'PE', 'BUY')] };
+    },
+    bps30: () => {
+      const s = _findStrikeByDelta(0.30, 'PE'), b = _findStrikeByDelta(0.15, 'PE');
+      if (!s || !b || s.strike === b.strike) return null;
+      return { name: 'Bull Put Spread 30/15Δ', legs: [_mkLegFromChain(s.strike, 'PE', 'SELL'), _mkLegFromChain(b.strike, 'PE', 'BUY')] };
+    },
+    bcs30: () => {
+      const s = _findStrikeByDelta(0.30, 'CE'), b = _findStrikeByDelta(0.15, 'CE');
+      if (!s || !b || s.strike === b.strike) return null;
+      return { name: 'Bear Call Spread 30/15Δ', legs: [_mkLegFromChain(s.strike, 'CE', 'SELL'), _mkLegFromChain(b.strike, 'CE', 'BUY')] };
+    },
+    calendar: () => {
+      // Sell ATM near expiry, buy ATM far expiry — the term-structure trade.
+      const d = state.lastData;
+      const atm = d?.atm, far = d?.far_expiry;
+      if (!atm || !far || far === d.expiry) return null;
+      const nearLeg = _mkLegFromChain(atm, 'CE', 'SELL');
+      const farInfo = d.expiries_data?.[far];
+      const farSd = (farInfo?.strikes || []).find(s => s.strike === atm);
+      if (!farSd?.ce_ltp) return null;
+      const farLeg = { action: 'BUY', option_type: 'CE', strike: atm, qty_lots: 1,
+        premium: farSd.ce_ltp, iv: farSd.ce_iv || d.atm_iv, expiry: far,
+        instrument_type: 'OPTION', entry_price: null, notes: 'far leg' };
+      return { name: `Calendar ${d.expiry}→${far}`, legs: [nearLeg, farLeg] };
+    },
+    mpfly: () => {
+      // Butterfly centered on max pain — expiry pin play.
+      const d = state.lastData;
+      const mp = d?.max_pain, gap = d?.strike_gap || 50;
+      if (!mp) return null;
+      const c0 = Math.round(mp / gap) * gap;
+      const body = _mkLegFromChain(c0, 'CE', 'SELL'); body.qty_lots = 2;
+      const legs = [_mkLegFromChain(c0 - 2 * gap, 'CE', 'BUY'), body, _mkLegFromChain(c0 + 2 * gap, 'CE', 'BUY')];
+      if (legs.some(l => !l.premium)) return null;
+      return { name: `Max-Pain Fly @ ${fmtInt(c0)}`, legs };
+    },
+    jade: () => {
+      // Short 25Δ put + short call spread (sell 25Δ CE / buy 15Δ CE).
+      // Classic rule: total credit should exceed the call-spread width → no upside risk.
+      const sp = _findStrikeByDelta(0.25, 'PE');
+      const sc = _findStrikeByDelta(0.25, 'CE'), lc = _findStrikeByDelta(0.15, 'CE');
+      if (!sp || !sc || !lc || sc.strike === lc.strike) return null;
+      const legs = [_mkLegFromChain(sp.strike, 'PE', 'SELL'),
+                    _mkLegFromChain(sc.strike, 'CE', 'SELL'),
+                    _mkLegFromChain(lc.strike, 'CE', 'BUY')];
+      const credit = legs.reduce((s, l) => s + (l.action === 'SELL' ? l.premium : -l.premium), 0);
+      const width = lc.strike - sc.strike;
+      const note = credit > width ? '' : ` ⚠ credit ${credit.toFixed(0)} < width ${width} — upside NOT risk-free today`;
+      return { name: 'Jade Lizard' + note, legs };
+    },
+    bwb: () => {
+      // Put broken-wing butterfly (bullish income): buy 1 near put, sell 2 lower, buy 1
+      // asymmetrically lower — near wing 2×gap, far wing 1×gap → little/no upper risk.
+      const d = state.lastData;
+      const gap = d?.strike_gap || 50, atm = d?.atm;
+      if (!atm) return null;
+      const k3 = atm - gap, k2 = atm - 3 * gap, k1 = atm - 4 * gap;
+      const body = _mkLegFromChain(k2, 'PE', 'SELL'); body.qty_lots = 2;
+      const legs = [_mkLegFromChain(k3, 'PE', 'BUY'), body, _mkLegFromChain(k1, 'PE', 'BUY')];
+      if (legs.some(l => !l.premium)) return null;
+      return { name: `PE Broken-Wing Fly ${fmtInt(k1)}/${fmtInt(k2)}/${fmtInt(k3)}`, legs };
+    },
+    peratio: () => {
+      // Put front-ratio 1×2: buy 1 higher-Δ put, sell 2 lower-Δ puts (credit + bullish lean).
+      const b = _findStrikeByDelta(0.35, 'PE'), s = _findStrikeByDelta(0.20, 'PE');
+      if (!b || !s || b.strike === s.strike) return null;
+      const short = _mkLegFromChain(s.strike, 'PE', 'SELL'); short.qty_lots = 2;
+      return { name: 'PE Front-Ratio 1×2 (35/20Δ)', legs: [_mkLegFromChain(b.strike, 'PE', 'BUY'), short] };
+    },
+    cebacks: () => {
+      // Call backspread 1×2: sell 1 higher-Δ call, buy 2 lower-Δ calls (cheap upside convexity).
+      const s = _findStrikeByDelta(0.35, 'CE'), b = _findStrikeByDelta(0.20, 'CE');
+      if (!s || !b || s.strike === b.strike) return null;
+      const long = _mkLegFromChain(b.strike, 'CE', 'BUY'); long.qty_lots = 2;
+      return { name: 'CE Backspread 1×2 (35/20Δ)', legs: [_mkLegFromChain(s.strike, 'CE', 'SELL'), long] };
+    },
+  };
+  document.querySelector('.dtpl-row')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-dtpl]');
+    if (!btn) return;
+    if (!state.lastData) { showToast('Load the option chain first'); return; }
+    const built = _DTPL[btn.dataset.dtpl]?.();
+    if (!built) { showToast('Could not resolve delta strikes — chain data too thin'); return; }
+    builderState.legs = built.legs;
+    resetStratLtpHistory();
+    renderBuilder();
+    showToast(`⚡ Deployed: ${built.name} (${built.legs.map(l => `${l.action[0]}${l.option_type}${fmtInt(l.strike)}`).join(' / ')})`);
+  });
+
+  // ======================================================================
+  // FEATURE: Panel manager (show/hide any analytics panel, persisted)
+  // ======================================================================
+  const _PMGR_PANELS = [
+    ['strategySuggestPanel', '🤖 AI Strategy Suggestions'],
+    ['ocLevelsWrap', '📐 OC Levels (S/R status)'],
+    ['gexPanelWrap', 'GEX profile'],
+    ['termStructWrap', 'IV term structure'],
+    ['straddleTrackWrap', 'ATM straddle tracker'],
+    ['oiTimelineWrap', 'OI flow timeline'],
+    ['skewChartWrap', 'IV skew chart'],
+    ['pivotPanel', 'Pivot levels'],
+    ['scenMatrixPanel', 'P&L scenario matrix'],
+    ['cmpTrayPanel', 'Strategy comparison'],
+    ['adjustPanel', 'Adjustment suggestions'],
+    ['dualStrip', 'Dual-symbol strip'],
+  ];
+  const _PMGR_KEY = 'nse_hidden_panels_v1';
+  function _hiddenPanels() { try { return new Set(JSON.parse(localStorage.getItem(_PMGR_KEY) || '[]')); } catch (_) { return new Set(); } }
+  function _isPanelHidden(id) { return _hiddenPanels().has(id); }
+  function _applyPanelVisibility() {
+    const hidden = _hiddenPanels();
+    for (const [id] of _PMGR_PANELS) {
+      const el = document.getElementById(id);
+      if (el) el.dataset.pmgrHidden = hidden.has(id) ? '1' : '';
+      if (el && hidden.has(id)) el.style.display = 'none';
+      else if (el && el.dataset.pmgrHidden === '' && ['strategySuggestPanel','ocLevelsWrap','gexPanelWrap','termStructWrap','straddleTrackWrap','oiTimelineWrap','skewChartWrap','pivotPanel','cmpTrayPanel'].includes(id)) el.style.display = '';
+    }
+  }
+  function _renderPmgr() {
+    const list = document.getElementById('pmgrList');
+    if (!list) return;
+    const hidden = _hiddenPanels();
+    list.innerHTML = _PMGR_PANELS.map(([id, label]) =>
+      `<label><input type="checkbox" data-pmgr="${id}" ${hidden.has(id) ? '' : 'checked'}> ${label}</label>`).join('');
+  }
+  document.getElementById('panelMgrBtn')?.addEventListener('click', (e) => {
+    if (e.target.closest('.hi')) return;
+    _renderPmgr();
+    document.getElementById('pmgrOverlay')?.classList.add('open');
+  });
+  // Overlay lives after this script in the DOM — bind via delegation, not direct refs
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('#pmgrCloseBtn')) { document.getElementById('pmgrOverlay')?.classList.remove('open'); return; }
+    if (e.target.id === 'pmgrOverlay') { e.target.classList.remove('open'); return; }
+    const cb = e.target.closest('#pmgrList [data-pmgr]');
+    if (cb && e.target.tagName !== 'INPUT') return;   // let the change handler below deal with checkbox clicks
+  });
+  document.addEventListener('change', (e) => {
+    const cb = e.target.closest('#pmgrList [data-pmgr]');
+    if (!cb) return;
+    const hidden = _hiddenPanels();
+    if (cb.checked) hidden.delete(cb.dataset.pmgr); else hidden.add(cb.dataset.pmgr);
+    localStorage.setItem(_PMGR_KEY, JSON.stringify([...hidden]));
+    _applyPanelVisibility();
+  });
+  _applyPanelVisibility();
+
+  // ======================================================================
+  // FEATURE: Dual-symbol strip (the OTHER index at a glance)
+  // ======================================================================
+  const _DUAL_PAIR = { NIFTY: 'BANKNIFTY', BANKNIFTY: 'NIFTY' };
+  let _dualTimer = null;
+  async function _refreshDualStrip() {
+    const strip = document.getElementById('dualStrip');
+    if (!strip || _isPanelHidden('dualStrip')) return;
+    const other = _DUAL_PAIR[state.symbol];
+    if (!other) { strip.style.display = 'none'; return; }
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/chain?symbol=${other}`);
+      if (!res.ok) throw new Error(String(res.status));
+      const d = await res.json();
+      const oc = computeOcLevels(d);
+      const gex = _computeGex(d);
+      const gexTag = gex ? (gex.total >= 0 ? '<b style="color:var(--pos)">+GEX</b>' : '<b style="color:var(--neg)">−GEX</b>') : '';
+      const supSt = oc ? `${oc.sup.status}${oc.sup.status !== 'STRONG' ? ' ' + oc.sup.pct.toFixed(0) + '%' : ''}` : '—';
+      const resSt = oc ? `${oc.res.status}${oc.res.status !== 'STRONG' ? ' ' + oc.res.pct.toFixed(0) + '%' : ''}` : '—';
+      strip.style.display = 'flex';
+      strip.innerHTML = `<b>${other}</b> <b>${fmtInt(d.underlying_value)}</b>
+        <span>PCR <b>${d.pcr}</b></span>
+        <span>S ${oc ? fmtInt(oc.sup.strike) : '—'} <span class="oc-sub">${supSt}</span></span>
+        <span>R ${oc ? fmtInt(oc.res.strike) : '—'} <span class="oc-sub">${resSt}</span></span>
+        ${gexTag}
+        <span class="oc-sub">IV ${d.atm_iv?.toFixed(1)}</span><i class="hi" data-h="dual-strip">i</i>`;
+    } catch (_) { strip.style.display = 'none'; }
+  }
+  clearInterval(_dualTimer);
+  _dualTimer = setInterval(_refreshDualStrip, 60000);
+  setTimeout(_refreshDualStrip, 6000);
+
+  // ======================================================================
+  // FEATURE: Checklist gating for Paper Trade
+  // ======================================================================
+  function _checklistComplete() {
+    const boxes = [...document.querySelectorAll('#checklistItems input[type=checkbox]')];
+    return boxes.length > 0 && boxes.every(b => b.checked);
+  }
+
+  // ======================================================================
+  // FEATURE: Auto journal enrichment on paper trade open/close
+  // ======================================================================
+  function _journalContextSnapshot(prefix) {
+    const d = state.lastData;
+    if (!d || !els.journalText) return;
+    const oc = computeOcLevels(d);
+    const gex = _computeGex(d);
+    const eScore = _computeEntryScore ? _computeEntryScore(d) : null;
+    const t = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const lines = [
+      `\n--- ${prefix} @ ${t} ---`,
+      `Spot ${fmtInt(d.underlying_value)} · ATM IV ${d.atm_iv?.toFixed(1)} · PCR ${d.pcr} · MaxPain ${fmtInt(d.max_pain)}`,
+      oc ? `S ${fmtInt(oc.sup.strike)} [${oc.sup.status}${oc.sup.status!=='STRONG'?' '+oc.sup.pct.toFixed(0)+'%':''}] · R ${fmtInt(oc.res.strike)} [${oc.res.status}${oc.res.status!=='STRONG'?' '+oc.res.pct.toFixed(0)+'%':''}]` : '',
+      gex ? `GEX ${gex.total >= 0 ? '+' : '−'} regime${gex.flip !== null ? ` · flip ${fmtInt(gex.flip)}` : ''}` : '',
+      eScore ? `Entry score ${eScore.score}/10 (${eScore.signals.slice(0,3).join(', ')})` : '',
+    ].filter(Boolean);
+    els.journalText.value += lines.join('\n') + '\n';
+    _saveJournal(); _updateJournalCount();
+  }
+
+  // ======================================================================
+  // FEATURE: Session replay (server: /api/replay-*)
+  // ======================================================================
+  const _replay = { active: false, dates: [], stamps: [], idx: 0, cache: {} };
+  function _replaySetLive(back) {
+    _replay.active = false;
+    document.getElementById('replayBar')?.classList.remove('active');
+    document.body.classList.remove('replay-mode');
+    if (back && els.autoToggle?.checked) { clearInterval(state.autoTimer); state.autoTimer = setInterval(fetchChain, _getAutoInterval()); }
+    if (back) fetchChain();
+  }
+  async function _replayEnter() {
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/replay-dates?symbol=${state.symbol}`);
+      const d = await res.json();
+      if (!d.dates?.length) { showToast('No recorded sessions yet — replay records automatically while the server runs during market hours.'); return; }
+      _replay.dates = d.dates;
+      const sel = document.getElementById('replayDate');
+      sel.innerHTML = d.dates.map(x => `<option value="${x}">${x}</option>`).join('');
+      sel.value = d.dates[d.dates.length - 1];
+      await _replayLoadDate(sel.value);
+      _replay.active = true;
+      clearInterval(state.autoTimer);                       // pause live polling
+      document.getElementById('replayBar')?.classList.add('active');
+      document.body.classList.add('replay-mode');
+    } catch (err) { showToast('Replay unavailable: ' + err.message + ' — update nse_chain_server.py.'); }
+  }
+  async function _replayLoadDate(day) {
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    const res = await fetch(`${base}/api/replay-index?symbol=${state.symbol}&date=${day}`);
+    const d = await res.json();
+    _replay.stamps = d.timestamps || [];
+    _replay.cache = {};
+    const slider = document.getElementById('replaySlider');
+    slider.max = Math.max(0, _replay.stamps.length - 1);
+    slider.value = slider.max;
+    _replayShow(parseInt(slider.max, 10));
+  }
+  async function _replayShow(i) {
+    if (!_replay.stamps.length) return;
+    _replay.idx = Math.max(0, Math.min(_replay.stamps.length - 1, i));
+    const lbl = document.getElementById('replayTimeLbl');
+    if (lbl) lbl.textContent = new Date(_replay.stamps[_replay.idx] * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    let snap = _replay.cache[_replay.idx];
+    if (!snap) {
+      try {
+        const base = els.serverUrl.value.replace(/\/+$/, '');
+        const day = document.getElementById('replayDate').value;
+        const res = await fetch(`${base}/api/replay-snap?symbol=${state.symbol}&date=${day}&i=${_replay.idx}`);
+        if (!res.ok) throw new Error(String(res.status));
+        snap = await res.json();
+        _replay.cache[_replay.idx] = snap;
+      } catch (_) { return; }
+    }
+    if (!_replay.active && !document.getElementById('replayBar')?.classList.contains('active')) return;
+    snap.strategies = snap.strategies || [];
+    state.lastData = snap;
+    // drive the same renderers the live pipeline uses
+    try {
+      renderChainTable(snap);
+      renderStatCards(snap);
+      renderSkewChart(snap);
+      renderOcLevels(snap);
+      renderGexChart(snap);
+      renderTermStructure(snap);
+      if (builderState.legs.length) renderBuilder();
+    } catch (e) { console.warn('replay render:', e); }
+  }
+  document.getElementById('replayModeBtn')?.addEventListener('click', () => _replay.active ? _replaySetLive(true) : _replayEnter());
+  document.getElementById('replayExitBtn')?.addEventListener('click', () => _replaySetLive(true));
+  document.getElementById('replayDate')?.addEventListener('change', (e) => _replayLoadDate(e.target.value));
+  document.getElementById('replaySlider')?.addEventListener('input', (e) => _replayShow(parseInt(e.target.value, 10)));
+  document.getElementById('replayPrevBtn')?.addEventListener('click', () => { const s = document.getElementById('replaySlider'); s.value = Math.max(0, _replay.idx - 1); _replayShow(_replay.idx - 1); });
+  document.getElementById('replayNextBtn')?.addEventListener('click', () => { const s = document.getElementById('replaySlider'); s.value = Math.min(_replay.stamps.length - 1, _replay.idx + 1); _replayShow(_replay.idx + 1); });
+
+  // ======================================================================
+  // FEATURE: Intraday Realized Vol vs IV spread (premium seller edge gauge)
+  // Parkinson estimator on session H/L, scaled to full day, annualized.
+  // ======================================================================
+  function _computeIntradayRv(d) {
+    const so = d.session_ohlc;
+    if (!(so?.high && so?.low && so.low > 0)) return null;
+    const now = new Date();
+    const ist = new Date(now.getTime() + (5.5 * 3600 + now.getTimezoneOffset() * 60) * 1000);
+    const mins = Math.max(15, ist.getHours() * 60 + ist.getMinutes() - (9 * 60 + 15));
+    const dayFrac = Math.min(1, mins / 375);
+    const park = Math.sqrt(Math.pow(Math.log(so.high / so.low), 2) / (4 * Math.LN2));
+    return park / Math.sqrt(dayFrac) * Math.sqrt(252) * 100;   // annualized %
+  }
+
+  // Quantified preview: build template legs in memory, run the full analyzer
+  function _previewTemplate(tplKey) {
+    try {
+      const built = _DTPL[tplKey]?.();
+      if (!built) return null;
+      const d = state.lastData;
+      const lotSize = d.lot_size || 50;
+      const expiryDteMap = {};
+      for (const [exp, info] of Object.entries(d.expiries_data || {})) expiryDteMap[exp] = info.dte ?? 0;
+      const a = analyzeLegsCalc(built.legs, d.underlying_value, lotSize, d.atm_iv, expiryDteMap);
+      const ev = computeExpectedValue(built.legs, d.underlying_value, lotSize, d.atm_iv, a.dteNear, expiryDteMap);
+      const net = built.legs.reduce((s, l) => s + (l.action === 'SELL' ? 1 : -1) * (l.premium || 0) * (l.qty_lots || 1), 0);
+      return {
+        pop: a.popPct,
+        maxL: a.maxLossUnlimited ? null : Math.abs(a.maxLoss) * lotSize,
+        ev, credit: net * lotSize,
+        defined: !a.maxLossUnlimited,
+        legsStr: built.legs.map(l => `${l.action[0]}${l.qty_lots > 1 ? l.qty_lots + 'x' : ''}${l.option_type}${fmtInt(l.strike)}`).join(' / '),
+      };
+    } catch (_) { return null; }
+  }
+
+  // ======================================================================
+  // FEATURE: Strategy Suggester v2 — regime-aware, deploys Δ-templates
+  // Consumes: IV rank, GEX regime + flip, OC WTT/WTB bias, term-structure
+  // slope, DTE, spot-vs-max-pain, velocity — each idea cites its drivers.
+  // ======================================================================
+  function _termSlope(d) {
+    const exps = Object.entries(d.expiries_data || {});
+    const pts = [];
+    for (const [, info] of exps) {
+      const strikes = info.strikes || [];
+      if (!strikes.length || info.dte == null) continue;
+      let best = null, bd = Infinity;
+      for (const s of strikes) { const x = Math.abs(s.strike - d.underlying_value); if (x < bd) { bd = x; best = s; } }
+      const ivs = [best?.ce_iv, best?.pe_iv].filter(v => v > 0);
+      if (ivs.length) pts.push({ dte: info.dte, iv: ivs.reduce((a, b) => a + b, 0) / ivs.length });
+    }
+    pts.sort((a, b) => a.dte - b.dte);
+    return pts.length >= 2 ? pts[pts.length - 1].iv - pts[0].iv : null;
+  }
+
+  function buildRegimeSuggestions(d) {
+    const out = [];
+    const ivRank = d.iv_rank ?? null;
+    const ivp = state._sessionIvp ?? null;                    // session fallback
+    const ivHigh = ivRank !== null ? ivRank >= 65 : (ivp !== null ? ivp >= 75 : (d.atm_iv || 0) >= 16);
+    const ivLow  = ivRank !== null ? ivRank <= 35 : (ivp !== null ? ivp <= 25 : (d.atm_iv || 0) <= 11);
+    const gex = state._gexRegime || null;                     // 'pos' | 'neg'
+    const oc = computeOcLevels(d);
+    const slope = _termSlope(d);
+    const dte = d.dte ?? 99;
+    const gap = d.strike_gap || 50;
+    const nearMaxPain = d.max_pain && Math.abs(d.underlying_value - d.max_pain) <= 1.5 * gap;
+    const ivSrc = ivRank !== null ? `IV rank ${Math.round(ivRank)}` : (ivp !== null ? `session IVP ${Math.round(ivp)}` : `ATM IV ${d.atm_iv?.toFixed(1)}`);
+
+    let bull = oc && (oc.sup.status === 'WTT' || oc.res.status === 'WTT');
+    let bear = oc && (oc.sup.status === 'WTB' || oc.res.status === 'WTB');
+    let rangy = oc && oc.sup.status === 'STRONG' && oc.res.status === 'STRONG';
+
+    // IV − RV spread: positive = options pricing more movement than delivered → seller edge
+    const rv = _computeIntradayRv(d);
+    const ivRvSpread = (rv !== null && d.atm_iv) ? d.atm_iv - rv : null;
+
+    // User view override (Opstra "Options Algorithm" style)
+    const view = document.getElementById('suggestView')?.value || 'auto';
+    if (view === 'bull')    { bull = true;  bear = false; rangy = false; }
+    if (view === 'bear')    { bear = true;  bull = false; rangy = false; }
+    if (view === 'neutral') { rangy = true; bull = false; bear = false; }
+    const wantBigMove = view === 'bigmove';
+    const definedOnly = document.getElementById('suggestRisk')?.value === 'defined';
+
+    if (slope !== null && slope < -0.5)
+      out.push({ tpl: 'calendar', name: 'Calendar Spread', why: [`term structure in backwardation (${slope.toFixed(1)} IV pts) — near expiry rich vs far`, 'sell the expensive near ATM, own the cheap far ATM'] });
+    if (dte <= 1 && nearMaxPain && gex === 'pos')
+      out.push({ tpl: 'mpfly', name: 'Max-Pain Butterfly', why: [`expiry ${dte === 0 ? 'today' : 'tomorrow'} · spot within 1.5 strikes of max pain ${fmtInt(d.max_pain)}`, '+GEX regime supports pinning'] });
+    if (ivHigh && rangy && gex === 'pos')
+      out.push({ tpl: 'ic2510', name: 'Iron Condor 25/10Δ', why: [ivSrc + ' (elevated — premium rich)', 'both S/R walls STRONG (rangebound read)', '+GEX: dealers dampen moves'] });
+    else if (ivHigh && rangy)
+      out.push({ tpl: 'strangle20', name: 'Short Strangle 20Δ', why: [ivSrc + ' (elevated)', 'both walls STRONG', 'undefined risk — size small; IC if margin-constrained'] });
+    if (ivHigh && bull && !bear)
+      out.push({ tpl: 'jade', name: 'Jade Lizard', why: [ivSrc, oc.sup.status === 'WTT' ? `support WTT ${oc.sup.pct.toFixed(0)}% (floor pressing up)` : 'resistance weakening upward', 'zero upside risk if credit > call-spread width'] });
+    if (ivHigh && bull)
+      out.push({ tpl: 'bps30', name: 'Bull Put Spread 30/15Δ', why: [ivSrc, 'bullish OC bias — sell puts into the rising floor', 'defined risk'] });
+    if (ivHigh && bear)
+      out.push({ tpl: 'bcs30', name: 'Bear Call Spread 30/15Δ', why: [ivSrc, oc.res.status === 'WTB' ? `resistance WTB ${oc.res.pct.toFixed(0)}% (ceiling pressing down)` : 'bearish OC bias', 'defined risk'] });
+    if (ivHigh && bull && gex === 'pos')
+      out.push({ tpl: 'bwb', name: 'PE Broken-Wing Fly', why: ['income structure with minimal upside risk', 'bullish lean + pinning regime'] });
+    if (ivLow && gex === 'neg')
+      out.push({ tpl: 'cebacks', name: 'CE Backspread 1×2', why: [ivSrc + ' (cheap vol)', '−GEX: dealers chase moves — convexity pays', 'long gamma, benefits from acceleration'] });
+    if (ivLow && !bull && !bear)
+      out.push({ tpl: 'straddle10w', name: 'Long-side note', why: [ivSrc + ' — premium cheap; avoid net selling', 'if expecting expansion, debit structures > credit here'], noDeploy: true });
+    if (bull && ivHigh && gex === 'pos' && dte <= 2)
+      out.push({ tpl: 'peratio', name: 'PE Front-Ratio 1×2', why: ['bullish + high IV + pinning', 'collects credit with room below; watch the naked lower put'] });
+
+    if (ivRvSpread !== null && ivRvSpread > 3 && rangy)
+      out.unshift({ tpl: gex === 'pos' ? 'ic2510' : 'strangle20', name: gex === 'pos' ? 'Iron Condor (IV≫RV)' : 'Short Strangle (IV≫RV)', why: [`IV ${d.atm_iv.toFixed(1)} vs realized ${rv.toFixed(1)} — options pricing ${ivRvSpread.toFixed(1)} pts more movement than delivered`, 'the core premium-selling edge condition'] });
+    if (ivRvSpread !== null && ivRvSpread < -3)
+      out.unshift({ tpl: 'cebacks', name: 'Long convexity (RV≫IV)', why: [`realized ${rv.toFixed(1)} vs IV ${d.atm_iv.toFixed(1)} — market moving MORE than options price in`, 'short premium is negative-edge here; own gamma instead'] });
+    if (wantBigMove) {
+      out.length = 0;
+      out.push({ tpl: 'straddle10w', name: 'Reverse Iron Fly view', why: ['big-move view: buy the ATM straddle legs (flip actions after deploy) or use backspread below', 'note: template deploys as SHORT fly — flip BUY/SELL per leg for long'], noDeploy: false });
+      out.push({ tpl: 'cebacks', name: 'CE Backspread 1×2', why: ['upside convexity, small/zero debit'] });
+      out.push({ tpl: 'calendar', name: 'Calendar', why: ['profits from IV expansion in the far leg if the move takes time'] });
+    }
+    let final = out;
+    if (definedOnly) {
+      final = out.filter(i => {
+        if (i.noDeploy || !i.tpl) return true;
+        const pv = _previewTemplate(i.tpl);
+        return pv ? pv.defined : true;
+      });
+      if (!final.length) final.push({ tpl: null, name: 'No defined-risk setup fits this regime', why: ['loosen the risk filter or wait for a cleaner read'], noDeploy: true });
+    }
+    if (!final.length)
+      final.push({ tpl: null, name: 'No high-conviction regime setup', why: [`signals mixed: ${ivSrc}, GEX ${gex || 'n/a'}, S/R ${oc ? oc.sup.status + '/' + oc.res.status : 'n/a'}`, 'generic time-of-day ideas below still apply'], noDeploy: true });
+    return final.slice(0, 4);
+  }
+
+  function _regimeSuggestBlock(d) {
+    const ideas = buildRegimeSuggestions(d);
+    const items = ideas.map(i => {
+      let pvHtml = '';
+      if (i.tpl && !i.noDeploy) {
+        const pv = _previewTemplate(i.tpl);
+        if (pv) pvHtml = `<div class="oc-sub" style="margin-top:2px;">
+          <b style="color:var(--text)">${pv.legsStr}</b> ·
+          POP <b style="color:var(--text)">${pv.pop.toFixed(0)}%</b> ·
+          ${pv.credit >= 0 ? 'Credit' : 'Debit'} <b style="color:var(--text)">${fmtRupee(Math.abs(pv.credit))}</b> ·
+          Max loss ${pv.maxL === null ? '<b class="neg-txt">Unltd</b>' : `<b style="color:var(--text)">${fmtRupee(pv.maxL)}</b>`} ·
+          EV <b class="${pv.ev >= 0 ? 'pos-txt' : 'neg-txt'}">${pv.ev === null ? '—' : fmtRupee(pv.ev)}</b></div>`;
+      }
+      return `
+      <div class="adjust-item" style="align-items:center;">
+        <span class="sev ${i.noDeploy ? 'sev-lo' : 'sev-md'}">${i.noDeploy ? 'INFO' : 'SETUP'}</span>
+        <span style="flex:1;"><b>${escapeHtml(i.name)}</b><br><span class="oc-sub">${i.why.map(escapeHtml).join(' · ')}</span>${pvHtml}</span>
+        ${i.tpl && !i.noDeploy ? `<button class="btn" data-dtpl="${i.tpl}" style="font-size:9px;padding:2px 9px;flex-shrink:0;">Deploy →</button>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="adjust-panel" style="margin:0 0 8px 0;">
+      <div style="font-size:10px;font-weight:700;color:var(--gold);margin-bottom:3px;">🎯 Regime Read<i class="hi" data-h="suggester-v2">i</i></div>
+      ${items}</div>`;
+  }
+  // Deploy buttons inside suggestions output reuse the same _DTPL dispatch
+  document.getElementById('suggestionsOutput')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-dtpl]');
+    if (!btn) return;
+    const built = _DTPL[btn.dataset.dtpl]?.();
+    if (!built) { showToast('Could not resolve strikes for this template right now'); return; }
+    builderState.legs = built.legs;
+    resetStratLtpHistory();
+    renderBuilder();
+    showToast(`⚡ Deployed: ${built.name}`);
+    document.querySelector('[data-tab="builder"]')?.dispatchEvent(new Event('click', { bubbles: true }));
+  });
+
+  // ======================================================================
+  // FEATURE: Portfolio delta drift alert
+  // ======================================================================
+  let _lastDeltaDriftAlert = 0;
+  function _checkDeltaDrift(netDelta, legs) {
+    if (legs.length < 2) return;                              // single-leg = directional by design
+    if (Date.now() - _lastDeltaDriftAlert < 300000) return;   // 5-min cooldown
+    const THRESH = 0.15;
+    if (Math.abs(netDelta) > THRESH) {
+      _lastDeltaDriftAlert = Date.now();
+      const dir = netDelta > 0 ? 'long' : 'short';
+      showToast(`⚠ Delta drift: position is ${Math.abs(netDelta).toFixed(2)}Δ ${dir} — consider re-hedging`);
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: Adjustment suggester
+  // ======================================================================
+  function _renderAdjustSuggestions(legs, spot, netDelta, gap) {
+    const panel = document.getElementById('adjustPanel');
+    const list  = document.getElementById('adjustList');
+    if (!panel || !list) return;
+    const items = [];
+
+    for (const leg of legs) {
+      if (leg.instrument_type === 'FUTURES') continue;
+      const chain = findChainStrikeData(leg.strike, leg.expiry);
+      const ltp = chain ? (leg.option_type === 'CE' ? chain.ce_ltp : chain.pe_ltp) : null;
+
+      // Short leg breached 2× entry credit
+      if (leg.action === 'SELL' && leg.entry_price && ltp && ltp >= 2 * leg.entry_price) {
+        items.push({ sev: 'hi', txt: `Short ${leg.option_type} ${fmtInt(leg.strike)} at ${(ltp/leg.entry_price).toFixed(1)}× entry credit (${fmtPrice(leg.entry_price)}→${fmtPrice(ltp)}). Standard exits: close leg, roll ${leg.option_type==='CE'?'up':'down'}-and-out, or convert to spread by buying a further ${leg.option_type}.` });
+      }
+      // Spot approaching short strike
+      if (leg.action === 'SELL' && ltp !== null && Math.abs(spot - leg.strike) <= gap) {
+        items.push({ sev: 'md', txt: `Spot ${fmtInt(spot)} within 1 strike of short ${leg.option_type} ${fmtInt(leg.strike)}. Gamma risk rises sharply here — decide roll/defend level BEFORE breach.` });
+      }
+      // Deep-ITM long leg: mostly intrinsic, little leverage left
+      if (leg.action === 'BUY' && leg.entry_price && ltp && ltp >= 3 * leg.entry_price) {
+        items.push({ sev: 'lo', txt: `Long ${leg.option_type} ${fmtInt(leg.strike)} at ${(ltp/leg.entry_price).toFixed(1)}× — consider booking partial or rolling ${leg.option_type==='CE'?'up':'down'} to strip profit while staying in the move.` });
+      }
+    }
+    // Portfolio delta breach
+    if (legs.length >= 2 && Math.abs(netDelta) > 0.15) {
+      const need = netDelta > 0 ? `sell ~${Math.ceil(Math.abs(netDelta)/0.4)} ATM CE or buy PE` : `sell ~${Math.ceil(Math.abs(netDelta)/0.4)} ATM PE or buy CE`;
+      items.push({ sev: 'md', txt: `Net delta ${netDelta>=0?'+':''}${netDelta.toFixed(2)} — to re-neutralise: ${need} (≈0.4Δ each).` });
+    }
+
+    if (!items.length) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    list.innerHTML = items.map(i => `<div class="adjust-item"><span class="sev sev-${i.sev}">${i.sev==='hi'?'ACT':'WATCH'}</span><span>${i.txt}</span></div>`).join('');
+  }
+
+  // ======================================================================
+  // FEATURE: Full backup export / import (all localStorage data)
+  // ======================================================================
+  const _BACKUP_KEYS = [_JOURNAL_KEY, _SETTINGS_KEY, _CHECKLIST_KEY, _ALERT_LOG_KEY, 'alertSettings', 'nse_theme', 'nse_active_tab'];
+  document.getElementById('fullBackupBtn')?.addEventListener('click', () => {
+    const payload = { _meta: { app: 'nse_dashboard', exported: new Date().toISOString(), version: 1 }, keys: {} };
+    for (const k of _BACKUP_KEYS) {
+      const v = localStorage.getItem(k);
+      if (v !== null) payload.keys[k] = v;
+    }
+    // also include any chain cache + ohlc keys
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith(_CACHE_KEY_PREFIX) || k.startsWith('nse_ohlc_'))) payload.keys[k] = localStorage.getItem(k);
+    }
+    payload.builderLegs = builderState.legs;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `nse_dashboard_backup_${new Date().toISOString().slice(0,10)}.json`
+    });
+    a.click(); URL.revokeObjectURL(a.href);
+    showToast('💾 Backup downloaded');
+  });
+  document.getElementById('fullRestoreBtn')?.addEventListener('click', () => document.getElementById('fullRestoreFile')?.click());
+  document.getElementById('fullRestoreFile')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(reader.result);
+        if (!payload?.keys || payload._meta?.app !== 'nse_dashboard') { showToast('✗ Not a valid dashboard backup file'); return; }
+        let n = 0;
+        for (const [k, v] of Object.entries(payload.keys)) { localStorage.setItem(k, v); n++; }
+        if (Array.isArray(payload.builderLegs) && payload.builderLegs.length) {
+          builderState.legs = payload.builderLegs;
+          renderBuilder();
+        }
+        _loadJournal();
+        showToast(`📂 Restored ${n} keys${payload.builderLegs?.length ? ` + ${payload.builderLegs.length} legs` : ''} — reload recommended`);
+      } catch (err) { showToast('✗ Restore failed: ' + err.message); }
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  });
+
+  // ======================================================================
+  // FEATURE: Futures basis / cost of carry (needs server: futures_price field)
+  // ======================================================================
+  function _renderFuturesBasis(data) {
+    const fut = data.futures_price;
+    if (!fut || !data.underlying_value) return;
+    const spot = data.underlying_value;
+    const basis = fut - spot;
+    const dte = Math.max(0.5, data.futures_dte ?? data.dte ?? 1);
+    const carryAnnPct = (basis / spot) * (365 / dte) * 100;
+    const grid = document.getElementById('statGrid');
+    let card = document.querySelector('.stat-card[data-label="Fut Basis"]');
+    const str = `${basis >= 0 ? '+' : ''}${basis.toFixed(1)} (${carryAnnPct >= 0 ? '+' : ''}${carryAnnPct.toFixed(1)}%)`;
+    const cls = basis >= 0 ? 'pos' : 'neg';
+    if (!card && grid) {
+      grid.insertAdjacentHTML('beforeend', statCard('Fut Basis', str, cls, 'fut-basis'));
+      grid.lastElementChild?.setAttribute('data-label', 'Fut Basis');
+    } else if (card) {
+      const v = card.querySelector('.stat-value');
+      if (v) { v.textContent = str; v.className = `stat-value ${cls}`; }
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: True IV Rank (needs server: iv_rank / iv_percentile_252 field)
+  // ======================================================================
+  function _renderIvRank(data) {
+    const rank = data.iv_rank ?? data.iv_rank_252;
+    if (rank == null) return;
+    const grid = document.getElementById('statGrid');
+    let card = document.querySelector('.stat-card[data-label="IV Rank"]');
+    const str = `${Math.round(rank)}`;
+    const cls = rank >= 70 ? 'pos' : rank <= 30 ? 'neg' : '';
+    if (!card && grid) {
+      grid.insertAdjacentHTML('beforeend', statCard('IV Rank', str, cls, 'iv-rank'));
+      grid.lastElementChild?.setAttribute('data-label', 'IV Rank');
+    } else if (card) {
+      const v = card.querySelector('.stat-value');
+      if (v) { v.textContent = str; v.className = `stat-value ${cls}`; }
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: OI flow timeline heatmap (needs server: /api/oi-timeline)
+  // ======================================================================
+  async function _loadOiTimeline() {
+    const out = document.getElementById('oiTimelineOut');
+    if (!out) return;
+    out.innerHTML = '<span style="font-size:10px;color:var(--muted-2);">Loading…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/oi-timeline?symbol=${encodeURIComponent(state.symbol)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const tl = await res.json();
+      // Expected: { strikes:[...], times:["10:15",...], ce:[[ΔOI per time]...per strike], pe:[[...]] }
+      if (!tl.strikes?.length || !tl.times?.length) { out.innerHTML = '<span style="font-size:10px;color:var(--muted-2);">No timeline data yet — sampler warming up.</span>'; return; }
+      const rows = tl.strikes.length, cols = tl.times.length;
+      const cv = document.createElement('canvas');
+      cv.width = cols; cv.height = rows;
+      cv.className = 'oi-timeline-canvas';
+      cv.style.height = Math.min(220, rows * 8) + 'px';
+      const ctx = cv.getContext('2d');
+      let maxAbs = 1;
+      for (let r = 0; r < rows; r++) for (let t = 0; t < cols; t++)
+        maxAbs = Math.max(maxAbs, Math.abs((tl.ce[r]?.[t]||0) - (tl.pe[r]?.[t]||0)));
+      for (let r = 0; r < rows; r++) {
+        for (let t = 0; t < cols; t++) {
+          const net = (tl.ce[r]?.[t] || 0) - (tl.pe[r]?.[t] || 0);   // + = CE building (bearish wall), − = PE building
+          const a = Math.min(1, Math.abs(net) / maxAbs);
+          ctx.fillStyle = net >= 0 ? `rgba(255,90,90,${a})` : `rgba(80,200,120,${a})`;
+          ctx.fillRect(t, r, 1, 1);
+        }
+      }
+      out.innerHTML = '';
+      out.appendChild(cv);
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'font-size:9px;color:var(--muted-2);display:flex;justify-content:space-between;';
+      lbl.innerHTML = `<span>${tl.times[0]} → ${tl.times[cols-1]}</span><span>strikes ${fmtInt(tl.strikes[0])}–${fmtInt(tl.strikes[rows-1])}</span>`;
+      out.appendChild(lbl);
+    } catch (err) {
+      out.innerHTML = `<span style="font-size:10px;color:var(--muted-2);">Endpoint unavailable (${escapeHtml(err.message)}). Apply the server patch — see <b>server_patch_features.md</b> in outputs.</span>`;
+    }
+  }
+  document.getElementById('oiTimelineLoadBtn')?.addEventListener('click', _loadOiTimeline);
+
+  // ======================================================================
+  // UI FIX + FEATURE: collapsible panels (AI suggestions, scenario matrix)
+  // ======================================================================
+  function _wireCollapse(btnId, panelId) {
+    const btn = document.getElementById(btnId);
+    const panel = document.getElementById(panelId);
+    if (!btn || !panel) return;
+    btn.addEventListener('click', () => {
+      const collapsed = panel.classList.toggle('panel-collapsed');
+      btn.textContent = collapsed ? '▸' : '▾';
+    });
+  }
+  _wireCollapse('suggestCollapseBtn', 'strategySuggestPanel');
+  _wireCollapse('scenMatrixCollapse', 'scenMatrixPanel');
+
+  // ======================================================================
+  // FEATURE: P&L scenario matrix (spot levels × dates)
+  // ======================================================================
+  function renderScenarioMatrix(legs, spot, lotSize, dteNear, expiryDteMap, gap) {
+    const panel = document.getElementById('scenMatrixPanel');
+    const out = document.getElementById('scenMatrixOut');
+    if (!panel || !out) return;
+    if (!legs.length || dteNear < 0) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    // Columns: today → expiry, at most 6 date steps
+    const nDates = Math.min(6, Math.max(2, dteNear + 1));
+    const dateSteps = Array.from({length: nDates}, (_, i) => Math.round(i * dteNear / (nDates - 1)));
+    const uniqueDates = [...new Set(dateSteps)];
+    // Rows: spot ± 5 × gap steps (11 rows), spot row in the middle
+    const levels = [];
+    for (let i = 5; i >= -5; i--) levels.push(Math.round((spot + i * gap) / gap) * gap);
+    let maxAbs = 1;
+    const cells = levels.map(px => uniqueDates.map(daysFromNow => {
+      const daysLeft = dteNear - daysFromNow;
+      const v = portfolioPnlPerUnit(legs, px, Math.max(0, daysLeft), expiryDteMap) * lotSize;
+      maxAbs = Math.max(maxAbs, Math.abs(v));
+      return v;
+    }));
+    const head = uniqueDates.map(d => `<th>${d === 0 ? 'Today' : d === dteNear ? 'Expiry' : `+${d}d`}</th>`).join('');
+    const spotRounded = Math.round(spot / gap) * gap;
+    const body = levels.map((px, r) => {
+      const isSpotRow = px === spotRounded;
+      const tds = cells[r].map(v => {
+        const a = Math.min(0.55, Math.abs(v) / maxAbs * 0.55);
+        const bg = v >= 0 ? `rgba(80,200,120,${a})` : `rgba(255,80,80,${a})`;
+        return `<td class="${isSpotRow ? 'spot-row-cell' : ''}" style="background:${bg}">${v >= 0 ? '+' : '−'}${Math.abs(Math.round(v)).toLocaleString('en-IN')}</td>`;
+      }).join('');
+      return `<tr><td class="strike-lbl">${isSpotRow ? '▶ ' : ''}${fmtInt(px)}</td>${tds}</tr>`;
+    }).join('');
+    out.innerHTML = `<table class="scen-matrix"><thead><tr><th style="text-align:right;">Spot ↓</th>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  // ======================================================================
+  // FEATURE: Expected Value per lot (payoff × lognormal terminal density)
+  // ======================================================================
+  function computeExpectedValue(legs, spot, lotSize, atmIv, dteNear, expiryDteMap) {
+    if (!legs.length || !atmIv || dteNear < 0) return null;
+    const T = Math.max(0.5, dteNear) / 365;
+    const sigma = (atmIv / 100) * Math.sqrt(T);
+    if (sigma <= 0) return null;
+    // integrate over ±4σ in log space, 160 steps
+    const N = 160;
+    let ev = 0, totalP = 0;
+    for (let i = 0; i < N; i++) {
+      const z = -4 + 8 * i / (N - 1);
+      const px = spot * Math.exp(-0.5 * sigma * sigma + sigma * z);
+      const pdf = Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI);
+      const w = pdf * (8 / (N - 1));
+      ev += portfolioPnlPerUnit(legs, px, 0, expiryDteMap) * lotSize * w;
+      totalP += w;
+    }
+    return ev / totalP;
+  }
+
+  // ======================================================================
+  // FEATURE: Strategy comparison tray (pin up to 3)
+  // ======================================================================
+  const _cmpTray = [];
+  function _pinCurrentStrategy() {
+    if (!builderState.legs.length || !state.lastData) { showToast('Load legs first'); return; }
+    if (_cmpTray.length >= 3) { showToast('Tray full — remove one first'); return; }
+    const d = state.lastData;
+    const lotSize = d.lot_size || 50;
+    const expiryDteMap = {}; 
+    for (const [exp, info] of Object.entries(d.expiries_data || {})) expiryDteMap[exp] = info.dte ?? 0;
+    const spot = d.underlying_value, atmIv = d.atm_iv;
+    const a = analyzeLegsCalc(builderState.legs, spot, lotSize, atmIv, expiryDteMap);
+    const ev = computeExpectedValue(builderState.legs, spot, lotSize, atmIv, a.dteNear, expiryDteMap);
+    _cmpTray.push({
+      name: _detectStrategyName(builderState.legs) || `Strategy ${_cmpTray.length + 1}`,
+      legs: JSON.parse(JSON.stringify(builderState.legs)),
+      pop: a.popPct,
+      maxP: a.maxProfitUnlimited ? null : a.maxProfit * lotSize,
+      maxL: a.maxLossUnlimited ? null : a.maxLoss * lotSize,
+      be: (a.breakevens || []).map(b => fmtInt(b)).join(' / ') || '—',
+      ev: ev,
+      nLegs: builderState.legs.length,
+    });
+    renderCmpTray();
+  }
+  function renderCmpTray() {
+    const out = document.getElementById('cmpTrayOut');
+    if (!out) return;
+    if (!_cmpTray.length) { out.innerHTML = '<span style="font-size:9.5px;color:var(--muted-2);">Pin up to 3 strategies to compare side-by-side.</span>'; return; }
+    const rows = [
+      ['Strategy', s => `${escapeHtml(s.name)} <span class="cmp-remove" data-cmp-rm="${_cmpTray.indexOf(s)}">✕</span>`],
+      ['Legs', s => s.nLegs],
+      ['POP %', s => s.pop.toFixed(1)],
+      ['Max Profit', s => s.maxP === null ? 'Unltd' : fmtRupee(s.maxP)],
+      ['Max Loss', s => s.maxL === null ? 'Unltd' : fmtRupee(s.maxL)],
+      ['EV / lot', s => s.ev === null ? '—' : `<span class="${s.ev >= 0 ? 'pos-txt' : 'neg-txt'}">${fmtRupee(s.ev)}</span>`],
+      ['Breakevens', s => s.be],
+      ['', s => `<button class="btn" data-cmp-load="${_cmpTray.indexOf(s)}" style="font-size:8.5px;padding:1px 8px;">Load</button>`],
+    ];
+    out.innerHTML = `<table class="cmp-table">${rows.map(([lbl, fn]) =>
+      `<tr><td>${lbl}</td>${_cmpTray.map(s => `<td>${fn(s)}</td>`).join('')}</tr>`).join('')}</table>`;
+  }
+  document.getElementById('cmpPinBtn')?.addEventListener('click', _pinCurrentStrategy);
+  document.getElementById('cmpTrayOut')?.addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-cmp-rm]');
+    if (rm) { _cmpTray.splice(parseInt(rm.dataset.cmpRm, 10), 1); renderCmpTray(); return; }
+    const ld = e.target.closest('[data-cmp-load]');
+    if (ld) {
+      const s = _cmpTray[parseInt(ld.dataset.cmpLoad, 10)];
+      if (s) { builderState.legs = JSON.parse(JSON.stringify(s.legs)); resetStratLtpHistory(); renderBuilder(); showToast(`Loaded: ${s.name}`); }
+    }
+  });
+
+  // ======================================================================
+  // FEATURE: Theta clock (remaining decay today + time to close)
+  // ======================================================================
+  function renderThetaClock(posThetaRs) {
+    const row = document.getElementById('thetaClockRow');
+    if (!row) return;
+    if (!builderState.legs.length || !posThetaRs || posThetaRs === 0) { row.style.display = 'none'; return; }
+    const now = new Date();
+    const ist = new Date(now.getTime() + (5.5 * 3600 + now.getTimezoneOffset() * 60) * 1000);
+    const mins = ist.getHours() * 60 + ist.getMinutes();
+    const open = 9 * 60 + 15, close = 15 * 60 + 30;
+    if (mins < open || mins >= close || ist.getDay() === 0 || ist.getDay() === 6) { row.style.display = 'none'; return; }
+    const fracLeft = (close - mins) / (close - open);
+    const remaining = posThetaRs * fracLeft;   // theta is per-day; scale by session fraction left
+    const h = Math.floor((close - mins) / 60), m = (close - mins) % 60;
+    row.style.display = 'flex';
+    const gaining = posThetaRs > 0;   // positive position theta = decay pays you
+    row.innerHTML = `<span>⏳ Theta clock<i class="hi" data-h="theta-clock">i</i>:</span>
+      <span>≈ <b>${fmtRupee(Math.abs(remaining))}</b> ${gaining ? 'left to collect' : 'decay cost left'} today</span>
+      <span>· ${h}h ${m}m to close</span>
+      <span style="color:var(--muted-2);">(day θ ${fmtRupee(posThetaRs)})</span>`;
+  }
+
+  // ======================================================================
+  // FEATURE: Daily loss limit guard + trailing drawdown alert
+  // ======================================================================
+  let _peakLivePnl = null, _lastTrailAlert = 0, _lossGuardFired = false;
+  function _checkRiskGuards(livePnl) {
+    const banner = document.getElementById('lossGuardBanner');
+    if (livePnl === null || livePnl === undefined) { if (banner) banner.classList.remove('active'); return; }
+    // Daily loss limit
+    const lim = parseFloat(document.getElementById('lossLimitInput')?.value);
+    if (banner && lim > 0 && livePnl <= -lim) {
+      banner.textContent = `🛑 DAILY LOSS LIMIT HIT: ${fmtRupee(livePnl)} (limit −${fmtRupee(lim)}) — STOP TRADING. Close positions, walk away.`;
+      banner.classList.add('active');
+      if (!_lossGuardFired) { _lossGuardFired = true; criticalAlert('🛑 Daily loss limit breached — stop trading'); }
+    } else if (banner) {
+      banner.classList.remove('active');
+      if (lim > 0 && livePnl > -lim) _lossGuardFired = false;
+    }
+    // Trailing drawdown
+    if (_peakLivePnl === null || livePnl > _peakLivePnl) _peakLivePnl = livePnl;
+    const dd = parseFloat(document.getElementById('trailDdInput')?.value);
+    if (dd > 0 && _peakLivePnl !== null && (_peakLivePnl - livePnl) >= dd && Date.now() - _lastTrailAlert > 300000) {
+      _lastTrailAlert = Date.now();
+      criticalAlert(`📉 Gave back ${fmtRupee(_peakLivePnl - livePnl)} from peak ${fmtRupee(_peakLivePnl)} — protect what's left?`);
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: Opening range breakout (ORB) levels
+  // ======================================================================
+  const _orb = { or15: null, or30: null };
+  function _updateOrb(spot) {
+    const now = new Date();
+    const ist = new Date(now.getTime() + (5.5 * 3600 + now.getTimezoneOffset() * 60) * 1000);
+    const mins = ist.getHours() * 60 + ist.getMinutes();
+    const open = 9 * 60 + 15;
+    if (mins < open || ist.getDay() === 0 || ist.getDay() === 6) return;
+    if (mins < open + 15) {
+      if (!_orb.or15) _orb.or15 = { hi: spot, lo: spot, done: false };
+      _orb.or15.hi = Math.max(_orb.or15.hi, spot); _orb.or15.lo = Math.min(_orb.or15.lo, spot);
+    } else if (_orb.or15 && !_orb.or15.done) _orb.or15.done = true;
+    if (mins < open + 30) {
+      if (!_orb.or30) _orb.or30 = { hi: spot, lo: spot, done: false };
+      _orb.or30.hi = Math.max(_orb.or30.hi, spot); _orb.or30.lo = Math.min(_orb.or30.lo, spot);
+    } else if (_orb.or30 && !_orb.or30.done) _orb.or30.done = true;
+  }
+  function _orbLevels() {
+    if (!document.getElementById('orbEnabled')?.checked) return [];
+    const lv = [];
+    if (_orb.or15?.done) { lv.push([`ORB15 H`, _orb.or15.hi, 'r']); lv.push([`ORB15 L`, _orb.or15.lo, 's']); }
+    if (_orb.or30?.done && (!_orb.or15 || Math.abs(_orb.or30.hi - _orb.or15.hi) > 1)) {
+      lv.push([`ORB30 H`, _orb.or30.hi, 'r']); lv.push([`ORB30 L`, _orb.or30.lo, 's']);
+    }
+    return lv;
+  }
+
+  // ======================================================================
+  // FEATURE: Spot velocity burst detector
+  // ======================================================================
+  let _lastVeloAlert = 0;
+  function _checkVelocity(spot) {
+    const pill = document.getElementById('veloPill');
+    const cutoff = Date.now() - 120000;   // last 2 minutes
+    const recent = _spotHistory.filter(p => p.ts >= cutoff);
+    if (recent.length < 4) { if (pill) pill.style.display = 'none'; return; }
+    const dtMin = (recent[recent.length - 1].ts - recent[0].ts) / 60000;
+    if (dtMin < 0.5) { if (pill) pill.style.display = 'none'; return; }
+    const move = recent[recent.length - 1].val - recent[0].val;
+    const ptsPerMin = move / dtMin;
+    const burstThresh = spot * 0.0008;    // 0.08% of spot per minute ≈ 19pts/min on Nifty 24k
+    const isBurst = Math.abs(ptsPerMin) >= burstThresh;
+    if (pill) {
+      pill.style.display = '';
+      pill.className = `velo-pill ${isBurst ? (ptsPerMin > 0 ? 'burst-up' : 'burst-dn') : ''}`;
+      pill.textContent = `${ptsPerMin >= 0 ? '▲' : '▼'} ${Math.abs(ptsPerMin).toFixed(0)}/m`;
+    }
+    if (isBurst && document.getElementById('veloAlertEnabled')?.checked && Date.now() - _lastVeloAlert > 300000) {
+      _lastVeloAlert = Date.now();
+      const gexNote = (state._gexRegime === 'neg') ? ' — in −GEX regime: moves can extend' : (state._gexRegime === 'pos') ? ' — in +GEX regime: fade candidate' : '';
+      showToast(`⚡ Velocity burst: ${ptsPerMin > 0 ? '+' : ''}${ptsPerMin.toFixed(0)} pts/min${gexNote}`);
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: IV spike / crush alert
+  // ======================================================================
+  const _ivTimed = [];   // {ts, iv} — _ivHistory has no timestamps
+  let _lastIvAlert = 0;
+  function _checkIvMove(iv) {
+    if (!iv) return;
+    _ivTimed.push({ ts: Date.now(), iv });
+    if (_ivTimed.length > 400) _ivTimed.shift();
+    if (!document.getElementById('ivAlertEnabled')?.checked) return;
+    if (Date.now() - _lastIvAlert < 600000) return;   // 10-min cooldown
+    const ref = _ivTimed.find(p => p.ts >= Date.now() - 900000);   // oldest within 15 min
+    if (!ref || ref === _ivTimed[_ivTimed.length - 1]) return;
+    const relChg = (iv - ref.iv) / ref.iv * 100;
+    if (Math.abs(relChg) >= 5) {
+      _lastIvAlert = Date.now();
+      showToast(relChg > 0
+        ? `🌋 IV spike: +${relChg.toFixed(1)}% in 15m (${ref.iv.toFixed(1)}→${iv.toFixed(1)}) — event fear building; long premium helped, shorts hurt`
+        : `🧊 IV crush: ${relChg.toFixed(1)}% in 15m (${ref.iv.toFixed(1)}→${iv.toFixed(1)}) — long premium bleeding beyond theta`);
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: Paper-trade statistics
+  // ======================================================================
+  // ======================================================================
+  // FEATURE: Portfolio aggregate (all open paper positions as one book)
+  // ======================================================================
+  function renderPortfolioPanel(trades) {
+    const panel = document.getElementById('portfolioPanel');
+    const grid = document.getElementById('portfolioGrid');
+    const note = document.getElementById('portfolioNote');
+    if (!panel || !grid) return;
+    const open = trades.filter(t => t.status === 'open');
+    if (open.length < 2) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    const totalPnl = open.reduce((s, t) => s + (t.live_pnl ?? 0), 0);
+    const pnlKnown = open.every(t => t.live_pnl !== null && t.live_pnl !== undefined);
+    // Combined delta — only computable for trades on the currently loaded symbol
+    let bookDelta = null;
+    const d = state.lastData;
+    if (d) {
+      const sameSym = open.filter(t => t.symbol === state.symbol);
+      if (sameSym.length) {
+        const expiryDteMap = {};
+        for (const [exp, info] of Object.entries(d.expiries_data || {})) expiryDteMap[exp] = info.dte ?? 0;
+        bookDelta = 0;
+        for (const t of sameSym) {
+          for (const leg of (t.legs || [])) {
+            try { bookDelta += (legGreeksSigned(leg, d.underlying_value, expiryDteMap)?.delta || 0) * (leg.qty_lots || 1); }
+            catch (_) {}
+          }
+        }
+      }
+    }
+    const bySym = {};
+    for (const t of open) bySym[t.symbol] = (bySym[t.symbol] || 0) + (t.live_pnl ?? 0);
+    grid.innerHTML = [
+      statCard('Open Positions', String(open.length)),
+      statCard('Book P&L' + (pnlKnown ? '' : ' (partial)'), fmtRupee(totalPnl), totalPnl >= 0 ? 'pos' : 'neg'),
+      bookDelta !== null ? statCard(`Book Δ (${state.symbol})`, (bookDelta >= 0 ? '+' : '') + bookDelta.toFixed(2), Math.abs(bookDelta) > 0.3 ? 'neg' : '') : '',
+    ].join('');
+    if (note) note.textContent = Object.entries(bySym).map(([s, p]) => `${s}: ${fmtRupee(p)}`).join(' · ')
+      + (bookDelta !== null && Math.abs(bookDelta) > 0.3 ? ' — ⚠ book delta elevated: positions are net directional' : '');
+  }
+
+  // ======================================================================
+  // FEATURE: Risk-based lot sizing (loss limit → max lots)
+  // ======================================================================
+  function _renderRiskSizing(analysis, lotSize) {
+    const out = document.getElementById('riskSizeOut');
+    if (!out) return;
+    const risk = parseFloat(document.getElementById('riskPerTradeInput')?.value);
+    if (!risk || risk <= 0 || !builderState.legs.length) { out.textContent = ''; return; }
+    if (analysis.maxLossUnlimited) {
+      out.innerHTML = '<span class="neg-txt">undefined risk — size by margin/delta, not max loss</span>';
+      return;
+    }
+    const maxLossPerLot = Math.abs(analysis.maxLoss) * lotSize;
+    if (maxLossPerLot <= 0) { out.textContent = ''; return; }
+    const maxLots = Math.floor(risk / maxLossPerLot);
+    const currLots = builderState.legs.reduce((m, l) => Math.max(m, l.qty_lots || 1), 0);
+    const over = currLots > maxLots;
+    out.innerHTML = `→ max <b>${maxLots}</b> lot${maxLots === 1 ? '' : 's'} (loss/lot ${fmtRupee(maxLossPerLot)})` +
+      (over ? ` <span class="neg-txt">⚠ current ${currLots} exceeds</span>` : maxLots === 0 ? ' <span class="neg-txt">— structure too big for this risk</span>' : '');
+  }
+
+  function renderPaperDeepStats(trades) {
+    renderPortfolioPanel(trades);   // aggregate open-book view
+    const panel = document.getElementById('paperDeepStats');
+    const grid = document.getElementById('paperDeepStatsGrid');
+    const note = document.getElementById('paperDeepStatsNote');
+    if (!panel || !grid) return;
+    const closed = trades.filter(t => t.status === 'closed' && t.exit_pnl !== null && t.exit_pnl !== undefined);
+    if (closed.length < 2) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    const wins = closed.filter(t => t.exit_pnl > 0), losses = closed.filter(t => t.exit_pnl < 0);
+    const winRate = wins.length / closed.length * 100;
+    const avgWin = wins.length ? wins.reduce((s, t) => s + t.exit_pnl, 0) / wins.length : 0;
+    const avgLoss = losses.length ? Math.abs(losses.reduce((s, t) => s + t.exit_pnl, 0) / losses.length) : 0;
+    const expectancy = (winRate / 100) * avgWin - (1 - winRate / 100) * avgLoss;
+    const grossW = wins.reduce((s, t) => s + t.exit_pnl, 0);
+    const grossL = Math.abs(losses.reduce((s, t) => s + t.exit_pnl, 0));
+    const pf = grossL > 0 ? grossW / grossL : null;
+    const best = Math.max(...closed.map(t => t.exit_pnl));
+    const worst = Math.min(...closed.map(t => t.exit_pnl));
+    // longest losing streak
+    let streak = 0, maxStreak = 0;
+    for (const t of [...closed].sort((a, b) => a.closed_at - b.closed_at)) {
+      streak = t.exit_pnl < 0 ? streak + 1 : 0;
+      maxStreak = Math.max(maxStreak, streak);
+    }
+    grid.innerHTML = [
+      statCard('Win Rate', winRate.toFixed(0) + '%', winRate >= 50 ? 'pos' : 'neg'),
+      statCard('Expectancy', fmtRupee(expectancy), expectancy >= 0 ? 'pos' : 'neg'),
+      statCard('Avg Win', fmtRupee(avgWin), 'pos'),
+      statCard('Avg Loss', fmtRupee(-avgLoss), 'neg'),
+      statCard('Profit Factor', pf === null ? '∞' : pf.toFixed(2), pf === null || pf >= 1 ? 'pos' : 'neg'),
+      statCard('Best / Worst', `${fmtRupee(best)} / ${fmtRupee(worst)}`),
+      statCard('Max Loss Streak', String(maxStreak), maxStreak >= 4 ? 'neg' : ''),
+    ].join('');
+    if (note) note.textContent = `${closed.length} closed trades · expectancy = P(win)×avgWin − P(loss)×avgLoss per trade`;
+  }
+
+  // ======================================================================
+  // FEATURE: Per-leg 1-min LTP sparkline (server: /api/ltp-history)
+  // ======================================================================
+  const _ltpSparkCache = {};   // "strike:side" -> {ts, points}
+  async function _loadLegLtpSpark(leg, idx) {
+    // render happens after renderBuilder rebuilds — defer one tick so container exists
+    setTimeout(async () => {
+      const wrap = document.getElementById(`legSpark-${idx}`);
+      if (!wrap) return;
+      const key = `${state.symbol}:${leg.strike}:${leg.option_type}`;
+      let pts = null;
+      const cached = _ltpSparkCache[key];
+      if (cached && Date.now() - cached.ts < 60000) {
+        pts = cached.points;
+      } else {
+        if (!wrap.innerHTML) wrap.innerHTML = '<span style="font-size:9px;color:var(--muted-2);">Loading LTP history…</span>';
+        try {
+          const base = els.serverUrl.value.replace(/\/+$/, '');
+          const res = await fetch(`${base}/api/ltp-history?symbol=${encodeURIComponent(state.symbol)}&strike=${leg.strike}&side=${leg.option_type}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const d = await res.json();
+          pts = d.points || [];
+          _ltpSparkCache[key] = { ts: Date.now(), points: pts };
+        } catch (err) {
+          wrap.innerHTML = `<span style="font-size:9px;color:var(--muted-2);">LTP history unavailable (${escapeHtml(err.message)}) — update nse_chain_server.py to this build.</span>`;
+          return;
+        }
+      }
+      if (pts.length < 3) { wrap.innerHTML = '<span style="font-size:9px;color:var(--muted-2);">Not enough samples yet (1/min while server polls) — check back shortly.</span>'; return; }
+      const vs = pts.map(p => p.ltp);
+      const mn = Math.min(...vs), mx = Math.max(...vs), span = Math.max(0.05, mx - mn);
+      const W = 300, Hh = 42, pad = 4;
+      const x = i => pad + i / (vs.length - 1) * (W - 2 * pad);
+      const y = v => Hh - pad - (v - mn) / span * (Hh - 2 * pad);
+      const line = vs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+      const col = vs[vs.length - 1] >= vs[0] ? 'var(--pos)' : 'var(--neg)';
+      let entryLine = '';
+      if (leg.entry_price && leg.entry_price >= mn && leg.entry_price <= mx) {
+        const ey = y(leg.entry_price).toFixed(1);
+        entryLine = `<line x1="${pad}" y1="${ey}" x2="${W - pad}" y2="${ey}" stroke="var(--gold)" stroke-width="1" stroke-dasharray="3 2"/>`;
+      }
+      const t0 = new Date(pts[0].t * 1000), t1 = new Date(pts[pts.length - 1].t * 1000);
+      const fmtT = t => t.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+      wrap.innerHTML = `<svg viewBox="0 0 ${W} ${Hh}" style="width:100%;max-width:320px;height:auto;">
+          <polyline points="${line}" fill="none" stroke="${col}" stroke-width="1.3"/>${entryLine}</svg>
+        <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted-2);max-width:320px;">
+          <span>${fmtT(t0)} → ${fmtT(t1)}</span><span>H ${mx.toFixed(1)} · L ${mn.toFixed(1)} · now ${vs[vs.length-1].toFixed(1)}${leg.entry_price ? ` · entry ${leg.entry_price}` : ''}</span>
+        </div>`;
+    }, 60);
+  }
+
+  // ======================================================================
+  // FEATURE: PCR divergence alert
+  // ======================================================================
+  let _lastPcrDivAlert = 0;
+  function _checkPcrDivergence(data) {
+    if (Date.now() - _lastPcrDivAlert < 300000) return;  // 5-min cooldown
+    const pcrOi  = parseFloat(data.pcr);
+    const pcrVol = parseFloat(_computePcrVol(data.strikes));
+    if (!pcrVol || !pcrOi || pcrOi <= 0) return;
+    const div = Math.abs(pcrOi - pcrVol) / pcrOi;
+    if (div > 0.20) {
+      _lastPcrDivAlert = Date.now();
+      const bias = pcrVol > pcrOi ? 'Fresh put buying' : 'Fresh call buying';
+      alertLevelTouch(`PCR Divergence (${bias}) OI=${pcrOi.toFixed(2)} Vol=${pcrVol}`, data.underlying_value, 'r');
+    }
+  }
+
+  // ======================================================================
+  // FEATURE: EOD strategy P&L summary (auto at 15:25 IST)
+  // ======================================================================
+  let _eodSummaryDone = false;
+  setInterval(() => {
+    if (_eodSummaryDone || !builderState.legs.length || !state.lastData) return;
+    const now = new Date();
+    const ist = new Date(now.getTime() + (5.5*3600 + now.getTimezoneOffset()*60)*1000);
+    if (ist.getHours() === 15 && ist.getMinutes() >= 25 && ist.getDay() >= 1 && ist.getDay() <= 5) {
+      _eodSummaryDone = true;
+      const d = state.lastData;
+      const stratName = _detectStrategyName(builderState.legs) || 'Custom';
+      const livePnl = _computeLivePnl();
+      const note = `\n\n--- EOD Strategy Summary (${ist.toLocaleTimeString('en-IN')}) ---\nStrategy: ${stratName}\nLive P&L: ${livePnl != null ? fmtRupee(livePnl) : 'N/A (no entry price set)'}\nClose Spot: ${fmtPrice(d.underlying_value)}\nMax Pain: ${fmtInt(d.max_pain)}\nATM IV: ${d.atm_iv?.toFixed(1)}%\nPCR: ${d.pcr}\n`;
+      const jEl = document.getElementById('journalText');
+      if (jEl) { jEl.value += note; _saveJournal(); _updateJournalCount(); }
+      showToast('📊 EOD summary added to session notes');
+    }
+  }, 30000);
+
+  // ======================================================================
+  // FEATURE: Drag-to-reorder legs
+  // ======================================================================
+  let _dragSrcIdx = null;
+  document.getElementById('legsList')?.addEventListener('dragstart', e => {
+    const row = e.target.closest('.leg-row');
+    if (!row) return;
+    // Block drags that start from inputs/selects (e.g. selecting text in entry/note fields)
+    if (e.target.closest('input, select, textarea, button')) { e.preventDefault(); return; }
+    _dragSrcIdx = parseInt(row.dataset.legIndex, 10);
+    row.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  document.getElementById('legsList')?.addEventListener('dragover', e => {
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  });
+  document.getElementById('legsList')?.addEventListener('drop', e => {
+    e.preventDefault();
+    const row = e.target.closest('.leg-row');
+    if (!row || _dragSrcIdx === null) return;
+    const destIdx = parseInt(row.dataset.legIndex, 10);
+    if (destIdx !== _dragSrcIdx) {
+      const [moved] = builderState.legs.splice(_dragSrcIdx, 1);
+      builderState.legs.splice(destIdx, 0, moved);
+      renderBuilder();
+    }
+    _dragSrcIdx = null;
+  });
+  document.getElementById('legsList')?.addEventListener('dragend', () => {
+    _dragSrcIdx = null;
+    document.querySelectorAll('.leg-row.dragging').forEach(r => r.classList.remove('dragging'));
+  });
+
   // ----------- tabs ----------
   els.tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -5379,7 +7404,7 @@
   // ---------- auto refresh ----------
   els.autoToggle.addEventListener('change', () => {
     if (els.autoToggle.checked) {
-      state.autoTimer = setInterval(fetchChain, 5000);
+      state.autoTimer = setInterval(fetchChain, _getAutoInterval());
     } else {
       clearInterval(state.autoTimer);
       state.autoTimer = null;
@@ -5430,6 +7455,7 @@
   function clearError() { els.errorWrap.innerHTML = ''; }
 
   async function fetchChain() {
+    if (typeof _replay !== 'undefined' && _replay.active) return;   // replay mode pauses live data
     if (state.inFlight) return;
     state.inFlight = true;
     setStatus('pending');
@@ -5471,6 +7497,7 @@
         // Try showing cached data while server is down
         const cached = _loadOfflineCache(state.symbol);
         if (cached) { _showStaleBanner(cached._cacheAge); renderChainTable(cached); renderStatCards(cached); }
+        _scheduleRetry();   // exponential backoff auto-retry
       } else {
         showError(escapeHtml(err.message));
       }
@@ -5553,6 +7580,9 @@
     _recordStraddle(data.straddle_premium);
     _renderStraddleSparkline();
     _updateIvp(data.atm_iv);
+    _checkIvMove(data.atm_iv);                 // IV spike/crush alert
+    _updateOrb(data.underlying_value);         // opening range tracker
+    _checkVelocity(data.underlying_value);     // burst detector + nav pill
     _updateLotSizeStrip(data.symbol || state.symbol, data.lot_size);
     state._oiWalls = _getOiWalls(data);
     // Batch 4 — latest features
@@ -5574,8 +7604,56 @@
     _renderIvSkew(data);
     _renderMpainSparkline();
     _prevSpotForScenario = data.underlying_value;
-    // VWAP on pivot bar
     state._sessionVwap = _computeSessionVwap();
+    // Batch 7 — newest
+    _renderHlDist(data);
+    _checkPcrDivergence(data);
+    _clearRetry();
+    const eScore = _computeEntryScore(data);
+    const eRow   = document.getElementById('entryScoreRow');
+    const ePill  = document.getElementById('entryScorePill');
+    const eSigs  = document.getElementById('entryScoreSignals');
+    if (eRow && ePill && eScore.signals.length >= 2) {
+      eRow.style.display = 'flex';
+      const cls = eScore.score >= 7 ? 'high' : eScore.score >= 4 ? 'mid' : 'low';
+      ePill.className = `entry-score-pill ${cls}`;
+      ePill.innerHTML = `${eScore.score}/10<i class="hi" data-h="entry-score">i</i>`;
+      if (eSigs) eSigs.textContent = eScore.signals.slice(0, 3).join(' · ');
+    }
+    // IV − RV spread card (seller edge gauge)
+    const _rv = _computeIntradayRv(data);
+    if (_rv !== null && data.atm_iv) {
+      const spread = data.atm_iv - _rv;
+      const grid2 = document.getElementById('statGrid');
+      let rvCard = document.querySelector('.stat-card[data-label="IV-RV"]');
+      const sStr = `${spread >= 0 ? '+' : '−'}${Math.abs(spread).toFixed(1)}`;
+      const sCls = spread >= 2 ? 'pos' : spread <= -2 ? 'neg' : '';
+      if (!rvCard && grid2) {
+        grid2.insertAdjacentHTML('beforeend', statCard('IV−RV', sStr, sCls, 'iv-rv'));
+        grid2.lastElementChild?.setAttribute('data-label', 'IV-RV');
+      } else if (rvCard) {
+        const v = rvCard.querySelector('.stat-value');
+        if (v) { v.textContent = sStr; v.className = `stat-value ${sCls}`; }
+      }
+    }
+    const vixRatio = _computeVixRatio(data);
+    if (vixRatio !== null) {
+      const grid = document.getElementById('statGrid');
+      let vixCard = document.querySelector('.stat-card[data-label="VIX Ratio"]');
+      const ratioStr = vixRatio.toFixed(2) + '×';
+      const rCls = vixRatio > 1.1 ? 'neg' : vixRatio < 0.9 ? 'pos' : '';
+      if (!vixCard && grid) {
+        grid.insertAdjacentHTML('beforeend', statCard('VIX Ratio', ratioStr, rCls, 'vix-ratio'));
+        grid.lastElementChild?.setAttribute('data-label','VIX Ratio');
+      } else if (vixCard) {
+        const v = vixCard.querySelector('.stat-value');
+        if (v) { v.textContent = ratioStr; v.className = `stat-value ${rCls}`; }
+      }
+    }
+    if (document.getElementById('autoToggle')?.checked) {
+      clearInterval(state.autoTimer);
+      state.autoTimer = setInterval(fetchChain, _getAutoInterval());
+    }
     // PCR by volume — inject as extra stat card
     const pcrVol = _computePcrVol(data.strikes);
     if (pcrVol) {
@@ -5612,6 +7690,12 @@
 
     // ─── Charts: update regardless of tab (lightweight SVG replacements) ──
     renderSkewChart(data);
+    renderOcLevels(data);
+    renderGexChart(data);
+    renderTermStructure(data);
+    renderStraddleSpark();
+    _renderFuturesBasis(data);
+    _renderIvRank(data);
     renderVolSurface(data);
     renderPcrTrend(data);
     renderStraddleChart(data);
@@ -6102,6 +8186,11 @@
     if (vwap && _spotHistory.length >= 5) {
       levels.push([`VWAP ${fmtInt(Math.round(vwap))}`, vwap, 'vwap']);
     }
+    // Opening range breakout levels (populated after first 15/30 min)
+    for (const lv of _orbLevels()) levels.push(lv);
+    // LTP-style H-OI reversal prices (writer breakevens of the biggest walls)
+    if (state._ocReversals?.call) levels.push([`C-Rev ${fmtInt(state._ocReversals.call)}`, state._ocReversals.call, 'r']);
+    if (state._ocReversals?.put)  levels.push([`P-Rev ${fmtInt(state._ocReversals.put)}`,  state._ocReversals.put,  's']);
     // Append circuit breakers (10%/15%/20% from prev close)
     const cb = state._circuitBreakers;
     if (cb) {
@@ -6181,7 +8270,19 @@
     if (Math.abs(s.strike - resistance) < 1e-6) strikeTag = '<span class="badge-tag badge-resistance">RES</span>';
     const ceBidAsk = (s.ce_bid || s.ce_ask) ? `<div class="bid-ask">${fmtPrice(s.ce_bid)} × ${fmtPrice(s.ce_ask)}</div>` : '';
     const peBidAsk = (s.pe_bid || s.pe_ask) ? `<div class="bid-ask">${fmtPrice(s.pe_bid)} × ${fmtPrice(s.pe_ask)}</div>` : '';
-    return { rowClasses, ceChgCls, peChgCls, ceBarPct, peBarPct, ceItmCls, peItmCls, strikeTag, ceBidAsk, peBidAsk, ceOiChg, peOiChg };
+    // Per-strike BS delta (shown under IV) + Vol/OI churn badge
+    const spot = state.lastData?.underlying_value, dte = Math.max(0.25, state.lastData?.dte ?? 1);
+    const T = dte / 365;
+    const ceDelta = (spot && s.ce_iv > 0.5) ? bsGreeks(spot, s.strike, T, s.ce_iv/100, 0.07, 'CE').delta : null;
+    const peDelta = (spot && s.pe_iv > 0.5) ? bsGreeks(spot, s.strike, T, s.pe_iv/100, 0.07, 'PE').delta : null;
+    const ceDeltaStr = ceDelta !== null ? `<span class="cell-delta">${ceDelta.toFixed(2)}Δ</span>` : '';
+    const peDeltaStr = peDelta !== null ? `<span class="cell-delta">${peDelta.toFixed(2)}Δ</span>` : '';
+    const ceVolOi = s.ce_oi > 0 ? (s.ce_volume||0) / s.ce_oi : 0;
+    const peVolOi = s.pe_oi > 0 ? (s.pe_volume||0) / s.pe_oi : 0;
+    const ceVolOiBadge = ceVolOi >= 0.8 ? `<span class="voloi-badge" title="Vol/OI ${ceVolOi.toFixed(1)} — heavy intraday churn">${ceVolOi.toFixed(1)}×</span>` : '';
+    const peVolOiBadge = peVolOi >= 0.8 ? `<span class="voloi-badge" title="Vol/OI ${peVolOi.toFixed(1)} — heavy intraday churn">${peVolOi.toFixed(1)}×</span>` : '';
+    return { rowClasses, ceChgCls, peChgCls, ceBarPct, peBarPct, ceItmCls, peItmCls, strikeTag, ceBidAsk, peBidAsk, ceOiChg, peOiChg,
+             ceDelta, peDelta, ceDeltaStr, peDeltaStr, ceVolOiBadge, peVolOiBadge };
   }
 
   function renderChainTable(data, isVisible = true) {
@@ -6220,15 +8321,15 @@
         const sc = _oiScenarioBadge(s.ce_oi_chg||0, s.pe_oi_chg||0, spotUp);
         _chainRowState.set(s.strike, {...s, _maxOi: maxOi, _atm: atm});
         return `<tr class="${c.rowClasses}" data-strike="${s.strike}">
-          <td class="oi-bar-wrap ${c.ceItmCls}" style="background:rgba(255,120,80,${ceAlpha})"><div class="oi-bar" style="width:${c.ceBarPct}%"></div><span class="oi-text">${fmtInt(s.ce_oi)}</span></td>
+          <td class="oi-bar-wrap ${c.ceItmCls}" style="background:rgba(255,120,80,${ceAlpha})"><div class="oi-bar" style="width:${c.ceBarPct}%"></div><span class="oi-text">${fmtInt(s.ce_oi)}${c.ceVolOiBadge}</span></td>
           <td class="${c.ceChgCls} ${c.ceItmCls}">${fmtSigned(c.ceOiChg)}${velCe}${sc.ce}</td>
-          <td class="${c.ceItmCls}">${fmtIv(s.ce_iv)}</td>
-          <td class="${c.ceItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="CE" title="Click to add as a Builder leg">${fmtPrice(s.ce_ltp)}${c.ceBidAsk}</td>
+          <td class="${c.ceItmCls}">${fmtIv(s.ce_iv)}${c.ceDeltaStr}</td>
+          <td class="${c.ceItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="CE" title="Rev ${s.ce_ltp ? fmtInt(s.strike + s.ce_ltp) : '—'} · Click to add as a Builder leg">${fmtPrice(s.ce_ltp)}${c.ceBidAsk}</td>
           <td class="strike-cell" style="cursor:pointer;" title="Click to open in Builder">${fmtInt(s.strike)}${c.strikeTag}</td>
-          <td class="${c.peItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="PE" title="Click to add as a Builder leg">${fmtPrice(s.pe_ltp)}${c.peBidAsk}</td>
-          <td class="${c.peItmCls}">${fmtIv(s.pe_iv)}</td>
+          <td class="${c.peItmCls} ltp-clickable" data-add-leg-strike="${s.strike}" data-add-leg-type="PE" title="Rev ${s.pe_ltp ? fmtInt(s.strike - s.pe_ltp) : '—'} · Click to add as a Builder leg">${fmtPrice(s.pe_ltp)}${c.peBidAsk}</td>
+          <td class="${c.peItmCls}">${fmtIv(s.pe_iv)}${c.peDeltaStr}</td>
           <td class="${c.peChgCls} ${c.peItmCls}">${fmtSigned(c.peOiChg)}${velPe}${sc.pe}</td>
-          <td class="oi-bar-wrap ${c.peItmCls}" style="background:rgba(80,200,120,${peAlpha})"><div class="oi-bar put" style="width:${c.peBarPct}%"></div><span class="oi-text">${fmtInt(s.pe_oi)}</span></td>
+          <td class="oi-bar-wrap ${c.peItmCls}" style="background:rgba(80,200,120,${peAlpha})"><div class="oi-bar put" style="width:${c.peBarPct}%"></div><span class="oi-text">${fmtInt(s.pe_oi)}${c.peVolOiBadge}</span></td>
         </tr>`;
       }).join('');
 
@@ -6252,19 +8353,21 @@
       if (tr.className !== c.rowClasses) tr.className = c.rowClasses;
 
       // Cell 0: CE OI bar + text
-      if (prev.ce_oi !== s.ce_oi || prev._maxOi !== maxOi) {
+      if (prev.ce_oi !== s.ce_oi || prev._maxOi !== maxOi || prev.ce_volume !== s.ce_volume) {
         const bar = cells[0].querySelector('.oi-bar');
         if (bar) bar.style.width = c.ceBarPct + '%';
         const txt = cells[0].querySelector('.oi-text');
-        if (txt) txt.textContent = fmtInt(s.ce_oi);
+        if (txt) txt.innerHTML = fmtInt(s.ce_oi) + c.ceVolOiBadge;
       }
       // Cell 1: CE OI change
       if (prev.ce_oi_chg !== s.ce_oi_chg || prev.ce_oi_15m !== s.ce_oi_15m || prev._atm !== atm) {
         cells[1].textContent = fmtSigned(c.ceOiChg);
         cells[1].className = `${c.ceChgCls} ${c.ceItmCls}`.trim();
       }
-      // Cell 2: CE IV
-      if (prev.ce_iv !== s.ce_iv) cells[2].textContent = fmtIv(s.ce_iv);
+      // Cell 2: CE IV + delta (delta drifts with spot even when IV static)
+      if (prev.ce_iv !== s.ce_iv || prev._spot !== state.lastData?.underlying_value) {
+        cells[2].innerHTML = fmtIv(s.ce_iv) + c.ceDeltaStr;
+      }
       // Cell 3: CE LTP + bid/ask
       if (prev.ce_ltp !== s.ce_ltp || prev.ce_bid !== s.ce_bid || prev.ce_ask !== s.ce_ask) {
         cells[3].innerHTML = fmtPrice(s.ce_ltp) + c.ceBidAsk;
@@ -6274,22 +8377,24 @@
       if (prev.pe_ltp !== s.pe_ltp || prev.pe_bid !== s.pe_bid || prev.pe_ask !== s.pe_ask) {
         cells[5].innerHTML = fmtPrice(s.pe_ltp) + c.peBidAsk;
       }
-      // Cell 6: PE IV
-      if (prev.pe_iv !== s.pe_iv) cells[6].textContent = fmtIv(s.pe_iv);
+      // Cell 6: PE IV + delta
+      if (prev.pe_iv !== s.pe_iv || prev._spot !== state.lastData?.underlying_value) {
+        cells[6].innerHTML = fmtIv(s.pe_iv) + c.peDeltaStr;
+      }
       // Cell 7: PE OI change
       if (prev.pe_oi_chg !== s.pe_oi_chg || prev.pe_oi_15m !== s.pe_oi_15m || prev._atm !== atm) {
         cells[7].textContent = fmtSigned(c.peOiChg);
         cells[7].className = `${c.peChgCls} ${c.peItmCls}`.trim();
       }
       // Cell 8: PE OI bar + text
-      if (prev.pe_oi !== s.pe_oi || prev._maxOi !== maxOi) {
+      if (prev.pe_oi !== s.pe_oi || prev._maxOi !== maxOi || prev.pe_volume !== s.pe_volume) {
         const bar = cells[8].querySelector('.oi-bar');
         if (bar) bar.style.width = c.peBarPct + '%';
         const txt = cells[8].querySelector('.oi-text');
-        if (txt) txt.textContent = fmtInt(s.pe_oi);
+        if (txt) txt.innerHTML = fmtInt(s.pe_oi) + c.peVolOiBadge;
       }
 
-      _chainRowState.set(s.strike, {...s, _maxOi: maxOi, _atm: atm});
+      _chainRowState.set(s.strike, {...s, _maxOi: maxOi, _atm: atm, _spot: state.lastData?.underlying_value});
     }
   }
 
@@ -6875,7 +8980,8 @@
 
   function fmtRupee(n) {
     if (n === null || n === undefined) return '—';
-    return '₹' + Math.round(n).toLocaleString('en-IN');
+    const v = Math.round(n);
+    return (v < 0 ? '−' : '') + '₹' + Math.abs(v).toLocaleString('en-IN');
   }
 
   function renderStrategy(data) {
@@ -7127,7 +9233,7 @@
   }
 
   // ---------- Builder state ----------
-  const builderState = { legs: [], dateSliderDays: 0, greekOverlay: 'none', slAmount: null, targetAmount: null, ivShiftPct: 0, pnlInterval: 1, manualTarget: null, fanView: false, ltpHistory: [] };
+  const builderState = { legs: [], dateSliderDays: 0, greekOverlay: 'none', slAmount: null, targetAmount: null, ivShiftPct: 0, spotShiftPts: 0, pnlInterval: 1, manualTarget: null, fanView: false, ltpHistory: [] };
 
   function findChainStrikeData(strikeTarget, expiry) {
     const info = state.lastData?.expiries_data?.[expiry];
@@ -7155,6 +9261,7 @@
     const leg = Object.assign({
       action: 'BUY', option_type: 'CE', strike: atm, qty_lots: 1,
       premium: 0, iv: state.lastData?.atm_iv ?? 13, expiry: defaultExpiry,
+      entry_price: null, notes: '',
     }, overrides || {});
     if (!overrides || overrides.premium === undefined) refreshLegFromChain(leg);
     builderState.legs.push(leg);
@@ -7343,11 +9450,29 @@
     }).join('');
   }
 
+  function _legLivePnlClass(leg) {
+    if (leg.entry_price == null || !state.lastData) return '';
+    const chain = findChainStrikeData(leg.strike, leg.expiry);
+    const ltp = chain ? (leg.option_type === 'CE' ? chain.ce_ltp : chain.pe_ltp) : null;
+    if (!ltp) return '';
+    const pnl = (leg.action === 'BUY' ? ltp - leg.entry_price : leg.entry_price - ltp) * leg.qty_lots * (state.lastData.lot_size || 50);
+    return pnl >= 0 ? 'pos-txt' : 'neg-txt';
+  }
+
+  function _legLivePnlStr(leg) {
+    if (leg.entry_price == null || !state.lastData) return '';
+    const chain = findChainStrikeData(leg.strike, leg.expiry);
+    const ltp = chain ? (leg.option_type === 'CE' ? chain.ce_ltp : chain.pe_ltp) : null;
+    if (!ltp) return '';
+    const pnl = (leg.action === 'BUY' ? ltp - leg.entry_price : leg.entry_price - ltp) * leg.qty_lots * (state.lastData.lot_size || 50);
+    return (pnl >= 0 ? '+' : '') + fmtRupee(pnl);
+  }
+
   function renderLegRow(leg, index) {
     leg.qty_lots = parseInt(leg.qty_lots) || 1;   // heal any undefined/NaN on render
     const g = leg._greeks || {};
     if (leg.instrument_type === 'FUTURES') {
-      return `<div class="leg-row" data-leg-index="${index}">
+      return `<div class="leg-row" data-leg-index="${index}" draggable="true">
         <div class="leg-row-top">
           <button class="leg-toggle action-${leg.action}" data-leg-action="toggle-action">${leg.action}</button>
           <span style="flex:1; text-align:center; font-size:11px; color:var(--muted); font-weight:600;">FUTURES @ ${fmtInt(leg.premium)}</span>
@@ -7359,6 +9484,7 @@
             <button class="stepper-btn" data-leg-action="qty-down">−</button>
             <span class="stepper-value">${leg.qty_lots}</span>
             <button class="stepper-btn" data-leg-action="qty-up">+</button>
+            <i class="hi" data-h="kb-lots">i</i>
           </div>
         </div>
         <div class="leg-greeks">
@@ -7369,8 +9495,9 @@
         </div>
       </div>`;
     }
-    return `<div class="leg-row" data-leg-index="${index}">
+    return `<div class="leg-row" data-leg-index="${index}" draggable="true">
       <div class="leg-row-top">
+        <span class="drag-handle" title="Drag to reorder">⠿</span><i class="hi" data-h="leg-reorder">i</i>
         <button class="leg-toggle action-${leg.action}" data-leg-action="toggle-action">${leg.action}</button>
         <button class="leg-toggle type-${leg.option_type}" data-leg-action="toggle-type">${leg.option_type}</button>
         <div class="stepper strike-stepper">
@@ -7378,8 +9505,10 @@
           <span class="stepper-value">${fmtInt(leg.strike)}</span>
           <button class="stepper-btn" data-leg-action="strike-up">+</button>
         </div>
+        <button class="stepper-btn" data-leg-action="ltp-chart" title="Show 1-min LTP chart of this strike (needs server ≥ this build)">📈<i class="hi" data-h="leg-ltp-chart">i</i></button>
         <button class="leg-remove" data-leg-action="remove">×</button>
       </div>
+      <div class="leg-spark-wrap" id="legSpark-${index}" style="display:${leg._showSpark ? '' : 'none'};"></div>
       <div class="leg-row-bottom">
         <select class="leg-week-select" data-leg-action="change-week">${weekSelectOptions(leg.expiry)}</select>
         <div class="stepper qty-stepper">
@@ -7388,6 +9517,15 @@
           <button class="stepper-btn" data-leg-action="qty-up">+</button>
         </div>
         <span class="leg-premium">${fmtPrice(leg.premium)}</span>
+      </div>
+      <div class="leg-entry-row">
+        <span style="color:var(--muted-2);">Entry<i class="hi" data-h="live-pnl">i</i>:</span>
+        <input class="leg-entry-input" type="number" placeholder="₹ entry" value="${leg.entry_price != null ? leg.entry_price : ''}" data-leg-entry="${index}" step="0.5">
+        <span class="leg-live-pnl ${_legLivePnlClass(leg)}">${_legLivePnlStr(leg)}</span>
+      </div>
+      <div class="leg-note-wrap">
+        <span style="font-size:9px;color:var(--muted-2);">Note<i class="hi" data-h="leg-notes">i</i></span>
+        <input class="leg-note-input" type="text" placeholder="hedge, rolled, etc." value="${escapeHtml(leg.notes||'')}" data-leg-note="${index}">
       </div>
       <div class="leg-greeks">
         <span><b>Δ</b> ${g.delta!==undefined ? g.delta.toFixed(2) : '—'}</span>
@@ -7547,7 +9685,14 @@
     // 1-sigma / 2-sigma expected-move bands, derived from the ATM straddle
     // price (same standard approximation used in Market View's Key Levels)
     let sigmaLines = '';
+    let probBands = '';
     if (sigmaLevels) {
+      // Probability cone: shaded ±1σ (≈68%) and ±2σ (≈95%) landing zones at expiry
+      const clampX = p => xScale(Math.min(maxP, Math.max(minP, p)));
+      const x1lo = clampX(sigmaLevels.spot - sigmaLevels.oneSigma), x1hi = clampX(sigmaLevels.spot + sigmaLevels.oneSigma);
+      const x2lo = clampX(sigmaLevels.spot - 2*sigmaLevels.oneSigma), x2hi = clampX(sigmaLevels.spot + 2*sigmaLevels.oneSigma);
+      probBands = `<rect class="prob-band-2s" x="${x2lo.toFixed(1)}" y="${padY}" width="${(x2hi-x2lo).toFixed(1)}" height="${H-2*padY}"/>
+                   <rect class="prob-band-1s" x="${x1lo.toFixed(1)}" y="${padY}" width="${(x1hi-x1lo).toFixed(1)}" height="${H-2*padY}"/>`;
       const sigmaSpecs = [
         { price: sigmaLevels.spot - sigmaLevels.oneSigma, label: '-1σ' },
         { price: sigmaLevels.spot + sigmaLevels.oneSigma, label: '+1σ' },
@@ -7578,6 +9723,7 @@
     }
 
     return `<svg viewBox="0 0 ${W} ${H}" class="builder-payoff-svg" preserveAspectRatio="none">
+      ${probBands}
       <path d="${profitArea}" style="fill:var(--pos);opacity:0.13"/>
       <path d="${lossArea}" style="fill:var(--neg);opacity:0.13"/>
       ${sigmaLines}
@@ -7772,12 +9918,40 @@
     const lotSize = data.lot_size || 50;
     const expiryDteMap = {};
     for (const [exp, info] of Object.entries(data.expiries_data || {})) expiryDteMap[exp] = info.dte;
-    const spot = data.underlying_value, atmIv = data.atm_iv;
+    const spotRaw = data.underlying_value, atmIv = data.atm_iv;
+    const spot = spotRaw + (builderState.spotShiftPts || 0);  // apply what-if spot shift
 
     // attach signed per-unit Greeks to each leg before rendering rows, so
     // the small Greeks line under each leg reflects current spot/IV/time
     for (const leg of builderState.legs) leg._greeks = legGreeksSigned(leg, spot, expiryDteMap);
+
+    // Preserve focus + caret if user is typing in an entry/note input (auto-refresh re-renders every 5s)
+    const _ae = document.activeElement;
+    let _aeRestore = null;
+    if (_ae && els.legsList.contains(_ae) && (_ae.dataset.legEntry !== undefined || _ae.dataset.legNote !== undefined)) {
+      _aeRestore = {
+        sel: _ae.dataset.legEntry !== undefined ? `[data-leg-entry="${_ae.dataset.legEntry}"]` : `[data-leg-note="${_ae.dataset.legNote}"]`,
+        value: _ae.value, start: _ae.selectionStart, end: _ae.selectionEnd
+      };
+    }
     els.legsList.innerHTML = builderState.legs.map(renderLegRow).join('');
+    // re-render any open LTP sparklines (cached ≤60s, so no fetch spam)
+    builderState.legs.forEach((leg, i) => { if (leg._showSpark) _loadLegLtpSpark(leg, i); });
+    if (_aeRestore) {
+      const el2 = els.legsList.querySelector(_aeRestore.sel);
+      if (el2) {
+        el2.value = _aeRestore.value; el2.focus();
+        try { el2.setSelectionRange(_aeRestore.start, _aeRestore.end); } catch(_) {}
+      }
+    }
+
+    // Net portfolio delta
+    const _netD = _renderNetDelta(builderState.legs, lotSize, spot);
+    _checkDeltaDrift(_netD, builderState.legs);
+    _renderAdjustSuggestions(builderState.legs, spotRaw, _netD, data.strike_gap || 50);
+    // Greeks P&L attribution
+    _updateGreeksPnlAttribution(builderState.legs, spotRaw, atmIv, lotSize);
+    // (Live P&L stat card is appended AFTER the stat grid rebuild below — see post-grid section)
 
     // Strategy name auto-detection
     const stratName = _detectStrategyName(builderState.legs);
@@ -7898,11 +10072,31 @@
       statCard('POP', analysis.popPct.toFixed(1)+'%', popClass(analysis.popPct)==='high'?'pos':(popClass(analysis.popPct)==='low'?'neg':'gold')),
       statCard('Max Profit', maxProfitStr, 'pos'),
       statCard('Max Loss', maxLossStr, 'neg'),
-      statCard('Breakeven', beStr),
+      statCard('Breakeven<i class="hi" data-h="be-distance">i</i>', beStr),
       statCard('Funds Needed', fundsStr),
       statCard('Margin Needed' + (marginIsEst?' (est)':''), marginStr),
       statCard('Risk : Reward', rrStr),
     ].join('');
+
+    // Live P&L stat card — appended AFTER the grid rebuild so it survives
+    const livePnl = _computeLivePnl();
+    if (livePnl !== null) {
+      const lStr = fmtRupee(livePnl), lCls = livePnl >= 0 ? 'pos' : 'neg';
+      els.builderStatGrid.insertAdjacentHTML('beforeend', statCard('Live P&L', lStr, lCls, 'live-pnl'));
+      els.builderStatGrid.lastElementChild?.setAttribute('data-label','Live P&L');
+    }
+    _checkRiskGuards(livePnl);   // daily loss limit + trailing drawdown
+
+    // Expected Value per lot (payoff × lognormal terminal density)
+    const evPerLot = computeExpectedValue(builderState.legs, spotRaw, lotSize, atmIv, analysis.dteNear, expiryDteMap);
+    if (evPerLot !== null) {
+      els.builderStatGrid.insertAdjacentHTML('beforeend',
+        statCard('EV / lot', fmtRupee(evPerLot), evPerLot >= 0 ? 'pos' : 'neg', 'ev-lot'));
+    }
+
+    // P&L scenario matrix (spot levels × dates)
+    renderScenarioMatrix(builderState.legs, spotRaw, lotSize, analysis.dteNear, expiryDteMap, data.strike_gap || 50);
+    _renderRiskSizing(analysis, lotSize);   // loss-limit → max lots
 
     // ---- Aggregate position Greeks (sum of signed per-leg greeks, scaled by qty*lotSize) ----
     let posDelta=0, posGamma=0, posTheta=0, posVega=0;
@@ -7913,12 +10107,38 @@
       posTheta += g.theta * leg.qty_lots * lotSize;
       posVega  += g.vega  * leg.qty_lots * lotSize;
     }
+    renderThetaClock(posTheta);   // remaining decay today + time-to-close
     function greekCard(label, value, decimals, signed) {
       const cls = signed ? (value>0?'pos':(value<0?'neg':'')) : '';
       return `<div class="greek-card"><div class="g-label">${label}</div><div class="g-value ${cls}">${value>=0&&signed?'+':''}${value.toFixed(decimals)}</div></div>`;
     }
     els.greeksPanel.innerHTML = `
       <div class="greeks-panel-title">Position Greeks · <span id="greekDateLabel">Today</span></div>
+      <div id="netDeltaRow" class="net-delta-row" style="display:none;">
+        <span style="color:var(--muted);">Net Δ<i class="hi" data-h="net-delta">i</i></span>
+        <span id="netDeltaVal" style="font-weight:700;">—</span>
+        <span id="netDeltaRupees" style="font-size:9px;color:var(--muted-2);"></span>
+      </div>
+      <div id="greeksAttrRow" class="greeks-attr-row" style="display:none;"><span class="attr-lbl">Greeks P&amp;L<i class="hi" data-h="greeks-pnl">i</i></span></div>
+      <div id="adjustPanel" class="adjust-panel" style="display:none;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">⚙ Adjustment Suggestions<i class="hi" data-h="adjust-suggest">i</i></div>
+        <div id="adjustList"></div>
+      </div>
+      <div id="thetaClockRow" class="theta-clock-row" style="display:none;"></div>
+      <div class="adjust-panel" id="scenMatrixPanel" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:10px;font-weight:700;color:var(--muted);">🗓 P&amp;L Scenario Matrix<i class="hi" data-h="scen-matrix">i</i></span>
+          <button class="collapse-btn" id="scenMatrixCollapse">▾</button>
+        </div>
+        <div id="scenMatrixOut" style="max-height:260px;overflow:auto;"></div>
+      </div>
+      <div class="adjust-panel" id="cmpTrayPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:10px;font-weight:700;color:var(--muted);">⚖ Strategy Comparison<i class="hi" data-h="cmp-tray">i</i></span>
+          <button class="btn" id="cmpPinBtn" style="font-size:9px;padding:2px 9px;">📌 Pin current</button>
+        </div>
+        <div id="cmpTrayOut"><span style="font-size:9.5px;color:var(--muted-2);">Pin up to 3 strategies to compare side-by-side.</span></div>
+      </div>
       <div class="greeks-grid">
         ${greekCard('Delta', posDelta, 1, true)}
         ${greekCard('Gamma', posGamma, 2, false)}
@@ -8080,6 +10300,10 @@
   els.closedTradesList = document.getElementById('closedTradesList');
 
   els.paperTradeBtn.addEventListener('click', async () => {
+    if (document.getElementById('checklistGate')?.checked && !_checklistComplete()) {
+      showToast('✋ Pre-trade checklist incomplete — finish it (or untick the gate) before paper trading.');
+      return;
+    }
     if (!builderState.legs.length || !state.lastData) return;
     const name = prompt('Name this paper trade:', `${state.symbol} ${builderState.legs.length}-leg`);
     if (name === null) return; // cancelled
@@ -8096,6 +10320,7 @@
       const data = await resp.json();
       if (data.error) { alert('Could not open paper trade: ' + data.error); return; }
       alert(`Paper trade opened: ${name}`);
+      _journalContextSnapshot(`OPENED: ${name}`);   // auto market-context snapshot
       fetchAndRenderPaperTrades();
     } catch (e) {
       alert('Could not reach the server to open the paper trade.');
@@ -8121,6 +10346,7 @@
   }
 
   function renderPaperTrades(trades, stats) {
+    renderPaperDeepStats(trades);   // win rate / expectancy / profit factor panel
     const open = trades.filter(t => t.status === 'open');
     const closed = trades.filter(t => t.status === 'closed').sort((a,b) => b.closed_at - a.closed_at);
 
@@ -8179,6 +10405,7 @@
         });
         const data = await resp.json();
         if (data.error) { alert('Could not close: ' + data.error); return; }
+        _journalContextSnapshot(`CLOSED trade (P&L ${data.trade?.exit_pnl != null ? fmtRupee(data.trade.exit_pnl) : 'n/a'})`);
         fetchAndRenderPaperTrades();
       } catch (e2) { alert('Could not reach the server.'); }
       return;
@@ -8412,19 +10639,49 @@
     else if (action === 'qty-up')   { leg.qty_lots = (parseInt(leg.qty_lots) || 1) + 1; }
     else if (action === 'qty-down') { leg.qty_lots = Math.max(1, (parseInt(leg.qty_lots) || 1) - 1); }
     else if (action === 'remove') { builderState.legs.splice(idx, 1); resetStratLtpHistory(); }
+    else if (action === 'ltp-chart') { leg._showSpark = !leg._showSpark; if (leg._showSpark) _loadLegLtpSpark(leg, idx); }
 
     renderBuilder();
   });
 
+  // Real-time persistence while typing (so 5s auto-refresh re-renders never lose keystrokes)
+  els.legsList.addEventListener('input', (e) => {
+    const noteInput = e.target.closest('[data-leg-note]');
+    if (noteInput) {
+      const leg = builderState.legs[parseInt(noteInput.dataset.legNote, 10)];
+      if (leg) leg.notes = noteInput.value;
+      return;
+    }
+    const entryInput = e.target.closest('[data-leg-entry]');
+    if (entryInput) {
+      const leg = builderState.legs[parseInt(entryInput.dataset.legEntry, 10)];
+      if (leg) leg.entry_price = entryInput.value !== '' ? parseFloat(entryInput.value) : null;
+    }
+  });
+
   els.legsList.addEventListener('change', (e) => {
     const select = e.target.closest('[data-leg-action="change-week"]');
-    if (!select) return;
-    const row = select.closest('.leg-row');
-    const idx = parseInt(row.dataset.legIndex, 10);
-    const leg = builderState.legs[idx];
-    leg.expiry = select.value;
-    refreshLegFromChain(leg);  // re-fetch this leg's premium/IV for the newly-selected week
-    renderBuilder();
+    if (select) {
+      const idx = parseInt(select.closest('.leg-row')?.dataset.legIndex, 10);
+      const leg = builderState.legs[idx];
+      leg.expiry = select.value;
+      refreshLegFromChain(leg);
+      renderBuilder(); return;
+    }
+    const entryInput = e.target.closest('[data-leg-entry]');
+    if (entryInput) {
+      const idx = parseInt(entryInput.dataset.legEntry, 10);
+      const leg = builderState.legs[idx];
+      if (leg) { leg.entry_price = entryInput.value !== '' ? parseFloat(entryInput.value) : null; renderBuilder(); }
+      return;
+    }
+    const noteInput = e.target.closest('[data-leg-note]');
+    if (noteInput) {
+      const idx = parseInt(noteInput.dataset.legNote, 10);
+      const leg = builderState.legs[idx];
+      if (leg) leg.notes = noteInput.value;
+      return;  // no re-render needed for notes
+    }
   });
 
   els.dateSlider.addEventListener('input', () => {
@@ -8433,10 +10690,18 @@
   });
 
   els.ivShiftSlider = document.getElementById('ivShiftSlider');
-  els.ivShiftLabel = document.getElementById('ivShiftLabel');
+  els.ivShiftLabel  = document.getElementById('ivShiftLabel');
   els.ivShiftSlider.addEventListener('input', () => {
     builderState.ivShiftPct = parseInt(els.ivShiftSlider.value, 10);
     els.ivShiftLabel.textContent = (builderState.ivShiftPct >= 0 ? '+' : '') + builderState.ivShiftPct + '%';
+    renderBuilder();
+  });
+  // Spot shift slider
+  const _spotShiftSlider = document.getElementById('spotShiftSlider');
+  const _spotShiftLabel  = document.getElementById('spotShiftLabel');
+  _spotShiftSlider?.addEventListener('input', () => {
+    builderState.spotShiftPts = parseInt(_spotShiftSlider.value, 10);
+    if (_spotShiftLabel) _spotShiftLabel.textContent = (builderState.spotShiftPts >= 0 ? '+' : '') + builderState.spotShiftPts + 'pts';
     renderBuilder();
   });
 
@@ -12030,7 +14295,7 @@
     try {
       const { session, timeStr } = _sessionInfo();
       const strategies = generateStrategySuggestions(d, session);
-      els.suggestionsOutput.innerHTML = renderStrategyCards(strategies, timeStr, session);
+      els.suggestionsOutput.innerHTML = _regimeSuggestBlock(d) + renderStrategyCards(strategies, timeStr, session);
     } catch (err) {
       els.suggestionsOutput.innerHTML = `<div style="color:var(--neg);font-size:11.5px;">Error generating suggestions: ${escapeHtml(err.message)}</div>`;
     } finally {
@@ -12124,7 +14389,7 @@
   fetchWatchlistData();
   setInterval(fetchWatchlistData, WATCHLIST_POLL_MS);
   if (els.autoToggle.checked) {
-    state.autoTimer = setInterval(fetchChain, 5000);
+    state.autoTimer = setInterval(fetchChain, _getAutoInterval());
   }
   fetchChain();
   setTimeout(() => fetchAndRenderMovers(), 2500);
@@ -12197,12 +14462,60 @@
     'offline-cache':     '<strong>Offline Cache</strong>When the server is unreachable, the last successful chain response (saved to localStorage) is shown with this banner. Data is stale but better than a blank screen — use it for reference while troubleshooting the connection.',
     'staleness-counter': '<strong>Live Staleness Counter</strong>Shows how many seconds/minutes since the last successful chain fetch. Green <10s = fresh. Amber with ⚠ = 10–120s, data may be slightly stale. Red ⛔ = no update in >2 minutes — check server connection or Akamai block.',
     'oi-walls':          '<strong>OI Call Wall / Put Wall</strong>Strike with highest total CE OI = call wall (likely resistance). Highest PE OI = put wall (likely support). Heavy writing at a strike means sellers are defending it. These shift intraday as large writers roll — watch for the wall moving as a signal of changing sentiment.',
+    'theme-toggle':      '<strong>Dark / Light Mode</strong>Toggles between dark (default) and light colour scheme. Preference saved to localStorage. Light mode is easier on the eyes in bright environments. Keyboard shortcut: T (when not typing in an input).',
+    'auto-retry':        '<strong>Auto-Retry with Backoff</strong>When the server is unreachable, automatically retries after 5s → 10s → 20s → 60s with a countdown shown here. Handles transient Akamai blocks or brief server restarts without needing a manual refresh.',
+    'power-hour':        '<strong>Power Hour Auto-Accelerate</strong>Between 14:00 and 15:30 IST, the auto-refresh interval drops from 5s to 2s automatically. This covers the period of highest F&O chain volatility — OI shifts are fastest in the final 90 minutes. The ⚡ PH badge appears during this window.',
+    'live-pnl':          '<strong>Live P&L per Leg</strong>Enter your actual entry price in the ₹ field. The dashboard computes your current mark-to-market P&L per leg using the live chain LTP, scaled by qty and lot size. Total Live P&L appears in the stat cards. Useful for tracking open positions without a separate spreadsheet.',
+    'entry-score':       '<strong>Entry Timing Score</strong>A 1–10 composite score computed from: session IV percentile (is IV cheap or expensive?), PCR level, spot position vs VWAP, straddle premium vs expected move ratio, and distance from OI walls. Higher = better conditions for selling premium. Lower = better for buying.',
+    'net-delta':         '<strong>Net Portfolio Delta</strong>Sum of (Δ × qty_lots) across all legs — your current directional exposure in index units. The ₹/pt figure shows how much you gain or lose per 1-point move in the index. A perfectly delta-neutral straddle shows ≈ 0.000.',
+    'spot-shift':        '<strong>What-If Spot Shift</strong>Simulates the entire position as if the index were at a different level — without changing your actual legs. Useful for asking "what would my Greeks and P&L look like if Nifty gaps up 100pts tomorrow?" Works alongside the IV shift slider.',
+    'vix-ratio':         '<strong>VIX vs Straddle Ratio</strong>ATM straddle premium ÷ INDIA VIX-implied daily move. >1.1 = options are priced above what VIX suggests (sell premium, rich vol). <0.9 = options are cheaper than VIX implies (buy premium, cheap vol). At 1.0 = options and VIX agree.',
+    'spot-hl-dist':      '<strong>Distance to Session High / Low</strong>How many points current spot is below the session high and above the session low. When spot is within 10pts of the session high, a breakout or rejection is imminent. Near the low, same logic applies. Key context for directional trades.',
+    'pcr-divergence':    '<strong>PCR Divergence Alert</strong>Fires when PCR by OI and PCR by volume diverge by >20%. Volume PCR rising while OI PCR is flat means fresh put buying without OI buildup — often seen before sharp moves. A 5-minute cooldown prevents repeated alerts on the same divergence.',
+    'eod-summary':       '<strong>EOD Strategy Summary</strong>At 15:25 IST on weekdays, automatically computes and logs the position\'s live P&L, current spot, max pain, ATM IV and PCR to the session notes journal. Triggers only if legs are loaded in the Builder and the market is still open.',
+    'leg-reorder':       '<strong>Drag to Reorder Legs</strong>Grab the ⠿ handle on the left of any leg row and drag it up or down to change the display order. The order has no effect on calculations — it\'s purely for visual organisation of multi-leg strategies.',
+    'leg-notes':         '<strong>Leg Notes</strong>Free-text field under each leg for annotations: "hedge leg", "rolled from 24000 strike", "close if premium > 150", etc. Notes are preserved when the builder re-renders. Useful for tracking intent and roll history of individual legs.',
+    'greeks-pnl':        '<strong>Greeks P&L Attribution</strong>When spot or IV changes between refreshes, this row shows how much of the position\'s P&L came from each Greek: Δ Move (directional), Γ Move (convexity), Θ Decay (time), V Move (volatility change). Helps you understand what\'s actually driving your P&L.',
+    'iv-shift':          '<strong>What-If IV Shift</strong>Shifts the implied volatility of all legs by the specified % before recomputing Greeks, the payoff chart and all stat cards. Simulates an IV expansion (+) or crush (−). Use with the date slider to model "what if IV drops 20% by Friday?"',
     'now-curve':         '<strong>P&L at Current Time</strong>Thin dotted white line — the position\'s P&L right now using today\'s actual DTE and live IV. Appears when the slider is moved to a future date so you can compare current P&L against where it will be then. Disappears when slider is at Today.',
     'strategy-name':     '<strong>Auto-Detected Strategy Name</strong>Identified from the leg structure — Short Straddle, Iron Condor, Bull Call Spread, etc. Updates live as legs change. Confirms you\'ve built the intended shape, especially useful when legs are added one at a time.',
     'iv-skew':           '<strong>IV Skew / Volatility Smile</strong>CE IV (orange) and PE IV (green) plotted across all strikes. The ATM is marked with a gold line. Steep negative skew = put IV >> call IV = market pricing downside risk. "Skew %" = PE IV minus CE IV at ATM — positive is normal, negative is unusual.',
     'oi-scenario':       '<strong>OI Scenario</strong>Interprets ΔOI + price direction together. LB = Long Buildup (price↑ OI↑). SC = Short Covering (price↑ OI↓). SB = Short Buildup (price↓ OI↑). LU = Long Unwinding (price↓ OI↓). PW = Put Writing (bullish). Only shown when |ΔOI| ≥ 1,000 contracts to filter noise.',
     'mpain-drift':       '<strong>Max Pain Drift</strong>Sparkline of max pain over today\'s session. Rising = call writers gaining; falling = put writers gaining. Large shifts during power hour (14:00+) often indicate gamma squeezes near expiry.',
     'vwap':              '<strong>Session VWAP (approx.)</strong>Time-weighted average of spot readings since session start. True VWAP needs tick volume — this is a time-weighted approximation. Above VWAP = buyers in control. Classic intraday bias: shorts struggle when price is above VWAP, longs struggle below.',
+    'gex':               '<strong>Gamma Exposure (GEX)</strong>Estimated dealer gamma per strike: Γ × OI × lot × spot² × 1%, calls (+) puts (−) by the SpotGamma convention. Net +GEX → dealers hedge against moves → pinning &amp; mean-reversion (favors premium selling). Net −GEX → dealers hedge with moves → trend acceleration (favors breakout buying). The zero-Γ flip level marks where the regime changes — spot crossing it often changes intraday character.',
+    'iv-term':           '<strong>IV Term Structure</strong>ATM IV plotted per expiry. Upward slope (contango) = normal. Downward (backwardation) = event premium loaded in the near expiry — the market expects a move before near expiry. The IV differential is also the calendar-spread edge: sell rich near IV / buy cheap far IV.',
+    'straddle-track':    '<strong>ATM Straddle Tracker</strong>ATM straddle price over the session (up to full day at 5s samples). Falling line (green) = theta burn winning — good for sellers. Rising (red) = realized movement or IV expansion outpacing decay. Expiry-day sellers: this is the cleanest single view of whether the day is paying you.',
+    'delta-picker':      '<strong>Delta Strike Finder</strong>Enter a target delta (e.g. 0.25) and pick CE/PE — the closest strike by Black-Scholes delta is highlighted in the chain. Standard use: wings for condors/strangles at 20–30Δ, hedges at 10–15Δ, stock-replacement at 70–80Δ.',
+    'adjust-suggest':    '<strong>Adjustment Suggestions</strong>Rule-based repair prompts: short leg trading ≥2× entry credit (classic stop for premium sellers), spot within 1 strike of a short strike (gamma danger zone), net |Δ| &gt; 0.15 on multi-leg positions (re-hedge trigger), long leg at 3×+ (profit-strip candidate). Heuristics, not advice — decide your response levels before entry.',
+    'backup':            '<strong>Full Backup / Restore</strong>💾 exports ALL dashboard data (journal, settings, checklists, alert log, theme, cached chains, current Builder legs) into one JSON file. 📂 restores from that file. localStorage is wiped by browser cache clears — back up regularly, and use it to migrate between machines/browsers.',
+    'fut-basis':         '<strong>Futures Basis / Cost of Carry</strong>Futures price − spot, with annualized carry %. Positive basis = normal carry (mild bullish lean). Basis collapsing toward zero or negative intraday = aggressive futures selling / hedging pressure — an early risk-off tell that often leads the option chain. Requires server patch for the futures feed.',
+    'iv-rank':           '<strong>IV Rank (252-day)</strong>Where today\'s ATM IV sits in its 1-year range: 0 = yearly low, 100 = yearly high. Above ~70: selling premium has statistical tailwind. Below ~30: favor debit strategies / long vega. Unlike the session IVP card, this uses a persistent daily history — requires the server patch to accumulate it.',
+    'oi-timeline':       '<strong>OI Flow Timeline</strong>Heatmap of OI change per strike (rows) over time (columns). Red = call OI building at that strike (writers defending above), green = put OI building (support forming). Watch for: walls migrating with price (writers rolling = trend), sudden column-wide flips (positioning reset). Requires the server-side sampler patch.',
+    'scen-matrix':       '<strong>P&amp;L Scenario Matrix</strong>Position P&amp;L across spot levels (rows, ±5 strikes) and dates (columns, today → expiry) — the whole what-if surface in one grid. Read horizontally to see how time decay reshapes the same spot level; vertically for directional exposure on a given day. The ▶ row is the current spot.',
+    'cmp-tray':          '<strong>Strategy Comparison</strong>Pin the current Builder position (up to 3) and compare POP, max profit/loss, EV and breakevens side-by-side before committing. "Load" restores a pinned strategy into the Builder. Pins live in memory only — they clear on page reload.',
+    'ev-lot':            '<strong>Expected Value per Lot</strong>Probability-weighted P&amp;L at expiry: the payoff integrated over a lognormal terminal-price distribution (σ from ATM IV × √DTE). POP alone misleads — a 90% POP condor can still be negative-EV if the rare loss dwarfs the frequent win. Positive EV = statistical edge <em>if</em> the IV assumption holds; real edge also needs IV to be overpriced vs realized.',
+    'loss-guard':        '<strong>Daily Loss Limit</strong>Set a ₹ amount; when the Builder\'s live P&amp;L breaches it, a persistent red banner locks to the top of the page. The single most valuable risk rule for a full-time trader: the limit decided calmly in the morning beats any decision made mid-drawdown. Leave blank to disable.',
+    'trail-dd':          '<strong>Trailing Drawdown Alert</strong>Tracks the peak live P&amp;L of your position this session and alerts when you\'ve given back more than this ₹ amount from the peak. Catches the classic "it was green an hour ago" failure — locking a partial win is a decision, and this makes sure you actively make it.',
+    'iv-alert':          '<strong>IV Spike / Crush Alert</strong>Fires when ATM IV moves ≥5% (relative) within 15 minutes. Spikes = event fear building (long premium gains, shorts bleed vega). Crush = premium deflating faster than theta — silently lethal for long options. 10-min cooldown between alerts.',
+    'velo-burst':        '<strong>Velocity Burst Detector</strong>Spot speed in points/min over the last 2 minutes (pill in the nav bar). Alerts on bursts ≥0.08% of spot per minute (~19 pts/min on Nifty 24k). Context-aware: a burst in a −GEX regime tends to extend (dealers chase); in +GEX it\'s a fade candidate (dealers absorb).',
+    'orb':               '<strong>Opening Range Breakout (ORB)</strong>First 15-min and 30-min session high/low, added as pivot-bar levels once each window completes. Classic NIFTY intraday structure: a clean break + hold outside the OR sets directional bias; repeated failures at the OR edge mark a range day. Uses 5s spot samples, so levels are approximate vs true tick data.',
+    'theta-clock':       '<strong>Theta Clock</strong>Your position\'s remaining theta for TODAY: day-theta scaled by the fraction of the trading session left (9:15–15:30 IST). For premium sellers it\'s "what\'s still on the table if spot goes nowhere"; for buyers it\'s the rent still due. Note: real decay isn\'t linear intraday — it clusters near open and close — so treat this as a first-order estimate.',
+    'paper-stats':       '<strong>Performance Statistics</strong>Computed from your closed paper trades: win rate, expectancy (avg ₹ per trade you should expect), profit factor (gross wins ÷ gross losses, &gt;1 = profitable system), and max losing streak (size your risk so the historical worst streak wouldn\'t break you). Needs ≥2 closed trades; the more trades, the more these numbers mean.',
+    'leg-ltp-chart':     '<strong>Leg LTP Chart</strong>1-minute price history of this specific strike since the server started sampling (📈 toggles it). Gold dashed line = your entry price. Shows what the current LTP hides: did that short call spike and mean-revert, or is it grinding steadily against you? Requires the updated nse_chain_server.py.',
+    'oc-levels':         '<strong>OC Levels (LTP-calculator style)</strong>Resistance = strike with highest Call OI; Support = strike with highest Put OI (shown for Volume too). <b>STRONG</b> = leader unchallenged (challenger &lt;70%). <b>WTT</b> = Weak Towards Top: a HIGHER strike is building OI, catching the leader — the level wants to shift UP (bullish when on support/resistance above). <b>WTB</b> = Weak Towards Bottom: a LOWER strike is challenging — level pressing DOWN. The % is the game of percentage: challenger OI ÷ leader OI. Rising % = shift approaching; at 100% the level shifts (Extension of Support/Resistance). DIVERSION = spot trading outside the S/R strikes entirely. Concept-faithful reimplementation of publicly documented ideas — not the proprietary tool.',
+    'reversal-price':    '<strong>Reversal Prices (writer breakevens)</strong>Call H-OI reversal = resistance strike + its Call LTP; Put H-OI reversal = support strike − its Put LTP. These are the spot levels where the biggest option writers start losing at expiry — above the call reversal, the largest CE wall is underwater; below the put reversal, the PE wall is. Also shown per strike as tooltips on chain LTP cells, and as C-Rev / P-Rev on the pivot bar.',
+    'replay':            '<strong>Session Replay</strong>Scrub back through any recorded trading day — the server saves one full chain snapshot per minute to ./replay/ while it runs. Pick a date, drag the slider (or step ◀ ▶), and every panel (chain, OC levels, GEX, skew, builder P&amp;L) re-renders exactly as it looked at that minute. The best learning loop there is: replay to your entry time and audit what the signals were actually saying. Live polling pauses during replay; ⏹ Live returns to real-time.',
+    'panel-mgr':         '<strong>Panel Manager</strong>Show or hide any analytics panel — hidden panels also skip their render work, so refreshes get lighter. Preferences persist across sessions. With this many panels, hiding the ones you do not use daily reduces scroll and decision noise.',
+    'delta-templates':   '<strong>Δ-Templates</strong>One-click multi-leg deployment with strikes auto-selected by Black-Scholes delta: Strangle 20Δ, Iron Condor 25/10Δ, ATM Straddle, Iron Fly (ATM + 10Δ wings), Bull Put 30/15Δ, Bear Call 30/15Δ. Replaces the current legs. Deltas resolve from live per-strike IVs, so the same template adapts to the volatility surface each day.',
+    'checklist-gate':    '<strong>Checklist Gate</strong>When ticked, the Paper Trade button refuses to fire until every pre-trade checklist item is checked. Pure discipline enforcement: the checklist you wrote calmly protects you from the version of you that wants to click fast.',
+    'dual-strip':        '<strong>Dual-Symbol Strip</strong>The OTHER index (Nifty ⇄ BankNifty) at a glance while you focus on one: spot, PCR, support/resistance with WTT/WTB status, GEX regime, ATM IV. Refreshes every 60s. Divergence between the two indices is itself a signal — e.g. BankNifty breaking its resistance while Nifty stalls often leads the broader move.',
+    'notify':            '<strong>Alerts Beyond the Tab</strong>Critical alerts (loss limit, trailing drawdown, S/R shifts, diversion) fire as desktop notifications when this tab is in the background (grant permission when the browser asks), and are relayed to Telegram via the server if alert_config.json is configured — so they reach your phone when you step away.',
+    'suggester-v2':      '<strong>Regime Read (Suggester v2)</strong>Rule engine consuming the full signal stack — IV rank (or session IVP fallback), GEX regime and flip, OC support/resistance WTT/WTB status, term-structure slope, DTE, and spot-vs-max-pain. Each setup cites the exact signals that triggered it and Deploy builds it via the Δ-templates with live strikes. Rules are transparent heuristics, not predictions: high IV + STRONG walls + posGEX → condor; backwardation → calendar; cheap vol + negGEX → backspread; expiry near max pain in pinning regime → butterfly.',
+    'portfolio-agg':     '<strong>Portfolio (Book View)</strong>All open paper positions summed: count, combined live P&amp;L with per-symbol breakdown, and book delta for positions on the currently loaded symbol. Premium sellers manage the BOOK, not individual trades — three delta-neutral positions can still add up to a directional book, which this flags when |Δ| exceeds 0.3.',
+    'suggest-view':      '<strong>View &amp; Risk Filter</strong>Override the auto regime read with your own directional view (bullish / bearish / neutral / big-move), and optionally restrict to defined-risk structures only. With Auto, the engine infers the view from OC WTT/WTB status and IV context. Each suggestion now shows a live quantified preview — actual strikes, POP, credit/debit, max loss and EV computed from the current chain before you deploy.',
+    'iv-rv':             '<strong>IV − Realized Vol Spread</strong>ATM IV minus intraday realized volatility (Parkinson estimator on session high/low, day-scaled, annualized). Positive spread = options are pricing MORE movement than the market is delivering — the core premium-selling edge. Negative = market moving more than options price in — short premium is negative-edge, own gamma instead. Early session readings are noisy (small sample); trust it more after 11:00.',
+    'risk-sizing':       '<strong>Risk-Based Lot Sizing</strong>Enter your max acceptable loss per trade; the builder computes max lots = risk ÷ (max loss per lot) for the current structure and warns when your quantity exceeds it. For undefined-risk structures (naked strangles, ratios) it refuses to size by max loss — those must be sized by margin and delta instead. Sizing decided before entry is the discipline that compounds.',
     'fii-score':         '<strong>FII Activity Score</strong>Directional bias from today\'s FII net flow vs the 5-day average. Bullish when net buying exceeds the recent average. A sustained 3+ day trend is far more significant than a single day spike.',
     'be-distance':       '<strong>Breakeven Distance</strong>How far the underlying must move from current spot to reach each breakeven at expiry. For premium sellers: smaller distance = more at risk. For buyers: the distance tells you how much move you need just to break even before profiting.',
     'kb-lots':           '<strong>Keyboard Lot Shortcuts</strong>In the Builder tab, press + or = to increase the last-clicked leg\'s qty. Press - or _ to decrease. Faster than reaching for the stepper buttons during fast-moving sessions.',
@@ -12243,5 +14556,13 @@
   }
 })();
 </script>
+<div id="pmgrOverlay" class="pmgr-overlay"><div class="pmgr-box">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <b style="font-size:12px;">🗂 Panel Manager</b>
+    <button class="collapse-btn" id="pmgrCloseBtn" style="font-size:14px;">✕</button>
+  </div>
+  <div id="pmgrList"></div>
+  <div style="font-size:9px;color:var(--muted-2);margin-top:8px;">Hidden panels skip rendering too — lighter refreshes.</div>
+</div></div>
 </body>
 </html>

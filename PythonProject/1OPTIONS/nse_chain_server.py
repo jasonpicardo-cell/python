@@ -45,6 +45,31 @@ ENDPOINTS
            `symbol` can be ANY NSE F&O symbol now — index or stock, not
            just the original 4 indices. `expiry` is optional (defaults to
            nearest). `band` is optional (defaults to 12).
+           Also includes: `iv_rank` (flat 0-100, from ./history — needs
+           ≥5 days of data), `futures_price` + `futures_dte` (nearest-month
+           futures for the basis card, best-effort, cached 30s).
+
+    GET /api/oi-timeline?symbol=NIFTY
+        -> {"strikes":[...], "times":["09:18",...], "ce":[[dOI,...]...],
+           "pe":[[...]...]} — 3-min dOI-per-strike grid for the dashboard's
+           OI Flow heatmap. Populated automatically while /api/chain is
+           polled (piggybacks on chain fetches, no extra NSE calls); holds
+           ~6.5h in memory, resets on server restart.
+
+    POST /api/notify   {"message": "..."}
+        -> relays a dashboard alert to Telegram via alert_config.json
+           (rate-limited 1/5s; returns {"sent": bool, "reason"?}).
+
+    GET /api/replay-dates?symbol=NIFTY          -> recorded session dates
+    GET /api/replay-index?symbol=NIFTY&date=YYYY-MM-DD -> snapshot timestamps
+    GET /api/replay-snap?symbol=NIFTY&date=...&i=N     -> one full snapshot
+        Session recorder: one chain snapshot/min saved to ./replay/ while
+        /api/chain is polled. Powers the dashboard's Replay mode.
+
+    GET /api/ltp-history?symbol=NIFTY&strike=24000&side=CE
+        -> {"points":[{"t":epoch,"ltp":...}]} — 1-min LTP samples of one
+           strike/side, collected automatically while /api/chain is polled.
+           Powers the per-leg mini price charts in the Builder.
 
     GET /api/history?symbol=NIFTY&days=1
         -> {"points": [{"t":..., "spot":..., "pcr":..., "atm_iv":...,
@@ -178,6 +203,150 @@ def _get_15m_oi_delta(symbol: str, strikes: list) -> dict:
     return result
 
 
+# ── OI flow timeline (heatmap feed) ──────────────────────────────────────────
+# Finer-grained than the 15-min snapshots: one column every 3 minutes storing
+# ΔOI per strike vs the previous column. Piggybacks on chain fetches (no extra
+# NSE calls), served via GET /api/oi-timeline?symbol=NIFTY in the grid shape
+# the dashboard's heatmap expects.
+# ── Session replay recorder ─────────────────────────────────────────────────
+# Writes one full chain snapshot per minute to ./replay/SYMBOL_YYYY-MM-DD.jsonl
+# so the dashboard can scrub back through the day after close. ~20-60KB/min.
+import os as _os
+_REPLAY_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "replay")
+_REPLAY_INTERVAL = 60
+_replay_due: dict = {}    # sym -> bool (set by chain fetch, consumed after response build)
+_replay_last: dict = {}   # sym -> ts
+
+def _record_replay_snapshot(symbol: str) -> None:
+    sym = symbol.upper()
+    if time.time() - _replay_last.get(sym, 0) >= _REPLAY_INTERVAL:
+        _replay_due[sym] = True
+
+def _write_replay_snapshot(symbol: str, response: dict) -> None:
+    sym = symbol.upper()
+    if not _replay_due.pop(sym, False):
+        return
+    _replay_last[sym] = time.time()
+    try:
+        _os.makedirs(_REPLAY_DIR, exist_ok=True)
+        day = time.strftime("%Y-%m-%d")
+        path = _os.path.join(_REPLAY_DIR, f"{sym}_{day}.jsonl")
+        slim = {k: v for k, v in response.items() if k not in ("strategies",)}
+        slim["_replay_ts"] = int(time.time())
+        with open(path, "a") as f:
+            f.write(json.dumps(slim, separators=(",", ":")) + "\n")
+    except Exception as e:  # noqa: BLE001
+        print(f"[!] Replay snapshot write failed (non-fatal): {e}")
+
+def _replay_index(symbol: str, day: str) -> dict:
+    path = _os.path.join(_REPLAY_DIR, f"{symbol.upper()}_{day}.jsonl")
+    if not _os.path.exists(path):
+        return {"symbol": symbol, "date": day, "timestamps": []}
+    ts = []
+    with open(path) as f:
+        for line in f:
+            try:
+                ts.append(json.loads(line).get("_replay_ts", 0))
+            except Exception:
+                ts.append(0)
+    return {"symbol": symbol, "date": day, "timestamps": ts}
+
+def _replay_snapshot(symbol: str, day: str, idx: int) -> dict | None:
+    path = _os.path.join(_REPLAY_DIR, f"{symbol.upper()}_{day}.jsonl")
+    if not _os.path.exists(path):
+        return None
+    with open(path) as f:
+        for i, line in enumerate(f):
+            if i == idx:
+                try:
+                    return json.loads(line)
+                except Exception:
+                    return None
+    return None
+
+def _replay_dates(symbol: str) -> list:
+    if not _os.path.isdir(_REPLAY_DIR):
+        return []
+    pre = symbol.upper() + "_"
+    return sorted(f[len(pre):-6] for f in _os.listdir(_REPLAY_DIR)
+                  if f.startswith(pre) and f.endswith(".jsonl"))
+
+
+_oi_timeline: dict = {}      # sym -> {times, ce:{k:[..]}, pe:{k:[..]}, _prev:{k:(ce,pe)}, _last_ts}
+_OI_TIMELINE_INTERVAL = 180  # 3 minutes
+_OI_TIMELINE_MAX_COLS = 130  # ~6.5h of samples
+
+def _record_oi_timeline(symbol: str, strikes: list) -> None:
+    now = time.time()
+    sym = symbol.upper()
+    tl = _oi_timeline.setdefault(sym, {"times": [], "ce": {}, "pe": {}, "_prev": {}, "_last_ts": 0.0})
+    if (now - tl["_last_ts"]) < _OI_TIMELINE_INTERVAL:
+        return
+    tl["_last_ts"] = now
+    tl["times"].append(time.strftime("%H:%M", time.localtime(now)))
+    n = len(tl["times"])
+    for s in strikes:
+        k = s.strike
+        ce_oi, pe_oi = (s.ce_oi or 0), (s.pe_oi or 0)
+        prev_ce, prev_pe = tl["_prev"].get(k, (ce_oi, pe_oi))   # first sample = 0 delta
+        tl["ce"].setdefault(k, [0] * (n - 1)).append(ce_oi - prev_ce)
+        tl["pe"].setdefault(k, [0] * (n - 1)).append(pe_oi - prev_pe)
+        tl["_prev"][k] = (ce_oi, pe_oi)
+    # pad strikes missing from this sample, then trim width
+    for d in (tl["ce"], tl["pe"]):
+        for k in d:
+            if len(d[k]) < n:
+                d[k].append(0)
+    if n > _OI_TIMELINE_MAX_COLS:
+        drop = n - _OI_TIMELINE_MAX_COLS
+        tl["times"] = tl["times"][drop:]
+        for d in (tl["ce"], tl["pe"]):
+            for k in d:
+                d[k] = d[k][drop:]
+
+# ── Strike LTP history (mini price charts per builder leg) ──────────────────
+# 1-min LTP samples for every strike, piggybacked on chain fetches. Memory-
+# bounded: ~100 strikes × 2 sides × 390 samples of (ts,ltp) per symbol.
+_ltp_history: dict = {}      # sym -> {"CE": {strike: [(ts, ltp), ...]}, "PE": {...}, "_last_ts": 0}
+_LTP_INTERVAL = 60           # 1 minute
+_LTP_MAX_SAMPLES = 400
+
+def _record_ltp_history(symbol: str, strikes: list) -> None:
+    now = time.time()
+    sym = symbol.upper()
+    st = _ltp_history.setdefault(sym, {"CE": {}, "PE": {}, "_last_ts": 0.0})
+    if (now - st["_last_ts"]) < _LTP_INTERVAL:
+        return
+    st["_last_ts"] = now
+    for s in strikes:
+        for side, ltp in (("CE", s.ce_ltp), ("PE", s.pe_ltp)):
+            if not ltp:
+                continue
+            arr = st[side].setdefault(s.strike, [])
+            arr.append((int(now), round(float(ltp), 2)))
+            if len(arr) > _LTP_MAX_SAMPLES:
+                arr.pop(0)
+
+def _ltp_history_series(symbol: str, strike: float, side: str) -> dict:
+    st = _ltp_history.get(symbol.upper(), {})
+    arr = st.get(side.upper(), {}).get(strike) or st.get(side.upper(), {}).get(int(strike)) or []
+    return {"symbol": symbol, "strike": strike, "side": side.upper(),
+            "points": [{"t": t, "ltp": v} for t, v in arr]}
+
+
+def _oi_timeline_grid(symbol: str) -> dict:
+    """Shape the timeline for the dashboard heatmap: rows=strikes, cols=times."""
+    tl = _oi_timeline.get(symbol.upper())
+    if not tl or not tl["times"]:
+        return {"symbol": symbol, "strikes": [], "times": [], "ce": [], "pe": []}
+    strikes = sorted(set(tl["ce"]) | set(tl["pe"]))
+    n = len(tl["times"])
+    def grid(d):
+        return [(d.get(k, []) + [0] * n)[:n] for k in strikes]
+    return {"symbol": symbol, "strikes": strikes, "times": tl["times"],
+            "ce": grid(tl["ce"]), "pe": grid(tl["pe"])}
+
+
 # ── FII/DII cache ────────────────────────────────────────────────────────────
 _fii_dii_cache: dict = {"data": None, "ts": 0.0}
 _FII_DII_TTL = 300   # 5 minutes
@@ -306,6 +475,53 @@ def _get_india_vix(fetcher: NSESession) -> float | None:
         return _vix_cache["value"]  # serve last-known value if we have one, else None
 
 
+# ── Futures price (basis / cost-of-carry) ────────────────────────────────────
+# Nearest-month futures LTP via the quote-derivative API. Cached 30s per symbol;
+# best-effort — returns (None, None) on any failure so /api/chain never breaks.
+_futures_cache: dict = {}   # symbol -> (ts, (price, dte))
+_FUTURES_TTL = 30.0
+
+def _fetch_futures_price(fetcher: NSESession, symbol: str):
+    sym = symbol.upper()
+    now = time.time()
+    cached = _futures_cache.get(sym)
+    if cached and (now - cached[0]) < _FUTURES_TTL:
+        return cached[1]
+    try:
+        from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+        from datetime import datetime as _dt
+        h = dict(API_HEADERS)
+        h["Referer"] = NSE_OC_PAGE
+        url = f"https://www.nseindia.com/api/quote-derivative?symbol={sym}"
+        r = fetcher.session.get(url, headers=h, timeout=10)
+        if r.status_code != 200:
+            raise NSEFetchError(f"quote-derivative HTTP {r.status_code}")
+        data = r.json()
+        futs = []
+        for st in data.get("stocks", []):
+            meta = st.get("metadata", {})
+            if "Future" not in meta.get("instrumentType", ""):
+                continue
+            try:
+                exp = _dt.strptime(meta.get("expiryDate", ""), "%d-%b-%Y")
+            except ValueError:
+                continue
+            price = meta.get("lastPrice")
+            if price:
+                futs.append((exp, float(price)))
+        if not futs:
+            raise NSEFetchError("no futures rows in quote-derivative payload")
+        futs.sort(key=lambda x: x[0])
+        exp, price = futs[0]
+        dte = max(0, (exp - _dt.now()).days)
+        result = (price, dte)
+        _futures_cache[sym] = (now, result)
+        return result
+    except Exception as e:  # noqa: BLE001 — strictly best-effort
+        print(f"[!] Futures price fetch failed (non-fatal): {e}")
+        return cached[1] if cached else (None, None)
+
+
 def _update_session_ohlc(symbol: str, spot: float) -> None:
     today = time.strftime("%Y-%m-%d")
     sym = symbol.upper()
@@ -350,6 +566,9 @@ def _enrich_strikes_with_oi_delta(symbol: str, strikes: list) -> list[dict]:
     """
     deltas_15m = _get_15m_oi_delta(symbol, strikes)
     _record_oi_snapshot(symbol, strikes)
+    _record_oi_timeline(symbol, strikes)   # 3-min heatmap feed (no extra NSE calls)
+    _record_ltp_history(symbol, strikes)   # 1-min LTP series for leg sparklines
+    _record_replay_snapshot(symbol)        # marks that a snapshot is due (written post-build)
     result = []
     for s in strikes:
         d = asdict(s)
@@ -470,6 +689,9 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
     # IV Rank from collected history (meaningful after ≥5 days of data)
     iv_rank = _compute_iv_rank(symbol, round(atm_iv, 2))
 
+    # Nearest-month futures — basis / cost-of-carry card (best-effort, cached 30s)
+    futures_price, futures_dte = _fetch_futures_price(fetcher, symbol)
+
     response = {
         "symbol": snap.symbol,
         "expiry": snap.expiry,
@@ -482,6 +704,9 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         "atm": atm,
         "atm_iv": round(atm_iv, 2),
         "atm_iv_rank": iv_rank,
+        "iv_rank": iv_rank["rank_pct"] if iv_rank else None,   # flat field for the IV Rank stat card
+        "futures_price": futures_price,
+        "futures_dte": futures_dte,
         "straddle_premium": straddle_premium,
         "strike_gap": strike_gap,
         "lot_size": lot_size,
@@ -1478,6 +1703,7 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[i] {self.command} /api/chain symbol={symbol} expiry={expiry} band={band}")
             try:
                 data = _build_response(symbol, expiry, band)
+                _write_replay_snapshot(symbol, data)   # session recorder (1/min)
                 self._send_json(data)
             except NSEFetchError as e:
                 print(f"[!] Fetch error: {e}")
@@ -1703,6 +1929,46 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"drafts": nse_drafts.get_drafts()})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Could not load drafts: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/ltp-history":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            try:
+                strike = float(qs.get("strike", ["0"])[0])
+            except ValueError:
+                strike = 0.0
+            side = (qs.get("side", ["CE"])[0]).upper()
+            self._send_json(_ltp_history_series(symbol, strike, side))
+            return
+
+        if parsed.path == "/api/replay-dates":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json({"symbol": symbol, "dates": _replay_dates(symbol)})
+            return
+
+        if parsed.path == "/api/replay-index":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            self._send_json(_replay_index(symbol, day))
+            return
+
+        if parsed.path == "/api/replay-snap":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            try:
+                idx = int(qs.get("i", ["0"])[0])
+            except ValueError:
+                idx = 0
+            snap = _replay_snapshot(symbol, day, idx)
+            if snap is None:
+                self._send_json({"error": "snapshot not found"}, status=404)
+            else:
+                self._send_json(snap)
+            return
+
+        if parsed.path == "/api/oi-timeline":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(_oi_timeline_grid(symbol))
             return
 
         if parsed.path == "/api/iv-rank":
@@ -2254,6 +2520,29 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(body_raw) if body_raw else {}
         except Exception as e:  # noqa: BLE001
             self._send_json({"error": f"Invalid request body: {e}"}, status=400)
+            return
+
+        if parsed.path == "/api/notify":
+            # Relay a dashboard alert to Telegram using existing alert_config.json.
+            # Rate-limited to 1 message per 5s to avoid Telegram flood limits.
+            msg = str(body.get("message", "")).strip()[:500]
+            if not msg:
+                self._send_json({"error": "Need message"}, status=400)
+                return
+            try:
+                cfg = nse_alerts.load_config()
+                if not (cfg.get("enabled") and cfg.get("telegram_token") and cfg.get("chat_id")):
+                    self._send_json({"sent": False, "reason": "Telegram disabled — edit alert_config.json (enabled, telegram_token, chat_id)"})
+                    return
+                now = time.time()
+                if now - getattr(self.server, "_last_notify_ts", 0) < 5:
+                    self._send_json({"sent": False, "reason": "rate-limited"})
+                    return
+                self.server._last_notify_ts = now
+                ok = nse_alerts.send_telegram_message(cfg["telegram_token"], cfg["chat_id"], f"📊 Dashboard: {msg}")
+                self._send_json({"sent": bool(ok)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"sent": False, "reason": str(e)})
             return
 
         if parsed.path == "/api/paper-trade/open":
