@@ -272,6 +272,202 @@ def _replay_dates(symbol: str) -> list:
                   if f.startswith(pre) and f.endswith(".jsonl"))
 
 
+# ── Rule-based intraday backtester over recorded replay data ────────────────
+# StockMock-style: time-based entry/exit, ATM-offset or delta strike selection,
+# per-leg SL / profit-lock, combined SL/target. Runs on ./replay/*.jsonl files
+# recorded by this server (1 snapshot/min) — your own data, unlimited runs.
+import math as _math
+
+def _bt_norm_cdf(x):
+    return 0.5 * (1.0 + _math.erf(x / _math.sqrt(2.0)))
+
+def _bt_delta(spot, strike, dte_days, iv_pct, opt_type):
+    try:
+        T = max(0.25, dte_days) / 365.0
+        sig = max(0.005, iv_pct / 100.0)
+        d1 = (_math.log(spot / strike) + (0.07 + sig * sig / 2) * T) / (sig * _math.sqrt(T))
+        return _bt_norm_cdf(d1) if opt_type == "CE" else _bt_norm_cdf(d1) - 1.0
+    except Exception:
+        return None
+
+def _bt_load_day(symbol, day):
+    path = _os.path.join(_REPLAY_DIR, f"{symbol.upper()}_{day}.jsonl")
+    if not _os.path.exists(path):
+        return []
+    snaps = []
+    with open(path) as f:
+        for line in f:
+            try:
+                snaps.append(json.loads(line))
+            except Exception:
+                pass
+    return snaps
+
+def _bt_hhmm(ts):
+    return time.strftime("%H:%M", time.localtime(ts))
+
+def _bt_resolve_strike(snap, leg):
+    """strike_sel: 'ATM', 'ATM+2', 'ATM-1', or 'delta:0.25'."""
+    sel = str(leg.get("strike_sel", "ATM")).upper()
+    gap = snap.get("strike_gap") or 50
+    atm = snap.get("atm")
+    if sel.startswith("DELTA:"):
+        try:
+            target = abs(float(sel.split(":", 1)[1]))
+        except ValueError:
+            return None
+        spot, dte = snap.get("underlying_value"), snap.get("dte", 1)
+        best, bd = None, 1e9
+        for s in snap.get("strikes", []):
+            iv = s.get("ce_iv" if leg["type"] == "CE" else "pe_iv") or 0
+            if iv <= 0.5:
+                continue
+            d = _bt_delta(spot, s["strike"], dte, iv, leg["type"])
+            if d is None:
+                continue
+            diff = abs(abs(d) - target)
+            if diff < bd:
+                bd, best = diff, s["strike"]
+        return best
+    off = 0
+    if sel.startswith("ATM+"):
+        off = int(sel[4:] or 0)
+    elif sel.startswith("ATM-"):
+        off = -int(sel[4:] or 0)
+    return (atm + off * gap) if atm else None
+
+def _bt_ltp(snap, strike, opt_type):
+    for s in snap.get("strikes", []):
+        if s["strike"] == strike:
+            return s.get("ce_ltp" if opt_type == "CE" else "pe_ltp")
+    return None
+
+def run_backtest(symbol, spec):
+    days = spec.get("dates") or _replay_dates(symbol)
+    entry_t, exit_t = spec.get("entry_time", "09:20"), spec.get("exit_time", "15:15")
+    legs_spec = spec.get("legs", [])
+    sl_pct = spec.get("sl_pct")            # per-leg stop, % of entry premium
+    tgt_pct = spec.get("target_pct")       # per-leg profit lock, % of entry premium
+    comb_sl = spec.get("combined_sl")      # ₹ per lot (positive number)
+    comb_tgt = spec.get("combined_target") # ₹ per lot
+    if not legs_spec:
+        return {"error": "Need legs"}
+    results = []
+    for day in days:
+        snaps = _bt_load_day(symbol, day)
+        if len(snaps) < 3:
+            continue
+        lot = snaps[0].get("lot_size") or 50
+        # entry snapshot = first at/after entry_time
+        ei = next((i for i, s in enumerate(snaps) if _bt_hhmm(s.get("_replay_ts", 0)) >= entry_t), None)
+        if ei is None or ei >= len(snaps) - 1:
+            continue
+        entry_snap = snaps[ei]
+        legs = []
+        ok = True
+        for ls in legs_spec:
+            k = _bt_resolve_strike(entry_snap, ls)
+            p = _bt_ltp(entry_snap, k, ls["type"]) if k else None
+            if not k or not p:
+                ok = False
+                break
+            legs.append({"side": ls["side"], "type": ls["type"], "strike": k, "qty": int(ls.get("qty", 1)),
+                         "entry": p, "exit": None, "exit_reason": None, "exit_time": None})
+        if not ok:
+            continue
+        day_min_mtm = 0.0
+        exit_reason = "time"
+        # walk forward
+        for i in range(ei + 1, len(snaps)):
+            snap = snaps[i]
+            hhmm = _bt_hhmm(snap.get("_replay_ts", 0))
+            mtm = 0.0
+            all_closed = True
+            for leg in legs:
+                if leg["exit"] is not None:
+                    mtm += (leg["entry"] - leg["exit"] if leg["side"] == "SELL" else leg["exit"] - leg["entry"]) * leg["qty"]
+                    continue
+                ltp = _bt_ltp(snap, leg["strike"], leg["type"])
+                if ltp is None:
+                    all_closed = False
+                    continue
+                # per-leg SL / target
+                if leg["side"] == "SELL":
+                    if sl_pct and ltp >= leg["entry"] * (1 + sl_pct / 100.0):
+                        leg["exit"], leg["exit_reason"], leg["exit_time"] = ltp, f"leg SL {sl_pct}%", hhmm
+                    elif tgt_pct and ltp <= leg["entry"] * (1 - tgt_pct / 100.0):
+                        leg["exit"], leg["exit_reason"], leg["exit_time"] = ltp, f"profit lock {tgt_pct}%", hhmm
+                else:
+                    if sl_pct and ltp <= leg["entry"] * (1 - sl_pct / 100.0):
+                        leg["exit"], leg["exit_reason"], leg["exit_time"] = ltp, f"leg SL {sl_pct}%", hhmm
+                    elif tgt_pct and ltp >= leg["entry"] * (1 + tgt_pct / 100.0):
+                        leg["exit"], leg["exit_reason"], leg["exit_time"] = ltp, f"profit lock {tgt_pct}%", hhmm
+                cur = leg["exit"] if leg["exit"] is not None else ltp
+                if leg["exit"] is None:
+                    all_closed = False
+                mtm += (leg["entry"] - cur if leg["side"] == "SELL" else cur - leg["entry"]) * leg["qty"]
+            mtm_rs = mtm * lot
+            day_min_mtm = min(day_min_mtm, mtm_rs)
+            # combined SL / target / time exit
+            hit_comb_sl = comb_sl and mtm_rs <= -abs(comb_sl)
+            hit_comb_tgt = comb_tgt and mtm_rs >= abs(comb_tgt)
+            if hit_comb_sl or hit_comb_tgt or hhmm >= exit_t or all_closed:
+                for leg in legs:
+                    if leg["exit"] is None:
+                        ltp = _bt_ltp(snap, leg["strike"], leg["type"])
+                        leg["exit"] = ltp if ltp is not None else leg["entry"]
+                        leg["exit_time"] = hhmm
+                        leg["exit_reason"] = "combined SL" if hit_comb_sl else ("combined target" if hit_comb_tgt else "time exit")
+                exit_reason = "combined SL" if hit_comb_sl else ("combined target" if hit_comb_tgt else ("all legs closed" if all_closed else "time exit"))
+                break
+        pnl = sum((l["entry"] - l["exit"] if l["side"] == "SELL" else l["exit"] - l["entry"]) * l["qty"] for l in legs if l["exit"] is not None) * lot
+        results.append({"date": day, "pnl": round(pnl, 2), "max_dd": round(day_min_mtm, 2),
+                        "exit_reason": exit_reason, "entry_time": _bt_hhmm(entry_snap.get("_replay_ts", 0)),
+                        "legs": legs})
+    if not results:
+        return {"symbol": symbol, "days": [], "summary": {"note": "No usable recorded days for this spec — record more sessions first."}}
+    pnls = [r["pnl"] for r in results]
+    wins = [p for p in pnls if p > 0]
+    summary = {
+        "n_days": len(results), "total": round(sum(pnls), 2),
+        "win_rate": round(len(wins) / len(results) * 100, 1),
+        "avg": round(sum(pnls) / len(results), 2),
+        "best": round(max(pnls), 2), "worst": round(min(pnls), 2),
+        "max_dd": round(min(r["max_dd"] for r in results), 2),
+    }
+    return {"symbol": symbol, "days": results, "summary": summary}
+
+
+# ── Results / earnings calendar (NSE event calendar, cached 1h) ──────────────
+_results_cal_cache = {"ts": 0.0, "data": None}
+
+def _fetch_results_calendar(fetcher):
+    now = time.time()
+    if _results_cal_cache["data"] is not None and now - _results_cal_cache["ts"] < 3600:
+        return _results_cal_cache["data"]
+    try:
+        from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+        h = dict(API_HEADERS)
+        h["Referer"] = NSE_OC_PAGE
+        r = fetcher.session.get("https://www.nseindia.com/api/event-calendar", headers=h, timeout=10)
+        if r.status_code != 200:
+            raise NSEFetchError(f"event-calendar HTTP {r.status_code}")
+        raw = r.json()
+        events = []
+        for e in (raw if isinstance(raw, list) else raw.get("data", [])):
+            purpose = (e.get("purpose") or e.get("bm_purpose") or "")
+            if "result" not in purpose.lower():
+                continue
+            events.append({"symbol": e.get("symbol"), "company": e.get("company") or e.get("sm_name"),
+                           "date": e.get("date") or e.get("bm_date"), "purpose": purpose})
+        events = events[:60]
+        _results_cal_cache.update(ts=now, data=events)
+        return events
+    except Exception as e:  # noqa: BLE001
+        print(f"[!] Results calendar fetch failed (non-fatal): {e}")
+        return _results_cal_cache["data"] or []
+
+
 _oi_timeline: dict = {}      # sym -> {times, ce:{k:[..]}, pe:{k:[..]}, _prev:{k:(ce,pe)}, _last_ts}
 _OI_TIMELINE_INTERVAL = 180  # 3 minutes
 _OI_TIMELINE_MAX_COLS = 130  # ~6.5h of samples
@@ -1941,6 +2137,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(_ltp_history_series(symbol, strike, side))
             return
 
+        if parsed.path == "/api/results-calendar":
+            fetcher = _shared_fetcher or NSESession()
+            self._send_json({"events": _fetch_results_calendar(fetcher)})
+            return
+
         if parsed.path == "/api/replay-dates":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             self._send_json({"symbol": symbol, "dates": _replay_dates(symbol)})
@@ -2520,6 +2721,14 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(body_raw) if body_raw else {}
         except Exception as e:  # noqa: BLE001
             self._send_json({"error": f"Invalid request body: {e}"}, status=400)
+            return
+
+        if parsed.path == "/api/backtest":
+            symbol = (body.get("symbol") or "NIFTY").upper()
+            try:
+                self._send_json(run_backtest(symbol, body))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"Backtest failed: {e}"}, status=500)
             return
 
         if parsed.path == "/api/notify":

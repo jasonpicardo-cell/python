@@ -627,6 +627,42 @@
   /* ── Delta templates ── */
   .dtpl-row { display:flex; gap:5px; flex-wrap:wrap; padding:4px 0; }
   .dtpl-row .btn { font-size:9.5px; padding:3px 10px; }
+  /* ── Gann tab ── */
+  .gann-controls { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; padding:10px 4px; }
+  .gann-controls label { display:flex; flex-direction:column; gap:3px; font-size:10px; color:var(--muted); }
+  .gann-controls .ohlc-inp { width:120px; }
+  .gann-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:820px){ .gann-grid { grid-template-columns:1fr; } }
+  .gann-levels { display:flex; flex-direction:column; gap:3px; font-size:11px; }
+  .gann-lvl-row { display:flex; justify-content:space-between; align-items:center; padding:3px 8px; border-radius:4px; background:var(--panel-2); }
+  .gann-lvl-row .lvl-tag { font-size:9px; font-weight:700; color:var(--muted); }
+  .gann-lvl-row .lvl-val { font-family:'IBM Plex Mono',monospace; font-weight:700; }
+  .gann-lvl-row.res { border-left:3px solid var(--neg); }
+  .gann-lvl-row.sup { border-left:3px solid var(--pos); }
+  .gann-lvl-row.anchor { border-left:3px solid var(--gold); background:rgba(255,193,7,.08); }
+  .gann-lvl-row .lvl-dist { font-size:9px; color:var(--muted-2); }
+  .gann-note { font-size:10px; color:var(--muted-2); padding:12px 6px; line-height:1.5; border-top:1px solid var(--border); margin-top:12px; }
+  .gann-wheel-cell { font-size:8.5px; text-anchor:middle; }
+  .gann-cardinal { fill:var(--neg); font-weight:700; }
+  .gann-diagonal { fill:var(--gold); }
+  .gann-angle-tag { font-size:9px; }
+  /* ── Numerology tab ── */
+  .numo-note { font-size:10px; color:var(--muted-2); padding:12px 10px; line-height:1.6; border:1px solid var(--gold); border-radius:6px; margin-top:14px; background:rgba(255,193,7,.05); }
+  .numo-note b { color:var(--text); }
+  .numo-big { display:flex; align-items:center; gap:16px; padding:10px 4px; }
+  .numo-orb { width:74px; height:74px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:34px; font-weight:800; color:#fff; flex-shrink:0; }
+  .numo-meaning { font-size:11px; color:var(--muted); line-height:1.5; }
+  .numo-meaning b { color:var(--text); }
+  .numo-chain { font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--muted-2); }
+  .numo-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+  .numo-cal-cell { aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    border-radius:4px; font-size:10px; background:var(--panel-2); position:relative; }
+  .numo-cal-cell .cal-day { font-weight:700; color:var(--text); }
+  .numo-cal-cell .cal-root { font-size:8px; }
+  .numo-cal-cell.cal-match { outline:1.5px solid var(--gold); }
+  .numo-cal-head { font-size:8px; color:var(--muted-2); text-align:center; padding:2px; }
+  .numo-wheel-num { font-weight:800; }
   /* ── Live P&L per leg ── */
   .leg-entry-row { display:flex;align-items:center;gap:5px;margin-top:4px;font-size:10px;flex-wrap:wrap; }
   .leg-entry-input { width:68px;padding:2px 5px;background:var(--panel-2);border:1px solid var(--border);
@@ -1651,6 +1687,8 @@
     <button class="tab" data-tab="market">Market View</button>
     <button class="tab" data-tab="paper">Paper Trades</button>
     <button class="tab" data-tab="flow">OI Flow</button>
+    <button class="tab" data-tab="gann">Gann</button>
+    <button class="tab" data-tab="numerology">Numerology</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
     <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
@@ -2951,10 +2989,26 @@
 
       <div class="skew-chart-wrap" id="straddleTrackWrap">
         <div class="skew-chart-head">
-          <span class="skew-chart-title">ATM Straddle — Session<i class="hi" data-h="straddle-track">i</i></span>
+          <span class="skew-chart-title">Multi-Straddle — Session<i class="hi" data-h="straddle-track">i</i></span>
           <span class="chart-legend" id="straddleTrackStats" style="font-size:10px;color:var(--muted-2);"></span>
         </div>
         <div class="straddle-spark-wrap"><div id="straddleSpark" style="flex:1;"></div></div>
+      </div>
+
+      <div class="skew-chart-wrap" id="volSurfaceWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">Volatility Surface<i class="hi" data-h="vol-surface">i</i></span>
+          <span class="chart-legend" style="font-size:9px;color:var(--muted-2);">rows = expiries · cols = strikes</span>
+        </div>
+        <div id="volSurfaceOut" style="overflow-x:auto;"></div>
+      </div>
+
+      <div class="skew-chart-wrap" id="resultsCalWrap">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">📅 Results Calendar<i class="hi" data-h="results-cal">i</i></span>
+          <button class="btn" id="resultsCalLoadBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+        </div>
+        <div id="resultsCalOut"><span class="oc-sub">Upcoming F&O results — click Load. (Needs updated server.)</span></div>
       </div>
 
       <div class="skew-chart-wrap" id="oiTimelineWrap">
@@ -3428,6 +3482,185 @@
         </table>
       </div>
 
+    </section>
+
+    <section id="tab-gann" class="tab-panel">
+      <div class="builder-panel-head"><h3>Gann Analysis<i class="hi" data-h="gann-tab">i</i></h3></div>
+
+      <div class="gann-controls">
+        <label>Price
+          <input type="number" id="gannPrice" class="ohlc-inp" step="0.05" placeholder="auto = spot">
+        </label>
+        <button class="btn" id="gannUseSpot" style="font-size:10px;">Use spot</button>
+        <label>Trend
+          <select id="gannTrend" class="ohlc-inp" style="font-size:11px;">
+            <option value="auto">Auto (vs prev close)</option>
+            <option value="up">Uptrend</option>
+            <option value="down">Downtrend</option>
+          </select>
+        </label>
+        <label>Recent swing high
+          <input type="number" id="gannSwingHigh" class="ohlc-inp" step="0.05" placeholder="optional">
+        </label>
+        <label>Recent swing low
+          <input type="number" id="gannSwingLow" class="ohlc-inp" step="0.05" placeholder="optional">
+        </label>
+        <button class="btn" id="gannCalcBtn" style="font-size:11px;font-weight:700;">Generate</button>
+      </div>
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Square of 9 — Support / Resistance<i class="hi" data-h="gann-sq9">i</i></span></div>
+          <div id="gannSq9Levels" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Square of 9 Wheel<i class="hi" data-h="gann-wheel">i</i></span></div>
+          <div id="gannWheel"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Gann Angles (1×1 fan) from anchor<i class="hi" data-h="gann-angles">i</i></span></div>
+          <div id="gannAngles"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Retracements &amp; Price Squares<i class="hi" data-h="gann-retrace">i</i></span></div>
+          <div id="gannRetrace" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">Time Cycles (Gann dates from anchor)<i class="hi" data-h="gann-time">i</i></span></div>
+          <div id="gannTimeCycles" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Square of 144 (Master Square)<i class="hi" data-h="gann-sq144">i</i></span></div>
+          <div id="gannSq144" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Hexagon Chart levels<i class="hi" data-h="gann-hex">i</i></span></div>
+          <div id="gannHex" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Planetary price lines (Sun / Moon)<i class="hi" data-h="gann-planet">i</i></span></div>
+          <div id="gannPlanet" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Price ⨯ Time squaring dates<i class="hi" data-h="gann-sqtime">i</i></span></div>
+          <div id="gannSqTime" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">⭐ Confluence — Gann levels vs live OC / GEX / max-pain<i class="hi" data-h="gann-confluence">i</i></span></div>
+          <div id="gannConfluence" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">Gann Fan + Square-of-9 chart overlay<i class="hi" data-h="gann-fanchart">i</i></span>
+            <span class="chart-legend" style="font-size:9px;color:var(--muted-2);">spot path · S9 bands · 1×1 fan</span>
+          </div>
+          <div id="gannFanChart"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Natural Squares &amp; 144 grid<i class="hi" data-h="gann-natural">i</i></span></div>
+          <div id="gannNatural" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Anniversary / cycle dates<i class="hi" data-h="gann-anniversary">i</i></span></div>
+          <div id="gannAnniversary" class="gann-levels"></div>
+        </div>
+      </div>
+
+      <div class="gann-note">
+        Gann techniques are geometric/temporal heuristics, not statistical edges. These levels are deterministic
+        transforms of the price you enter — treat them as one lens among many (confluence with OC levels, GEX, and
+        VWAP is where they earn attention), never as standalone signals.
+      </div>
+    </section>
+
+    <section id="tab-numerology" class="tab-panel">
+      <div class="builder-panel-head"><h3>Numerology<i class="hi" data-h="numo-tab">i</i></h3></div>
+
+      <div class="gann-controls">
+        <label>Price / number
+          <input type="number" id="numoPrice" class="ohlc-inp" step="0.05" placeholder="auto = spot">
+        </label>
+        <button class="btn" id="numoUseSpot" style="font-size:10px;">Use spot</button>
+        <label>Date
+          <input type="date" id="numoDate" class="ohlc-inp">
+        </label>
+        <button class="btn" id="numoCalcBtn" style="font-size:11px;font-weight:700;">Generate</button>
+      </div>
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Digit-Root Vibration<i class="hi" data-h="numo-root">i</i></span></div>
+          <div id="numoRoot"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Day's Numerology<i class="hi" data-h="numo-day">i</i></span></div>
+          <div id="numoDay" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">Vibration Levels — nearest strikes sharing the price's root<i class="hi" data-h="numo-levels">i</i></span></div>
+          <div id="numoLevels" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">Digit-Root Wheel (1–9 cycle)<i class="hi" data-h="numo-wheel">i</i></span>
+          </div>
+          <div id="numoWheel"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">Month's root-day calendar<i class="hi" data-h="numo-cal">i</i></span></div>
+          <div id="numoCalendar"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Master Numbers<i class="hi" data-h="numo-master">i</i></span></div>
+          <div id="numoMaster" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Lo Shu Grid<i class="hi" data-h="numo-loshu">i</i></span></div>
+          <div id="numoLoShu"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Special Numbers near price<i class="hi" data-h="numo-special">i</i></span></div>
+          <div id="numoSpecial" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Symbol Numerology<i class="hi" data-h="numo-name">i</i></span></div>
+          <div id="numoName" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">30-Day Root Wave<i class="hi" data-h="numo-wave">i</i></span></div>
+          <div id="numoWave"></div>
+        </div>
+      </div>
+
+      <div class="numo-note">
+        <b>Read this first.</b> Numerology has <b>no established predictive relationship</b> with market prices — these
+        are arithmetic patterns (digit sums, roots) computed from numbers you enter, presented because you asked for the
+        tool, not because they carry a statistical edge. Unlike the OI, IV, and GEX panels elsewhere in this dashboard —
+        which read real positioning data — nothing here is validated against outcomes. Treat it as a curiosity or a
+        discipline-structuring ritual at most, never as a basis for risking capital. Position sizing and stops should
+        always come from the data-driven tools.
+      </div>
     </section>
   </main>
 
@@ -6280,6 +6513,10 @@
     ['cmpTrayPanel', 'Strategy comparison'],
     ['adjustPanel', 'Adjustment suggestions'],
     ['dualStrip', 'Dual-symbol strip'],
+    ['volSurfaceWrap', 'Volatility surface'],
+    ['resultsCalWrap', 'Results calendar'],
+    ['btPanel', 'Rule backtester'],
+    ['stratChartPanel', 'Strategy P&L chart'],
   ];
   const _PMGR_KEY = 'nse_hidden_panels_v1';
   function _hiddenPanels() { try { return new Set(JSON.parse(localStorage.getItem(_PMGR_KEY) || '[]')); } catch (_) { return new Set(); } }
@@ -6817,6 +7054,972 @@
   document.getElementById('oiTimelineLoadBtn')?.addEventListener('click', _loadOiTimeline);
 
   // ======================================================================
+  // FEATURE: Rule Backtester UI (server: POST /api/backtest over replay data)
+  // ======================================================================
+  const _btLegs = [
+    { side: 'SELL', type: 'CE', strike_sel: 'ATM', qty: 1 },
+    { side: 'SELL', type: 'PE', strike_sel: 'ATM', qty: 1 },
+  ];
+  function _renderBtLegs() {
+    const out = document.getElementById('btLegs');
+    if (!out) return;
+    out.innerHTML = _btLegs.map((l, i) => `
+      <div class="dtpl-row" style="align-items:center;" data-bt-leg="${i}">
+        <select class="ohlc-inp" data-bt-f="side" style="font-size:10px;"><option ${l.side==='SELL'?'selected':''}>SELL</option><option ${l.side==='BUY'?'selected':''}>BUY</option></select>
+        <select class="ohlc-inp" data-bt-f="type" style="font-size:10px;"><option ${l.type==='CE'?'selected':''}>CE</option><option ${l.type==='PE'?'selected':''}>PE</option></select>
+        <input class="ohlc-inp" data-bt-f="strike_sel" value="${l.strike_sel}" style="width:76px;font-size:10px;" title="ATM, ATM+2, ATM-1, or delta:0.25">
+        <input class="ohlc-inp" data-bt-f="qty" type="number" value="${l.qty}" min="1" style="width:38px;font-size:10px;">
+        <button class="collapse-btn" data-bt-rm="${i}" style="color:var(--neg);">✕</button>
+      </div>`).join('');
+  }
+  document.getElementById('btBody')?.addEventListener('change', (e) => {
+    const row = e.target.closest('[data-bt-leg]');
+    if (!row) return;
+    const leg = _btLegs[parseInt(row.dataset.btLeg, 10)];
+    const f = e.target.dataset.btF;
+    if (leg && f) leg[f] = f === 'qty' ? parseInt(e.target.value, 10) || 1 : e.target.value.trim();
+  });
+  document.getElementById('btBody')?.addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-bt-rm]');
+    if (rm) { _btLegs.splice(parseInt(rm.dataset.btRm, 10), 1); _renderBtLegs(); }
+  });
+  document.getElementById('btAddLeg')?.addEventListener('click', () => {
+    if (_btLegs.length >= 6) return;
+    _btLegs.push({ side: 'SELL', type: 'CE', strike_sel: 'ATM', qty: 1 });
+    _renderBtLegs();
+  });
+  document.getElementById('btCollapse')?.addEventListener('click', () => {
+    const b = document.getElementById('btBody');
+    const open = b.style.display === 'none';
+    b.style.display = open ? '' : 'none';
+    document.getElementById('btCollapse').textContent = open ? '▾' : '▸';
+    if (open && !document.getElementById('btLegs').innerHTML) _renderBtLegs();
+  });
+  document.getElementById('btRunBtn')?.addEventListener('click', async () => {
+    const status = document.getElementById('btStatus');
+    const out = document.getElementById('btResults');
+    const v = id => document.getElementById(id)?.value;
+    const num = id => { const x = parseFloat(v(id)); return isFinite(x) && x > 0 ? x : null; };
+    status.textContent = 'Running…';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/backtest`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: state.symbol, entry_time: v('btEntry'), exit_time: v('btExit'),
+          sl_pct: num('btSl'), target_pct: num('btTgt'), combined_sl: num('btCsl'), combined_target: num('btCtgt'),
+          legs: _btLegs }) });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      const s = d.summary || {};
+      if (!d.days?.length) { out.innerHTML = `<div class="oc-sub">${escapeHtml(s.note || 'No results')}</div>`; status.textContent = ''; return; }
+      const cards = [
+        statCard('Days', String(s.n_days)),
+        statCard('Total', fmtRupee(s.total), s.total >= 0 ? 'pos' : 'neg'),
+        statCard('Win Rate', s.win_rate + '%', s.win_rate >= 50 ? 'pos' : 'neg'),
+        statCard('Avg / Day', fmtRupee(s.avg), s.avg >= 0 ? 'pos' : 'neg'),
+        statCard('Best / Worst', `${fmtRupee(s.best)} / ${fmtRupee(s.worst)}`),
+        statCard('Max Intraday DD', fmtRupee(s.max_dd), 'neg'),
+      ].join('');
+      const rows = d.days.map(r => `<tr>
+        <td>${r.date}</td>
+        <td class="${r.pnl >= 0 ? 'pos-txt' : 'neg-txt'}" style="font-weight:700;">${fmtRupee(r.pnl)}</td>
+        <td class="neg-txt">${fmtRupee(r.max_dd)}</td>
+        <td class="oc-sub">${escapeHtml(r.exit_reason)}</td>
+        <td class="oc-sub">${r.legs.map(l => `${l.side[0]}${l.type}${fmtInt(l.strike)} ${l.entry}→${l.exit ?? '—'}`).join(' · ')}</td>
+      </tr>`).join('');
+      out.innerHTML = `<div class="pstats-grid">${cards}</div>
+        <table class="cmp-table"><thead><tr><th style="text-align:left;">Date</th><th>P&L</th><th>Max DD</th><th style="text-align:left;">Exit</th><th style="text-align:left;">Legs</th></tr></thead><tbody>${rows}</tbody></table>
+        <div class="oc-sub" style="margin-top:4px;">1-min snapshot granularity — real fills differ (slippage, spreads). More recorded days = more meaningful stats.</div>`;
+      status.textContent = '';
+    } catch (err) { status.textContent = ''; out.innerHTML = `<div class="oc-sub">Backtest unavailable: ${escapeHtml(err.message)} — update nse_chain_server.py.</div>`; }
+  });
+
+  // ======================================================================
+  // FEATURE: Multi-straddle tracking (fixed ATM / ATM±1 strikes from session start)
+  // ======================================================================
+  const _msTrack = { strikes: null, series: {} };   // {k: [{ts, v}]}
+  function _trackMultiStraddle(d) {
+    if (!d?.strikes?.length || !d.atm) return;
+    const gap = d.strike_gap || 50;
+    if (!_msTrack.strikes) _msTrack.strikes = [d.atm - gap, d.atm, d.atm + gap];
+    for (const k of _msTrack.strikes) {
+      const s = d.strikes.find(x => x.strike === k);
+      if (!s || !s.ce_ltp || !s.pe_ltp) continue;
+      const arr = _msTrack.series[k] = _msTrack.series[k] || [];
+      const last = arr[arr.length - 1];
+      if (last && Date.now() - last.ts < 15000) continue;
+      arr.push({ ts: Date.now(), v: s.ce_ltp + s.pe_ltp });
+      if (arr.length > 800) arr.shift();
+    }
+  }
+  const _MS_COLORS = ['var(--gold)', 'var(--accent)', 'var(--pos)'];
+  function renderMultiStraddle() {
+    const out = document.getElementById('straddleSpark');
+    const stats = document.getElementById('straddleTrackStats');
+    if (!out || !_msTrack.strikes) return;
+    const series = _msTrack.strikes.map(k => (_msTrack.series[k] || []).map(p => p.v)).filter(a => a.length > 1);
+    if (series.length < 1) return;
+    const all = series.flat();
+    const mn = Math.min(...all), mx = Math.max(...all), span = Math.max(0.5, mx - mn);
+    const W = 560, H = 74, pad = 6;
+    const lines = series.map((vs0, si) => {
+      let vs = vs0;
+      if (vs.length > 300) { const st = vs.length / 300; vs = Array.from({length: 300}, (_, i) => vs[Math.floor(i * st)]); }
+      const x = i => pad + i / (vs.length - 1) * (W - 2 * pad);
+      const y = v => H - pad - (v - mn) / span * (H - 2 * pad);
+      return `<polyline points="${vs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}" fill="none" stroke="${_MS_COLORS[si]}" stroke-width="${si === 1 ? 1.6 : 1}" opacity="${si === 1 ? 1 : .75}"/>`;
+    }).join('');
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${lines}</svg>`;
+    if (stats) stats.innerHTML = _msTrack.strikes.map((k, i) => {
+      const arr = _msTrack.series[k] || [];
+      const cur = arr.length ? arr[arr.length - 1].v : null;
+      return `<span style="color:${_MS_COLORS[i]}">${fmtInt(k)}: ${cur ? cur.toFixed(0) : '—'}</span>`;
+    }).join(' · ');
+  }
+
+  // ======================================================================
+  // FEATURE: Strategy P&L session chart (formalizes ltpHistory)
+  // ======================================================================
+  function renderStratChart() {
+    const panel = document.getElementById('stratChartPanel');
+    const out = document.getElementById('stratChartOut');
+    if (!panel || !out) return;
+    const hist = builderState.ltpHistory;
+    if (!hist || hist.length < 3 || !builderState.legs.length) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    const lot = state.lastData?.lot_size || 50;
+    const base = hist[0].v;
+    const vs = hist.map(p => (p.v - base) * lot);   // ₹ P&L vs first sample
+    const mn = Math.min(0, ...vs), mx = Math.max(0, ...vs), span = Math.max(1, mx - mn);
+    const W = 560, H = 88, pad = 8;
+    const x = i => pad + i / (vs.length - 1) * (W - 2 * pad);
+    const y = v => H - pad - (v - mn) / span * (H - 2 * pad);
+    const zero = y(0).toFixed(1);
+    const cur = vs[vs.length - 1];
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+      <line x1="${pad}" y1="${zero}" x2="${W - pad}" y2="${zero}" stroke="var(--border)" stroke-width="1"/>
+      <polyline points="${vs.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}" fill="none" stroke="${cur >= 0 ? 'var(--pos)' : 'var(--neg)'}" stroke-width="1.5"/>
+      <circle cx="${x(vs.length - 1)}" cy="${y(cur)}" r="2.5" fill="${cur >= 0 ? 'var(--pos)' : 'var(--neg)'}"/></svg>
+      <div class="oc-sub">Since first sample: <b class="${cur >= 0 ? 'pos-txt' : 'neg-txt'}">${fmtRupee(cur)}</b> · peak ${fmtRupee(mx)} · trough ${fmtRupee(mn)} · ${hist.length} samples</div>`;
+  }
+
+  // ======================================================================
+  // FEATURE: Volatility surface (expiries × strikes IV heatmap)
+  // ======================================================================
+  function renderVolSurface(d) {
+    const out = document.getElementById('volSurfaceOut');
+    if (!out) return;
+    const exps = Object.entries(d.expiries_data || {}).filter(([, i]) => i.strikes?.length).sort((a, b) => (a[1].dte ?? 0) - (b[1].dte ?? 0));
+    if (exps.length < 2) { out.innerHTML = '<span class="oc-sub">Need 2+ expiries in payload.</span>'; return; }
+    const gap = d.strike_gap || 50, atm = d.atm;
+    const cols = Array.from({length: 11}, (_, i) => atm + (i - 5) * gap);
+    let allIvs = [];
+    const grid = exps.map(([exp, info]) => {
+      const bys = {}; for (const s of info.strikes) bys[s.strike] = s;
+      return cols.map(k => {
+        const s = bys[k];
+        if (!s) return null;
+        const ivs = [s.ce_iv, s.pe_iv].filter(v => v > 0.5);
+        if (!ivs.length) return null;
+        const iv = ivs.reduce((a, b) => a + b, 0) / ivs.length;
+        allIvs.push(iv);
+        return iv;
+      });
+    });
+    if (!allIvs.length) { out.innerHTML = '<span class="oc-sub">No IV data.</span>'; return; }
+    const mn = Math.min(...allIvs), mx = Math.max(...allIvs), span = Math.max(0.1, mx - mn);
+    const head = cols.map(k => `<th style="${k === atm ? 'color:var(--text);font-weight:800;' : ''}">${fmtInt(k)}</th>`).join('');
+    const rows = exps.map(([exp, info], r) => {
+      const tds = grid[r].map(iv => {
+        if (iv === null) return '<td class="oc-sub">—</td>';
+        const t = (iv - mn) / span;
+        return `<td style="background:rgba(${Math.round(60 + t * 195)},${Math.round(90 + (1 - t) * 110)},235,${0.15 + t * 0.45});font-weight:${t > .75 ? 700 : 400};">${iv.toFixed(1)}</td>`;
+      }).join('');
+      return `<tr><td class="strike-lbl" style="white-space:nowrap;">${info.dte}d</td>${tds}</tr>`;
+    }).join('');
+    out.innerHTML = `<table class="scen-matrix"><thead><tr><th>DTE ↓</th>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  // ======================================================================
+  // FEATURE: Results calendar loader
+  // ======================================================================
+
+  // ======================================================================
+  // FEATURE: Gann Analysis tab
+  // Square of 9, Gann angles, price retracements/squares, time cycles.
+  // All are deterministic geometric transforms — no external data needed.
+  // ======================================================================
+
+  // Square of 9: price sits on a spiral; ±k×45° rotations give S/R.
+  // Mechanism: sqrt(price), add/subtract (angle/180) per 180°, re-square.
+  function _gannSq9Levels(price) {
+    if (!price || price <= 0) return null;
+    const root = Math.sqrt(price);
+    const degToLevel = deg => {
+      const v = root + deg / 180;      // 180° = +1 to the square root
+      return v > 0 ? v * v : null;
+    };
+    const angles = [45, 90, 135, 180, 225, 270, 315, 360];
+    const res = angles.map(a => ({ deg: a, val: degToLevel(a) })).filter(x => x.val);
+    const sup = angles.map(a => ({ deg: -a, val: degToLevel(-a) })).filter(x => x.val && x.val > 0);
+    return { root, res, sup };
+  }
+
+  // The strongest S9 levels are the 90/180/270/360 (cardinal) — square/opposition.
+  function renderGannSq9(price) {
+    const out = document.getElementById('gannSq9Levels');
+    if (!out) return;
+    const s9 = _gannSq9Levels(price);
+    if (!s9) { out.innerHTML = '<span class="oc-sub">Enter a valid price.</span>'; return; }
+    const fmtRow = (x, kind) => {
+      const strong = Math.abs(x.deg) % 90 === 0;
+      const dist = ((x.val - price) / price * 100);
+      return `<div class="gann-lvl-row ${kind}">
+        <span class="lvl-tag">${x.deg > 0 ? '+' : ''}${x.deg}°${strong ? ' ★' : ''}</span>
+        <span class="lvl-val">${fmtInt(Math.round(x.val))}</span>
+        <span class="lvl-dist">${dist >= 0 ? '+' : ''}${dist.toFixed(2)}%</span>
+      </div>`;
+    };
+    out.innerHTML =
+      s9.res.slice().reverse().map(x => fmtRow(x, 'res')).join('') +
+      `<div class="gann-lvl-row anchor"><span class="lvl-tag">PRICE</span><span class="lvl-val">${fmtInt(Math.round(price))}</span><span class="lvl-dist">√ = ${s9.root.toFixed(2)}</span></div>` +
+      s9.sup.map(x => fmtRow(x, 'sup')).join('');
+  }
+
+  // Square of 9 wheel — concentric rings, cardinal (90°) + diagonal (45°) crosses.
+  function renderGannWheel(price) {
+    const out = document.getElementById('gannWheel');
+    if (!out) return;
+    const s9 = _gannSq9Levels(price);
+    if (!s9) { out.innerHTML = ''; return; }
+    const cx = 150, cy = 150, R = 130;
+    // 8 spokes at 45° intervals, each labeled with its S9 level
+    const spokes = [0, 45, 90, 135, 180, 225, 270, 315];
+    let lines = '', labels = '';
+    spokes.forEach(deg => {
+      const rad = (deg - 90) * Math.PI / 180;
+      const x2 = cx + R * Math.cos(rad), y2 = cy + R * Math.sin(rad);
+      const cardinal = deg % 90 === 0;
+      lines += `<line x1="${cx}" y1="${cy}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--border)" stroke-width="${cardinal ? 1.4 : 0.8}" opacity="${cardinal ? 0.9 : 0.5}"/>`;
+      const lvl = s9.root + deg / 180; const val = lvl * lvl;
+      const lx = cx + (R + 4) * Math.cos(rad), ly = cy + (R + 4) * Math.sin(rad);
+      labels += `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" class="gann-wheel-cell ${cardinal ? 'gann-cardinal' : 'gann-diagonal'}" dominant-baseline="middle" text-anchor="${Math.cos(rad) < -0.3 ? 'end' : Math.cos(rad) > 0.3 ? 'start' : 'middle'}">${fmtInt(Math.round(val))}</text>`;
+    });
+    // concentric rings at each 360° cycle out
+    let rings = '';
+    for (let i = 1; i <= 3; i++) rings += `<circle cx="${cx}" cy="${cy}" r="${R * i / 3}" fill="none" stroke="var(--border)" stroke-width="0.6" opacity="0.4"/>`;
+    out.innerHTML = `<svg viewBox="0 0 300 300" style="width:100%;max-width:320px;height:auto;margin:0 auto;display:block;">
+      ${rings}${lines}${labels}
+      <circle cx="${cx}" cy="${cy}" r="26" fill="var(--panel-2)" stroke="var(--gold)" stroke-width="1.5"/>
+      <text x="${cx}" y="${cy - 3}" text-anchor="middle" class="gann-wheel-cell" style="font-size:11px;font-weight:700;fill:var(--text);">${fmtInt(Math.round(price))}</text>
+      <text x="${cx}" y="${cy + 9}" text-anchor="middle" class="gann-wheel-cell" style="fill:var(--muted-2);">price</text>
+    </svg>`;
+  }
+
+  // Gann angles: 1×1 (45°) is the master; others are price-per-unit-time rays.
+  // We express them as price levels N days forward from the anchor (spot).
+  function renderGannAngles(price, trend) {
+    const out = document.getElementById('gannAngles');
+    if (!out) return;
+    // 1×1 unit = a fraction of price per day. Gann scaled 1 point/unit; on an index
+    // we use a unit of price/√price ≈ √price per day as the 1×1 slope (self-scaling).
+    const unit = Math.sqrt(price) / 2;
+    const ratios = [['8×1', 8], ['4×1', 4], ['2×1', 2], ['1×1', 1], ['1×2', 0.5], ['1×4', 0.25], ['1×8', 0.125]];
+    const dir = trend === 'down' ? -1 : 1;
+    const days = [1, 3, 5, 7];
+    const rows = ratios.map(([lbl, slope]) => {
+      const vals = days.map(dn => Math.round(price + dir * slope * unit * dn));
+      const master = lbl === '1×1';
+      return `<div class="gann-lvl-row ${master ? 'anchor' : (dir > 0 ? 'res' : 'sup')}">
+        <span class="lvl-tag">${lbl}${master ? ' ★' : ''}</span>
+        <span class="lvl-dist" style="flex:1;text-align:right;">${vals.map((v, i) => `${days[i]}d: <b class="lvl-val" style="font-size:10px;">${fmtInt(v)}</b>`).join(' · ')}</span>
+      </div>`;
+    }).join('');
+    out.innerHTML = rows + `<div class="oc-sub" style="margin-top:4px;">Slope unit = √price/2 ≈ ${unit.toFixed(1)} pts/day · ${dir > 0 ? 'projected up' : 'projected down'}. 1×1 is the master balance line.</div>`;
+  }
+
+  // Price retracements (Gann eighths + Fib) and price-squaring targets.
+  function renderGannRetrace(hi, lo, price) {
+    const out = document.getElementById('gannRetrace');
+    if (!out) return;
+    if (!hi || !lo || hi <= lo) {
+      out.innerHTML = '<span class="oc-sub">Enter swing high &amp; low (or they default to session/prev-day range) to see retracements.</span>';
+      return;
+    }
+    const range = hi - lo;
+    // Gann emphasizes eighths; 3/8, 4/8(=1/2), 5/8 are the key reversal zone
+    const gann = [[1, 8], [2, 8], [3, 8], [4, 8], [5, 8], [6, 8], [7, 8]];
+    const rows = gann.map(([n, d]) => {
+      const frac = n / d;
+      const val = lo + range * frac;
+      const key = (n === 3 || n === 4 || n === 5);
+      const near = Math.abs(val - price) / price < 0.002;
+      return `<div class="gann-lvl-row ${near ? 'anchor' : (val > price ? 'res' : 'sup')}">
+        <span class="lvl-tag">${n}/8${key ? ' ★' : ''}</span>
+        <span class="lvl-val">${fmtInt(Math.round(val))}</span>
+        <span class="lvl-dist">${(frac * 100).toFixed(1)}%</span>
+      </div>`;
+    }).join('');
+    // Price squares: hi and lo squared/rooted give Gann natural targets
+    const sqUp = Math.round(Math.pow(Math.sqrt(hi) + 1, 2));
+    const sqDn = Math.round(Math.pow(Math.max(0, Math.sqrt(lo) - 1), 2));
+    out.innerHTML = rows +
+      `<div class="gann-lvl-row res"><span class="lvl-tag">√H+1 sq</span><span class="lvl-val">${fmtInt(sqUp)}</span><span class="lvl-dist">next square up</span></div>` +
+      `<div class="gann-lvl-row sup"><span class="lvl-tag">√L−1 sq</span><span class="lvl-val">${fmtInt(sqDn)}</span><span class="lvl-dist">next square down</span></div>`;
+  }
+
+  // Time cycles: Gann's significant day counts forward from an anchor date.
+  function renderGannTime() {
+    const out = document.getElementById('gannTimeCycles');
+    if (!out) return;
+    const anchor = new Date();
+    const counts = [
+      [45, '1/8 circle'], [90, '¼ circle (square)'], [120, '⅓ circle'],
+      [135, '3/8'], [180, '½ circle (opposition)'], [225, '5/8'],
+      [270, '¾ circle'], [315, '7/8'], [360, 'full circle / year']
+    ];
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+    const rows = counts.map(([n, lbl]) => {
+      const d = new Date(anchor); d.setDate(d.getDate() + n);
+      const strong = [90, 180, 270, 360].includes(n);
+      return `<div class="gann-lvl-row ${strong ? 'anchor' : ''}">
+        <span class="lvl-tag">+${n}d${strong ? ' ★' : ''}</span>
+        <span class="lvl-val" style="font-size:10px;">${fmtD(d)}</span>
+        <span class="lvl-dist">${lbl}</span>
+      </div>`;
+    }).join('');
+    out.innerHTML = `<div class="oc-sub" style="margin-bottom:4px;">Calendar-day cycles from today (${fmtD(anchor)}). Square (90) and opposition (180) days are the classic turn windows.</div>` + rows;
+  }
+
+  function _gannResolveInputs() {
+    const d = state.lastData;
+    const spot = d?.underlying_value;
+    let price = parseFloat(document.getElementById('gannPrice')?.value);
+    if (!price || price <= 0) price = spot || null;
+    let hi = parseFloat(document.getElementById('gannSwingHigh')?.value);
+    let lo = parseFloat(document.getElementById('gannSwingLow')?.value);
+    // default swing range: session OHLC, else prev-day, else ±1% of price
+    if ((!hi || !lo) && d?.session_ohlc?.high && d?.session_ohlc?.low) {
+      hi = hi || d.session_ohlc.high; lo = lo || d.session_ohlc.low;
+    }
+    if ((!hi || !lo) && price) { hi = hi || price * 1.01; lo = lo || price * 0.99; }
+    let trend = document.getElementById('gannTrend')?.value || 'auto';
+    if (trend === 'auto') {
+      const prevClose = (typeof state_ohlc !== 'undefined' && state_ohlc?.close) || d?.session_ohlc?.open;
+      trend = (prevClose && price >= prevClose) ? 'up' : 'down';
+    }
+    return { price, hi, lo, trend };
+  }
+
+  function renderGannTab() {
+    const { price, hi, lo, trend } = _gannResolveInputs();
+    if (!price) {
+      document.getElementById('gannSq9Levels').innerHTML = '<span class="oc-sub">Load the option chain (for spot) or type a price, then Generate.</span>';
+      return;
+    }
+    renderGannSq9(price);
+    renderGannWheel(price);
+    renderGannAngles(price, trend);
+    renderGannRetrace(hi, lo, price);
+    renderGannTime();
+    renderGannConfluence(price);
+    renderGannFanChart(price, trend);
+    renderGannNatural(price);
+    renderGannAnniversary();
+    renderGannSq144(price, lo);
+    renderGannHex(price);
+    renderGannPlanet(price);
+    renderGannSqTime(price, hi, lo);
+  }
+
+  // ── Advanced: confluence of Gann S9 levels with live OC/GEX/max-pain ──
+  function renderGannConfluence(price) {
+    const out = document.getElementById('gannConfluence');
+    if (!out) return;
+    const d = state.lastData;
+    if (!d) { out.innerHTML = '<span class="oc-sub">Load the option chain to cross-reference Gann levels with live positioning.</span>'; return; }
+    const s9 = _gannSq9Levels(price);
+    if (!s9) { out.innerHTML = ''; return; }
+    const gann = [...s9.res.map(x => ({ ...x, kind: 'R' })), ...s9.sup.map(x => ({ ...x, kind: 'S' }))];
+    // reference levels from live data
+    const refs = [];
+    const oc = (typeof computeOcLevels === 'function') ? computeOcLevels(d) : null;
+    if (oc) { refs.push({ label: 'OC Resistance', val: oc.res.strike }); refs.push({ label: 'OC Support', val: oc.sup.strike });
+              if (oc.callHOiRev) refs.push({ label: 'Call reversal', val: oc.callHOiRev });
+              if (oc.putHOiRev) refs.push({ label: 'Put reversal', val: oc.putHOiRev }); }
+    if (d.max_pain) refs.push({ label: 'Max Pain', val: d.max_pain });
+    const gex = (typeof _computeGex === 'function') ? _computeGex(d) : null;
+    if (gex?.flip) refs.push({ label: 'GEX flip', val: gex.flip });
+    if (state._oiWalls?.length) for (const w of state._oiWalls.slice(0, 4)) refs.push({ label: `OI wall ${w.type || ''}`.trim(), val: w.strike });
+    // find Gann levels within 0.35% of any reference
+    const hits = [];
+    for (const g of gann) {
+      for (const r of refs) {
+        const distPct = Math.abs(g.val - r.val) / price * 100;
+        if (distPct <= 0.35) hits.push({ gann: g, ref: r, distPct });
+      }
+    }
+    hits.sort((a, b) => a.distPct - b.distPct);
+    if (!hits.length) { out.innerHTML = '<span class="oc-sub">No Gann level currently within 0.35% of an OC / GEX / max-pain level. Confluence is what makes Gann levels worth watching — none right now.</span>'; return; }
+    out.innerHTML = hits.slice(0, 8).map(h => `
+      <div class="gann-lvl-row ${h.gann.kind === 'R' ? 'res' : 'sup'}">
+        <span class="lvl-tag">S9 ${h.gann.deg > 0 ? '+' : ''}${h.gann.deg}°</span>
+        <span class="lvl-val">${fmtInt(Math.round(h.gann.val))}</span>
+        <span class="lvl-dist" style="flex:1;text-align:right;">↔ <b style="color:var(--gold);">${escapeHtml(h.ref.label)}</b> ${fmtInt(Math.round(h.ref.val))} · ${h.distPct.toFixed(2)}% apart</span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">These are the only Gann levels with live-data backing — treat them as the actionable ones.</div>';
+  }
+
+  // ── Advanced: Gann fan + S9 band overlay on the intraday spot path ──
+  function renderGannFanChart(price, trend) {
+    const out = document.getElementById('gannFanChart');
+    if (!out) return;
+    const hist = (typeof _spotHistory !== 'undefined' ? _spotHistory : []).filter(p => p.val);
+    const W = 680, H = 260, padL = 52, padR = 46, padY = 16;
+    const s9 = _gannSq9Levels(price);
+    // y-range: include spot path + nearest S9 bands
+    const s9vals = s9 ? [...s9.res.slice(0, 3).map(x => x.val), ...s9.sup.slice(0, 3).map(x => x.val)] : [];
+    const pathVals = hist.map(p => p.val);
+    const allV = [...pathVals, ...s9vals, price];
+    if (allV.length < 2) { out.innerHTML = '<span class="oc-sub">Spot history is still collecting — the fan chart fills in as the session runs (needs a few minutes of ticks).</span>'; return; }
+    let mn = Math.min(...allV), mx = Math.max(...allV);
+    const padv = (mx - mn) * 0.08 || price * 0.002; mn -= padv; mx += padv;
+    const span = Math.max(1, mx - mn);
+    const y = v => H - padY - (v - mn) / span * (H - 2 * padY);
+    const n = Math.max(hist.length, 30);
+    const x = i => padL + i / (n - 1) * (W - padL - padR);
+    // S9 horizontal bands
+    let bands = '';
+    if (s9) {
+      for (const lv of [...s9.res.slice(0, 3), ...s9.sup.slice(0, 3)]) {
+        if (lv.val < mn || lv.val > mx) continue;
+        const yy = y(lv.val).toFixed(1);
+        const strong = Math.abs(lv.deg) % 90 === 0;
+        bands += `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="${lv.deg > 0 ? 'var(--neg)' : 'var(--pos)'}" stroke-width="${strong ? 1 : 0.6}" stroke-dasharray="${strong ? '' : '3 3'}" opacity="${strong ? 0.55 : 0.32}"/>
+          <text x="${W - padR + 2}" y="${yy}" dominant-baseline="middle" style="font-size:8px;fill:var(--muted-2);">${fmtInt(Math.round(lv.val))} ${lv.deg > 0 ? '+' : ''}${lv.deg}°</text>`;
+      }
+    }
+    // price line
+    let priceLine = '';
+    if (price >= mn && price <= mx) {
+      const yy = y(price).toFixed(1);
+      priceLine = `<line x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}" stroke="var(--gold)" stroke-width="1.2"/>
+        <text x="${padL - 4}" y="${yy}" text-anchor="end" dominant-baseline="middle" style="font-size:8px;fill:var(--gold);">${fmtInt(Math.round(price))}</text>`;
+    }
+    // Gann 1×1 fan from the first point of the path (or left-center)
+    const anchorI = 0;
+    const anchorV = pathVals.length ? pathVals[0] : price;
+    const unit = Math.sqrt(price) / 2;
+    const dir = trend === 'down' ? -1 : 1;
+    let fan = '';
+    const fanRatios = [[1, 'var(--gold)', 1.3], [2, 'var(--muted-2)', 0.7], [0.5, 'var(--muted-2)', 0.7]];
+    for (const [slope, col, wdt] of fanRatios) {
+      const x1 = x(anchorI), y1 = y(anchorV);
+      const vEnd = anchorV + dir * slope * unit * (n - 1);
+      const x2 = x(n - 1), y2 = y(vEnd);
+      fan += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${col}" stroke-width="${wdt}" opacity="0.7"/>`;
+    }
+    // spot path
+    let path = '';
+    if (pathVals.length > 1) {
+      const step = pathVals.length / Math.min(pathVals.length, 240);
+      const pts = [];
+      for (let i = 0; i < pathVals.length; i += step) pts.push(`${x(Math.floor(i)).toFixed(1)},${y(pathVals[Math.floor(i)]).toFixed(1)}`);
+      path = `<polyline points="${pts.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.4"/>`;
+    }
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+      ${bands}${fan}${priceLine}${path}
+      <line x1="${padL}" y1="${padY}" x2="${padL}" y2="${H - padY}" stroke="var(--border)" stroke-width="0.6"/>
+    </svg>
+    <div class="oc-sub">Blue = intraday spot · gold = 1×1 balance line from session start · red/green dashes = S9 resistance/support bands. Watch where the spot path meets a solid ★ band.</div>`;
+  }
+
+  // ── Advanced: natural squares (n²) around price + Gann's 144 master numbers ──
+  function renderGannNatural(price) {
+    const out = document.getElementById('gannNatural');
+    if (!out) return;
+    const root = Math.sqrt(price);
+    const base = Math.floor(root);
+    const rows = [];
+    for (let k = base - 2; k <= base + 3; k++) {
+      if (k <= 0) continue;
+      const sq = k * k;
+      const mid = k * k + k;        // midpoint (k+0.5)² ≈ k²+k
+      rows.push({ label: `${k}²`, val: sq, strong: true });
+      if (mid < (k + 1) * (k + 1)) rows.push({ label: `${k}²+${k}`, val: mid, strong: false });
+    }
+    const near = rows.reduce((a, b) => Math.abs(b.val - price) < Math.abs(a.val - price) ? b : a, rows[0]);
+    out.innerHTML = rows.map(r => {
+      const isNear = r === near;
+      const rel = r.val > price ? 'res' : 'sup';
+      return `<div class="gann-lvl-row ${isNear ? 'anchor' : rel}">
+        <span class="lvl-tag">${r.label}${r.strong ? ' ★' : ''}</span>
+        <span class="lvl-val">${fmtInt(r.val)}</span>
+        <span class="lvl-dist">${((r.val - price) / price * 100).toFixed(2)}%${isNear ? ' · nearest' : ''}</span>
+      </div>`;
+    }).join('') + `<div class="oc-sub" style="margin-top:4px;">Perfect squares (★) are Gann's strongest natural S/R. Price sitting on one (${fmtInt(near.val)}) often stalls or reverses. 144 = 12² is his master number.</div>`;
+  }
+
+  // ── Advanced: anniversary dates (Gann's yearly + Fibonacci-day cycles) ──
+  function renderGannAnniversary() {
+    const out = document.getElementById('gannAnniversary');
+    if (!out) return;
+    const today = new Date();
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+    // Gann anniversary spans + Fib day counts often watched intraday-to-swing
+    const fibDays = [21, 34, 55, 89, 144, 233];
+    const rows = fibDays.map(n => {
+      const d = new Date(today); d.setDate(d.getDate() + n);
+      const strong = n === 144;
+      return `<div class="gann-lvl-row ${strong ? 'anchor' : ''}">
+        <span class="lvl-tag">+${n}d${strong ? ' ★' : ''}</span>
+        <span class="lvl-val" style="font-size:10px;">${fmtD(d)}</span>
+        <span class="lvl-dist">Fib day</span>
+      </div>`;
+    }).join('');
+    // yearly anniversaries (Gann held prior turning points recur ±1yr)
+    const anniv = [0.25, 0.5, 1, 2].map(yr => {
+      const d = new Date(today); d.setDate(d.getDate() + Math.round(yr * 365));
+      return `<div class="gann-lvl-row">
+        <span class="lvl-tag">${yr === 1 ? '1yr' : yr < 1 ? (yr * 12) + 'mo' : yr + 'yr'}</span>
+        <span class="lvl-val" style="font-size:10px;">${fmtD(d)}</span>
+        <span class="lvl-dist">anniversary</span>
+      </div>`;
+    }).join('');
+    out.innerHTML = rows + anniv + '<div class="oc-sub" style="margin-top:4px;">Count from today. 144 days (★) is Gann\'s key cycle. Anniversaries mark where past turns may echo.</div>';
+  }
+
+  // ── Advanced: Square of 144 — fixed 144-pt master grid from swing low ──
+  function renderGannSq144(price, lo) {
+    const out = document.getElementById('gannSq144');
+    if (!out) return;
+    const anchor = lo && lo > 0 ? lo : price;
+    // levels every 72 (half-cell) from anchor, full 144 multiples are strong
+    const startK = Math.max(0, Math.floor((price - anchor) / 72) - 3);
+    const rows = [];
+    for (let k = startK; k <= startK + 7; k++) {
+      const val = anchor + k * 72;
+      const full = k % 2 === 0;
+      rows.push({ val, full, cells: k / 2 });
+    }
+    const near = rows.reduce((a, b) => Math.abs(b.val - price) < Math.abs(a.val - price) ? b : a, rows[0]);
+    out.innerHTML = rows.reverse().map(r => `
+      <div class="gann-lvl-row ${r === near ? 'anchor' : (r.val > price ? 'res' : 'sup')}">
+        <span class="lvl-tag">${r.full ? `${r.cells}×144 ★` : '½ cell'}</span>
+        <span class="lvl-val">${fmtInt(Math.round(r.val))}</span>
+        <span class="lvl-dist">${((r.val - price) / price * 100).toFixed(2)}%</span>
+      </div>`).join('') +
+      `<div class="oc-sub" style="margin-top:4px;">144-pt cells from anchor ${fmtInt(Math.round(anchor))} (swing low, or price if unset). Gann's Master Square: full-cell multiples (★) outrank halves.</div>`;
+  }
+
+  // ── Advanced: Hexagon chart — centered hexagonal number lattice ──
+  // Ring n ends at 3n(n+1)+1; corners of ring n are spaced n apart.
+  function renderGannHex(price) {
+    const out = document.getElementById('gannHex');
+    if (!out) return;
+    if (!price || price < 7) { out.innerHTML = ''; return; }
+    const n = Math.max(1, Math.round((-3 + Math.sqrt(9 + 12 * (price - 1))) / 6));   // ring containing price
+    const ringStart = k => 3 * k * (k - 1) + 2;      // first cell of ring k
+    const rows = [];
+    for (const k of [n + 1, n]) {
+      const rs = ringStart(k);
+      for (let c = 5; c >= 0; c--) {
+        const corner = rs + c * k;                    // 6 corners spaced k apart
+        if (corner > price * 1.06 || corner < price * 0.94) continue;
+        rows.push({ val: corner, ring: k, cornerIdx: c + 1 });
+      }
+    }
+    rows.sort((a, b) => b.val - a.val);
+    if (!rows.length) { out.innerHTML = '<span class="oc-sub">No hexagon corners within ±6% of price.</span>'; return; }
+    const near = rows.reduce((a, b) => Math.abs(b.val - price) < Math.abs(a.val - price) ? b : a, rows[0]);
+    out.innerHTML = rows.map(r => `
+      <div class="gann-lvl-row ${r === near ? 'anchor' : (r.val > price ? 'res' : 'sup')}">
+        <span class="lvl-tag">ring ${r.ring} · ${r.cornerIdx * 60}°</span>
+        <span class="lvl-val">${fmtInt(r.val)}</span>
+        <span class="lvl-dist">${((r.val - price) / price * 100).toFixed(2)}%</span>
+      </div>`).join('') +
+      `<div class="oc-sub" style="margin-top:4px;">Price sits in hexagon ring ${n} (corner spacing ${n} pts). Gann rotated the hexagon like the Sq9 — 60° corners are its cardinal points.</div>`;
+  }
+
+  // ── Advanced: planetary price lines — Sun & Moon longitude → price ──
+  // Low-precision ephemeris (Sun ±0.01°, Moon ±0.3°) — ample for 1-pt-per-degree lines.
+  function _eclipticLongitudes(date) {
+    const d = (date.getTime() / 86400000) - 10957.5;   // days since J2000
+    const rad = Math.PI / 180;
+    const norm = x => ((x % 360) + 360) % 360;
+    const gs = norm(357.528 + 0.9856003 * d);
+    const sun = norm(280.460 + 0.9856474 * d + 1.915 * Math.sin(gs * rad) + 0.020 * Math.sin(2 * gs * rad));
+    const mm = norm(134.963 + 13.064993 * d);
+    const moon = norm(218.316 + 13.176396 * d + 6.289 * Math.sin(mm * rad));
+    return { sun, moon };
+  }
+  function renderGannPlanet(price) {
+    const out = document.getElementById('gannPlanet');
+    if (!out) return;
+    const { sun, moon } = _eclipticLongitudes(new Date());
+    const mk = (name, lon, harmonics) => {
+      const rows = [];
+      for (const h of harmonics) {
+        const base = norm360(lon + h);
+        const k = Math.round((price - base) / 360);
+        const lvl = k * 360 + base;
+        if (lvl > 0) rows.push({ name: `${name}${h ? ' +' + h + '°' : ''}`, lon: base, val: lvl });
+      }
+      return rows;
+    };
+    function norm360(x) { return ((x % 360) + 360) % 360; }
+    const rows = [...mk('☉ Sun', sun, [0, 90, 180, 270]), ...mk('☾ Moon', moon, [0, 180])]
+      .sort((a, b) => b.val - a.val);
+    const near = rows.reduce((a, b) => Math.abs(b.val - price) < Math.abs(a.val - price) ? b : a, rows[0]);
+    out.innerHTML = rows.map(r => `
+      <div class="gann-lvl-row ${r === near ? 'anchor' : (r.val > price ? 'res' : 'sup')}">
+        <span class="lvl-tag">${r.name}</span>
+        <span class="lvl-val">${fmtInt(Math.round(r.val))}</span>
+        <span class="lvl-dist">${r.lon.toFixed(1)}° · ${((r.val - price) / price * 100).toFixed(2)}%</span>
+      </div>`).join('') +
+      `<div class="oc-sub" style="margin-top:4px;">Gann's planetary conversion at 1 pt/degree: level = n×360 + longitude (+ square/opposition harmonics). Sun ${sun.toFixed(1)}°, Moon ${moon.toFixed(1)}° today. Moon advances ~13°/day, so its lines drift ~13 pts daily.</div>`;
+  }
+
+  // ── Advanced: price ⨯ time squaring — days elapsed = points ranged ──
+  function renderGannSqTime(price, hi, lo) {
+    const out = document.getElementById('gannSqTime');
+    if (!out) return;
+    if (!hi || !lo || hi <= lo) { out.innerHTML = '<span class="oc-sub">Needs swing high/low.</span>'; return; }
+    const today = new Date();
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    const rows = [];
+    for (const [anchorName, range] of [['low', price - lo], ['high', hi - price], ['full range', hi - lo]]) {
+      if (range <= 0) continue;
+      for (const scale of [1, 0.1]) {
+        const days = Math.round(range * scale);
+        if (days < 1 || days > 400) continue;
+        const d = new Date(today); d.setDate(d.getDate() + days);
+        rows.push({ label: `${anchorName} ${scale === 1 ? '1:1' : '1:10'}`, days, date: fmtD(d), pts: Math.round(range) });
+      }
+    }
+    if (!rows.length) { out.innerHTML = '<span class="oc-sub">Ranges too small/large to square in a useful window.</span>'; return; }
+    rows.sort((a, b) => a.days - b.days);
+    out.innerHTML = rows.map(r => `
+      <div class="gann-lvl-row ${r.days <= 10 ? 'anchor' : ''}">
+        <span class="lvl-tag">${r.label}</span>
+        <span class="lvl-val" style="font-size:10px;">${r.date}</span>
+        <span class="lvl-dist">${r.pts} pts ⨯ ${r.days}d${r.days <= 10 ? ' · imminent' : ''}</span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">"Squaring": when time elapsed (days) equals price ranged (points, or ÷10). Gann watched these balance dates for trend changes. Rows marked gold square within 10 days.</div>';
+  }
+
+  document.getElementById('gannCalcBtn')?.addEventListener('click', renderGannTab);
+  document.getElementById('gannUseSpot')?.addEventListener('click', () => {
+    const spot = state.lastData?.underlying_value;
+    if (spot) { document.getElementById('gannPrice').value = Math.round(spot * 100) / 100; renderGannTab(); }
+    else showToast('Load the option chain first to get spot');
+  });
+
+  // ======================================================================
+  // FEATURE: Numerology tab
+  // Digit-root ("vibration") transforms of prices and dates. Presented as a
+  // curiosity — see the on-tab disclaimer. No predictive validity is claimed.
+  // ======================================================================
+  const _NUMO_MEANING = {
+    1: ['Unity / initiation', '#e11d48'], 2: ['Balance / duality', '#f59e0b'],
+    3: ['Expansion', '#22c55e'], 4: ['Structure / resistance', '#3b82f6'],
+    5: ['Change / volatility', '#a855f7'], 6: ['Harmony', '#14b8a6'],
+    7: ['Reflection / pause', '#6366f1'], 8: ['Power / material', '#eab308'],
+    9: ['Completion / turn', '#ef4444'],
+  };
+  function _digitRoot(n) {
+    n = Math.abs(Math.round(n));
+    while (n > 9) n = String(n).split('').reduce((s, d) => s + +d, 0);
+    return n || 0;
+  }
+  function _digitRootChain(n) {
+    const chain = [Math.abs(Math.round(n))];
+    let x = chain[0];
+    while (x > 9) { x = String(x).split('').reduce((s, d) => s + +d, 0); chain.push(x); }
+    return chain;
+  }
+
+  function renderNumoRoot(price) {
+    const out = document.getElementById('numoRoot');
+    if (!out) return;
+    const chain = _digitRootChain(price);
+    const root = chain[chain.length - 1];
+    const [meaning, col] = _NUMO_MEANING[root] || ['—', 'var(--muted)'];
+    out.innerHTML = `<div class="numo-big">
+      <div class="numo-orb" style="background:${col};">${root}</div>
+      <div class="numo-meaning">
+        <b>Price ${fmtInt(Math.round(price))}</b> reduces to <b>${root}</b> — ${escapeHtml(meaning)}<br>
+        <span class="numo-chain">${chain.join(' → ')}</span>
+      </div>
+    </div>`;
+  }
+
+  function renderNumoDay(dateStr) {
+    const out = document.getElementById('numoDay');
+    if (!out) return;
+    const d = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(d)) { out.innerHTML = '<span class="oc-sub">Invalid date.</span>'; return; }
+    const dd = d.getDate(), mm = d.getMonth() + 1, yy = d.getFullYear();
+    const dayRoot = _digitRoot(dd);
+    const fullRoot = _digitRoot(dd + mm + yy);
+    const [dMean, dCol] = _NUMO_MEANING[dayRoot] || ['—', 'var(--muted)'];
+    const [fMean, fCol] = _NUMO_MEANING[fullRoot] || ['—', 'var(--muted)'];
+    const wd = d.toLocaleDateString('en-IN', { weekday: 'long' });
+    out.innerHTML = `
+      <div class="gann-lvl-row anchor"><span class="lvl-tag">DATE</span><span class="lvl-val">${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span><span class="lvl-dist">${wd}</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Day root</span><span class="lvl-val" style="color:${dCol};">${dayRoot}</span><span class="lvl-dist">${escapeHtml(dMean)}</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Full-date root</span><span class="lvl-val" style="color:${fCol};">${fullRoot}</span><span class="lvl-dist">${dd}+${mm}+${yy} → ${escapeHtml(fMean)}</span></div>`;
+  }
+
+  // Nearest strikes/levels that share the price's digit root ("same vibration")
+  function renderNumoLevels(price) {
+    const out = document.getElementById('numoLevels');
+    if (!out) return;
+    const root = _digitRoot(price);
+    const d = state.lastData;
+    const gap = d?.strike_gap || 50;
+    const center = Math.round(price / gap) * gap;
+    const matches = [];
+    for (let k = center - 20 * gap; k <= center + 20 * gap; k += gap) {
+      if (k > 0 && _digitRoot(k) === root) matches.push(k);
+    }
+    // also whole-number "vibration" prices near spot (every value sharing root within ±0.5%)
+    if (!matches.length) { out.innerHTML = `<span class="oc-sub">No strike within ±20 gaps shares root ${root}.</span>`; return; }
+    const near = matches.reduce((a, b) => Math.abs(b - price) < Math.abs(a - price) ? b : a);
+    out.innerHTML = `<div class="oc-sub" style="margin-bottom:4px;">Strikes vibrating to <b style="color:var(--gold);">${root}</b> (same digit root as ${fmtInt(Math.round(price))}) — numerological "resonance" levels:</div>` +
+      matches.map(k => `<div class="gann-lvl-row ${k === near ? 'anchor' : (k > price ? 'res' : 'sup')}">
+        <span class="lvl-tag">root ${root}</span>
+        <span class="lvl-val">${fmtInt(k)}</span>
+        <span class="lvl-dist">${((k - price) / price * 100).toFixed(2)}%${k === near ? ' · nearest' : ''}</span>
+      </div>`).join('');
+  }
+
+  function renderNumoWheel(price) {
+    const out = document.getElementById('numoWheel');
+    if (!out) return;
+    const root = _digitRoot(price);
+    const cx = 150, cy = 130, R = 96;
+    let nodes = '', spokes = '';
+    for (let i = 1; i <= 9; i++) {
+      const ang = (i / 9 * 360 - 90) * Math.PI / 180;
+      const nx = cx + R * Math.cos(ang), ny = cy + R * Math.sin(ang);
+      const [, col] = _NUMO_MEANING[i];
+      const active = i === root;
+      spokes += `<line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="var(--border)" stroke-width="0.5" opacity="0.4"/>`;
+      nodes += `<circle cx="${nx.toFixed(1)}" cy="${ny.toFixed(1)}" r="${active ? 20 : 14}" fill="${col}" opacity="${active ? 1 : 0.4}" ${active ? 'stroke="var(--gold)" stroke-width="2"' : ''}/>
+        <text x="${nx.toFixed(1)}" y="${ny.toFixed(1)}" text-anchor="middle" dominant-baseline="central" class="numo-wheel-num" style="fill:#fff;font-size:${active ? 15 : 11}px;">${i}</text>`;
+    }
+    // connect root to its "harmonics" (i and 10-i, and same-root multiples visually via triangle 3-6-9)
+    const harmonic = [3, 6, 9];
+    let tri = '';
+    if (harmonic.includes(root)) {
+      const pts = harmonic.map(i => { const a = (i / 9 * 360 - 90) * Math.PI / 180; return `${(cx + R * Math.cos(a)).toFixed(1)},${(cy + R * Math.sin(a)).toFixed(1)}`; });
+      tri = `<polygon points="${pts.join(' ')}" fill="none" stroke="var(--gold)" stroke-width="1" stroke-dasharray="4 3" opacity="0.6"/>`;
+    }
+    out.innerHTML = `<svg viewBox="0 0 300 280" style="width:100%;max-width:340px;height:auto;margin:0 auto;display:block;">
+      ${spokes}${tri}${nodes}
+      <text x="${cx}" y="${cy - 4}" text-anchor="middle" style="font-size:11px;fill:var(--muted);">root</text>
+      <text x="${cx}" y="${cy + 12}" text-anchor="middle" style="font-size:18px;font-weight:800;fill:var(--text);">${root}</text>
+    </svg>
+    <div class="oc-sub" style="text-align:center;">${fmtInt(Math.round(price))} vibrates to ${root}. The 3-6-9 triangle is highlighted when the root is one of Tesla's "key" numbers.</div>`;
+  }
+
+  function renderNumoCalendar(dateStr, price) {
+    const out = document.getElementById('numoCalendar');
+    if (!out) return;
+    const base = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(base)) { out.innerHTML = ''; return; }
+    const priceRoot = _digitRoot(price || (state.lastData?.underlying_value) || 0);
+    const yr = base.getFullYear(), mo = base.getMonth();
+    const first = new Date(yr, mo, 1);
+    const daysIn = new Date(yr, mo + 1, 0).getDate();
+    const startWd = first.getDay();
+    const wdHead = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(w => `<div class="numo-cal-head">${w}</div>`).join('');
+    let cells = '';
+    for (let i = 0; i < startWd; i++) cells += '<div class="numo-cal-cell" style="background:transparent;"></div>';
+    for (let dnum = 1; dnum <= daysIn; dnum++) {
+      const r = _digitRoot(dnum + (mo + 1) + yr);
+      const [, col] = _NUMO_MEANING[r] || ['', 'var(--muted)'];
+      const match = priceRoot && r === priceRoot;
+      cells += `<div class="numo-cal-cell ${match ? 'cal-match' : ''}">
+        <span class="cal-day">${dnum}</span>
+        <span class="cal-root" style="color:${col};">${r}</span>
+      </div>`;
+    }
+    out.innerHTML = `<div class="oc-sub" style="margin-bottom:4px;">${base.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })} — each day's full-date root. Gold outline = days sharing the current price's root (${priceRoot || '—'}).</div>
+      <div class="numo-cal-grid">${wdHead}${cells}</div>`;
+  }
+
+  function renderNumoTab() {
+    const spot = state.lastData?.underlying_value;
+    let price = parseFloat(document.getElementById('numoPrice')?.value);
+    if (!price || price <= 0) price = spot || 0;
+    const dateStr = document.getElementById('numoDate')?.value;
+    if (!price) { document.getElementById('numoRoot').innerHTML = '<span class="oc-sub">Load the chain (for spot) or type a number, then Generate.</span>'; }
+    else { renderNumoRoot(price); renderNumoLevels(price); renderNumoWheel(price); renderNumoLoShu(price); renderNumoSpecial(price); }
+    renderNumoDay(dateStr);
+    renderNumoCalendar(dateStr, price);
+    renderNumoMaster(price, dateStr);
+    renderNumoName();
+    renderNumoWave(dateStr, price);
+  }
+  // ── Advanced: master numbers (11/22/33) in the reduction chain ──
+  function renderNumoMaster(price, dateStr) {
+    const out = document.getElementById('numoMaster');
+    if (!out) return;
+    const items = [];
+    const check = (label, n) => {
+      const chain = _digitRootChain(n);
+      const masters = chain.filter(x => x === 11 || x === 22 || x === 33);
+      items.push({ label, n: Math.round(n), chain, masters });
+    };
+    check('Price', price);
+    const d = dateStr ? new Date(dateStr) : new Date();
+    if (!isNaN(d)) {
+      check('Full date', d.getDate() + (d.getMonth() + 1) + d.getFullYear());
+      check('Day', d.getDate());
+    }
+    const anyMaster = items.some(i => i.masters.length);
+    out.innerHTML = items.map(i => `
+      <div class="gann-lvl-row ${i.masters.length ? 'anchor' : ''}">
+        <span class="lvl-tag">${i.label}</span>
+        <span class="numo-chain" style="flex:1;text-align:center;">${i.chain.join(' → ')}</span>
+        <span class="lvl-dist">${i.masters.length ? '★ master ' + i.masters.join(',') : '—'}</span>
+      </div>`).join('') +
+      `<div class="oc-sub" style="margin-top:4px;">Master numbers (11, 22, 33) are flagged when they appear anywhere in the reduction chain — numerologists leave them unreduced. ${anyMaster ? 'One is present today.' : 'None in the current chains.'}</div>`;
+  }
+
+  // ── Advanced: Lo Shu grid — digits of the price placed on the 3×3 magic square ──
+  function renderNumoLoShu(price) {
+    const out = document.getElementById('numoLoShu');
+    if (!out) return;
+    const digits = String(Math.abs(Math.round(price))).split('').map(Number).filter(x => x > 0);
+    const counts = {};
+    for (const dg of digits) counts[dg] = (counts[dg] || 0) + 1;
+    // classic Lo Shu arrangement
+    const grid = [[4, 9, 2], [3, 5, 7], [8, 1, 6]];
+    const cells = grid.map(row => row.map(n => {
+      const cnt = counts[n] || 0;
+      const [, col] = _NUMO_MEANING[n];
+      return `<div class="numo-cal-cell" style="${cnt ? `background:${col};` : 'opacity:.45;'}">
+        <span class="cal-day" style="${cnt ? 'color:#fff;' : ''}">${cnt ? String(n).repeat(Math.min(cnt, 3)) : n}</span>
+        <span class="cal-root" style="${cnt ? 'color:#fff;' : ''}">${cnt ? '×' + cnt : 'absent'}</span>
+      </div>`;
+    }).join('')).join('');
+    const present = Object.keys(counts).map(Number).sort();
+    const missing = [1,2,3,4,5,6,7,8,9].filter(n => !counts[n]);
+    // classic arrow checks (rows/cols/diagonals fully present)
+    const arrows = [];
+    const sets = { 'Mind row (4-9-2)': [4,9,2], 'Emotion row (3-5-7)': [3,5,7], 'Practical row (8-1-6)': [8,1,6],
+                   'Thought col (4-3-8)': [4,3,8], 'Will col (9-5-1)': [9,5,1], 'Action col (2-7-6)': [2,7,6] };
+    for (const [name, set] of Object.entries(sets)) if (set.every(n => counts[n])) arrows.push(name);
+    out.innerHTML = `<div class="numo-cal-grid" style="max-width:200px;margin:0 auto;grid-template-columns:repeat(3,1fr);">${cells}</div>
+      <div class="oc-sub" style="margin-top:6px;">Digits of ${fmtInt(Math.round(price))} on the Lo Shu square. Present: ${present.join(', ') || 'none'} · missing: ${missing.join(', ') || 'none'}.
+      ${arrows.length ? '<br>Complete arrows: <b style="color:var(--gold);">' + arrows.join(' · ') + '</b>' : ''}</div>`;
+  }
+
+  // ── Advanced: special numbers near price (repdigits, palindromes, sequences) ──
+  function renderNumoSpecial(price) {
+    const out = document.getElementById('numoSpecial');
+    if (!out) return;
+    const p = Math.round(price);
+    const lo = Math.floor(p * 0.97), hi = Math.ceil(p * 1.03);
+    const found = [];
+    const isPalin = s => s === [...s].reverse().join('');
+    const isRep = s => /^(\d)\1+$/.test(s);
+    const isSeq = s => { for (let i = 1; i < s.length; i++) if (+s[i] !== (+s[i-1] + 1) % 10) return false; return s.length >= 3; };
+    for (let n = lo; n <= hi; n++) {
+      const s = String(n);
+      if (isRep(s)) found.push({ n, tag: 'repdigit', strong: true });
+      else if (isPalin(s) && s.length >= 4) found.push({ n, tag: 'palindrome', strong: false });
+      else if (isSeq(s)) found.push({ n, tag: 'sequence', strong: false });
+      else if (n % 1000 === 0) found.push({ n, tag: 'millennium', strong: true });
+      else if (n % 500 === 0) found.push({ n, tag: 'half-thousand', strong: false });
+    }
+    if (!found.length) { out.innerHTML = '<span class="oc-sub">No special numbers within ±3%.</span>'; return; }
+    const near = found.reduce((a, b) => Math.abs(b.n - p) < Math.abs(a.n - p) ? b : a, found[0]);
+    out.innerHTML = found.sort((a, b) => b.n - a.n).slice(0, 10).map(f => `
+      <div class="gann-lvl-row ${f === near ? 'anchor' : (f.n > p ? 'res' : 'sup')}">
+        <span class="lvl-tag">${f.tag}${f.strong ? ' ★' : ''}</span>
+        <span class="lvl-val">${fmtInt(f.n)}</span>
+        <span class="lvl-dist">${((f.n - p) / p * 100).toFixed(2)}%</span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Honest note: round thousands (★) DO show real order-clustering effects in market microstructure — that part is documented. Palindromes and repdigits are pure pattern-affinity.</div>';
+  }
+
+  // ── Advanced: symbol name numerology (Pythagorean & Chaldean) ──
+  const _PYTH = {A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,I:9,J:1,K:2,L:3,M:4,N:5,O:6,P:7,Q:8,R:9,S:1,T:2,U:3,V:4,W:5,X:6,Y:7,Z:8};
+  const _CHAL = {A:1,B:2,C:3,D:4,E:5,F:8,G:3,H:5,I:1,J:1,K:2,L:3,M:4,N:5,O:7,P:8,Q:1,R:2,S:3,T:4,U:6,V:6,W:6,X:5,Y:1,Z:7};
+  function renderNumoName() {
+    const out = document.getElementById('numoName');
+    if (!out) return;
+    const sym = (state.symbol || 'NIFTY').toUpperCase();
+    const sum = map => sym.split('').reduce((s, ch) => s + (map[ch] || 0), 0);
+    const py = sum(_PYTH), ch = sum(_CHAL);
+    const pyR = _digitRoot(py), chR = _digitRoot(ch);
+    const [pyM, pyC] = _NUMO_MEANING[pyR], [chM, chC] = _NUMO_MEANING[chR];
+    out.innerHTML = `
+      <div class="gann-lvl-row anchor"><span class="lvl-tag">SYMBOL</span><span class="lvl-val">${escapeHtml(sym)}</span><span class="lvl-dist">${sym.length} letters</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Pythagorean</span><span class="lvl-val" style="color:${pyC};">${py} → ${pyR}</span><span class="lvl-dist">${escapeHtml(pyM)}</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Chaldean</span><span class="lvl-val" style="color:${chC};">${ch} → ${chR}</span><span class="lvl-dist">${escapeHtml(chM)}</span></div>
+      <div class="oc-sub" style="margin-top:4px;">The two classical letter-value systems applied to the traded symbol. Changes only when you switch symbols.</div>`;
+  }
+
+  // ── Advanced: 30-day root wave — step chart of daily full-date roots ──
+  function renderNumoWave(dateStr, price) {
+    const out = document.getElementById('numoWave');
+    if (!out) return;
+    const start = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(start)) { out.innerHTML = ''; return; }
+    const priceRoot = price ? _digitRoot(price) : null;
+    const days = [];
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(start); d.setDate(d.getDate() + i);
+      days.push({ d, root: _digitRoot(d.getDate() + (d.getMonth() + 1) + d.getFullYear()) });
+    }
+    const W = 680, H = 150, padL = 26, padR = 8, padY = 14;
+    const x = i => padL + i / 29 * (W - padL - padR);
+    const y = r => H - padY - (r - 1) / 8 * (H - 2 * padY);
+    // step-line path
+    let path = `M ${x(0)} ${y(days[0].root)}`;
+    for (let i = 1; i < 30; i++) path += ` L ${x(i)} ${y(days[i - 1].root)} L ${x(i)} ${y(days[i].root)}`;
+    let dots = '', marks = '', grid = '';
+    for (let r = 1; r <= 9; r++) grid += `<line x1="${padL}" y1="${y(r)}" x2="${W - padR}" y2="${y(r)}" stroke="var(--border)" stroke-width="0.4" opacity="0.5"/><text x="${padL - 4}" y="${y(r)}" text-anchor="end" dominant-baseline="middle" style="font-size:8px;fill:var(--muted-2);">${r}</text>`;
+    days.forEach((dy, i) => {
+      const [, col] = _NUMO_MEANING[dy.root];
+      const match = priceRoot && dy.root === priceRoot;
+      dots += `<circle cx="${x(i).toFixed(1)}" cy="${y(dy.root).toFixed(1)}" r="${match ? 4 : 2.2}" fill="${col}" ${match ? 'stroke="var(--gold)" stroke-width="1.5"' : ''}/>`;
+      if (i % 5 === 0) marks += `<text x="${x(i).toFixed(1)}" y="${H - 1}" text-anchor="middle" style="font-size:7.5px;fill:var(--muted-2);">${dy.d.getDate()}/${dy.d.getMonth() + 1}</text>`;
+      if (dy.root === 9) marks += `<line x1="${x(i)}" y1="${padY}" x2="${x(i)}" y2="${H - padY}" stroke="var(--neg)" stroke-width="0.5" stroke-dasharray="2 3" opacity="0.5"/>`;
+    });
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+      ${grid}<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity="0.8"/>${dots}${marks}</svg>
+      <div class="oc-sub">Daily full-date roots for 30 days from ${start.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}. Gold-ringed dots share the price root${priceRoot ? ` (${priceRoot})` : ''}; dashed red verticals are 9-days ("completion"). The 9-day sawtooth pattern is a property of mod-9 arithmetic — every date sequence produces it.</div>`;
+  }
+
+  document.getElementById('numoCalcBtn')?.addEventListener('click', renderNumoTab);
+  document.getElementById('numoUseSpot')?.addEventListener('click', () => {
+    const spot = state.lastData?.underlying_value;
+    if (spot) { document.getElementById('numoPrice').value = Math.round(spot * 100) / 100; renderNumoTab(); }
+    else showToast('Load the option chain first to get spot');
+  });
+
+  document.getElementById('resultsCalLoadBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('resultsCalOut');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/results-calendar`);
+      const d = await res.json();
+      if (!d.events?.length) { out.innerHTML = '<span class="oc-sub">No upcoming results found (or NSE calendar unavailable).</span>'; return; }
+      out.innerHTML = `<table class="cmp-table"><tbody>` + d.events.slice(0, 25).map(e =>
+        `<tr><td style="text-align:left;font-weight:700;">${escapeHtml(e.symbol || '')}</td>
+         <td style="text-align:left;" class="oc-sub">${escapeHtml(e.company || '')}</td>
+         <td>${escapeHtml(e.date || '')}</td></tr>`).join('') + '</tbody></table>' +
+        '<div class="oc-sub" style="margin-top:3px;">IV typically ramps into results and crushes after — calendar/long-vol before, avoid short straddles through the event unsized.</div>';
+    } catch (err) { out.innerHTML = `<span class="oc-sub">Unavailable: ${escapeHtml(err.message)} — update server.</span>`; }
+  });
+
+  // ======================================================================
   // UI FIX + FEATURE: collapsible panels (AI suggestions, scenario matrix)
   // ======================================================================
   function _wireCollapse(btnId, panelId) {
@@ -7312,6 +8515,16 @@
         if (!state_ohlc.high) fetchOhlcForPivots();
         if (!scanState.data)  runPivotScanner(false);
       }
+      if (tab.dataset.tab === 'gann') {
+        if (!document.getElementById('gannPrice').value && state.lastData?.underlying_value) {
+          renderGannTab();
+        }
+      }
+      if (tab.dataset.tab === 'numerology') {
+        const dInp = document.getElementById('numoDate');
+        if (dInp && !dInp.value) dInp.value = new Date().toISOString().slice(0, 10);
+        renderNumoTab();
+      }
       if (tab.dataset.tab === 'market') {
         fetchAndRenderHistoryTrend();
         if (state.marketViewDirty && state.lastData) {
@@ -7693,7 +8906,9 @@
     renderOcLevels(data);
     renderGexChart(data);
     renderTermStructure(data);
-    renderStraddleSpark();
+    _trackMultiStraddle(data);
+    renderMultiStraddle();
+    renderVolSurface(data);
     _renderFuturesBasis(data);
     _renderIvRank(data);
     renderVolSurface(data);
@@ -10097,6 +11312,7 @@
     // P&L scenario matrix (spot levels × dates)
     renderScenarioMatrix(builderState.legs, spotRaw, lotSize, analysis.dteNear, expiryDteMap, data.strike_gap || 50);
     _renderRiskSizing(analysis, lotSize);   // loss-limit → max lots
+    renderStratChart();                     // session P&L line
 
     // ---- Aggregate position Greeks (sum of signed per-leg greeks, scaled by qty*lotSize) ----
     let posDelta=0, posGamma=0, posTheta=0, posVega=0;
@@ -10131,6 +11347,33 @@
           <button class="collapse-btn" id="scenMatrixCollapse">▾</button>
         </div>
         <div id="scenMatrixOut" style="max-height:260px;overflow:auto;"></div>
+      </div>
+      <div class="adjust-panel" id="btPanel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:10px;font-weight:700;color:var(--muted);">🧪 Rule Backtester (recorded days)<i class="hi" data-h="backtester">i</i></span>
+          <button class="collapse-btn" id="btCollapse">▸</button>
+        </div>
+        <div id="btBody" style="display:none;">
+          <div class="dtpl-row" style="align-items:center;">
+            Entry <input id="btEntry" class="ohlc-inp" value="09:20" style="width:52px;">
+            Exit <input id="btExit" class="ohlc-inp" value="15:10" style="width:52px;">
+            Leg SL% <input id="btSl" class="ohlc-inp" type="number" value="25" style="width:46px;">
+            Lock% <input id="btTgt" class="ohlc-inp" type="number" placeholder="off" style="width:46px;">
+            Comb SL₹ <input id="btCsl" class="ohlc-inp" type="number" placeholder="off" style="width:60px;">
+            Comb Tgt₹ <input id="btCtgt" class="ohlc-inp" type="number" placeholder="off" style="width:60px;">
+          </div>
+          <div id="btLegs"></div>
+          <div class="dtpl-row">
+            <button class="btn" id="btAddLeg" style="font-size:9px;">+ leg</button>
+            <button class="btn" id="btRunBtn" style="font-size:10px;font-weight:700;">▶ Run backtest</button>
+            <span id="btStatus" class="oc-sub"></span>
+          </div>
+          <div id="btResults"></div>
+        </div>
+      </div>
+      <div class="adjust-panel" id="stratChartPanel" style="display:none;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">📈 Strategy P&amp;L — Session<i class="hi" data-h="strat-chart">i</i></div>
+        <div id="stratChartOut"></div>
       </div>
       <div class="adjust-panel" id="cmpTrayPanel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
@@ -14513,6 +15756,35 @@
     'notify':            '<strong>Alerts Beyond the Tab</strong>Critical alerts (loss limit, trailing drawdown, S/R shifts, diversion) fire as desktop notifications when this tab is in the background (grant permission when the browser asks), and are relayed to Telegram via the server if alert_config.json is configured — so they reach your phone when you step away.',
     'suggester-v2':      '<strong>Regime Read (Suggester v2)</strong>Rule engine consuming the full signal stack — IV rank (or session IVP fallback), GEX regime and flip, OC support/resistance WTT/WTB status, term-structure slope, DTE, and spot-vs-max-pain. Each setup cites the exact signals that triggered it and Deploy builds it via the Δ-templates with live strikes. Rules are transparent heuristics, not predictions: high IV + STRONG walls + posGEX → condor; backwardation → calendar; cheap vol + negGEX → backspread; expiry near max pain in pinning regime → butterfly.',
     'portfolio-agg':     '<strong>Portfolio (Book View)</strong>All open paper positions summed: count, combined live P&amp;L with per-symbol breakdown, and book delta for positions on the currently loaded symbol. Premium sellers manage the BOOK, not individual trades — three delta-neutral positions can still add up to a directional book, which this flags when |Δ| exceeds 0.3.',
+    'backtester':        '<strong>Rule Backtester</strong>StockMock-style testing over YOUR recorded replay data: time-based entry/exit, ATM-offset or delta strike selection (ATM, ATM+2, delta:0.25), per-leg SL%% and profit-lock%%, combined ₹ SL/target. Per-day results with exit reasons plus win rate, avg, and max intraday drawdown. Runs at 1-min snapshot granularity — real fills will differ (slippage, spreads), and stats only become meaningful as recorded days accumulate. Unlimited runs, your data, no subscriptions.',
+    'strat-chart':       '<strong>Strategy P&amp;L Chart</strong>The current Builder position marked-to-market through the session, in ₹ vs the first sample after loading legs. Shows the path, not just the endpoint: a position that went +4k → +1k reads very differently from one that ground steadily to +1k. Resets when legs change.',
+    'vol-surface':       '<strong>Volatility Surface</strong>IV heatmap across expiries (rows, by DTE) and strikes (columns, ATM ±5). Hot cells = expensive vol. Read vertically for term structure at a strike, horizontally for skew at an expiry. Calendar spreads live in vertical gradients; skew trades in horizontal ones.',
+    'results-cal':       '<strong>Results Calendar</strong>Upcoming F&amp;O earnings dates from the NSE event calendar (cached 1h server-side). IV typically ramps into results and crushes after: long-vol/calendar setups favor the ramp, and short straddles held through the event are a vega coin-flip — size accordingly or step aside.',
+    'gann-tab':          '<strong>Gann Analysis</strong>W.D. Gann\'s geometric and time-based techniques applied to your spot/entered price: Square of 9 support/resistance, the S9 wheel, Gann angle fans, price retracements in eighths, price-squaring targets, and calendar time cycles. Important framing: these are deterministic geometric transforms of a single price, not statistical edges — they have no predictive validation the way OI or IV signals do. Their value, if any, is as confluence: a Square-of-9 level that coincides with a max-OI strike or GEX flip is more interesting than either alone. Treat as one lens, never a standalone signal.',
+    'gann-sq9':          '<strong>Square of 9 — S/R</strong>Takes √price, rotates around the spiral by ±45° increments (180° = ±1 on the root), and re-squares to get support/resistance levels. The cardinal angles (90/180/270/360°, marked ★) are the "square" and "opposition" points Gann considered strongest. Levels above the price act as resistance, below as support.',
+    'gann-wheel':        '<strong>Square of 9 Wheel</strong>The spiral shown as 8 spokes at 45° intervals, each labeled with its price level. Red cardinal spokes (90° apart) are the strong square/opposition levels; gold diagonals are the 45° intermediate levels. Concentric rings mark full 360° cycles outward from the price.',
+    'gann-angles':       '<strong>Gann Angles (fan)</strong>Price rays at fixed slopes projected forward from the anchor. The 1×1 (★) is the master balance line — Gann held that price above a rising 1×1 is strong, below it weak. Steeper (2×1, 4×1, 8×1) and shallower (1×2, 1×4, 1×8) fan out around it. Slope self-scales to √price/2 per day since a fixed 1-point/day slope is meaningless on an index. Direction follows the selected trend.',
+    'gann-retrace':      '<strong>Retracements &amp; Squares</strong>Gann favored eighths over Fibonacci: the 3/8, 4/8 (½) and 5/8 band (★) is the key reversal zone of any swing. Computed from swing high/low (defaults to session range if blank). Price-squaring targets (√H+1 squared, √L−1 squared) give the next natural Gann level beyond the range.',
+    'gann-time':         '<strong>Time Cycles</strong>Gann weighted TIME above price. These are calendar-day counts forward from today at the key angular divisions of the circle — the square (90 days) and opposition (180 days) are the classic turning-point windows, with the full circle (360 ≈ 1 year) closing the cycle. Watch for reversals clustering near the ★ dates, especially when they coincide with expiries or events.',
+    'gann-confluence':   '<strong>Gann Confluence</strong>The one Gann panel with live-data backing: it cross-references the Square-of-9 levels against your real positioning signals — OC support/resistance, call/put reversal prices, max pain, GEX flip, OI walls — and surfaces only the Gann levels sitting within 0.35% of one. A geometric level that coincides with the max-OI strike is worth a look; one floating in empty space is just arithmetic. Use these as the actionable subset.',
+    'gann-fanchart':     '<strong>Gann Fan + S9 Overlay</strong>The intraday spot path (blue) with Square-of-9 support/resistance bands (red/green, solid = strong cardinal levels) and a 1×1 balance-line fan projected from the session open (gold). The visual question: is price respecting the S9 bands, and is it above or below the rising/falling 1×1? Fills in as the session accumulates spot ticks.',
+    'gann-natural':      '<strong>Natural Squares</strong>Perfect squares (n²) bracketing the price — Gann considered these the strongest natural support/resistance, since price "squares out" at them. The nearest is highlighted; price sitting on a perfect square often stalls or reverses. 144 (=12²) is his master number. The k²+k midpoints are secondary levels.',
+    'gann-anniversary':  '<strong>Anniversary / Cycle Dates</strong>Fibonacci day-counts (21, 34, 55, 89, 144, 233) and yearly anniversaries forward from today. Gann held that market turns echo at these intervals from a prior pivot — 144 days (★) being the key cycle. Most useful when you anchor mentally from a known significant high or low rather than just today.',
+    'numo-tab':          '<strong>Numerology</strong>Digit-root ("vibration") transforms of prices and dates. IMPORTANT: numerology has no established predictive relationship with markets — everything here is arithmetic (digit sums and roots) computed from numbers you enter, included because you asked for the tool, not because it carries any edge. Unlike the OI/IV/GEX panels that read real data, nothing here is validated against outcomes. Treat it as a curiosity or a discipline ritual; never size positions or set stops from it.',
+    'numo-root':         '<strong>Digit-Root Vibration</strong>Repeatedly sums a number\'s digits until one digit remains (e.g. 24350 → 2+4+3+5+0=14 → 1+4=5). Numerologists call this the number\'s "vibration." The colour and keyword are the traditional associations — decorative, not predictive.',
+    'numo-day':          '<strong>Day Numerology</strong>The digit root of the calendar day, and of the full date (day+month+year summed). In market numerology folklore, days are sometimes grouped by these roots — shown here for interest only, with no claim that price behaves differently on any root-day.',
+    'numo-levels':       '<strong>Vibration Levels</strong>Nearby strikes whose digit root matches the current price\'s root — "same vibration" levels in numerological terms. Presented as a pattern over the strike ladder; there is no evidence these act as real support or resistance. If one happens to coincide with an actual OI wall, that is the OI wall doing the work, not the number.',
+    'numo-wheel':        '<strong>Digit-Root Wheel</strong>The 1–9 cycle as a wheel, with the current price\'s root highlighted. The dashed triangle marks the 3-6-9 set (Tesla\'s "key numbers" in popular lore). Purely illustrative.',
+    'numo-cal':          '<strong>Root-Day Calendar</strong>Each day of the month coloured by its full-date digit root, with days matching the current price\'s root outlined. A visual curiosity for spotting root patterns across the month — not a trading calendar.',
+    'gann-sq144':        '<strong>Square of 144</strong>Gann\'s Master Square: horizontal levels every 144 points (with 72-pt half-cells) counted from the swing-low anchor. Full-cell multiples (★) outrank halves. 144 = 12² was, for Gann, the master unit of both price and time — pair these levels with the 144-day cycle in the anniversary panel.',
+    'gann-hex':          '<strong>Hexagon Chart</strong>Gann\'s other spiral: numbers wound on a hexagonal lattice instead of a square. Ring n has corners spaced n points apart at 60° intervals — shown here are the corner values of the ring containing the price and the next ring out, within ±6%. On Nifty-scale prices the corner spacing (~ring number) lands around 90 points, giving usefully-spaced levels.',
+    'gann-planet':       '<strong>Planetary Price Lines</strong>Gann\'s longitude-to-price conversion at 1 point per degree: level = n×360 + planet longitude, plus square (90°) and opposition (180°) harmonics. Uses a built-in low-precision ephemeris (Sun ±0.01°, Moon ±0.3° — ample at 1 pt/°). Moon lines drift ~13 pts/day, Sun ~1 pt/day. This is the astro-financial corner of Gann\'s work — zero validated edge, included for completeness of the method.',
+    'gann-sqtime':       '<strong>Price ⨯ Time Squaring</strong>Gann\'s signature idea: a move is "square" when time elapsed equals price ranged — e.g. a 250-pt rally squares at 250 days (1:1) or 25 days (1:10). Shown are the upcoming squaring dates for the ranges from your swing low, swing high, and full range. Dates within 10 days are highlighted. Balance points, in Gann\'s framing, are where trends change or accelerate.',
+    'numo-master':       '<strong>Master Numbers</strong>11, 22 and 33 are the numbers numerologists refuse to reduce ("master numbers"). This panel shows the full reduction chain of the price and date and flags any master number appearing at any stage. Arithmetic curiosity — a chain passing through 22 says nothing about tomorrow\'s range.',
+    'numo-loshu':        '<strong>Lo Shu Grid</strong>The price\'s digits placed on the 3×3 Lo Shu magic square (every row, column and diagonal of 4-9-2 / 3-5-7 / 8-1-6 sums to 15). Filled cells show digit counts; classical "arrows" light up when a full row or column is present. A Vedic/Chinese numerology visualization applied to a price — decorative pattern analysis.',
+    'numo-special':      '<strong>Special Numbers</strong>Repdigits (22222), palindromes (24542), sequences (23456) and round thousands within ±3% of price. One honest distinction: round thousands (★) genuinely matter — limit orders demonstrably cluster at round numbers, a documented microstructure effect. The rest is pattern affinity with no market mechanism.',
+    'numo-name':         '<strong>Symbol Numerology</strong>The traded symbol\'s letters valued under the two classical systems — Pythagorean (A=1…I=9 repeating) and Chaldean (sound-based, no 9) — summed and reduced. Follows whichever symbol you have loaded.',
+    'numo-wave':         '<strong>30-Day Root Wave</strong>The daily full-date digit root plotted as a step chart for the next 30 days. Gold-ringed dots share the price\'s root; red dashed lines mark 9-days ("completion" in numerology). Worth knowing: the perfect 1-through-9 sawtooth is a property of mod-9 arithmetic itself — every date sequence produces exactly this wave, which is a good intuition for why date numerology can\'t discriminate between days in any market-relevant way.',
     'suggest-view':      '<strong>View &amp; Risk Filter</strong>Override the auto regime read with your own directional view (bullish / bearish / neutral / big-move), and optionally restrict to defined-risk structures only. With Auto, the engine infers the view from OC WTT/WTB status and IV context. Each suggestion now shows a live quantified preview — actual strikes, POP, credit/debit, max loss and EV computed from the current chain before you deploy.',
     'iv-rv':             '<strong>IV − Realized Vol Spread</strong>ATM IV minus intraday realized volatility (Parkinson estimator on session high/low, day-scaled, annualized). Positive spread = options are pricing MORE movement than the market is delivering — the core premium-selling edge. Negative = market moving more than options price in — short premium is negative-edge, own gamma instead. Early session readings are noisy (small sample); trust it more after 11:00.',
     'risk-sizing':       '<strong>Risk-Based Lot Sizing</strong>Enter your max acceptable loss per trade; the builder computes max lots = risk ÷ (max loss per lot) for the current structure and warns when your quantity exceeds it. For undefined-risk structures (naked strangles, ratios) it refuses to size by max loss — those must be sized by margin and delta instead. Sizing decided before entry is the discipline that compounds.',
