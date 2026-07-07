@@ -1688,7 +1688,9 @@
     <button class="tab" data-tab="paper">Paper Trades</button>
     <button class="tab" data-tab="flow">OI Flow</button>
     <button class="tab" data-tab="gann">Gann</button>
+    <button class="tab" data-tab="levels">Levels</button>
     <button class="tab" data-tab="numerology">Numerology</button>
+    <button class="tab" data-tab="astro">Astrology</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
     <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
@@ -1742,12 +1744,17 @@
         <div class="home-left">
           <!-- ── Morning Pre-Session Checklist ─────────────────── -->
           <div class="checklist-panel" id="checklistPanel">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;cursor:pointer;" id="checklistHead">
               <span class="skew-chart-title">☑ Pre-Session Checklist<i class="hi" data-h="morning-checklist">i</i></span>
-              <span id="checklistProgress" style="font-size:9px;color:var(--muted-2);"></span>
+              <span style="display:flex;gap:8px;align-items:center;">
+                <span id="checklistProgress" style="font-size:9px;color:var(--muted-2);"></span>
+                <button class="collapse-btn" id="checklistCollapse">▸</button>
+              </span>
             </div>
-            <div id="checklistItems"></div>
-            <div class="checklist-progress"><div class="checklist-progress-fill" id="checklistBar" style="width:0%"></div></div>
+            <div id="checklistBody" style="display:none;">
+              <div id="checklistItems"></div>
+              <div class="checklist-progress"><div class="checklist-progress-fill" id="checklistBar" style="width:0%"></div></div>
+            </div>
           </div>
 
           <!-- ── AI Strategy Suggestions ──────────────────────────── -->
@@ -3576,12 +3583,108 @@
           <div class="skew-chart-head"><span class="skew-chart-title">Anniversary / cycle dates<i class="hi" data-h="gann-anniversary">i</i></span></div>
           <div id="gannAnniversary" class="gann-levels"></div>
         </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">☉ Price⨯Sun timing (S9 angle dates)<i class="hi" data-h="gann-sun-time">i</i></span></div>
+          <div id="gannSunTime" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Swing Campaign Analyzer<i class="hi" data-h="gann-swings">i</i></span></div>
+          <div id="gannSwings" class="gann-levels"></div>
+        </div>
       </div>
 
       <div class="gann-note">
         Gann techniques are geometric/temporal heuristics, not statistical edges. These levels are deterministic
         transforms of the price you enter — treat them as one lens among many (confluence with OC levels, GEX, and
         VWAP is where they earn attention), never as standalone signals.
+      </div>
+    </section>
+
+    <section id="tab-levels" class="tab-panel">
+      <div class="builder-panel-head"><h3>Market Levels<i class="hi" data-h="levels-tab">i</i></h3></div>
+
+      <div class="gann-controls">
+        <button class="btn" id="levelsGenBtn" style="font-size:11px;font-weight:700;">Generate all</button>
+        <span class="oc-sub" id="levelsStatus">Uses prev-day OHLC + session data + live spot. Data-measured panels need the updated server.</span>
+      </div>
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">👑 Master Confluence Ladder — every source, one ranking<i class="hi" data-h="lvl-master">i</i></span></div>
+          <div id="lvlMaster" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">🎓 Level Report Card (measured)<i class="hi" data-h="lvl-stats">i</i></span>
+            <button class="btn" id="lvlStatsBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="lvlStats" class="gann-levels"><span class="oc-sub">Bounce rates of round levels, from your replay archive.</span></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Camarilla Pivots<i class="hi" data-h="lvl-camarilla">i</i></span></div>
+          <div id="lvlCamarilla" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Murrey Math (8/8ths)<i class="hi" data-h="lvl-murrey">i</i></span></div>
+          <div id="lvlMurrey" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Fibonacci Confluence Clusters<i class="hi" data-h="lvl-fibclust">i</i></span></div>
+          <div id="lvlFibClusters" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Round-Number Grid<i class="hi" data-h="lvl-round">i</i></span></div>
+          <div id="lvlRound" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Square of 12 grid<i class="hi" data-h="lvl-sq12">i</i></span></div>
+          <div id="lvlSq12" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Harmonic Pattern Scanner<i class="hi" data-h="lvl-harmonic">i</i></span></div>
+          <div id="lvlHarmonic" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">📊 TPO Levels — naked POCs &amp; value areas (measured)<i class="hi" data-h="lvl-tpo">i</i></span>
+            <button class="btn" id="lvlTpoBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="lvlTpo" class="gann-levels"><span class="oc-sub">From your replay archive — click Load.</span></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">🧲 Max-Pain Magnet — measured<i class="hi" data-h="lvl-mpstats">i</i></span>
+            <button class="btn" id="lvlMpBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="lvlMpStats" class="gann-levels"><span class="oc-sub">From your replay archive — click Load.</span></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">🕐 Time-of-Day Seasonality<i class="hi" data-h="lvl-tod">i</i></span>
+            <button class="btn" id="lvlTodBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="lvlTod"><span class="oc-sub">From your replay archive — click Load.</span></div>
+        </div>
+      </div>
+
+      <div class="gann-note">
+        Tiering, honestly: Camarilla / Murrey / round numbers carry real order-flow gravity in Indian markets because
+        thousands of traders watch them — self-fulfilling, not mystical. Fib clusters are defensible via the confluence
+        logic. Square-of-12 and harmonics sit in the same geometric tier as the Gann tab. The measured panels (TPO,
+        max-pain, seasonality) are the strongest of all: they are YOUR recorded data answering "do these levels actually
+        hold?" — trust them in that order.
       </div>
     </section>
 
@@ -3651,6 +3754,29 @@
           <div class="skew-chart-head"><span class="skew-chart-title">30-Day Root Wave<i class="hi" data-h="numo-wave">i</i></span></div>
           <div id="numoWave"></div>
         </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">🌙 Lunar Phases &amp; Aspects<i class="hi" data-h="numo-lunar">i</i></span></div>
+          <div id="numoLunar" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">🕉 Panchang (Tithi / Nakshatra)<i class="hi" data-h="numo-panchang">i</i></span></div>
+          <div id="numoPanchang" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Personal Day Cycle<i class="hi" data-h="numo-personal">i</i></span></div>
+          <div class="dtpl-row" style="align-items:center;">
+            <label style="font-size:9px;color:var(--muted);">DOB <input type="date" id="numoDob" class="ohlc-inp" style="width:130px;"></label>
+          </div>
+          <div id="numoPersonal" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">🔬 Digit Reality Check (measured)<i class="hi" data-h="numo-reality">i</i></span></div>
+          <div id="numoReality"></div>
+        </div>
       </div>
 
       <div class="numo-note">
@@ -3660,6 +3786,80 @@
         which read real positioning data — nothing here is validated against outcomes. Treat it as a curiosity or a
         discipline-structuring ritual at most, never as a basis for risking capital. Position sizing and stops should
         always come from the data-driven tools.
+      </div>
+    </section>
+
+    <section id="tab-astro" class="tab-panel">
+      <div class="builder-panel-head"><h3>Astrology<i class="hi" data-h="astro-tab">i</i></h3></div>
+
+      <div class="gann-controls">
+        <label>Zodiac
+          <select id="astroZodiac" class="ohlc-inp" style="font-size:11px;">
+            <option value="sidereal">Sidereal (Lahiri) — Vedic</option>
+            <option value="tropical">Tropical — Western</option>
+          </select>
+        </label>
+        <label>Date
+          <input type="date" id="astroDate" class="ohlc-inp">
+        </label>
+        <button class="btn" id="astroGenBtn" style="font-size:11px;font-weight:700;">Generate</button>
+        <span class="oc-sub">Built-in ephemeris: Sun ±0.01°, Moon ±0.3°, planets ±1°.</span>
+      </div>
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">Zodiac Wheel<i class="hi" data-h="astro-wheel">i</i></span></div>
+          <div id="astroWheel"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Planetary Positions<i class="hi" data-h="astro-positions">i</i></span></div>
+          <div id="astroPositions" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Aspects in Effect<i class="hi" data-h="astro-aspects">i</i></span></div>
+          <div id="astroAspects" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Upcoming Exact Aspects (30d)<i class="hi" data-h="astro-upcoming">i</i></span></div>
+          <div id="astroUpcoming" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Retrograde Stations (120d)<i class="hi" data-h="astro-retro">i</i></span></div>
+          <div id="astroRetro" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">Planetary Price Lines (all planets)<i class="hi" data-h="astro-lines">i</i></span></div>
+          <div id="astroLines" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Nifty "Natal" Transits<i class="hi" data-h="astro-natal">i</i></span></div>
+          <div id="astroNatal" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">☾ Moon Ingress & Void-of-Course (7d)<i class="hi" data-h="astro-moon">i</i></span></div>
+          <div id="astroMoon" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">Planetary Hours (today, Mumbai sunrise)<i class="hi" data-h="astro-hours">i</i></span></div>
+          <div id="astroHours"></div>
+        </div>
+      </div>
+
+      <div class="numo-note">
+        <b>Same honesty as the Numerology tab.</b> The astronomy here is real — positions, aspects, retrogrades and the
+        Vedic sidereal option are computed correctly from Keplerian elements, and you can check them against any
+        ephemeris. The astrology — the idea that these configurations influence markets — has no established empirical
+        support. Financial-astrology studies do not replicate. Use this as the calendar/context layer you enjoy, keep
+        position sizing and stops with the data tools, and if a planetary line ever "works," remember the round-number
+        and OI panels were probably at the same price.
       </div>
     </section>
   </main>
@@ -4427,6 +4627,7 @@
         lossLimit:       get('lossLimitInput')?.value,
         checklistGate:   get('checklistGate')?.checked,
         riskPerTrade:    get('riskPerTradeInput')?.value,
+        numoDob:         get('numoDob')?.value,
         trailDd:         get('trailDdInput')?.value,
         ivAlertOn:       get('ivAlertEnabled')?.checked,
         veloAlertOn:     get('veloAlertEnabled')?.checked,
@@ -4468,6 +4669,7 @@
       set('lossLimitInput', s.lossLimit);
       set('checklistGate', s.checklistGate, 'checked');
       set('riskPerTradeInput', s.riskPerTrade);
+      set('numoDob', s.numoDob);
       set('trailDdInput', s.trailDd);
       set('ivAlertEnabled', s.ivAlertOn, 'checked');
       set('veloAlertEnabled', s.veloAlertOn, 'checked');
@@ -5421,6 +5623,16 @@
     _renderChecklist();
   };
   _renderChecklist();
+
+  // Pre-session checklist: minimized by default; header (or ▸) toggles
+  document.getElementById('checklistHead')?.addEventListener('click', (e) => {
+    if (e.target.closest('.hi')) return;   // don't toggle when tapping the (i) help icon
+    const body = document.getElementById('checklistBody');
+    const btn = document.getElementById('checklistCollapse');
+    const open = body.style.display === 'none';
+    body.style.display = open ? '' : 'none';
+    if (btn) btn.textContent = open ? '▾' : '▸';
+  });
 
   // ======================================================================
   // FEATURE: Multi-symbol watchlist alerts (support/resistance crossings)
@@ -6564,16 +6776,55 @@
   // ======================================================================
   const _DUAL_PAIR = { NIFTY: 'BANKNIFTY', BANKNIFTY: 'NIFTY' };
   let _dualTimer = null;
+  let _dualPrevSpot = null;   // other-symbol prev spot for crossing detection
+  const _dualAlerted = new Set();
+
+  // Level alerts (incl. voice) for the OTHER index — runs on every dual fetch,
+  // regardless of whether the strip panel is visible. NIFTY & BANKNIFTY are
+  // both covered whichever one is loaded.
+  function _checkDualAlerts(other, d) {
+    const spot = d.underlying_value;
+    if (!spot) return;
+    // reset baseline when the "other" symbol changes (user switched tabs) —
+    // comparing NIFTY prev vs BANKNIFTY spot would fake-cross every level
+    if (_checkDualAlerts._for !== other) { _checkDualAlerts._for = other; _dualPrevSpot = null; }
+    const prev = _dualPrevSpot;
+    _dualPrevSpot = spot;
+    if (!prev || prev === spot) return;
+    const oc = computeOcLevels(d);
+    const lo = Math.min(prev, spot), hi = Math.max(prev, spot);
+    const checks = [
+      [oc?.res?.strike, `${other} Resistance`, 'r'],
+      [oc?.sup?.strike, `${other} Support`, 's'],
+      [d.max_pain, `${other} Max Pain`, 'r'],
+    ];
+    for (const [level, label, pol] of checks) {
+      if (!level) continue;
+      const key = `${other}:${label}:${level}`;
+      if (_dualAlerted.has(key)) {
+        if (Math.abs(spot - level) / level > 0.003) _dualAlerted.delete(key);  // re-arm
+        continue;
+      }
+      if (lo <= level && level <= hi) {
+        _dualAlerted.add(key);
+        console.log(`[dual] ${label} ${level} crossed by ${prev}→${spot}`);
+        alertLevelTouch(label, level, pol);
+      }
+    }
+  }
+
   async function _refreshDualStrip() {
-    const strip = document.getElementById('dualStrip');
-    if (!strip || _isPanelHidden('dualStrip')) return;
     const other = _DUAL_PAIR[state.symbol];
-    if (!other) { strip.style.display = 'none'; return; }
+    if (!other) return;
+    const strip = document.getElementById('dualStrip');
+    const stripVisible = strip && !_isPanelHidden('dualStrip');
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const res = await fetch(`${base}/api/chain?symbol=${other}`);
       if (!res.ok) throw new Error(String(res.status));
       const d = await res.json();
+      _checkDualAlerts(other, d);          // ← alerts fire even if strip hidden
+      if (!stripVisible) return;
       const oc = computeOcLevels(d);
       const gex = _computeGex(d);
       const gexTag = gex ? (gex.total >= 0 ? '<b style="color:var(--pos)">+GEX</b>' : '<b style="color:var(--neg)">−GEX</b>') : '';
@@ -6586,7 +6837,7 @@
         <span>R ${oc ? fmtInt(oc.res.strike) : '—'} <span class="oc-sub">${resSt}</span></span>
         ${gexTag}
         <span class="oc-sub">IV ${d.atm_iv?.toFixed(1)}</span><i class="hi" data-h="dual-strip">i</i>`;
-    } catch (_) { strip.style.display = 'none'; }
+    } catch (_) { if (strip) strip.style.display = 'none'; }
   }
   clearInterval(_dualTimer);
   _dualTimer = setInterval(_refreshDualStrip, 60000);
@@ -7416,19 +7667,21 @@
       document.getElementById('gannSq9Levels').innerHTML = '<span class="oc-sub">Load the option chain (for spot) or type a price, then Generate.</span>';
       return;
     }
-    renderGannSq9(price);
-    renderGannWheel(price);
-    renderGannAngles(price, trend);
-    renderGannRetrace(hi, lo, price);
-    renderGannTime();
-    renderGannConfluence(price);
-    renderGannFanChart(price, trend);
-    renderGannNatural(price);
-    renderGannAnniversary();
-    renderGannSq144(price, lo);
-    renderGannHex(price);
-    renderGannPlanet(price);
-    renderGannSqTime(price, hi, lo);
+    _safe(() => renderGannSq9(price), 'renderGannSq9');
+    _safe(() => renderGannWheel(price), 'renderGannWheel');
+    _safe(() => renderGannAngles(price, trend), 'renderGannAngles');
+    _safe(() => renderGannRetrace(hi, lo, price), 'renderGannRetrace');
+    _safe(() => renderGannTime(), 'renderGannTime');
+    _safe(() => renderGannConfluence(price), 'renderGannConfluence');
+    _safe(() => renderGannFanChart(price, trend), 'renderGannFanChart');
+    _safe(() => renderGannNatural(price), 'renderGannNatural');
+    _safe(() => renderGannAnniversary(), 'renderGannAnniversary');
+    _safe(() => renderGannSq144(price, lo), 'renderGannSq144');
+    _safe(() => renderGannHex(price), 'renderGannHex');
+    _safe(() => renderGannPlanet(price), 'renderGannPlanet');
+    _safe(() => renderGannSqTime(price, hi, lo), 'renderGannSqTime');
+    _safe(() => renderGannSunTime(price), 'renderGannSunTime');
+    _safe(() => renderGannSwings(), 'renderGannSwings');
   }
 
   // ── Advanced: confluence of Gann S9 levels with live OC/GEX/max-pain ──
@@ -7449,7 +7702,8 @@
     if (d.max_pain) refs.push({ label: 'Max Pain', val: d.max_pain });
     const gex = (typeof _computeGex === 'function') ? _computeGex(d) : null;
     if (gex?.flip) refs.push({ label: 'GEX flip', val: gex.flip });
-    if (state._oiWalls?.length) for (const w of state._oiWalls.slice(0, 4)) refs.push({ label: `OI wall ${w.type || ''}`.trim(), val: w.strike });
+    if (state._oiWalls?.callStrike) refs.push({ label: 'Call OI wall', val: state._oiWalls.callStrike });
+    if (state._oiWalls?.putStrike)  refs.push({ label: 'Put OI wall',  val: state._oiWalls.putStrike });
     // find Gann levels within 0.35% of any reference
     const hits = [];
     for (const g of gann) {
@@ -7707,6 +7961,62 @@
       '<div class="oc-sub" style="margin-top:4px;">"Squaring": when time elapsed (days) equals price ranged (points, or ÷10). Gann watched these balance dates for trend changes. Rows marked gold square within 10 days.</div>';
   }
 
+  // ── Advanced: Price⨯Sun timing — dates when Sun conjuncts the price's S9 angle ──
+  // Price's wheel angle: (√P × 180) mod 360 (one 360° turn = +2 on the root).
+  function renderGannSunTime(price) {
+    const out = document.getElementById('gannSunTime');
+    if (!out) return;
+    if (!price || price <= 0) { out.innerHTML = ''; return; }
+    const priceAngle = ((Math.sqrt(price) * 180) % 360 + 360) % 360;
+    const today = new Date();
+    const rows = [];
+    for (const [h, name] of [[0, 'conjunct ☌'], [90, 'square □'], [180, 'opposite ☍'], [270, 'square □']]) {
+      const target = (priceAngle + h) % 360;
+      // Sun moves ~0.9856°/day — find next crossing within 366 days (daily scan)
+      let prev = _eclipticLongitudes(today).sun;
+      for (let day = 1; day <= 366; day++) {
+        const d = new Date(today.getTime() + day * 86400000);
+        const cur = _eclipticLongitudes(d).sun;
+        const crossed = ((prev - target + 360) % 360) > 350 || (prev < target && cur >= target) || (prev > cur && (target > prev || target <= cur));
+        if ((prev <= target && cur >= target) || (prev > cur && (target >= prev || target <= cur))) {
+          rows.push({ h, name, date: d, days: day });
+          break;
+        }
+        prev = cur;
+      }
+    }
+    rows.sort((a, b) => a.days - b.days);
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+    out.innerHTML = `<div class="gann-lvl-row anchor"><span class="lvl-tag">PRICE ANGLE</span><span class="lvl-val">${priceAngle.toFixed(1)}°</span><span class="lvl-dist">(√${fmtInt(Math.round(price))} × 180) mod 360</span></div>` +
+      rows.map(r => `<div class="gann-lvl-row ${r.days <= 15 ? 'res' : ''}"><span class="lvl-tag">Sun ${r.name}</span><span class="lvl-val" style="font-size:10px;">${fmtD(r.date)}</span><span class="lvl-dist">+${r.days}d${r.days <= 15 ? ' · soon' : ''}</span></div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Gann\'s "price meets time via the Sun": dates when the Sun\'s longitude reaches the price\'s Square-of-9 wheel angle (±harmonics). Sun advances ~1°/day, so these are annual-cycle dates.</div>';
+  }
+
+  // ── Advanced: Swing Campaign Analyzer — Gann's 50% rule on live swings ──
+  function renderGannSwings() {
+    const out = document.getElementById('gannSwings');
+    if (!out) return;
+    const pts = (typeof _spotHistory !== 'undefined' ? _spotHistory : []).map(p => p.val).filter(Boolean);
+    if (pts.length < 60) { out.innerHTML = '<span class="oc-sub">Needs ~5+ min of session history — collecting.</span>'; return; }
+    const piv = _zigzag(pts, 0.12);
+    if (piv.length < 3) { out.innerHTML = '<span class="oc-sub">Fewer than 3 swings so far — quiet tape.</span>'; return; }
+    const last = piv.slice(-4);
+    const rows = [];
+    for (let i = 1; i < last.length; i++) {
+      const a = last[i - 1].v, b = last[i].v;
+      const pts_ = b - a, dur = last[i].i - last[i - 1].i;
+      const half = (a + b) / 2;
+      rows.push({ n: piv.length - last.length + i, from: a, to: b, pts: pts_, dur, half });
+    }
+    out.innerHTML = rows.map(r => `
+      <div class="gann-lvl-row ${r.pts >= 0 ? 'sup' : 'res'}">
+        <span class="lvl-tag">swing ${r.n} ${r.pts >= 0 ? '▲' : '▼'}</span>
+        <span class="lvl-val" style="font-size:10px;">${fmtInt(Math.round(r.from))}→${fmtInt(Math.round(r.to))}</span>
+        <span class="lvl-dist">${Math.abs(r.pts).toFixed(0)} pts · ${r.dur} ticks · 50% = <b style="color:var(--gold);">${fmtInt(Math.round(r.half))}</b></span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Gann\'s 50% rule: the half-point of each swing is the key hold/fail line — above the 50% of the last down-swing is strength, below the 50% of the last up-swing is weakness. Gold values are those lines for the last 3 swings.</div>';
+  }
+
   document.getElementById('gannCalcBtn')?.addEventListener('click', renderGannTab);
   document.getElementById('gannUseSpot')?.addEventListener('click', () => {
     const spot = state.lastData?.underlying_value;
@@ -7855,12 +8165,16 @@
     if (!price || price <= 0) price = spot || 0;
     const dateStr = document.getElementById('numoDate')?.value;
     if (!price) { document.getElementById('numoRoot').innerHTML = '<span class="oc-sub">Load the chain (for spot) or type a number, then Generate.</span>'; }
-    else { renderNumoRoot(price); renderNumoLevels(price); renderNumoWheel(price); renderNumoLoShu(price); renderNumoSpecial(price); }
-    renderNumoDay(dateStr);
-    renderNumoCalendar(dateStr, price);
-    renderNumoMaster(price, dateStr);
-    renderNumoName();
-    renderNumoWave(dateStr, price);
+    else { _safe(() => renderNumoRoot(price), 'renderNumoRoot'); _safe(() => renderNumoLevels(price), 'renderNumoLevels'); _safe(() => renderNumoWheel(price), 'renderNumoWheel'); _safe(() => renderNumoLoShu(price), 'renderNumoLoShu'); _safe(() => renderNumoSpecial(price), 'renderNumoSpecial'); }
+    _safe(() => renderNumoDay(dateStr), 'renderNumoDay');
+    _safe(() => renderNumoCalendar(dateStr, price), 'renderNumoCalendar');
+    _safe(() => renderNumoMaster(price, dateStr), 'renderNumoMaster');
+    _safe(() => renderNumoName(), 'renderNumoName');
+    _safe(() => renderNumoWave(dateStr, price), 'renderNumoWave');
+    _safe(() => renderNumoLunar(), 'renderNumoLunar');
+    _safe(() => renderNumoPanchang(), 'renderNumoPanchang');
+    _safe(() => renderNumoPersonal(dateStr), 'renderNumoPersonal');
+    _safe(() => renderNumoReality(), 'renderNumoReality');
   }
   // ── Advanced: master numbers (11/22/33) in the reduction chain ──
   function renderNumoMaster(price, dateStr) {
@@ -7996,12 +8310,874 @@
       <div class="oc-sub">Daily full-date roots for 30 days from ${start.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}. Gold-ringed dots share the price root${priceRoot ? ` (${priceRoot})` : ''}; dashed red verticals are 9-days ("completion"). The 9-day sawtooth pattern is a property of mod-9 arithmetic — every date sequence produces it.</div>`;
   }
 
+  // ── Lunar phases & aspects (from the built-in ephemeris) ──
+  function renderNumoLunar() {
+    const out = document.getElementById('numoLunar');
+    if (!out) return;
+    const norm = x => ((x % 360) + 360) % 360;
+    const phaseAngle = d => { const e = _eclipticLongitudes(d); return norm(e.moon - e.sun); };
+    const today = new Date();
+    const nowPhase = phaseAngle(today);
+    const phaseName = nowPhase < 12 || nowPhase > 348 ? 'New Moon 🌑' : nowPhase < 78 ? 'Waxing Crescent 🌒' : nowPhase < 102 ? 'First Quarter 🌓' :
+      nowPhase < 168 ? 'Waxing Gibbous 🌔' : nowPhase < 192 ? 'Full Moon 🌕' : nowPhase < 258 ? 'Waning Gibbous 🌖' : nowPhase < 282 ? 'Last Quarter 🌗' : 'Waning Crescent 🌘';
+    // next crossings of 0/90/180/270 over the coming 30 days (hourly scan)
+    const targets = [[0, 'New Moon 🌑 (conjunction)'], [90, 'First Quarter 🌓 (square)'], [180, 'Full Moon 🌕 (opposition)'], [270, 'Last Quarter 🌗 (square)']];
+    const events = [];
+    let prev = nowPhase;
+    for (let hr = 1; hr <= 24 * 30 && events.length < 5; hr++) {
+      const d = new Date(today.getTime() + hr * 3600000);
+      const a = phaseAngle(d);
+      for (const [t, name] of targets) {
+        const crossed = (t === 0) ? (prev > 350 && a < 10) : (prev < t && a >= t);
+        if (crossed) events.push({ name, date: d });
+      }
+      prev = a;
+    }
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    out.innerHTML = `<div class="gann-lvl-row anchor"><span class="lvl-tag">NOW</span><span class="lvl-val" style="font-size:11px;">${phaseName}</span><span class="lvl-dist">${nowPhase.toFixed(1)}°</span></div>` +
+      events.map(e => `<div class="gann-lvl-row"><span class="lvl-tag">next</span><span class="lvl-val" style="font-size:10px;">${e.name}</span><span class="lvl-dist">${fmtD(e.date)}</span></div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Sun–Moon angle from the built-in ephemeris (±0.3°, ≈ ±40min at phase boundaries). Academic studies of lunar equity effects show weak, inconsistent results — shown as a calendar overlay, not a signal.</div>';
+  }
+
+  // ── Panchang: Tithi + Nakshatra + Paksha (real Vedic calendar math) ──
+  const _TITHI = ['Pratipada','Dwitiya','Tritiya','Chaturthi','Panchami','Shashthi','Saptami','Ashtami','Navami','Dashami','Ekadashi','Dwadashi','Trayodashi','Chaturdashi','Purnima/Amavasya'];
+  const _NAKSHATRA = ['Ashwini','Bharani','Krittika','Rohini','Mrigashira','Ardra','Punarvasu','Pushya','Ashlesha','Magha','P.Phalguni','U.Phalguni','Hasta','Chitra','Swati','Vishakha','Anuradha','Jyeshtha','Mula','P.Ashadha','U.Ashadha','Shravana','Dhanishta','Shatabhisha','P.Bhadrapada','U.Bhadrapada','Revati'];
+  function _panchangFor(d) {
+    const norm = x => ((x % 360) + 360) % 360;
+    const e = _eclipticLongitudes(d);
+    const elong = norm(e.moon - e.sun);
+    const tithiNum = Math.floor(elong / 12);           // 0-29
+    const paksha = tithiNum < 15 ? 'Shukla (waxing)' : 'Krishna (waning)';
+    const tithiName = _TITHI[tithiNum % 15] + (tithiNum === 14 ? ' (Purnima)' : tithiNum === 29 ? ' (Amavasya)' : '');
+    const nakIdx = Math.floor(norm(e.moon) / (360 / 27));
+    return { tithiNum: (tithiNum % 15) + 1, tithiName, paksha, nakshatra: _NAKSHATRA[nakIdx], moonLon: norm(e.moon) };
+  }
+  function renderNumoPanchang() {
+    const out = document.getElementById('numoPanchang');
+    if (!out) return;
+    const today = new Date();
+    const p = _panchangFor(today);
+    const rows = [];
+    for (let i = 1; i <= 4; i++) {
+      const d = new Date(today); d.setDate(d.getDate() + i);
+      const pp = _panchangFor(d);
+      rows.push(`<div class="gann-lvl-row"><span class="lvl-tag">+${i}d</span><span class="lvl-val" style="font-size:10px;">${pp.tithiName}</span><span class="lvl-dist">${pp.nakshatra}</span></div>`);
+    }
+    out.innerHTML = `
+      <div class="gann-lvl-row anchor"><span class="lvl-tag">TITHI</span><span class="lvl-val" style="font-size:11px;">${p.tithiName} (${p.tithiNum})</span><span class="lvl-dist">${p.paksha}</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">NAKSHATRA</span><span class="lvl-val" style="font-size:11px;">${p.nakshatra}</span><span class="lvl-dist">☾ ${p.moonLon.toFixed(1)}°</span></div>
+      ${rows.join('')}
+      <div class="oc-sub" style="margin-top:4px;">Real Vedic calendar math: Tithi = (Moon−Sun)÷12°, Nakshatra = Moon÷13°20′, from the built-in ephemeris (Moon ±0.3° → boundaries ±40min vs published panchang; no correction for Lahiri ayanamsa in nakshatra — tropical, not sidereal, so expect ~1 nakshatra offset vs traditional almanacs). Same epistemic tier as the rest of this tab.</div>`;
+  }
+
+  // ── Advanced: Personal Day Cycle (DOB kept in-browser only) ──
+  function renderNumoPersonal(dateStr) {
+    const out = document.getElementById('numoPersonal');
+    if (!out) return;
+    const dobStr = document.getElementById('numoDob')?.value;
+    if (!dobStr) { out.innerHTML = '<span class="oc-sub">Enter your date of birth (stays in this browser — saved with dashboard settings, sent nowhere).</span>'; return; }
+    const dob = new Date(dobStr);
+    const today = dateStr ? new Date(dateStr) : new Date();
+    if (isNaN(dob) || isNaN(today)) { out.innerHTML = '<span class="oc-sub">Invalid date.</span>'; return; }
+    // classical: personal day = root(dob day + dob month + current day + current month + current year)
+    const pd = _digitRoot(dob.getDate() + (dob.getMonth() + 1) + today.getDate() + (today.getMonth() + 1) + today.getFullYear());
+    const ud = _digitRoot(today.getDate() + (today.getMonth() + 1) + today.getFullYear());
+    const [pM, pC] = _NUMO_MEANING[pd], [uM, uC] = _NUMO_MEANING[ud];
+    // 14-day alignment strip
+    let strip = '';
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(today); d.setDate(d.getDate() + i);
+      const p = _digitRoot(dob.getDate() + (dob.getMonth() + 1) + d.getDate() + (d.getMonth() + 1) + d.getFullYear());
+      const u = _digitRoot(d.getDate() + (d.getMonth() + 1) + d.getFullYear());
+      const match = p === u;
+      strip += `<div class="numo-cal-cell ${match ? 'cal-match' : ''}" style="aspect-ratio:auto;padding:3px 0;">
+        <span class="cal-day" style="font-size:8px;">${d.getDate()}/${d.getMonth() + 1}</span>
+        <span class="cal-root" style="color:${_NUMO_MEANING[p][1]};">P${p}·U${u}</span></div>`;
+    }
+    out.innerHTML = `
+      <div class="gann-lvl-row anchor"><span class="lvl-tag">PERSONAL</span><span class="lvl-val" style="color:${pC};">${pd}</span><span class="lvl-dist">${escapeHtml(pM)}</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">UNIVERSAL</span><span class="lvl-val" style="color:${uC};">${ud}</span><span class="lvl-dist">${escapeHtml(uM)}</span></div>
+      <div class="numo-cal-grid" style="grid-template-columns:repeat(7,1fr);margin-top:4px;">${strip}</div>
+      <div class="oc-sub" style="margin-top:4px;">Personal day (your DOB folded into today) vs universal day. Gold outline = alignment days, which numerology folklore favors. Same disclaimer as the whole tab — arithmetic, not augury.</div>`;
+  }
+
+  // ── Advanced: Digit Reality Check — do session prices favor any digit? ──
+  function renderNumoReality() {
+    const out = document.getElementById('numoReality');
+    if (!out) return;
+    const pts = (typeof _spotHistory !== 'undefined' ? _spotHistory : []).map(p => p.val).filter(Boolean);
+    if (pts.length < 60) { out.innerHTML = '<span class="oc-sub">Needs ~5+ min of session ticks — collecting.</span>'; return; }
+    const lastDig = Array(10).fill(0), roots = Array(10).fill(0);
+    for (const p of pts) {
+      lastDig[Math.abs(Math.round(p)) % 10]++;
+      roots[_digitRoot(p)]++;
+    }
+    const n = pts.length;
+    const expL = n / 10, expR = n / 9;
+    const bar = (arr, exp, labels) => labels.map((lb, i) => {
+      const v = arr[i], dev = (v - exp) / exp * 100;
+      const h = Math.max(2, Math.min(46, v / (exp * 2) * 46));
+      return `<div style="display:flex;flex-direction:column;align-items:center;gap:1px;flex:1;">
+        <span style="font-size:7px;color:${Math.abs(dev) > 25 ? 'var(--gold)' : 'var(--muted-2)'};">${dev >= 0 ? '+' : ''}${dev.toFixed(0)}%</span>
+        <div style="width:70%;height:${h}px;background:var(--accent);opacity:${0.4 + Math.min(0.6, Math.abs(dev) / 60)};border-radius:2px 2px 0 0;"></div>
+        <span style="font-size:8px;color:var(--muted);">${lb}</span></div>`;
+    }).join('');
+    out.innerHTML = `
+      <div class="oc-sub" style="margin-bottom:2px;">Last digit of spot (${n} ticks) vs uniform:</div>
+      <div style="display:flex;align-items:flex-end;height:64px;">${bar(lastDig, expL, ['0','1','2','3','4','5','6','7','8','9'])}</div>
+      <div class="oc-sub" style="margin:6px 0 2px;">Digit root vs uniform:</div>
+      <div style="display:flex;align-items:flex-end;height:64px;">${bar(roots.slice(1), expR, ['1','2','3','4','5','6','7','8','9'])}</div>
+      <div class="oc-sub" style="margin-top:5px;">The measured answer to "do prices vibrate to numbers?" — deviations shrink toward 0% as ticks accumulate (law of large numbers). Persistent skew would appear here if it existed; tick-size granularity is the usual cause of last-digit lumpiness, not numerology.</div>`;
+  }
+
+  document.getElementById('numoDob')?.addEventListener('change', () => renderNumoPersonal(document.getElementById('numoDate')?.value));
   document.getElementById('numoCalcBtn')?.addEventListener('click', renderNumoTab);
+
+  // ======================================================================
+  // FEATURE: Astrology tab — real low-precision ephemeris (Schlyter method)
+  // Geocentric ecliptic longitudes for Mercury–Saturn via Keplerian elements;
+  // Sun & Moon reuse the existing _eclipticLongitudes. Accuracy ≈ ±1°.
+  // ======================================================================
+  const _AST_RAD = Math.PI / 180;
+  const _astNorm = x => ((x % 360) + 360) % 360;
+  // Schlyter epoch: d = days since 1999-12-31 00:00 UTC (= unix day 10956)
+  function _astDays(date) { return date.getTime() / 86400000 - 10956; }
+  const _AST_ELEMENTS = {
+    Mercury: d => ({ N: 48.3313 + 3.24587e-5 * d, i: 7.0047, w: 29.1241 + 1.01444e-5 * d, a: 0.387098, e: 0.205635 + 5.59e-10 * d, M: 168.6562 + 4.0923344368 * d }),
+    Venus:   d => ({ N: 76.6799 + 2.46590e-5 * d, i: 3.3946, w: 54.8910 + 1.38374e-5 * d, a: 0.723330, e: 0.006773 - 1.302e-9 * d, M: 48.0052 + 1.6021302244 * d }),
+    Mars:    d => ({ N: 49.5574 + 2.11081e-5 * d, i: 1.8497, w: 286.5016 + 2.92961e-5 * d, a: 1.523688, e: 0.093405 + 2.516e-9 * d, M: 18.6021 + 0.5240207766 * d }),
+    Jupiter: d => ({ N: 100.4542 + 2.76854e-5 * d, i: 1.3030, w: 273.8777 + 1.64505e-5 * d, a: 5.20256, e: 0.048498 + 4.469e-9 * d, M: 19.8950 + 0.0830853001 * d }),
+    Saturn:  d => ({ N: 113.6634 + 2.38980e-5 * d, i: 2.4886, w: 339.3939 + 2.97661e-5 * d, a: 9.55475, e: 0.055546 - 9.499e-9 * d, M: 316.9670 + 0.0334442282 * d }),
+  };
+  function _astHelio(el) {
+    const M = _astNorm(el.M) * _AST_RAD, e = el.e;
+    let E = M + e * Math.sin(M) * (1 + e * Math.cos(M));
+    for (let k = 0; k < 4; k++) E = E - (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+    const xv = el.a * (Math.cos(E) - e), yv = el.a * Math.sqrt(1 - e * e) * Math.sin(E);
+    const v = Math.atan2(yv, xv), r = Math.hypot(xv, yv);
+    const N = el.N * _AST_RAD, w = el.w * _AST_RAD, inc = el.i * _AST_RAD;
+    const xh = r * (Math.cos(N) * Math.cos(v + w) - Math.sin(N) * Math.sin(v + w) * Math.cos(inc));
+    const yh = r * (Math.sin(N) * Math.cos(v + w) + Math.cos(N) * Math.sin(v + w) * Math.cos(inc));
+    return { x: xh, y: yh };
+  }
+  function _astSunXY(d) {
+    const w = 282.9404 + 4.70935e-5 * d, e = 0.016709 - 1.151e-9 * d, M = _astNorm(356.0470 + 0.9856002585 * d) * _AST_RAD;
+    let E = M + e * Math.sin(M) * (1 + e * Math.cos(M));
+    const xv = Math.cos(E) - e, yv = Math.sqrt(1 - e * e) * Math.sin(E);
+    const v = Math.atan2(yv, xv), r = Math.hypot(xv, yv);
+    const lon = _astNorm(v / _AST_RAD + w);
+    return { x: r * Math.cos(lon * _AST_RAD), y: r * Math.sin(lon * _AST_RAD) };
+  }
+  function _planetLongitudes(date) {
+    const d = _astDays(date);
+    const sun = _astSunXY(d);
+    const out = {};
+    for (const [name, elFn] of Object.entries(_AST_ELEMENTS)) {
+      const h = _astHelio(elFn(d));
+      out[name] = _astNorm(Math.atan2(h.y + sun.y, h.x + sun.x) / _AST_RAD);
+    }
+    const sm = _eclipticLongitudes(date);
+    return { Sun: sm.sun, Moon: sm.moon, ...out };
+  }
+  function _astAyanamsa(date) {   // Lahiri, linear approx: 23.85° @2000 + 50.3″/yr
+    const yrs = (date.getTime() / 86400000 - 10957.5) / 365.25;
+    return 23.853 + 0.013969 * yrs;
+  }
+  const _SIGNS_TROP = ['Aries ♈','Taurus ♉','Gemini ♊','Cancer ♋','Leo ♌','Virgo ♍','Libra ♎','Scorpio ♏','Sagittarius ♐','Capricorn ♑','Aquarius ♒','Pisces ♓'];
+  const _SIGNS_VED  = ['Mesha ♈','Vrishabha ♉','Mithuna ♊','Karka ♋','Simha ♌','Kanya ♍','Tula ♎','Vrischika ♏','Dhanu ♐','Makara ♑','Kumbha ♒','Meena ♓'];
+  const _PLANET_GLYPH = { Sun: '☉', Moon: '☾', Mercury: '☿', Venus: '♀', Mars: '♂', Jupiter: '♃', Saturn: '♄' };
+  const _PLANET_COL = { Sun: '#eab308', Moon: '#94a3b8', Mercury: '#22c55e', Venus: '#ec4899', Mars: '#ef4444', Jupiter: '#f97316', Saturn: '#6366f1' };
+  const _ASPECTS = [[0, 'Conjunction', '☌'], [60, 'Sextile', '⚹'], [90, 'Square', '□'], [120, 'Trine', '△'], [180, 'Opposition', '☍']];
+
+  function _astroInputs() {
+    const dStr = document.getElementById('astroDate')?.value;
+    const date = dStr ? new Date(dStr + 'T09:15:00') : new Date();
+    const sidereal = (document.getElementById('astroZodiac')?.value || 'sidereal') === 'sidereal';
+    const ayan = sidereal ? _astAyanamsa(date) : 0;
+    const lons = _planetLongitudes(date);
+    const adj = {};
+    for (const [k, v] of Object.entries(lons)) adj[k] = _astNorm(v - ayan);
+    return { date, sidereal, ayan, lons: adj, tropLons: lons };
+  }
+
+  function renderAstroWheel({ lons, sidereal }) {
+    const out = document.getElementById('astroWheel');
+    if (!out) return;
+    const cx = 210, cy = 210, R1 = 195, R2 = 160, Rp = 130;
+    const signs = sidereal ? _SIGNS_VED : _SIGNS_TROP;
+    let segs = '', ticks = '';
+    for (let s = 0; s < 12; s++) {
+      // zodiac runs counterclockwise from left (0° Aries at 9 o'clock, astrological convention)
+      const a0 = (180 - s * 30) * _AST_RAD, a1 = (180 - (s + 1) * 30) * _AST_RAD;
+      const mid = (180 - (s + 0.5) * 30) * _AST_RAD;
+      segs += `<line x1="${(cx + R2 * Math.cos(a0)).toFixed(1)}" y1="${(cy - R2 * Math.sin(a0)).toFixed(1)}" x2="${(cx + R1 * Math.cos(a0)).toFixed(1)}" y2="${(cy - R1 * Math.sin(a0)).toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
+      const tx = cx + (R1 + R2) / 2 * Math.cos(mid), ty = cy - (R1 + R2) / 2 * Math.sin(mid);
+      segs += `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle" dominant-baseline="central" style="font-size:9px;fill:var(--muted);">${signs[s].split(' ')[1]}</text>`;
+      for (let t = 0; t < 30; t += 10) {
+        const ta = (180 - (s * 30 + t)) * _AST_RAD;
+        ticks += `<line x1="${(cx + R2 * Math.cos(ta)).toFixed(1)}" y1="${(cy - R2 * Math.sin(ta)).toFixed(1)}" x2="${(cx + (R2 + 6) * Math.cos(ta)).toFixed(1)}" y2="${(cy - (R2 + 6) * Math.sin(ta)).toFixed(1)}" stroke="var(--border)" stroke-width="0.4" opacity="0.6"/>`;
+      }
+    }
+    // planets — collision-avoid by nudging overlapping glyphs inward
+    const placed = [];
+    let planets = '';
+    for (const [name, lon] of Object.entries(lons)) {
+      let r = Rp;
+      while (placed.some(p => Math.abs(_astNorm(p.lon - lon + 180) - 180) < 9 && Math.abs(p.r - r) < 20)) r -= 22;
+      placed.push({ lon, r });
+      const a = (180 - lon) * _AST_RAD;
+      const px = cx + r * Math.cos(a), py = cy - r * Math.sin(a);
+      planets += `<line x1="${(cx + R2 * Math.cos(a)).toFixed(1)}" y1="${(cy - R2 * Math.sin(a)).toFixed(1)}" x2="${px.toFixed(1)}" y2="${py.toFixed(1)}" stroke="${_PLANET_COL[name]}" stroke-width="0.5" opacity="0.5"/>
+        <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="11" fill="var(--panel-2)" stroke="${_PLANET_COL[name]}" stroke-width="1.4"/>
+        <text x="${px.toFixed(1)}" y="${py.toFixed(1)}" text-anchor="middle" dominant-baseline="central" style="font-size:12px;fill:${_PLANET_COL[name]};">${_PLANET_GLYPH[name]}</text>`;
+    }
+    // aspect lines between planets inside the wheel
+    let aspectLines = '';
+    const names = Object.keys(lons);
+    for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
+      const sep = Math.abs(_astNorm(lons[names[i]] - lons[names[j]] + 180) - 180);
+      for (const [ang, , ] of _ASPECTS) {
+        const orb = (names[i] === 'Moon' || names[j] === 'Moon') ? 6 : 4;
+        if (Math.abs(sep - ang) <= orb && ang > 0) {
+          const a1 = (180 - lons[names[i]]) * _AST_RAD, a2 = (180 - lons[names[j]]) * _AST_RAD;
+          const rr = 108;
+          const col = ang === 120 || ang === 60 ? 'var(--pos)' : ang === 90 || ang === 180 ? 'var(--neg)' : 'var(--gold)';
+          aspectLines += `<line x1="${(cx + rr * Math.cos(a1)).toFixed(1)}" y1="${(cy - rr * Math.sin(a1)).toFixed(1)}" x2="${(cx + rr * Math.cos(a2)).toFixed(1)}" y2="${(cy - rr * Math.sin(a2)).toFixed(1)}" stroke="${col}" stroke-width="0.8" opacity="0.55"/>`;
+        }
+      }
+    }
+    out.innerHTML = `<svg viewBox="0 0 420 420" style="width:100%;max-width:440px;height:auto;margin:0 auto;display:block;">
+      <circle cx="${cx}" cy="${cy}" r="${R1}" fill="none" stroke="var(--border)" stroke-width="1.2"/>
+      <circle cx="${cx}" cy="${cy}" r="${R2}" fill="none" stroke="var(--border)" stroke-width="1"/>
+      <circle cx="${cx}" cy="${cy}" r="108" fill="none" stroke="var(--border)" stroke-width="0.4" opacity="0.5"/>
+      ${segs}${ticks}${aspectLines}${planets}
+    </svg>
+    <div class="oc-sub" style="text-align:center;">${sidereal ? 'Sidereal (Lahiri)' : 'Tropical'} · green = trine/sextile · red = square/opposition · gold = conjunction · 0° ${sidereal ? 'Mesha' : 'Aries'} at 9 o’clock</div>`;
+  }
+
+  function renderAstroPositions({ lons, sidereal, date }) {
+    const out = document.getElementById('astroPositions');
+    if (!out) return;
+    const signs = sidereal ? _SIGNS_VED : _SIGNS_TROP;
+    const tomorrow = new Date(date.getTime() + 86400000);
+    const lonsT = _planetLongitudes(tomorrow);
+    const ayanT = sidereal ? _astAyanamsa(tomorrow) : 0;
+    out.innerHTML = Object.entries(lons).map(([name, lon]) => {
+      const sIdx = Math.floor(lon / 30), degIn = lon - sIdx * 30;
+      const lonTm = _astNorm(lonsT[name] - ayanT);
+      let motion = _astNorm(lonTm - lon + 180) - 180;
+      const retro = motion < -0.001;
+      return `<div class="gann-lvl-row ${retro ? 'res' : ''}">
+        <span class="lvl-tag" style="color:${_PLANET_COL[name]};">${_PLANET_GLYPH[name]} ${name}</span>
+        <span class="lvl-val" style="font-size:10.5px;">${degIn.toFixed(1)}° ${signs[sIdx]}</span>
+        <span class="lvl-dist">${retro ? '℞ retro' : motion.toFixed(2) + '°/d'}</span>
+      </div>`;
+    }).join('');
+  }
+
+  function renderAstroAspects({ lons }) {
+    const out = document.getElementById('astroAspects');
+    if (!out) return;
+    const names = Object.keys(lons);
+    const hits = [];
+    for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) {
+      const sep = Math.abs(_astNorm(lons[names[i]] - lons[names[j]] + 180) - 180);
+      for (const [ang, aname, glyph] of _ASPECTS) {
+        const orb = (names[i] === 'Moon' || names[j] === 'Moon') ? 6 : 4;
+        const off = Math.abs(sep - ang);
+        if (off <= orb) hits.push({ a: names[i], b: names[j], aname, glyph, ang, off });
+      }
+    }
+    hits.sort((x, y) => x.off - y.off);
+    out.innerHTML = hits.length ? hits.map(h => `
+      <div class="gann-lvl-row ${h.ang === 90 || h.ang === 180 ? 'res' : h.ang === 0 ? 'anchor' : 'sup'}">
+        <span class="lvl-tag">${_PLANET_GLYPH[h.a]} ${h.glyph} ${_PLANET_GLYPH[h.b]}</span>
+        <span class="lvl-val" style="font-size:10.5px;">${h.a} ${h.aname} ${h.b}</span>
+        <span class="lvl-dist">orb ${h.off.toFixed(1)}°</span>
+      </div>`).join('') : '<span class="oc-sub">No aspects within orb right now.</span>';
+  }
+
+  function renderAstroUpcoming({ date, sidereal }) {
+    const out = document.getElementById('astroUpcoming');
+    if (!out) return;
+    const pairs = [];
+    const names = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn'];
+    for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) pairs.push([names[i], names[j]]);
+    const events = [];
+    let prev = _planetLongitudes(date);
+    for (let day = 1; day <= 30 && events.length < 10; day++) {
+      const d = new Date(date.getTime() + day * 86400000);
+      const cur = _planetLongitudes(d);
+      for (const [a, b] of pairs) {
+        const sPrev = _astNorm(prev[a] - prev[b] + 180) - 180;
+        const sCur = _astNorm(cur[a] - cur[b] + 180) - 180;
+        for (const [ang, aname, glyph] of _ASPECTS) {
+          for (const target of ang === 0 ? [0] : [ang, -ang]) {
+            if ((sPrev - target) * (sCur - target) < 0 && Math.abs(sPrev - sCur) < 30) {
+              events.push({ date: d, a, b, aname, glyph });
+            }
+          }
+        }
+      }
+      prev = cur;
+    }
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    out.innerHTML = events.length ? events.slice(0, 10).map(e => `
+      <div class="gann-lvl-row">
+        <span class="lvl-tag">${fmtD(e.date)}</span>
+        <span class="lvl-val" style="font-size:10.5px;">${_PLANET_GLYPH[e.a]} ${e.glyph} ${_PLANET_GLYPH[e.b]} ${e.a} ${e.aname} ${e.b}</span>
+        <span class="lvl-dist">exact</span>
+      </div>`).join('') : '<span class="oc-sub">No exact aspects in the next 30 days (unusual — check date).</span>';
+  }
+
+  function renderAstroRetro({ date }) {
+    const out = document.getElementById('astroRetro');
+    if (!out) return;
+    const watch = ['Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn'];
+    const rows = [];
+    const lonAt = (name, d) => _planetLongitudes(d)[name];
+    for (const name of watch) {
+      let prevMotion = null, curD = new Date(date);
+      let status = null;
+      const m0 = _astNorm(lonAt(name, new Date(date.getTime() + 86400000)) - lonAt(name, date) + 180) - 180;
+      status = m0 < 0 ? '℞ retrograde now' : 'direct';
+      // find next station: sign change of daily motion in 120 days
+      let found = null;
+      let pm = m0;
+      for (let day = 2; day <= 120; day++) {
+        const d1 = new Date(date.getTime() + day * 86400000);
+        const d2 = new Date(date.getTime() + (day + 1) * 86400000);
+        const m = _astNorm(lonAt(name, d2) - lonAt(name, d1) + 180) - 180;
+        if (pm * m < 0) { found = { date: d1, to: m < 0 ? 'stations retrograde ℞' : 'stations direct' }; break; }
+        pm = m;
+      }
+      rows.push({ name, status, found });
+    }
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    out.innerHTML = rows.map(r => `
+      <div class="gann-lvl-row ${r.status.includes('℞') ? 'res' : ''}">
+        <span class="lvl-tag" style="color:${_PLANET_COL[r.name]};">${_PLANET_GLYPH[r.name]} ${r.name}</span>
+        <span class="lvl-val" style="font-size:10.5px;">${r.status}</span>
+        <span class="lvl-dist">${r.found ? `${r.found.to} ${fmtD(r.found.date)}` : 'no station <120d'}</span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Apparent (geocentric) motion — retrogrades are a parallax effect of Earth’s own orbit, computed here from the real geometry. "Mercury retrograde" folklore included at no extra charge.</div>';
+  }
+
+  function renderAstroLines({ tropLons }) {
+    const out = document.getElementById('astroLines');
+    if (!out) return;
+    const price = state.lastData?.underlying_value;
+    if (!price) { out.innerHTML = '<span class="oc-sub">Load the option chain for spot.</span>'; return; }
+    const rows = [];
+    for (const [name, lon] of Object.entries(tropLons)) {
+      const k = Math.round((price - lon) / 360);
+      const lvl = k * 360 + lon;
+      if (lvl > 0) rows.push({ name, lon, val: lvl });
+    }
+    rows.sort((a, b) => b.val - a.val);
+    const near = rows.reduce((a, b) => Math.abs(b.val - price) < Math.abs(a.val - price) ? b : a, rows[0]);
+    out.innerHTML = rows.map(r => `
+      <div class="gann-lvl-row ${r === near ? 'anchor' : (r.val > price ? 'res' : 'sup')}">
+        <span class="lvl-tag" style="color:${_PLANET_COL[r.name]};">${_PLANET_GLYPH[r.name]} ${r.name}</span>
+        <span class="lvl-val">${fmtInt(Math.round(r.val))}</span>
+        <span class="lvl-dist">${r.lon.toFixed(1)}° · ${((r.val - price) / price * 100).toFixed(2)}%</span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Gann longitude→price at 1 pt/° (tropical longitudes, per convention). Jupiter/Saturn lines are near-static (0.08°/0.03° daily); Moon sweeps ~13 pts/day.</div>';
+  }
+
+  // ── Advanced: Nifty "natal" transits (base date 3 Nov 1995) ──
+  const _NIFTY_NATAL_DATE = new Date('1995-11-03T09:15:00+05:30');
+  let _natalCache = null;
+  function renderAstroNatal({ lons, sidereal, ayan }) {
+    const out = document.getElementById('astroNatal');
+    if (!out) return;
+    if (!_natalCache) _natalCache = _planetLongitudes(_NIFTY_NATAL_DATE);
+    const natal = {};
+    for (const [k, v] of Object.entries(_natalCache)) natal[k] = _astNorm(v - (sidereal ? _astAyanamsa(_NIFTY_NATAL_DATE) : 0));
+    const hits = [];
+    for (const [tName, tLon] of Object.entries(lons)) {
+      for (const [nName, nLon] of Object.entries(natal)) {
+        const sep = Math.abs(_astNorm(tLon - nLon + 180) - 180);
+        for (const [ang, aname, glyph] of _ASPECTS) {
+          const orb = tName === 'Moon' ? 4 : 3;
+          if (Math.abs(sep - ang) <= orb) hits.push({ tName, nName, aname, glyph, off: Math.abs(sep - ang), ang });
+        }
+      }
+    }
+    hits.sort((a, b) => a.off - b.off);
+    const slow = hits.filter(h => !['Moon'].includes(h.tName));
+    out.innerHTML = (slow.length ? slow.slice(0, 8) : hits.slice(0, 5)).map(h => `
+      <div class="gann-lvl-row ${h.ang === 90 || h.ang === 180 ? 'res' : h.ang === 0 ? 'anchor' : 'sup'}">
+        <span class="lvl-tag">${_PLANET_GLYPH[h.tName]} ${h.glyph}</span>
+        <span class="lvl-val" style="font-size:10px;">transit ${h.tName} ${h.aname} natal ${h.nName}</span>
+        <span class="lvl-dist">orb ${h.off.toFixed(1)}°</span>
+      </div>`).join('') || '<span class="oc-sub">No transits to natal points within orb.</span>';
+    out.innerHTML += '<div class="oc-sub" style="margin-top:4px;">"Natal" chart cast for the Nifty base date (3 Nov 1995, 09:15 IST) — the financial-astrology "first trade chart" convention. Slow-planet transits shown preferentially; Moon transits everything weekly.</div>';
+  }
+
+  // ── Advanced: Moon ingress & void-of-course, next 7 days ──
+  function renderAstroMoon({ sidereal }) {
+    const out = document.getElementById('astroMoon');
+    if (!out) return;
+    const signs = sidereal ? _SIGNS_VED : _SIGNS_TROP;
+    const now = new Date();
+    const moonLonAt = d => _astNorm(_eclipticLongitudes(d).moon - (sidereal ? _astAyanamsa(d) : 0));
+    // hourly scan 7 days: ingress = sign index change; last exact Moon aspect before ingress = VoC start
+    const events = [];
+    let prevSign = Math.floor(moonLonAt(now) / 30);
+    let lastAspect = null;
+    let prevLons = _planetLongitudes(now);
+    for (let hr = 1; hr <= 24 * 7; hr++) {
+      const d = new Date(now.getTime() + hr * 3600000);
+      const curLons = _planetLongitudes(d);
+      // track exact Moon aspects (crossings)
+      for (const other of ['Sun', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn']) {
+        const sP = _astNorm(prevLons.Moon - prevLons[other] + 180) - 180;
+        const sC = _astNorm(curLons.Moon - curLons[other] + 180) - 180;
+        for (const [ang] of _ASPECTS) {
+          for (const t of ang === 0 ? [0] : [ang, -ang]) {
+            if ((sP - t) * (sC - t) < 0 && Math.abs(sP - sC) < 30) lastAspect = { time: d, other };
+          }
+        }
+      }
+      const mSign = Math.floor(moonLonAt(d) / 30);
+      if (mSign !== prevSign) {
+        events.push({ ingress: d, sign: mSign, vocFrom: lastAspect ? lastAspect.time : null });
+        lastAspect = null;
+        prevSign = mSign;
+      }
+      prevLons = curLons;
+    }
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    out.innerHTML = events.slice(0, 4).map(e => `
+      <div class="gann-lvl-row">
+        <span class="lvl-tag">→ ${signs[e.sign].split(' ')[1]}</span>
+        <span class="lvl-val" style="font-size:10px;">${signs[e.sign].split(' ')[0]} ingress ${fmtD(e.ingress)}</span>
+        <span class="lvl-dist">${e.vocFrom ? 'VoC from ' + fmtD(e.vocFrom) : 'VoC n/a'}</span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Void-of-course = the window from the Moon\'s last exact aspect until it enters the next sign — trading folklore says "nothing comes of" VoC initiatives. Times ±40min (Moon ephemeris ±0.3°). Hourly scan, so short VoC windows can be missed.</div>';
+  }
+
+  // ── Advanced: planetary hours (classical, Mumbai sunrise) ──
+  function _sunriseSunset(date, lat, lon) {
+    // NOAA simplified — adequate to a few minutes
+    const rad = Math.PI / 180;
+    const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
+    const gamma = 2 * Math.PI / 365 * (dayOfYear - 1);
+    const eqtime = 229.18 * (0.000075 + 0.001868 * Math.cos(gamma) - 0.032077 * Math.sin(gamma) - 0.014615 * Math.cos(2 * gamma) - 0.040849 * Math.sin(2 * gamma));
+    const decl = 0.006918 - 0.399912 * Math.cos(gamma) + 0.070257 * Math.sin(gamma) - 0.006758 * Math.cos(2 * gamma) + 0.000907 * Math.sin(2 * gamma) - 0.002697 * Math.cos(3 * gamma) + 0.00148 * Math.sin(3 * gamma);
+    const ha = Math.acos(Math.cos(90.833 * rad) / (Math.cos(lat * rad) * Math.cos(decl)) - Math.tan(lat * rad) * Math.tan(decl)) / rad;
+    const sunriseUTCmin = 720 - 4 * (lon + ha) - eqtime;
+    const sunsetUTCmin = 720 - 4 * (lon - ha) - eqtime;
+    const base = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    return { rise: new Date(base.getTime() + sunriseUTCmin * 60000), set: new Date(base.getTime() + sunsetUTCmin * 60000) };
+  }
+  const _CHALDEAN_ORDER = ['Saturn', 'Jupiter', 'Mars', 'Sun', 'Venus', 'Mercury', 'Moon'];
+  const _DAY_RULERS = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn'];  // Sun..Sat
+  function renderAstroHours() {
+    const out = document.getElementById('astroHours');
+    if (!out) return;
+    const now = new Date();
+    const { rise, set } = _sunriseSunset(now, 19.076, 72.877);   // Mumbai
+    const ruler = _DAY_RULERS[now.getDay()];
+    const startIdx = _CHALDEAN_ORDER.indexOf(ruler);
+    const dayLen = (set - rise) / 12, nightLen = (86400000 - (set - rise)) / 12;
+    const hours = [];
+    for (let i = 0; i < 12; i++) hours.push({ start: new Date(rise.getTime() + i * dayLen), planet: _CHALDEAN_ORDER[(startIdx + i) % 7], day: true });
+    for (let i = 0; i < 12; i++) hours.push({ start: new Date(set.getTime() + i * nightLen), planet: _CHALDEAN_ORDER[(startIdx + 12 + i) % 7], day: false });
+    const fmtT = d => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    // market-hours strip 09:15–15:30
+    const mkt = hours.filter(h => {
+      const t = h.start.getHours() + h.start.getMinutes() / 60;
+      return h.day && t >= 5.5 && t <= 16;
+    });
+    const cur = hours.filter(h => h.start <= now).pop();
+    out.innerHTML = `<div class="gann-lvl-row anchor"><span class="lvl-tag">DAY RULER</span><span class="lvl-val" style="color:${_PLANET_COL[ruler]};">${_PLANET_GLYPH[ruler]} ${ruler}</span><span class="lvl-dist">sunrise ${fmtT(rise)} · sunset ${fmtT(set)}</span></div>
+      <div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:4px;">` +
+      mkt.map(h => `<div style="flex:1;min-width:60px;text-align:center;padding:4px 2px;border-radius:4px;background:var(--panel-2);${cur && h.start.getTime() === cur.start.getTime() ? 'outline:1.5px solid var(--gold);' : ''}">
+        <div style="font-size:13px;color:${_PLANET_COL[h.planet]};">${_PLANET_GLYPH[h.planet]}</div>
+        <div style="font-size:8px;color:var(--muted-2);">${fmtT(h.start)}</div></div>`).join('') +
+      `</div>
+      <div class="oc-sub" style="margin-top:5px;">Classical planetary hours: sunrise→sunset split into 12 unequal "hours," ruled in Chaldean order from the day\'s ruler. Mumbai coordinates; gold outline = current hour. Renaissance timekeeping applied to NSE hours — historical curiosity tier.</div>`;
+  }
+
+  function renderAstroTab() {
+    const inp = _astroInputs();
+    _safe(() => renderAstroWheel(inp), 'renderAstroWheel');
+    _safe(() => renderAstroPositions(inp), 'renderAstroPositions');
+    _safe(() => renderAstroAspects(inp), 'renderAstroAspects');
+    _safe(() => renderAstroUpcoming(inp), 'renderAstroUpcoming');
+    _safe(() => renderAstroRetro(inp), 'renderAstroRetro');
+    _safe(() => renderAstroLines(inp), 'renderAstroLines');
+    _safe(() => renderAstroNatal(inp), 'renderAstroNatal');
+    _safe(() => renderAstroMoon(inp), 'renderAstroMoon');
+    _safe(() => renderAstroHours(), 'renderAstroHours');
+  }
+  document.getElementById('astroGenBtn')?.addEventListener('click', renderAstroTab);
+  document.getElementById('astroZodiac')?.addEventListener('change', renderAstroTab);
   document.getElementById('numoUseSpot')?.addEventListener('click', () => {
     const spot = state.lastData?.underlying_value;
     if (spot) { document.getElementById('numoPrice').value = Math.round(spot * 100) / 100; renderNumoTab(); }
     else showToast('Load the option chain first to get spot');
   });
+
+  // ======================================================================
+  // FEATURE SET: Market Levels tab
+  // ======================================================================
+  function _lvlRow(tag, val, price, extra, strongCls) {
+    const near = Math.abs(val - price) / price < 0.0015;
+    const cls = strongCls || (near ? 'anchor' : (val > price ? 'res' : 'sup'));
+    return `<div class="gann-lvl-row ${cls}">
+      <span class="lvl-tag">${tag}</span>
+      <span class="lvl-val">${fmtInt(Math.round(val))}</span>
+      <span class="lvl-dist">${extra || ((val - price) / price * 100).toFixed(2) + '%'}</span>
+    </div>`;
+  }
+  function _lvlOhlc() {
+    // prev-day OHLC preferred; session as fallback
+    const so = state.lastData?.session_ohlc;
+    const p = state_ohlc;
+    if (p?.high && p?.low && p?.close) return { h: p.high, l: p.low, c: p.close, src: 'prev-day' };
+    if (so?.high && so?.low) return { h: so.high, l: so.low, c: so.close || so.open, src: 'session' };
+    return null;
+  }
+
+  // ── 1. Camarilla pivots ──
+  function computeCamarilla(h, l, c) {
+    const r = h - l, k = 1.1;
+    return {
+      h5: (h / l) * c, h4: c + r * k / 2, h3: c + r * k / 4,
+      l3: c - r * k / 4, l4: c - r * k / 2, l5: c - ((h / l) * c - c),
+    };
+  }
+  function renderCamarilla(price) {
+    const out = document.getElementById('lvlCamarilla');
+    if (!out) return;
+    const o = _lvlOhlc();
+    if (!o) { out.innerHTML = '<span class="oc-sub">Needs prev-day or session OHLC (load Market View pivots first).</span>'; state._camarilla = null; return; }
+    const cam = computeCamarilla(o.h, o.l, o.c);
+    state._camarilla = cam;   // consumed by pivot bar
+    out.innerHTML =
+      _lvlRow('H5 ext', cam.h5, price) + _lvlRow('H4 breakout ★', cam.h4, price) + _lvlRow('H3 reversal ★', cam.h3, price) +
+      `<div class="gann-lvl-row anchor"><span class="lvl-tag">SPOT</span><span class="lvl-val">${fmtInt(Math.round(price))}</span><span class="lvl-dist">${o.src}</span></div>` +
+      _lvlRow('L3 reversal ★', cam.l3, price) + _lvlRow('L4 breakout ★', cam.l4, price) + _lvlRow('L5 ext', cam.l5, price) +
+      '<div class="oc-sub" style="margin-top:4px;">Trade grammar: fade at H3/L3 in range days; go with the break beyond H4/L4. Widely watched in Indian intraday flow.</div>';
+  }
+
+  // ── 2. Murrey Math ──
+  function computeMurrey(h, l) {
+    const r = Math.max(1e-9, h - l);
+    const frame = Math.pow(8, Math.ceil(Math.log(r) / Math.log(8)));   // smallest 8^n covering range
+    const base = Math.floor(l / frame) * frame;
+    const step = frame / 8;
+    return { base, step, frame };
+  }
+  function renderMurrey(price) {
+    const out = document.getElementById('lvlMurrey');
+    if (!out) return;
+    const o = _lvlOhlc();
+    if (!o) { out.innerHTML = '<span class="oc-sub">Needs OHLC.</span>'; return; }
+    const m = computeMurrey(o.h, o.l);
+    const names = ['0/8 hard support', '1/8 weak', '2/8 pivot minor', '3/8 range floor ★', '4/8 major pivot ★', '5/8 range top ★', '6/8 pivot minor', '7/8 weak', '8/8 hard resistance'];
+    let rows = '';
+    for (let i = 8; i >= 0; i--) {
+      const v = m.base + i * m.step;
+      if (Math.abs(v - price) / price > 0.06) continue;
+      rows += _lvlRow(`${i}/8`, v, price, names[i].replace(/^\d\/8 /, ''));
+    }
+    out.innerHTML = (rows || '<span class="oc-sub">Frame octave puts all 8ths beyond ±6% — unusual; widen the swing.</span>') +
+      `<div class="oc-sub" style="margin-top:4px;">Frame ${fmtInt(m.frame)} pts (8^n), cell ${fmtInt(m.step)}. Gann Square-of-8 descendant: 3/8–5/8 is the "trading range" zone, 4/8 the major battle line.</div>`;
+  }
+
+  // ── 3. Fibonacci confluence clusters ──
+  function renderFibClusters(price) {
+    const out = document.getElementById('lvlFibClusters');
+    if (!out) return;
+    const swings = [];
+    const so = state.lastData?.session_ohlc;
+    if (so?.high && so?.low) swings.push(['session', so.high, so.low]);
+    if (state_ohlc?.high && state_ohlc?.low) swings.push(['prev-day', state_ohlc.high, state_ohlc.low]);
+    const gh = parseFloat(document.getElementById('gannSwingHigh')?.value), gl = parseFloat(document.getElementById('gannSwingLow')?.value);
+    if (gh && gl && gh > gl) swings.push(['manual', gh, gl]);
+    if (!swings.length) { out.innerHTML = '<span class="oc-sub">No swings available yet.</span>'; return; }
+    const ratios = [0.236, 0.382, 0.5, 0.618, 0.786, 1.272, 1.618];
+    const levels = [];
+    for (const [name, h, l] of swings) {
+      const r = h - l;
+      for (const f of ratios) {
+        levels.push({ v: l + r * f, src: `${name} ${f}` });          // up-swing retrace/ext
+        levels.push({ v: h - r * f, src: `${name} ${f}↓` });          // down-swing
+      }
+    }
+    // cluster: greedy bucket within 0.15%
+    levels.sort((a, b) => a.v - b.v);
+    const clusters = [];
+    for (const lv of levels) {
+      const c0 = clusters[clusters.length - 1];
+      if (c0 && Math.abs(lv.v - c0.center) / price < 0.0015) {
+        c0.members.push(lv); c0.center = c0.members.reduce((s, m) => s + m.v, 0) / c0.members.length;
+      } else clusters.push({ center: lv.v, members: [lv] });
+    }
+    const strong = clusters.filter(cl => cl.members.length >= 2 && Math.abs(cl.center - price) / price < 0.04)
+      .sort((a, b) => b.members.length - a.members.length).slice(0, 7)
+      .sort((a, b) => b.center - a.center);
+    if (!strong.length) { out.innerHTML = '<span class="oc-sub">No multi-ratio clusters within ±4% right now.</span>'; return; }
+    out.innerHTML = strong.map(cl =>
+      _lvlRow(`×${cl.members.length} cluster${cl.members.length >= 3 ? ' ★' : ''}`, cl.center, price,
+        cl.members.slice(0, 3).map(m => m.src).join(', '))).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Zones where fib ratios from independent swings stack within 0.15%. Cluster count is the strength score — singles are noise, ×3+ earns a look.</div>';
+  }
+
+  // ── 4. Round-number grid ──
+  function renderRoundGrid(price) {
+    const out = document.getElementById('lvlRound');
+    if (!out) return;
+    const tiers = [[1000, '1000s ★★', 3], [500, '500s ★', 2], [250, '250s', 1], [100, '100s', 0]];
+    const rows = [];
+    for (const [unit, name, w] of tiers) {
+      const below = Math.floor(price / unit) * unit;
+      for (const v of [below, below + unit]) {
+        if (rows.some(r => r.v === v && r.w >= w)) continue;
+        const existing = rows.find(r => r.v === v);
+        if (existing) continue;
+        rows.push({ v, name, w });
+      }
+    }
+    rows.sort((a, b) => b.v - a.v);
+    out.innerHTML = rows.map(r => _lvlRow(r.name, r.v, price)).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">The one "number magic" with a real mechanism: resting orders demonstrably cluster at round levels (documented microstructure). Thousands outrank 500s outrank the rest.</div>';
+  }
+
+  // ── 5. Square of 12 grid ──
+  function renderSq12(price) {
+    const out = document.getElementById('lvlSq12');
+    if (!out) return;
+    const lo = parseFloat(document.getElementById('gannSwingLow')?.value) || state_ohlc?.low || price;
+    const startK = Math.max(0, Math.floor((price - lo) / 12) - 4);
+    let rows = '';
+    for (let k = startK + 9; k >= startK; k--) {
+      const v = lo + k * 12;
+      const major = (k % 12 === 0);
+      if (Math.abs(v - price) / price > 0.01 && !major) continue;
+      rows += _lvlRow(major ? `${k / 12}×144 ★` : `+${k}×12`, v, price);
+    }
+    out.innerHTML = (rows || '<span class="oc-sub">No 12-grid lines within ±1%.</span>') +
+      `<div class="oc-sub" style="margin-top:4px;">12-pt micro-grid from anchor ${fmtInt(Math.round(lo))}; every 12th line (=144) is a Master Square level. Fine-grained cousin of the Sq144 panel on the Gann tab.</div>`;
+  }
+
+  // ── 6. Harmonic pattern scanner (XABCD on session swings) ──
+  function _zigzag(points, thresholdPct) {
+    if (points.length < 10) return [];
+    const piv = [{ i: 0, v: points[0] }];
+    let dir = 0;
+    for (let i = 1; i < points.length; i++) {
+      const last = piv[piv.length - 1];
+      const chg = (points[i] - last.v) / last.v * 100;
+      if (dir >= 0 && chg <= -thresholdPct) { piv.push({ i, v: points[i] }); dir = -1; }
+      else if (dir <= 0 && chg >= thresholdPct) { piv.push({ i, v: points[i] }); dir = 1; }
+      else if ((dir >= 0 && points[i] > last.v) || (dir <= 0 && points[i] < last.v)) { last.i = i; last.v = points[i]; }
+    }
+    return piv;
+  }
+  const _HARMONICS = [
+    { name: 'Gartley', b: [0.588, 0.648], d: [0.756, 0.816] },
+    { name: 'Bat', b: [0.352, 0.53], d: [0.856, 0.916] },
+    { name: 'Butterfly', b: [0.756, 0.816], d: [1.22, 1.32] },
+    { name: 'Crab', b: [0.352, 0.648], d: [1.55, 1.68] },
+  ];
+  function renderHarmonics(price) {
+    const out = document.getElementById('lvlHarmonic');
+    if (!out) return;
+    const pts = (typeof _spotHistory !== 'undefined' ? _spotHistory : []).map(p => p.val).filter(Boolean);
+    if (pts.length < 60) { out.innerHTML = '<span class="oc-sub">Needs ~5+ min of session spot history — collecting.</span>'; return; }
+    const piv = _zigzag(pts, 0.12);   // 0.12% swings intraday
+    if (piv.length < 5) { out.innerHTML = `<span class="oc-sub">Only ${piv.length} swing pivots so far (need 5 for XABCD) — quiet tape.</span>`; return; }
+    const [X, A, B, C, D] = piv.slice(-5).map(p => p.v);
+    const XA = Math.abs(A - X), AB = Math.abs(B - A), CD_proj = null;
+    if (XA < 1e-9) { out.innerHTML = '<span class="oc-sub">Degenerate swings.</span>'; return; }
+    const bRatio = AB / XA;
+    const dRatio = Math.abs(D - X) >= 0 ? Math.abs(A - D) / XA : 0;
+    const hits = _HARMONICS.filter(h => bRatio >= h.b[0] && bRatio <= h.b[1] && dRatio >= h.d[0] && dRatio <= h.d[1]);
+    const fmtPiv = piv.slice(-5).map((p, i) => `${'XABCD'[i]}=${fmtInt(Math.round(p.v))}`).join(' ');
+    if (hits.length) {
+      out.innerHTML = hits.map(h => `<div class="gann-lvl-row anchor"><span class="lvl-tag">${h.name} ★</span><span class="lvl-val">PRZ ≈ ${fmtInt(Math.round(D))}</span><span class="lvl-dist">B=${bRatio.toFixed(2)} D=${dRatio.toFixed(2)}</span></div>`).join('') +
+        `<div class="oc-sub" style="margin-top:4px;">${fmtPiv}. Pattern complete at D — the PRZ is a fade zone with a stop just beyond, by the playbook. Intraday 0.12% zigzag; ratios ±tolerance.</div>`;
+    } else {
+      // show projected D zones for the two closest templates
+      const projs = _HARMONICS.map(h => ({ name: h.name, ok: bRatio >= h.b[0] && bRatio <= h.b[1], d: h.d })).filter(p => p.ok);
+      out.innerHTML = `<div class="oc-sub">No completed pattern. Last swings: ${fmtPiv} · B-ratio ${bRatio.toFixed(2)}.</div>` +
+        (projs.length ? projs.map(p => {
+          const dir = A > X ? -1 : 1;   // D completes opposite the XA thrust
+          const dLo = A + dir * p.d[0] * XA, dHi = A + dir * p.d[1] * XA;
+          return `<div class="gann-lvl-row"><span class="lvl-tag">${p.name} setup</span><span class="lvl-val">${fmtInt(Math.round(Math.min(dLo, dHi)))}–${fmtInt(Math.round(Math.max(dLo, dHi)))}</span><span class="lvl-dist">projected PRZ</span></div>`;
+        }).join('') : '<div class="oc-sub">B-leg ratio matches no template — no projection.</div>');
+    }
+  }
+
+  // ── 9-11. Measured loaders (server) ──
+  async function _lvlFetch(path) {
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    const res = await fetch(`${base}${path}?symbol=${encodeURIComponent(state.symbol)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+  document.getElementById('lvlTpoBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('lvlTpo');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const d = await _lvlFetch('/api/tpo-levels');
+      const price = state.lastData?.underlying_value || 0;
+      if (!d.days?.length) { out.innerHTML = '<span class="oc-sub">No recorded days yet — TPO levels build up as the replay archive grows.</span>'; return; }
+      out.innerHTML = d.days.slice(-8).reverse().map(day => `
+        <div class="gann-lvl-row ${day.naked ? 'anchor' : ''}">
+          <span class="lvl-tag">${day.date}${day.naked ? ' NAKED ★' : ''}</span>
+          <span class="lvl-val">POC ${fmtInt(Math.round(day.poc))}</span>
+          <span class="lvl-dist">VA ${fmtInt(Math.round(day.val))}–${fmtInt(Math.round(day.vah))}${price ? ' · ' + ((day.poc - price) / price * 100).toFixed(2) + '%' : ''}</span>
+        </div>`).join('') +
+        '<div class="oc-sub" style="margin-top:4px;">Time-at-price profile per recorded day (index has no true volume — TPO uses time, the original Market Profile method). NAKED = a POC no later session has touched: classic magnet levels.</div>';
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+  document.getElementById('lvlMpBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('lvlMpStats');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const d = await _lvlFetch('/api/maxpain-stats');
+      const s = d.summary || {};
+      if (!d.days?.length) { out.innerHTML = `<span class="oc-sub">${escapeHtml(s.note || 'No data')}</span>`; return; }
+      out.innerHTML = `<div class="pstats-grid">` +
+        statCard('Days', String(s.n_days)) +
+        statCard('Converged', s.converge_rate + '%', s.converge_rate >= 55 ? 'pos' : '') +
+        statCard('Avg pts toward MP', String(s.avg_move_toward), s.avg_move_toward > 0 ? 'pos' : 'neg') +
+        (s.expiry_converge_rate !== null ? statCard('Expiry-day rate', s.expiry_converge_rate + '%', s.expiry_converge_rate >= 60 ? 'pos' : '') : '') +
+        `</div>` +
+        d.days.slice(-5).reverse().map(r => `<div class="gann-lvl-row ${r.converged ? 'sup' : 'res'}"><span class="lvl-tag">${r.date}</span><span class="lvl-val">MP ${fmtInt(r.max_pain)}</span><span class="lvl-dist">${r.dist_10am}→${r.dist_close} pts ${r.converged ? '✓ converged' : '✗ diverged'}</span></div>`).join('') +
+        '<div class="oc-sub" style="margin-top:4px;">Your own measured answer to "is max pain a magnet?" — convergence rate near 50% means it isn\'t (here), materially above means it is. Folklore → data.</div>';
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+  document.getElementById('lvlTodBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('lvlTod');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const d = await _lvlFetch('/api/tod-seasonality');
+      if (!d.buckets?.length) { out.innerHTML = '<span class="oc-sub">No recorded days yet.</span>'; return; }
+      const maxR = Math.max(...d.buckets.map(b => b.avg_range), 1);
+      const W = 300, H = 120, padL = 4, bw = (W - 2 * padL) / d.buckets.length;
+      const bars = d.buckets.map((b, i) => {
+        const hh = b.avg_range / maxR * (H - 26);
+        return `<rect x="${(padL + i * bw).toFixed(1)}" y="${(H - 18 - hh).toFixed(1)}" width="${(bw - 1.5).toFixed(1)}" height="${hh.toFixed(1)}" fill="var(--accent)" opacity="${0.4 + 0.6 * b.avg_range / maxR}"/>` +
+          (i % 4 === 0 ? `<text x="${(padL + i * bw).toFixed(1)}" y="${H - 6}" style="font-size:6.5px;fill:var(--muted-2);">${b.bucket}</text>` : '');
+      }).join('');
+      const peak = d.buckets.reduce((a, b) => b.avg_range > a.avg_range ? b : a);
+      out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${bars}</svg>
+        <div class="oc-sub">Avg 15-min range across ${d.buckets[0]?.n || '?'} recorded day(s). Peak activity: <b style="color:var(--gold);">${peak.bucket}</b> (${peak.avg_range} pts). Levels break when volatility arrives — time entries accordingly.</div>`;
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+
+  // ── Advanced: Master Confluence Ladder — every level source, one ranking ──
+  // Tier weights: measured/positioning (OI walls, OC S/R, max pain, GEX flip,
+  // reversals) = 3 · crowd-watched (Camarilla, round, Murrey) = 2 · geometric
+  // (S9, fibs via swings, planetary) = 1. Cluster within 0.2% of spot.
+  function renderLvlMaster(price) {
+    const out = document.getElementById('lvlMaster');
+    if (!out) return;
+    const d = state.lastData;
+    const src = [];
+    // measured / positioning (w3)
+    const oc = (typeof computeOcLevels === 'function' && d) ? computeOcLevels(d) : null;
+    if (oc) {
+      src.push({ v: oc.res.strike, s: 'OC Resistance', w: 3 });
+      src.push({ v: oc.sup.strike, s: 'OC Support', w: 3 });
+      if (state._ocReversals?.call) src.push({ v: state._ocReversals.call, s: 'C-Rev', w: 3 });
+      if (state._ocReversals?.put)  src.push({ v: state._ocReversals.put,  s: 'P-Rev', w: 3 });
+    }
+    if (d?.max_pain) src.push({ v: d.max_pain, s: 'Max Pain', w: 3 });
+    const gex = (typeof _computeGex === 'function' && d) ? _computeGex(d) : null;
+    if (gex?.flip) src.push({ v: gex.flip, s: 'GEX flip', w: 3 });
+    if (state._oiWalls?.callStrike) src.push({ v: state._oiWalls.callStrike, s: 'Call OI wall', w: 3 });
+    if (state._oiWalls?.putStrike)  src.push({ v: state._oiWalls.putStrike,  s: 'Put OI wall',  w: 3 });
+    // crowd-watched (w2)
+    if (state._camarilla) for (const [k, lbl] of [['h4', 'Cam H4'], ['h3', 'Cam H3'], ['l3', 'Cam L3'], ['l4', 'Cam L4']]) src.push({ v: state._camarilla[k], s: lbl, w: 2 });
+    for (const unit of [1000, 500]) {
+      const below = Math.floor(price / unit) * unit;
+      src.push({ v: below, s: `round ${unit}`, w: 2 });
+      src.push({ v: below + unit, s: `round ${unit}`, w: 2 });
+    }
+    const o = _lvlOhlc();
+    if (o) {
+      const m = computeMurrey(o.h, o.l);
+      for (let i = 0; i <= 8; i++) {
+        const v = m.base + i * m.step;
+        if (Math.abs(v - price) / price < 0.03) src.push({ v, s: `MM ${i}/8`, w: 2 });
+      }
+    }
+    // geometric (w1)
+    const s9 = _gannSq9Levels(price);
+    if (s9) for (const x of [...s9.res, ...s9.sup]) if (Math.abs(x.deg) % 90 === 0) src.push({ v: x.val, s: `S9 ${x.deg > 0 ? '+' : ''}${x.deg}°`, w: 1 });
+    if (typeof _planetLongitudes === 'function') {
+      const tl = _planetLongitudes(new Date());
+      for (const [name, lon] of Object.entries(tl)) {
+        const lvl = Math.round((price - lon) / 360) * 360 + lon;
+        if (lvl > 0 && Math.abs(lvl - price) / price < 0.03) src.push({ v: lvl, s: `${_PLANET_GLYPH[name] || ''}${name} line`, w: 1 });
+      }
+    }
+    const cand = src.filter(x => x.v > 0 && Math.abs(x.v - price) / price < 0.035);
+    if (cand.length < 2) { out.innerHTML = '<span class="oc-sub">Load the chain and Generate the tab first — few sources active.</span>'; return; }
+    cand.sort((a, b) => a.v - b.v);
+    const clusters = [];
+    for (const x of cand) {
+      const c0 = clusters[clusters.length - 1];
+      if (c0 && Math.abs(x.v - c0.center) / price < 0.002) {
+        c0.members.push(x);
+        c0.score += x.w;
+        c0.center = c0.members.reduce((s, m) => s + m.v * m.w, 0) / c0.members.reduce((s, m) => s + m.w, 0);
+      } else clusters.push({ center: x.v, members: [x], score: x.w });
+    }
+    const top = clusters.filter(cl => cl.members.length >= 2)
+      .sort((a, b) => b.score - a.score).slice(0, 10)
+      .sort((a, b) => b.center - a.center);
+    if (!top.length) { out.innerHTML = '<span class="oc-sub">No multi-source zones within ±3.5% right now.</span>'; return; }
+    const maxScore = Math.max(...top.map(t => t.score));
+    out.innerHTML = top.map(cl => {
+      const srcs = [...new Set(cl.members.map(m => m.s))].slice(0, 5).join(' + ');
+      const bar = Math.round(cl.score / maxScore * 100);
+      return `<div class="gann-lvl-row ${cl.score >= maxScore * 0.8 ? 'anchor' : (cl.center > price ? 'res' : 'sup')}">
+        <span class="lvl-tag">⚡${cl.score}</span>
+        <span class="lvl-val">${fmtInt(Math.round(cl.center))}</span>
+        <span class="lvl-dist" style="flex:1;text-align:right;">${srcs} · ${((cl.center - price) / price * 100).toFixed(2)}%</span>
+      </div><div style="height:2px;background:linear-gradient(90deg,var(--gold) ${bar}%,transparent ${bar}%);margin:-2px 8px 3px;"></div>`;
+    }).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Weighting: positioning data (OI/OC/GEX/max-pain) ×3 · crowd-watched (Camarilla/round/Murrey) ×2 · geometric (S9/planetary) ×1. Score ⚡ = weighted source count. A zone where positioning AND crowd levels stack is the strongest thing any tab here can show you.</div>';
+  }
+
+  document.getElementById('lvlStatsBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('lvlStats');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const d = await _lvlFetch('/api/level-stats');
+      const t = d.tiers || {};
+      const row = (name, obj) => obj && obj.touches ? `
+        <div class="gann-lvl-row ${obj.bounce_rate >= 55 ? 'sup' : obj.bounce_rate <= 45 ? 'res' : ''}">
+          <span class="lvl-tag">round ${name}s</span>
+          <span class="lvl-val">${obj.bounce_rate}% bounce</span>
+          <span class="lvl-dist">${obj.touches} touches</span>
+        </div>` : `<div class="gann-lvl-row"><span class="lvl-tag">round ${name}s</span><span class="lvl-val">—</span><span class="lvl-dist">no touches recorded</span></div>`;
+      out.innerHTML = row('1000', t['1000']) + row('500', t['500']) +
+        `<div class="oc-sub" style="margin-top:4px;">${escapeHtml(d.note || '')} Near 50% = coin flip (level does nothing); materially above = genuine bounce tendency in YOUR data. Sample grows with every recorded day.</div>`;
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+
+  function renderLevelsTab() {
+    const price = state.lastData?.underlying_value;
+    if (!price) { document.getElementById('levelsStatus').textContent = 'Load the option chain first — spot needed.'; return; }
+    _safe(() => renderCamarilla(price), 'renderCamarilla');
+    _safe(() => renderMurrey(price), 'renderMurrey');
+    _safe(() => renderFibClusters(price), 'renderFibClusters');
+    _safe(() => renderRoundGrid(price), 'renderRoundGrid');
+    _safe(() => renderSq12(price), 'renderSq12');
+    _safe(() => renderHarmonics(price), 'renderHarmonics');
+    _safe(() => renderLvlMaster(price), 'renderLvlMaster');
+  }
+  document.getElementById('levelsGenBtn')?.addEventListener('click', renderLevelsTab);
 
   document.getElementById('resultsCalLoadBtn')?.addEventListener('click', async () => {
     const out = document.getElementById('resultsCalOut');
@@ -8520,6 +9696,14 @@
           renderGannTab();
         }
       }
+      if (tab.dataset.tab === 'levels') {
+        renderLevelsTab();
+      }
+      if (tab.dataset.tab === 'astro') {
+        const dInp = document.getElementById('astroDate');
+        if (dInp && !dInp.value) dInp.value = new Date().toISOString().slice(0, 10);
+        renderAstroTab();
+      }
       if (tab.dataset.tab === 'numerology') {
         const dInp = document.getElementById('numoDate');
         if (dInp && !dInp.value) dInp.value = new Date().toISOString().slice(0, 10);
@@ -8698,7 +9882,14 @@
       clearError();
       setStatus('ok');
       state.lastData = data;
-      render(data);
+      try {
+        render(data);
+      } catch (renderErr) {
+        // A render bug must NEVER masquerade as a network error or kill alerts.
+        console.error('[pipeline] render() fatal:', renderErr);
+        showToast(`⚠ Render error: ${renderErr.message} — alerts still active`);
+        _safe(() => renderPivotLevels(), 'alerts-guarantee');
+      }
     } catch (err) {
       setStatus('bad');
       if (err.isNetworkError) {
@@ -8725,6 +9916,20 @@
   // _chainRowState: strike → last rendered values — used to skip cell writes when unchanged
   const _chainRowState = new Map();
 
+  // Panel-isolation wrapper: one broken panel must never kill the pipeline
+  // (and with it the level monitor → alerts → voice). Errors surface as a
+  // console line + one toast per panel per session instead of silent death.
+  const _safeWarned = new Set();
+  function _safe(fn, tag) {
+    try { fn(); } catch (e) {
+      console.error(`[pipeline] ${tag} failed:`, e);
+      if (!_safeWarned.has(tag)) {
+        _safeWarned.add(tag);
+        try { showToast(`⚠ Panel "${tag}" errored — other panels unaffected (see console)`); } catch (_) {}
+      }
+    }
+  }
+
   function render(data) {
     // ─── Save scroll position BEFORE any DOM mutations ───────────────────
     // This is the primary guard against refresh-caused scroll jumps.
@@ -8747,7 +9952,7 @@
     lastSpot = newSpot;
     els.tickerSpot.textContent = fmtPrice(newSpot);
     els.metaExpiry.textContent = data.expiry;
-    updateCountdown();
+    _safe(() => updateCountdown(), 'updateCountdown');
     els.metaAtmIv.textContent = data.atm_iv ? data.atm_iv.toFixed(1) + '%' : '—';
     if (data.atm_iv_rank) {
       const r = data.atm_iv_rank;
@@ -8771,57 +9976,57 @@
     els.expirySelect.value = data.expiry;
     state.expiry = data.expiry;
 
-    renderStatCards(data);
-    renderPivotLevels();
-    _updateSessionOhlcDisplay();
-    _renderGreeksCard(data);
-    _renderStraddleBreakeven();
-    _renderOiConcentrationChart(data);
-    _checkPcrAlerts(data.pcr);
-    _syncPosSizerLotSize(data.lot_size || 75);
+    _safe(() => renderStatCards(data), 'renderStatCards');
+    _safe(() => renderPivotLevels(), 'renderPivotLevels');
+    _safe(() => _updateSessionOhlcDisplay(), '_updateSessionOhlcDisplay');
+    _safe(() => _renderGreeksCard(data), '_renderGreeksCard');
+    _safe(() => _renderStraddleBreakeven(), '_renderStraddleBreakeven');
+    _safe(() => _renderOiConcentrationChart(data), '_renderOiConcentrationChart');
+    _safe(() => _checkPcrAlerts(data.pcr), '_checkPcrAlerts');
+    _safe(() => _syncPosSizerLotSize(data.lot_size || 75), '_syncPosSizerLotSize');
     // New features
-    _checkIvSpikeAlert(data.atm_iv);
-    _checkVolumeSpikes(data.strikes || []);
-    _checkPcrTrend(data.pcr);
-    _renderThetaDecay(data);
-    _updateExpectedMoves(data);
-    _renderMultiExpiryComparison(data);
-    _fetchAndRenderRelativeStrength();
-    _updateMiniHud();
-    _saveSettings();
+    _safe(() => _checkIvSpikeAlert(data.atm_iv), '_checkIvSpikeAlert');
+    _safe(() => _checkVolumeSpikes(data.strikes || []), '_checkVolumeSpikes');
+    _safe(() => _checkPcrTrend(data.pcr), '_checkPcrTrend');
+    _safe(() => _renderThetaDecay(data), '_renderThetaDecay');
+    _safe(() => _updateExpectedMoves(data), '_updateExpectedMoves');
+    _safe(() => _renderMultiExpiryComparison(data), '_renderMultiExpiryComparison');
+    _safe(() => _fetchAndRenderRelativeStrength(), '_fetchAndRenderRelativeStrength');
+    _safe(() => _updateMiniHud(), '_updateMiniHud');
+    _safe(() => _saveSettings(), '_saveSettings');
     // Batch 3 new features
-    _recordStraddle(data.straddle_premium);
-    _renderStraddleSparkline();
-    _updateIvp(data.atm_iv);
+    _safe(() => _recordStraddle(data.straddle_premium), '_recordStraddle');
+    _safe(() => _renderStraddleSparkline(), '_renderStraddleSparkline');
+    _safe(() => _updateIvp(data.atm_iv), '_updateIvp');
     _checkIvMove(data.atm_iv);                 // IV spike/crush alert
     _updateOrb(data.underlying_value);         // opening range tracker
     _checkVelocity(data.underlying_value);     // burst detector + nav pill
-    _updateLotSizeStrip(data.symbol || state.symbol, data.lot_size);
+    _safe(() => _updateLotSizeStrip(data.symbol || state.symbol, data.lot_size), '_updateLotSizeStrip');
     state._oiWalls = _getOiWalls(data);
     // Batch 4 — latest features
     _lastFetchTime = Date.now();
-    _saveOfflineCache(data);
-    _updateOiVelocity(data.strikes || []);
-    _renderExpiryCal(data);
-    _checkWatchlistAlerts();
-    _showStaleBanner(-1);
+    _safe(() => _saveOfflineCache(data), '_saveOfflineCache');
+    _safe(() => _updateOiVelocity(data.strikes || []), '_updateOiVelocity');
+    _safe(() => _renderExpiryCal(data), '_renderExpiryCal');
+    _safe(() => _checkWatchlistAlerts(), '_checkWatchlistAlerts');
+    _safe(() => _showStaleBanner(-1), '_showStaleBanner');
     state._circuitBreakers = _getCircuitBreakers();
     // Batch 5 — newest features
-    _recordSpot(data.underlying_value);
-    _renderSpotSparkline();
-    _recordFlow(data);
-    _renderFlowTimeline();
-    _recordSessionLog(data);
-    _checkWatchlistSrCrossings();
+    _safe(() => _recordSpot(data.underlying_value), '_recordSpot');
+    _safe(() => _renderSpotSparkline(), '_renderSpotSparkline');
+    _safe(() => _recordFlow(data), '_recordFlow');
+    _safe(() => _renderFlowTimeline(), '_renderFlowTimeline');
+    _safe(() => _recordSessionLog(data), '_recordSessionLog');
+    _safe(() => _checkWatchlistSrCrossings(), '_checkWatchlistSrCrossings');
     // Batch 6 — latest additions
-    _renderIvSkew(data);
-    _renderMpainSparkline();
+    _safe(() => _renderIvSkew(data), '_renderIvSkew');
+    _safe(() => _renderMpainSparkline(), '_renderMpainSparkline');
     _prevSpotForScenario = data.underlying_value;
     state._sessionVwap = _computeSessionVwap();
     // Batch 7 — newest
-    _renderHlDist(data);
-    _checkPcrDivergence(data);
-    _clearRetry();
+    _safe(() => _renderHlDist(data), '_renderHlDist');
+    _safe(() => _checkPcrDivergence(data), '_checkPcrDivergence');
+    _safe(() => _clearRetry(), '_clearRetry');
     const eScore = _computeEntryScore(data);
     const eRow   = document.getElementById('entryScoreRow');
     const ePill  = document.getElementById('entryScorePill');
@@ -8902,19 +10107,19 @@
     renderChainTable(data, activeTab === 'chain');
 
     // ─── Charts: update regardless of tab (lightweight SVG replacements) ──
-    renderSkewChart(data);
-    renderOcLevels(data);
-    renderGexChart(data);
-    renderTermStructure(data);
-    _trackMultiStraddle(data);
-    renderMultiStraddle();
-    renderVolSurface(data);
-    _renderFuturesBasis(data);
-    _renderIvRank(data);
-    renderVolSurface(data);
-    renderPcrTrend(data);
-    renderStraddleChart(data);
-    renderStratLtpChart();
+    _safe(() => renderSkewChart(data), 'renderSkewChart');
+    _safe(() => renderOcLevels(data), 'renderOcLevels');
+    _safe(() => renderGexChart(data), 'renderGexChart');
+    _safe(() => renderTermStructure(data), 'renderTermStructure');
+    _safe(() => _trackMultiStraddle(data), '_trackMultiStraddle');
+    _safe(() => renderMultiStraddle(), 'renderMultiStraddle');
+    _safe(() => renderVolSurface(data), 'renderVolSurface');
+    _safe(() => _renderFuturesBasis(data), '_renderFuturesBasis');
+    _safe(() => _renderIvRank(data), '_renderIvRank');
+    _safe(() => renderVolSurface(data), 'renderVolSurface');
+    _safe(() => renderPcrTrend(data), 'renderPcrTrend');
+    _safe(() => renderStraddleChart(data), 'renderStraddleChart');
+    _safe(() => renderStratLtpChart(), 'renderStratLtpChart');
 
     // ─── Market View: skip when not active — it has many DOM writes ───────
     if (isFirstRender || activeTab === 'market') {
@@ -8933,7 +10138,7 @@
       state.strategyDirty = true;
     }
 
-    renderFlags(data);
+    _safe(() => renderFlags(data), 'renderFlags');
 
     // ─── Builder: only re-render when builder tab is active ───────────────
     if (isFirstRender || activeTab === 'builder') {
@@ -9104,6 +10309,73 @@
     try { window.speechSynthesis?.resume(); } catch (_) {}
   }, 10000);
 
+  // ── VOICE: serialized queue — utterances play one after another, and we
+  // NEVER call cancel() in normal operation. The previous design canceled
+  // in-flight speech (pending-check + watchdog races), which is exactly what
+  // produced "[voice] ERROR: canceled". A queue removes the need to cancel.
+  const _voiceQ = [];
+  let _voiceBusy = false;
+  let _voicePick = null;   // preferred voice, resolved once voices load
+
+  function _pickVoice() {
+    try {
+      const vs = window.speechSynthesis?.getVoices?.() || [];
+      if (!vs.length) return null;
+      return vs.find(v => /en[-_]IN/i.test(v.lang))
+          || vs.find(v => /en[-_]GB/i.test(v.lang))
+          || vs.find(v => /^en/i.test(v.lang))
+          || vs[0];
+    } catch (_) { return null; }
+  }
+  try {
+    window.speechSynthesis?.addEventListener?.('voiceschanged', () => {
+      _voicePick = _pickVoice();
+      if (_voicePick) console.log(`[voice] using voice: ${_voicePick.name} (${_voicePick.lang})`);
+    });
+    _voicePick = _pickVoice();
+  } catch (_) {}
+
+  function _voicePump() {
+    if (_voiceBusy || !_voiceQ.length) return;
+    const synth = window.speechSynthesis;
+    if (!synth) { _voiceQ.length = 0; return; }
+    _voiceBusy = true;
+    const text = _voiceQ.shift();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 1.1; utter.pitch = 1.0;
+    utter.volume = Math.max(_alertVolume(), 0.01);
+    if (_voicePick) utter.voice = _voicePick;
+    let settled = false;
+    const finish = (why) => {
+      if (settled) return;
+      settled = true;
+      _voiceBusy = false;
+      console.log(`[voice] ${why}: "${text}"`);
+      setTimeout(_voicePump, 120);   // small gap, then next in queue
+    };
+    utter.onstart = () => console.log(`[voice] speaking: "${text}"`);
+    utter.onend   = () => finish('finished');
+    utter.onerror = (e) => finish(`error (${e.error})`);
+    // Watchdog: if the utterance neither ends nor errors within 12s (wedged
+    // synth / silently dropped), reset ONCE and move on — never touches a
+    // healthy in-flight utterance because end/error settle first.
+    setTimeout(() => {
+      if (!settled) {
+        console.log('[voice] watchdog: utterance stuck >12s — resetting synth');
+        try { synth.cancel(); } catch (_) {}
+        finish('watchdog-reset');
+      }
+    }, 12000);
+    try {
+      synth.resume();   // un-wedge paused state (Chrome background tabs)
+      synth.speak(utter);
+      console.log(`[voice] queued to synth: "${text}" (volume=${utter.volume})`);
+    } catch (e) {
+      console.log(`[voice] EXCEPTION calling speak(): ${e}`);
+      finish('exception');
+    }
+  }
+
   function _speakLevel(label, price) {
     if (!_voiceEnabled()) {
       console.log('[voice] skipped — voiceToggle checkbox is unchecked');
@@ -9113,24 +10385,17 @@
       console.log('[voice] skipped — window.speechSynthesis not available in this browser');
       return;
     }
+    if (_alertVolume() <= 0.01) console.warn('[voice] volume slider is at 0 — speech will be near-silent. Raise the 🔊 slider.');
     let text = label;
     if (/^R(\d+)$/.test(label)) text = `Resistance ${label.slice(1)} touched at ${Math.round(price)}`;
     else if (/^S(\d+)$/.test(label)) text = `Support ${label.slice(1)} touched at ${Math.round(price)}`;
     else text = `${label} touched at ${Math.round(price)}`;
-
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 1.1; utter.pitch = 1.0; utter.volume = _alertVolume();
-    utter.onstart = () => console.log(`[voice] speaking: "${text}"`);
-    utter.onend   = () => console.log('[voice] finished speaking');
-    utter.onerror = (e) => console.log(`[voice] ERROR: ${e.error} — text was "${text}"`);
-
-    try {
-      window.speechSynthesis.cancel();   // cancel any in-progress speech
-      window.speechSynthesis.speak(utter);
-      console.log(`[voice] queued: "${text}" (volume=${utter.volume})`);
-    } catch (e) {
-      console.log(`[voice] EXCEPTION calling speak(): ${e}`);
+    _voiceQ.push(text);
+    while (_voiceQ.length > 3) {           // cap backlog: keep newest 3
+      const dropped = _voiceQ.shift();
+      console.log(`[voice] queue full — dropped oldest: "${dropped}"`);
     }
+    _voicePump();
   }
 
   // ── TONE: single high sine wave, hard attack, long exponential decay ──
@@ -9403,6 +10668,13 @@
     }
     // Opening range breakout levels (populated after first 15/30 min)
     for (const lv of _orbLevels()) levels.push(lv);
+    // Camarilla reversal/breakout levels (computed on the Levels tab)
+    if (state._camarilla) {
+      levels.push([`C-H4 ${fmtInt(Math.round(state._camarilla.h4))}`, state._camarilla.h4, 'r']);
+      levels.push([`C-H3 ${fmtInt(Math.round(state._camarilla.h3))}`, state._camarilla.h3, 'r']);
+      levels.push([`C-L3 ${fmtInt(Math.round(state._camarilla.l3))}`, state._camarilla.l3, 's']);
+      levels.push([`C-L4 ${fmtInt(Math.round(state._camarilla.l4))}`, state._camarilla.l4, 's']);
+    }
     // LTP-style H-OI reversal prices (writer breakevens of the biggest walls)
     if (state._ocReversals?.call) levels.push([`C-Rev ${fmtInt(state._ocReversals.call)}`, state._ocReversals.call, 'r']);
     if (state._ocReversals?.put)  levels.push([`P-Rev ${fmtInt(state._ocReversals.put)}`,  state._ocReversals.put,  's']);
@@ -15614,6 +16886,7 @@
     // Also test voice — this was previously untested by this button, so a
     // user with a broken/blocked speechSynthesis had no way to find out
     // except by waiting for (and missing) a real pivot touch.
+    if (_alertVolume() <= 0.01) showToast('🔇 Volume slider is at 0 — voice will be silent. Raise it first.');
     _speakLevel('Test Alert', state.lastData?.underlying_value || 24000);
     if (toggle && !origEnabled) setTimeout(() => { toggle.checked = false; }, 500);
   });
@@ -15785,6 +17058,34 @@
     'numo-special':      '<strong>Special Numbers</strong>Repdigits (22222), palindromes (24542), sequences (23456) and round thousands within ±3% of price. One honest distinction: round thousands (★) genuinely matter — limit orders demonstrably cluster at round numbers, a documented microstructure effect. The rest is pattern affinity with no market mechanism.',
     'numo-name':         '<strong>Symbol Numerology</strong>The traded symbol\'s letters valued under the two classical systems — Pythagorean (A=1…I=9 repeating) and Chaldean (sound-based, no 9) — summed and reduced. Follows whichever symbol you have loaded.',
     'numo-wave':         '<strong>30-Day Root Wave</strong>The daily full-date digit root plotted as a step chart for the next 30 days. Gold-ringed dots share the price\'s root; red dashed lines mark 9-days ("completion" in numerology). Worth knowing: the perfect 1-through-9 sawtooth is a property of mod-9 arithmetic itself — every date sequence produces exactly this wave, which is a good intuition for why date numerology can\'t discriminate between days in any market-relevant way.',
+    'levels-tab':        '<strong>Market Levels</strong>Level-identification methods in honest tiers. Camarilla, Murrey Math and round numbers carry real order-flow gravity in Indian markets — enough traders watch them that orders cluster there (self-fulfilling, and that\'s a legitimate mechanism). Fib clusters earn their place through confluence scoring. Square-of-12 and harmonics are geometric, same tier as the Gann tab. The measured panels at the bottom (TPO, max-pain, seasonality) are the strongest: your own recorded data answering whether levels actually behave as claimed.',
+    'lvl-camarilla':     '<strong>Camarilla Pivots</strong>H4/H3/L3/L4 from previous-day OHLC via the 1.1-factor equations. The playbook: fade moves at H3/L3 on range days (reversal levels), trade WITH a break beyond H4/L4 (breakout levels). H5/L5 are extension targets. Enormously popular among Indian intraday traders — which is exactly why they work more often than the arithmetic deserves. H3/L3/H4/L4 are also pushed to the pivot bar with touch alerts.',
+    'lvl-murrey':        '<strong>Murrey Math</strong>An algorithmic descendant of Gann\'s Square of 8: a frame sized to the smallest power-of-8 covering the swing range, divided into eighths. 8/8 and 0/8 are hardest resistance/support, 4/8 the major pivot, 3/8–5/8 the "trading range" where price spends most time. Auto-scales to any instrument.',
+    'lvl-fibclust':      '<strong>Fib Confluence Clusters</strong>Retracements and extensions computed from several independent swings (session, prev-day, your manual Gann swings) and clustered where they stack within 0.15%. A single fib line is noise; three ratios from different swings landing on one zone is a defensible level. The ×count is the strength score.',
+    'lvl-round':         '<strong>Round-Number Grid</strong>Nearest 1000/500/250/100 levels. This is the one number-based method with a documented mechanism: limit orders and stops measurably cluster at round numbers (market-microstructure literature), making them real liquidity shelves. Thousands (★★) dominate.',
+    'lvl-sq12':          '<strong>Square of 12</strong>Gann\'s 12-unit micro-grid from the swing-low anchor — the fine-grained cousin of the Square of 144. Every 12th line (=144 pts) is a Master Square level. Most useful for scalping granularity between the larger geometric levels.',
+    'lvl-harmonic':      '<strong>Harmonic Scanner</strong>Detects XABCD patterns (Gartley, Bat, Butterfly, Crab) on session swings via a 0.12% zigzag, checking the B and D leg ratios against each template. A completed pattern gives a PRZ (potential reversal zone) — by the playbook, a fade zone with a stop just beyond. When only the B-leg matches, projected D zones are shown as setups-in-progress. Ratio tolerances are ±; intraday patterns are noisier than daily ones.',
+    'lvl-tpo':           '<strong>TPO Levels (measured)</strong>Time-at-price profile per recorded day: POC (most-traded-time price) and 70% value area, computed from your replay archive. The index has no true volume, so this uses time — which is the ORIGINAL Market Profile method (TPO = time-price opportunity). NAKED POCs — prior-day POCs no later session has revisited — are classic magnet levels in auction theory, and here they come from your own data.',
+    'lvl-mpstats':       '<strong>Max-Pain Magnet (measured)</strong>The folklore says price gets "pinned" toward max pain. This measures it on YOUR recorded days: distance to max pain at 10:00 vs at close, convergence rate overall and on expiry days. Near 50% = coin flip (no magnet); materially above = the effect is real in your data. This is the pattern for every folklore level: measure it, then decide.',
+    'lvl-tod':           '<strong>Time-of-Day Seasonality</strong>Average 15-min range across recorded days — WHEN this market actually moves. The classic India pattern is a volatile open, dead lunch, and a 14:30+ ramp, but your own measured curve beats the folklore. Practical use: levels break when volatility arrives, and premium decays fastest when it doesn\'t — time entries and theta exposure accordingly.',
+    'numo-lunar':        '<strong>Lunar Phases &amp; Aspects</strong>Current Sun–Moon phase angle and the next new/full/quarter moons, from the built-in ephemeris (±0.3° ≈ ±40min at boundaries). The academic literature on lunar equity effects finds weak, inconsistent results — this is a calendar overlay for interest, not a signal. Full/new moons do coincide with Purnima/Amavasya, which some Indian traders track culturally.',
+    'numo-panchang':     '<strong>Panchang</strong>Real Vedic calendar math from the ephemeris: Tithi (lunar day) = Sun–Moon elongation ÷ 12°, with Paksha (waxing/waning fortnight); Nakshatra = Moon\'s longitude ÷ 13°20′. Honest precision notes: Moon accuracy ±0.3° puts tithi boundaries within ±40min of published panchangs, and the nakshatra uses tropical longitude (no Lahiri ayanamsa correction), so it runs ~1 mansion ahead of sidereal almanacs. Cultural calendar, same epistemic tier as this whole tab.',
+    'astro-tab':         '<strong>Astrology</strong>A real ephemeris (Keplerian elements, Schlyter method: Sun ±0.01°, Moon ±0.3°, planets ≈±1°) rendering the seven classical planets, aspects, retrogrades and both zodiacs. The astronomy is verifiable against any almanac; the astrology — any market influence — has no empirical support and financial-astrology studies do not replicate. Calendar and context layer only.',
+    'astro-wheel':       '<strong>Zodiac Wheel</strong>All seven classical planets on the ecliptic circle, 0° Aries/Mesha at the 9 o\'clock position (astrological convention, counterclockwise). Inner lines are aspects in orb: green trines/sextiles ("soft"), red squares/oppositions ("hard"), gold conjunctions. Toggle sidereal (Lahiri ayanamsa, used in Vedic/Indian practice — currently ≈24.2°) vs tropical (Western).',
+    'astro-positions':   '<strong>Planetary Positions</strong>Longitude within sign, daily motion, and retrograde flag for each planet, in the selected zodiac. Motion column: Moon ~13°/day, Sun ~1°, Jupiter ~0.08°, Saturn ~0.03°. ℞ marks apparent retrograde.',
+    'astro-aspects':     '<strong>Aspects in Effect</strong>Angular separations currently within orb (6° for Moon pairs, 4° others): conjunction 0°, sextile 60°, square 90°, trine 120°, opposition 180°. Sorted tightest-orb first. In traditional framing squares/oppositions are "tension" and trines/sextiles "flow" — decorative labels, not forecasts.',
+    'astro-upcoming':    '<strong>Upcoming Exact Aspects</strong>Daily scan of the next 30 days for the moment any planet pair crosses an exact aspect angle. Moon aspects dominate the list by sheer speed (it aspects everything within a fortnight); the slow-planet events (Jupiter/Saturn) are the rare ones astrologers weight most.',
+    'astro-retro':       '<strong>Retrograde Stations</strong>Current direct/retrograde status per planet and the next station (direction change) within 120 days, found by scanning the sign of daily motion. Retrogrades are apparent-motion geometry — Earth overtaking or being overtaken — computed here from the actual orbits, so the dates are real even though the "Mercury retrograde ruins everything" lore is not.',
+    'astro-lines':       '<strong>Planetary Price Lines</strong>The Gann longitude→price conversion (1 point per degree, level = n×360 + longitude) extended from Sun/Moon to all seven classical planets, using tropical longitudes per the Gann convention. Slow planets give near-static lines (Saturn drifts ~1 pt/month); the Moon\'s line sweeps ~13 pts/day. Same epistemic status as the Gann tab\'s planetary panel.',
+    'gann-sun-time':     '<strong>Price⨯Sun Timing</strong>The price\'s Square-of-9 wheel angle — (√price × 180) mod 360 — and the upcoming dates when the Sun\'s longitude conjuncts, squares, or opposes it. This is Gann\'s "when price meets time via the Sun": the Sun advances ~1°/day, so each harmonic hits once a year. Dates within 15 days are flagged.',
+    'gann-swings':       '<strong>Swing Campaign Analyzer</strong>The last three zigzag swings (0.12% threshold) from session data: size in points, duration, and each swing\'s 50% level. Gann\'s most practical rule: holding above the half-point of the last decline is strength; failing the half-point of the last rally is weakness. The gold values are those lines, live.',
+    'lvl-master':        '<strong>Master Confluence Ladder</strong>Every level source on this dashboard fused into one ranked ladder: positioning data (OC S/R, OI walls, max pain, GEX flip, reversals) weighted ×3, crowd-watched levels (Camarilla, round numbers, Murrey) ×2, geometric (Square-of-9 cardinals, planetary lines) ×1, clustered within 0.2%. The ⚡ score is the weighted count. This panel is the whole esoteric wing\'s honest conclusion: a zone is interesting in proportion to how much REAL positioning sits behind it.',
+    'lvl-stats':         '<strong>Level Report Card</strong>Round-number levels graded on your own recorded days: a touch is price within 0.04% of a 500/1000 level; a bounce is a reversal of ≥0.1% against the approach within ~15 minutes. Bounce rate near 50% = the level does nothing; materially above = genuine reaction tendency. The measured counterpart to the round-number panel\'s microstructure claim.',
+    'numo-personal':     '<strong>Personal Day Cycle</strong>Your date of birth folded into today\'s date (classical personal-day formula) vs the universal day number, with a 14-day alignment strip. The DOB is saved only in this browser\'s local settings and sent nowhere. Folklore favors "alignment" days; the arithmetic is exact, the significance is not.',
+    'numo-reality':      '<strong>Digit Reality Check</strong>The empirical panel this tab deserves: last-digit and digit-root distributions of actual session ticks vs the uniform expectation. Deviations converge to 0% as ticks accumulate — if prices "vibrated" to particular numbers, it would show here as persistent skew, and it doesn\'t. Tick-size granularity explains any last-digit lumpiness. Numerology, measured.',
+    'astro-natal':       '<strong>Nifty Natal Transits</strong>The "first trade chart" convention of financial astrology: a natal chart cast for the Nifty base date (3 Nov 1995, 09:15 IST), with current transiting planets checked for aspects to natal positions (orb 3°, Moon 4°). Slow-planet transits (Jupiter/Saturn) shown preferentially since Moon aspects everything weekly. The chart is computed correctly; whether an index has a birthday is left to the reader.',
+    'astro-moon':        '<strong>Moon Ingress &amp; Void-of-Course</strong>Sign-entry times for the Moon over the next 7 days, each with its void-of-course window — from the Moon\'s last exact aspect until ingress. Trading folklore holds that VoC-period initiatives "come to nothing." Hourly scan with ±40min accuracy (Moon ±0.3°); very short VoC windows can be missed.',
+    'astro-hours':       '<strong>Planetary Hours</strong>The classical unequal-hours system: sunrise→sunset (computed for Mumbai) divided into 12 day-hours ruled in Chaldean order starting from the day\'s ruler, shown for NSE market hours with the current hour highlighted. Renaissance timekeeping meeting a modern exchange — offered as the historical curiosity it is.',
     'suggest-view':      '<strong>View &amp; Risk Filter</strong>Override the auto regime read with your own directional view (bullish / bearish / neutral / big-move), and optionally restrict to defined-risk structures only. With Auto, the engine infers the view from OC WTT/WTB status and IV context. Each suggestion now shows a live quantified preview — actual strikes, POP, credit/debit, max loss and EV computed from the current chain before you deploy.',
     'iv-rv':             '<strong>IV − Realized Vol Spread</strong>ATM IV minus intraday realized volatility (Parkinson estimator on session high/low, day-scaled, annualized). Positive spread = options are pricing MORE movement than the market is delivering — the core premium-selling edge. Negative = market moving more than options price in — short premium is negative-edge, own gamma instead. Early session readings are noisy (small sample); trust it more after 11:00.',
     'risk-sizing':       '<strong>Risk-Based Lot Sizing</strong>Enter your max acceptable loss per trade; the builder computes max lots = risk ÷ (max loss per lot) for the current structure and warns when your quantity exceeds it. For undefined-risk structures (naked strangles, ratios) it refuses to size by max loss — those must be sized by margin and delta instead. Sizing decided before entry is the discipline that compounds.',

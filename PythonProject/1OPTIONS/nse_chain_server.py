@@ -438,6 +438,150 @@ def run_backtest(symbol, spec):
     return {"symbol": symbol, "days": results, "summary": summary}
 
 
+# ── Measured levels from the replay archive (TPO, max-pain stats, ToD) ──────
+def _replay_all_days(symbol):
+    return [(d, _bt_load_day(symbol, d)) for d in _replay_dates(symbol)]
+
+def compute_tpo_levels(symbol):
+    """Per recorded day: time-at-price profile POC / VAH / VAL from 1-min spot
+    samples, plus naked (unrevisited) status of each prior day's POC."""
+    days = []
+    for day, snaps in _replay_all_days(symbol):
+        spots = [s.get("underlying_value") for s in snaps if s.get("underlying_value")]
+        if len(spots) < 30:
+            continue
+        lo, hi = min(spots), max(spots)
+        if hi <= lo:
+            continue
+        nbins = 40
+        w = (hi - lo) / nbins
+        bins = [0] * nbins
+        for p in spots:
+            bins[min(nbins - 1, int((p - lo) / w))] += 1
+        poc_i = bins.index(max(bins))
+        poc = lo + (poc_i + 0.5) * w
+        # value area: expand around POC until 70% of samples covered
+        total = sum(bins)
+        covered = bins[poc_i]
+        a = b = poc_i
+        while covered < 0.7 * total and (a > 0 or b < nbins - 1):
+            up = bins[b + 1] if b < nbins - 1 else -1
+            dn = bins[a - 1] if a > 0 else -1
+            if up >= dn:
+                b += 1; covered += bins[b]
+            else:
+                a -= 1; covered += bins[a]
+        days.append({"date": day, "poc": round(poc, 1), "vah": round(lo + (b + 1) * w, 1),
+                     "val": round(lo + a * w, 1), "hi": round(hi, 1), "lo": round(lo, 1)})
+    # naked POC: not touched by any LATER day's range
+    for i, d in enumerate(days):
+        naked = True
+        for later in days[i + 1:]:
+            if later["lo"] <= d["poc"] <= later["hi"]:
+                naked = False
+                break
+        d["naked"] = naked and i < len(days) - 1   # today's own POC isn't "naked" yet
+    return {"symbol": symbol, "days": days}
+
+def compute_maxpain_stats(symbol):
+    """Does price actually converge toward max pain intraday? Measured from
+    your own recorded days: |spot−MP| early vs at close, per day."""
+    rows = []
+    for day, snaps in _replay_all_days(symbol):
+        if len(snaps) < 30:
+            continue
+        early = next((s for s in snaps if _bt_hhmm(s.get("_replay_ts", 0)) >= "10:00"), snaps[0])
+        last = snaps[-1]
+        mp = early.get("max_pain")
+        s0, s1 = early.get("underlying_value"), last.get("underlying_value")
+        if not (mp and s0 and s1):
+            continue
+        d0, d1 = abs(s0 - mp), abs(s1 - mp)
+        rows.append({"date": day, "max_pain": mp, "dist_10am": round(d0, 1),
+                     "dist_close": round(d1, 1), "converged": d1 < d0,
+                     "dte": early.get("dte")})
+    if not rows:
+        return {"symbol": symbol, "days": [], "summary": {"note": "No recorded days yet."}}
+    conv = [r for r in rows if r["converged"]]
+    expiry_rows = [r for r in rows if (r["dte"] or 9) <= 0]
+    summary = {
+        "n_days": len(rows),
+        "converge_rate": round(len(conv) / len(rows) * 100, 1),
+        "avg_move_toward": round(sum(r["dist_10am"] - r["dist_close"] for r in rows) / len(rows), 1),
+        "expiry_days": len(expiry_rows),
+        "expiry_converge_rate": round(len([r for r in expiry_rows if r["converged"]]) / len(expiry_rows) * 100, 1) if expiry_rows else None,
+    }
+    return {"symbol": symbol, "days": rows, "summary": summary}
+
+def compute_tod_seasonality(symbol):
+    """Average |Δspot| and range per 15-min bucket across recorded days —
+    WHEN does this market actually move?"""
+    from collections import defaultdict as _dd
+    buckets = _dd(lambda: {"absmove": [], "rng": []})
+    for day, snaps in _replay_all_days(symbol):
+        by_bucket = _dd(list)
+        for s in snaps:
+            sp = s.get("underlying_value")
+            if not sp:
+                continue
+            hhmm = _bt_hhmm(s.get("_replay_ts", 0))
+            try:
+                h, m = int(hhmm[:2]), int(hhmm[3:5])
+            except ValueError:
+                continue
+            key = f"{h:02d}:{(m // 15) * 15:02d}"
+            by_bucket[key].append(sp)
+        for key, sps in by_bucket.items():
+            if len(sps) >= 2:
+                buckets[key]["absmove"].append(abs(sps[-1] - sps[0]))
+                buckets[key]["rng"].append(max(sps) - min(sps))
+    out = []
+    for key in sorted(buckets):
+        b = buckets[key]
+        out.append({"bucket": key,
+                    "avg_move": round(sum(b["absmove"]) / len(b["absmove"]), 1),
+                    "avg_range": round(sum(b["rng"]) / len(b["rng"]), 1),
+                    "n": len(b["absmove"])})
+    return {"symbol": symbol, "buckets": out}
+
+
+# ── Level touch-and-react statistics (grades round numbers on YOUR data) ────
+def compute_level_stats(symbol):
+    """For every recorded day: how did price react at round 500/1000 levels?
+    Touch = within 0.04%% of the level; bounce = reversed >=0.1%% away against
+    the approach direction within the next 15 samples; else break/absorb."""
+    tiers = {"1000": [], "500": []}
+    for day, snaps in _replay_all_days(symbol):
+        spots = [s.get("underlying_value") for s in snaps if s.get("underlying_value")]
+        if len(spots) < 40:
+            continue
+        for unit_name, unit in (("1000", 1000), ("500", 500)):
+            seen = set()
+            for i in range(3, len(spots) - 16):
+                p = spots[i]
+                lvl = round(p / unit) * unit
+                if unit_name == "500" and lvl % 1000 == 0:
+                    continue          # pure-500s only; 1000s counted in their own tier
+                if lvl in seen or abs(p - lvl) / lvl > 0.0004:
+                    continue
+                approach = spots[i] - spots[i - 3]
+                if abs(approach) < lvl * 0.0003:
+                    continue          # drifting sideways, not an approach
+                seen.add(lvl)
+                fut = spots[i + 1:i + 16]
+                moved_back = any((f - lvl) * (1 if approach < 0 else -1) > lvl * 0.001 for f in fut)
+                moved_thru = any((f - lvl) * (1 if approach > 0 else -1) > lvl * 0.001 for f in fut)
+                if moved_back and not moved_thru:
+                    tiers[unit_name].append(1)
+                elif moved_thru:
+                    tiers[unit_name].append(0)
+    out = {}
+    for name, arr in tiers.items():
+        out[name] = {"touches": len(arr), "bounce_rate": round(sum(arr) / len(arr) * 100, 1) if arr else None}
+    return {"symbol": symbol, "tiers": out,
+            "note": "bounce = reversed ≥0.1% against approach within ~15 min of a touch (±0.04%)"}
+
+
 # ── Results / earnings calendar (NSE event calendar, cached 1h) ──────────────
 _results_cal_cache = {"ts": 0.0, "data": None}
 
@@ -2135,6 +2279,26 @@ class Handler(BaseHTTPRequestHandler):
                 strike = 0.0
             side = (qs.get("side", ["CE"])[0]).upper()
             self._send_json(_ltp_history_series(symbol, strike, side))
+            return
+
+        if parsed.path == "/api/level-stats":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(compute_level_stats(symbol))
+            return
+
+        if parsed.path == "/api/tpo-levels":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(compute_tpo_levels(symbol))
+            return
+
+        if parsed.path == "/api/maxpain-stats":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(compute_maxpain_stats(symbol))
+            return
+
+        if parsed.path == "/api/tod-seasonality":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(compute_tod_seasonality(symbol))
             return
 
         if parsed.path == "/api/results-calendar":
