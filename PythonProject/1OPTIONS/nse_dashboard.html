@@ -1691,6 +1691,7 @@
     <button class="tab" data-tab="levels">Levels</button>
     <button class="tab" data-tab="numerology">Numerology</button>
     <button class="tab" data-tab="astro">Astrology</button>
+    <button class="tab" data-tab="vedic">Vedic</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
     <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
@@ -3860,6 +3861,74 @@
         support. Financial-astrology studies do not replicate. Use this as the calendar/context layer you enjoy, keep
         position sizing and stops with the data tools, and if a planetary line ever "works," remember the round-number
         and OI panels were probably at the same price.
+      </div>
+    </section>
+
+    <section id="tab-vedic" class="tab-panel">
+      <div class="builder-panel-head"><h3>Vedic Astrology<i class="hi" data-h="vedic-tab">i</i></h3></div>
+
+      <div class="gann-controls">
+        <label>Anchor
+          <select id="vedicAnchor" class="ohlc-inp" style="font-size:11px;">
+            <option value="launch" selected>Nifty launch (22 Apr 1996) — first trade</option>
+            <option value="dob">My DOB (from Numerology tab)</option>
+            <option value="derivatives">Nifty derivatives launch (12 Jun 2000)</option>
+            <option value="base">Nifty base date (3 Nov 1995)</option>
+          </select>
+        </label>
+        <label>Birth time (for DOB)
+          <input type="time" id="vedicBirthTime" class="ohlc-inp" value="12:00" style="width:90px;">
+        </label>
+        <button class="btn" id="vedicGenBtn" style="font-size:11px;font-weight:700;">Generate</button>
+        <span class="oc-sub">Sidereal (Lahiri). Dasha needs birth time; without it, sub-periods drift.</span>
+      </div>
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🕉 Vimshottari Dasha — active period ladder<i class="hi" data-h="vedic-dasha">i</i></span></div>
+          <div id="vedicDasha" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Birth Nakshatra & Moon<i class="hi" data-h="vedic-birth">i</i></span></div>
+          <div id="vedicBirth" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Rahu / Ketu (lunar nodes)<i class="hi" data-h="vedic-nodes">i</i></span></div>
+          <div id="vedicNodes" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">Graha Drishti — Vedic aspects (whole-sign)<i class="hi" data-h="vedic-drishti">i</i></span></div>
+          <div id="vedicDrishti" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Choghadiya (day muhurta)<i class="hi" data-h="vedic-choghadiya">i</i></span></div>
+          <div id="vedicChoghadiya"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Hora (planetary hour ruler)<i class="hi" data-h="vedic-hora">i</i></span></div>
+          <div id="vedicHora" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">⭐ Confluence Filter — the Vedic "3-signal" rule<i class="hi" data-h="vedic-confluence">i</i></span></div>
+          <div id="vedicConfluence" class="gann-levels"></div>
+        </div>
+      </div>
+
+      <div class="numo-note">
+        <b>Vedic method, honestly framed.</b> This tab implements the genuinely Vedic tools the Western Astrology tab
+        lacks — Vimshottari Dasha (the 120-year period system anchored to your birth Moon), the lunar nodes Rahu/Ketu,
+        whole-sign Graha Drishti, and Choghadiya/Hora muhurta. The astronomy and the classical rules are computed
+        correctly and you can check them against any panchang or Dasha calculator. But the market claim — that a
+        planetary period or muhurta moves Nifty — has the same absence of replicated evidence as everything on the
+        Astrology and Numerology tabs. Traditional Vedic financial astrology itself insists on confluence: at least
+        three independent signals aligning before acting. The Confluence Filter panel makes that rule explicit — and it
+        is still LORE, however many signals stack. Size from the data tabs; read this as heritage and timing ritual.
       </div>
     </section>
   </main>
@@ -8685,8 +8754,8 @@
       '<div class="oc-sub" style="margin-top:4px;">Gann longitude→price at 1 pt/° (tropical longitudes, per convention). Jupiter/Saturn lines are near-static (0.08°/0.03° daily); Moon sweeps ~13 pts/day.</div>';
   }
 
-  // ── Advanced: Nifty "natal" transits (base date 3 Nov 1995) ──
-  const _NIFTY_NATAL_DATE = new Date('1995-11-03T09:15:00+05:30');
+  // ── Advanced: Nifty "natal" transits (launch date 22 Apr 1996) ──
+  const _NIFTY_NATAL_DATE = new Date('1996-04-22T09:30:00+05:30');
   let _natalCache = null;
   function renderAstroNatal({ lons, sidereal, ayan }) {
     const out = document.getElementById('astroNatal');
@@ -8712,7 +8781,7 @@
         <span class="lvl-val" style="font-size:10px;">transit ${h.tName} ${h.aname} natal ${h.nName}</span>
         <span class="lvl-dist">orb ${h.off.toFixed(1)}°</span>
       </div>`).join('') || '<span class="oc-sub">No transits to natal points within orb.</span>';
-    out.innerHTML += '<div class="oc-sub" style="margin-top:4px;">"Natal" chart cast for the Nifty base date (3 Nov 1995, 09:15 IST) — the financial-astrology "first trade chart" convention. Slow-planet transits shown preferentially; Moon transits everything weekly.</div>';
+    out.innerHTML += '<div class="oc-sub" style="margin-top:4px;">"Natal" chart cast for the Nifty launch date (22 Apr 1996, 09:30 IST) — when the index first went live, the astrologically-correct "first trade" moment (the 3 Nov 1995 base date is a backdated reference, so no chart is truly born there). Slow-planet transits shown preferentially; Moon transits everything weekly.</div>';
   }
 
   // ── Advanced: Moon ingress & void-of-course, next 7 days ──
@@ -8815,6 +8884,297 @@
   }
   document.getElementById('astroGenBtn')?.addEventListener('click', renderAstroTab);
   document.getElementById('astroZodiac')?.addEventListener('change', renderAstroTab);
+
+  // ======================================================================
+  // FEATURE: Vedic Astrology tab
+  // Vimshottari Dasha, Rahu/Ketu nodes, whole-sign Graha Drishti, Choghadiya
+  // & Hora — the genuinely Vedic tools the Western Astrology tab lacks.
+  // Reuses the verified ephemeris (_planetLongitudes, _astAyanamsa, _NAKSHATRA).
+  // ======================================================================
+  const _NIFTY_NATAL_ISO = '1996-04-22T09:30:00+05:30';   // (kept for compatibility; see _vedicAnchorDate)
+
+  // Rahu (Moon's north node) mean longitude; Ketu is exactly opposite.
+  // Standard mean-node formula referenced to J2000 (unix day 10957.5), retrograde.
+  function _lunarNodes(date) {
+    const d = date.getTime() / 86400000 - 10957.5;      // days since J2000.0
+    const rahu = _astNorm(125.04452 - 0.0529538083 * d); // mean ascending node
+    return { rahu, ketu: _astNorm(rahu + 180) };
+  }
+
+  // Vimshottari: nakshatra lords in order, and each planet's dasha years.
+  const _VIM_SEQ = ['Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu', 'Jupiter', 'Saturn', 'Mercury'];
+  const _VIM_YEARS = { Ketu: 7, Venus: 20, Sun: 6, Moon: 10, Mars: 7, Rahu: 18, Jupiter: 16, Saturn: 19, Mercury: 17 };
+  // 27 nakshatras cycle through the 9 lords starting at Ketu (Ashwini=Ketu).
+  const _NAK_LORD = i => _VIM_SEQ[i % 9];
+  const _VED_GLYPH = { Sun: '☉', Moon: '☾', Mars: '♂', Mercury: '☿', Jupiter: '♃', Venus: '♀', Saturn: '♄', Rahu: '☊', Ketu: '☋' };
+  const _VED_COL = { Sun: '#eab308', Moon: '#94a3b8', Mars: '#ef4444', Mercury: '#22c55e', Jupiter: '#f97316', Venus: '#ec4899', Saturn: '#6366f1', Rahu: '#8b5cf6', Ketu: '#78716c' };
+  const _VED_NATURE = { Jupiter: 'benefic', Venus: 'benefic', Mercury: 'neutral', Moon: 'benefic', Sun: 'malefic', Mars: 'malefic', Saturn: 'malefic', Rahu: 'malefic', Ketu: 'malefic' };
+
+  // Nifty milestone charts. Launch (first published/traded value) is the
+  // astrologically-correct "first trade" moment; base date is a backdated
+  // accounting reference (no value existed that day); derivatives launch is
+  // the birth of the F&O instrument options traders actually deal in.
+  const _NIFTY_LAUNCH_ISO = '1996-04-22T09:30:00+05:30';   // index went live
+  const _NIFTY_BASE_ISO   = '1995-11-03T09:15:00+05:30';   // base-date reference
+  const _NIFTY_DERIV_ISO  = '2000-06-12T09:55:00+05:30';   // first Nifty futures
+
+  function _vedicAnchorDate() {
+    const which = document.getElementById('vedicAnchor')?.value || 'launch';
+    if (which === 'launch')      return { date: new Date(_NIFTY_LAUNCH_ISO), label: 'Nifty launch (22 Apr 1996)', hasTime: true };
+    if (which === 'base')        return { date: new Date(_NIFTY_BASE_ISO),   label: 'Nifty base date (3 Nov 1995)', hasTime: true };
+    if (which === 'derivatives') return { date: new Date(_NIFTY_DERIV_ISO),  label: 'Nifty F&O launch (12 Jun 2000)', hasTime: true };
+    const dob = document.getElementById('numoDob')?.value;
+    if (!dob) return null;
+    const t = document.getElementById('vedicBirthTime')?.value || '12:00';
+    return { date: new Date(`${dob}T${t}:00+05:30`), label: `DOB ${dob} ${t}`, hasTime: true };
+  }
+
+  // Moon's sidereal longitude → nakshatra index (0-26) + fraction traversed.
+  function _moonNakshatra(date) {
+    const lon = _astNorm(_planetLongitudes(date).Moon - _astAyanamsa(date));
+    const span = 360 / 27;                 // 13°20′
+    const idx = Math.floor(lon / span);
+    const frac = (lon - idx * span) / span;
+    return { idx, frac, lon };
+  }
+
+  // Full Vimshottari timeline from birth → find Maha + Antar active at "now".
+  function _vimshottari(birth, now) {
+    const nak = _moonNakshatra(birth);
+    const startLord = _NAK_LORD(nak.idx);
+    const startPos = _VIM_SEQ.indexOf(startLord);
+    // balance of first mahadasha = remaining fraction × its years
+    const firstRemaining = (1 - nak.frac) * _VIM_YEARS[startLord];
+    const DAY = 86400000, YEAR = 365.25 * DAY;
+    let cursor = birth.getTime() - (_VIM_YEARS[startLord] - firstRemaining) * YEAR; // virtual maha start
+    const periods = [];
+    for (let k = 0; k < 9; k++) {
+      const lord = _VIM_SEQ[(startPos + k) % 9];
+      const len = _VIM_YEARS[lord] * YEAR;
+      periods.push({ lord, start: cursor, end: cursor + len });
+      cursor += len;
+    }
+    const maha = periods.find(p => now >= p.start && now < p.end) || periods[0];
+    // antardasha: sub-periods within maha, same sequence starting at maha lord, each proportional
+    const antars = [];
+    let ac = maha.start;
+    const mstart = _VIM_SEQ.indexOf(maha.lord);
+    for (let k = 0; k < 9; k++) {
+      const sub = _VIM_SEQ[(mstart + k) % 9];
+      const len = (_VIM_YEARS[sub] / 120) * _VIM_YEARS[maha.lord] * YEAR;
+      antars.push({ lord: sub, start: ac, end: ac + len });
+      ac += len;
+    }
+    const antar = antars.find(p => now >= p.start && now < p.end) || antars[0];
+    // pratyantar within antar
+    const praths = [];
+    let pc = antar.start;
+    const astart = _VIM_SEQ.indexOf(antar.lord);
+    for (let k = 0; k < 9; k++) {
+      const sub = _VIM_SEQ[(astart + k) % 9];
+      const len = (_VIM_YEARS[sub] / 120) * (_VIM_YEARS[antar.lord] / 120) * _VIM_YEARS[maha.lord] * YEAR;
+      praths.push({ lord: sub, start: pc, end: pc + len });
+      pc += len;
+    }
+    const prath = praths.find(p => now >= p.start && now < p.end) || praths[0];
+    return { nak, startLord, maha, antar, prath, periods, antars };
+  }
+
+  function renderVedicDasha(anchor, now) {
+    const out = document.getElementById('vedicDasha');
+    if (!out) return;
+    if (!anchor) { out.innerHTML = '<span class="oc-sub">Set your DOB on the Numerology tab (or switch Anchor to Nifty natal), then Generate.</span>'; return; }
+    const v = _vimshottari(anchor.date, now.getTime());
+    const fmtY = ms => (ms / (365.25 * 86400000));
+    const fmtD = t => new Date(t).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const pct = p => Math.round((now.getTime() - p.start) / (p.end - p.start) * 100);
+    const row = (label, p, big) => {
+      const nature = _VED_NATURE[p.lord];
+      const ncol = nature === 'benefic' ? 'var(--pos)' : nature === 'malefic' ? 'var(--neg)' : 'var(--muted)';
+      return `<div class="gann-lvl-row ${big ? 'anchor' : ''}">
+        <span class="lvl-tag" style="color:${_VED_COL[p.lord]};">${label}</span>
+        <span class="lvl-val" style="font-size:11px;">${_VED_GLYPH[p.lord]} ${p.lord} <span style="color:${ncol};font-size:9px;">${nature}</span></span>
+        <span class="lvl-dist">${pct(p)}% · ends ${fmtD(p.end)}</span>
+      </div>`;
+    };
+    out.innerHTML =
+      row('MAHADASHA', v.maha, true) +
+      row('Antardasha', v.antar) +
+      row('Pratyantar', v.prath) +
+      `<div class="oc-sub" style="margin-top:4px;">Anchored to ${escapeHtml(anchor.label)} · birth Moon in <b>${_NAKSHATRA[v.nak.idx]}</b> (lord ${v.startLord}). The Mahadasha sets the multi-year theme; Antardasha (months) and Pratyantar (weeks) refine timing. Benefic/malefic is the classical nature, not a forecast. Full sequence: ${v.periods.map(p => `${_VED_GLYPH[p.lord]}${Math.round(fmtY(p.end - p.start))}y`).join(' → ')}.</div>`;
+  }
+
+  function renderVedicBirth(anchor) {
+    const out = document.getElementById('vedicBirth');
+    if (!out) return;
+    if (!anchor) { out.innerHTML = '<span class="oc-sub">No anchor set.</span>'; return; }
+    const nak = _moonNakshatra(anchor.date);
+    const pada = Math.floor(nak.frac * 4) + 1;   // 4 quarters per nakshatra
+    const signs = ['Mesha','Vrishabha','Mithuna','Karka','Simha','Kanya','Tula','Vrischika','Dhanu','Makara','Kumbha','Meena'];
+    const rashi = signs[Math.floor(nak.lon / 30)];
+    out.innerHTML = `
+      <div class="gann-lvl-row anchor"><span class="lvl-tag">NAKSHATRA</span><span class="lvl-val" style="font-size:11px;">${_NAKSHATRA[nak.idx]}</span><span class="lvl-dist">pada ${pada} · lord ${_NAK_LORD(nak.idx)}</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Moon Rashi</span><span class="lvl-val" style="font-size:11px;">${rashi}</span><span class="lvl-dist">${nak.lon.toFixed(1)}° sidereal</span></div>
+      <div class="oc-sub" style="margin-top:4px;">Your Janma Nakshatra (birth star) and its lord — the seed of the whole Dasha sequence. Pada is the quarter (1–4) within the star, used for finer chart work.</div>`;
+  }
+
+  function renderVedicNodes(now) {
+    const out = document.getElementById('vedicNodes');
+    if (!out) return;
+    const nodes = _lunarNodes(now);
+    const ayan = _astAyanamsa(now);
+    const signs = ['Mesha','Vrishabha','Mithuna','Karka','Simha','Kanya','Tula','Vrischika','Dhanu','Makara','Kumbha','Meena'];
+    const sidRahu = _astNorm(nodes.rahu - ayan), sidKetu = _astNorm(nodes.ketu - ayan);
+    const mk = (name, lon) => `<div class="gann-lvl-row"><span class="lvl-tag" style="color:${_VED_COL[name]};">${_VED_GLYPH[name]} ${name}</span><span class="lvl-val" style="font-size:11px;">${signs[Math.floor(lon/30)]}</span><span class="lvl-dist">${(lon%30).toFixed(1)}° in sign</span></div>`;
+    out.innerHTML = mk('Rahu', sidRahu) + mk('Ketu', sidKetu) +
+      '<div class="oc-sub" style="margin-top:4px;">The lunar nodes — shadow "planets" Vedic astrology treats as full grahas (Western astrology mostly ignores them). Always exactly opposite, retrograde, ~18.6-year zodiac cycle. Rahu = amplification/obsession, Ketu = dissolution/detachment in the tradition.</div>';
+  }
+
+  function renderVedicDrishti(now) {
+    const out = document.getElementById('vedicDrishti');
+    if (!out) return;
+    const ayan = _astAyanamsa(now);
+    const lons = _planetLongitudes(now);
+    const nodes = _lunarNodes(now);
+    const bodies = { ...lons, Rahu: nodes.rahu, Ketu: nodes.ketu };
+    const sign = name => Math.floor(_astNorm(bodies[name] - ayan) / 30);
+    // Vedic whole-sign drishti: all planets aspect 7th; Mars +4,+8; Jupiter +5,+9; Saturn +3,+10
+    const special = { Mars: [4, 8], Jupiter: [5, 9], Saturn: [3, 10] };
+    const names = ['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu'];
+    const hits = [];
+    for (const a of names) {
+      const aSign = sign(a);
+      const aspects = [7, ...(special[a] || [])];
+      for (const b of names) {
+        if (a === b) continue;
+        const bSign = sign(b);
+        const houseDiff = ((bSign - aSign + 12) % 12) + 1;   // 1..12
+        if (aspects.includes(houseDiff)) {
+          hits.push({ a, b, houseDiff, benefic: _VED_NATURE[a] === 'benefic' });
+        }
+      }
+    }
+    if (!hits.length) { out.innerHTML = '<span class="oc-sub">No whole-sign aspects active.</span>'; return; }
+    out.innerHTML = hits.slice(0, 12).map(h => `
+      <div class="gann-lvl-row ${h.benefic ? 'sup' : 'res'}">
+        <span class="lvl-tag" style="color:${_VED_COL[h.a]};">${_VED_GLYPH[h.a]} → ${_VED_GLYPH[h.b]}</span>
+        <span class="lvl-val" style="font-size:10px;">${h.a} aspects ${h.b}</span>
+        <span class="lvl-dist">${h.houseDiff}th drishti${h.houseDiff !== 7 ? ' (special)' : ''}</span>
+      </div>`).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">Graha Drishti = whole-sign aspects, fundamentally different from Western degree-orbs. Every planet aspects the 7th sign from itself; Mars also aspects 4th &amp; 8th, Jupiter 5th &amp; 9th, Saturn 3rd &amp; 10th. Green = benefic-cast, red = malefic-cast, by classical nature.</div>';
+  }
+
+  const _CHOG_DAY = ['Udveg','Chal','Labh','Amrit','Kaal','Shubh','Rog'];   // sequence varies by weekday
+  const _CHOG_START = { 0: 'Udveg', 1: 'Amrit', 2: 'Rog', 3: 'Labh', 4: 'Shubh', 5: 'Chal', 6: 'Kaal' }; // Sun..Sat first choghadiya
+  const _CHOG_QUALITY = { Amrit: 'good', Shubh: 'good', Labh: 'good', Chal: 'neutral', Udveg: 'bad', Rog: 'bad', Kaal: 'bad' };
+  const _CHOG_SEQ = ['Udveg','Chal','Labh','Amrit','Kaal','Shubh','Rog'];
+  function renderVedicChoghadiya(now) {
+    const out = document.getElementById('vedicChoghadiya');
+    if (!out) return;
+    const { rise, set } = _sunriseSunset(now, 19.076, 72.877);   // Mumbai, reuse astro helper
+    const dayLen = (set - rise) / 8;   // 8 choghadiya in daytime
+    const startName = _CHOG_START[now.getDay()];
+    const startIdx = _CHOG_SEQ.indexOf(startName);
+    const slots = [];
+    for (let i = 0; i < 8; i++) {
+      const name = _CHOG_SEQ[(startIdx + i) % 7];
+      slots.push({ name, start: new Date(rise.getTime() + i * dayLen), q: _CHOG_QUALITY[name] });
+    }
+    const cur = slots.filter(s => s.start <= now).pop();
+    const fmtT = d => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const qcol = q => q === 'good' ? 'var(--pos)' : q === 'bad' ? 'var(--neg)' : 'var(--muted)';
+    // market-hours slots (09:15-15:30)
+    const mkt = slots.filter(s => { const t = s.start.getHours() + s.start.getMinutes() / 60; return t >= 8 && t <= 16; });
+    out.innerHTML = `<div style="display:flex;flex-direction:column;gap:2px;">` +
+      mkt.map(s => `<div style="display:flex;justify-content:space-between;padding:3px 8px;border-radius:4px;background:var(--panel-2);${cur && s.start.getTime() === cur.start.getTime() ? 'outline:1.5px solid var(--gold);' : ''}">
+        <span style="font-size:10px;color:${qcol(s.q)};font-weight:700;">${s.name}</span>
+        <span style="font-size:9px;color:var(--muted-2);">${fmtT(s.start)} · ${s.q}</span></div>`).join('') +
+      `</div><div class="oc-sub" style="margin-top:4px;">Choghadiya divides daytime into 8 muhurtas. Amrit/Shubh/Labh are auspicious, Chal neutral, Udveg/Rog/Kaal inauspicious in tradition. Gold outline = current. Mumbai sunrise ${fmtT(rise)}.</div>`;
+  }
+
+  function renderVedicHora(now) {
+    const out = document.getElementById('vedicHora');
+    if (!out) return;
+    const { rise, set } = _sunriseSunset(now, 19.076, 72.877);
+    // Hora = planetary hour, Chaldean order, but Vedic labels lords the same way
+    const order = ['Saturn', 'Jupiter', 'Mars', 'Sun', 'Venus', 'Mercury', 'Moon'];
+    const dayRulers = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn'];
+    const ruler = dayRulers[now.getDay()];
+    const dayLen = (set - rise) / 12, nightLen = (86400000 - (set - rise)) / 12;
+    const startIdx = order.indexOf(ruler);
+    const isDay = now >= rise && now < set;
+    let idx, slotStart;
+    if (isDay) { idx = Math.floor((now - rise) / dayLen); slotStart = new Date(rise.getTime() + idx * dayLen); }
+    else { const base = now < rise ? new Date(set.getTime() - 86400000) : set; idx = Math.floor((now - base) / nightLen) + 12; slotStart = new Date(base.getTime() + (idx - 12) * nightLen); }
+    const horaLord = order[(startIdx + idx) % 7];
+    const usefulness = { Jupiter: 'best for buying/expansion', Mercury: 'good for trading/analysis', Venus: 'favourable, deals', Moon: 'volatile, emotional', Sun: 'authority, trends', Mars: 'aggressive, risky', Saturn: 'slow, caution' };
+    const fmtT = d => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    out.innerHTML = `
+      <div class="gann-lvl-row anchor"><span class="lvl-tag">DAY LORD</span><span class="lvl-val" style="color:${_VED_COL[ruler]};">${_VED_GLYPH[ruler]} ${ruler}</span><span class="lvl-dist">${now.toLocaleDateString('en-IN', { weekday: 'long' })}</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">CURRENT HORA</span><span class="lvl-val" style="color:${_VED_COL[horaLord]};">${_VED_GLYPH[horaLord]} ${horaLord}</span><span class="lvl-dist">from ${fmtT(slotStart)}</span></div>
+      <div class="oc-sub" style="margin-top:4px;">Hora = the hour\'s planetary ruler (Chaldean order). Traditional trading lore: <b>${escapeHtml(usefulness[horaLord] || '')}</b>. Mercury and Jupiter horas are the classically "favourable" trading hours.</div>`;
+  }
+
+  function renderVedicConfluence(anchor, now) {
+    const out = document.getElementById('vedicConfluence');
+    if (!out) return;
+    const signals = [];
+    // 1. Dasha lord nature
+    if (anchor) {
+      const v = _vimshottari(anchor.date, now.getTime());
+      const mn = _VED_NATURE[v.maha.lord], an = _VED_NATURE[v.antar.lord];
+      signals.push({ ok: mn === 'benefic', label: `Mahadasha lord ${v.maha.lord} is ${mn}`, weight: mn });
+      signals.push({ ok: an === 'benefic', label: `Antardasha lord ${v.antar.lord} is ${an}`, weight: an });
+    }
+    // 2. Current hora favourability
+    const { rise, set } = _sunriseSunset(now, 19.076, 72.877);
+    const order = ['Saturn','Jupiter','Mars','Sun','Venus','Mercury','Moon'];
+    const dayRulers = ['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn'];
+    const dayLen = (set - rise) / 12;
+    const hIdx = (now >= rise && now < set) ? Math.floor((now - rise) / dayLen) : 0;
+    const horaLord = order[(order.indexOf(dayRulers[now.getDay()]) + hIdx) % 7];
+    const horaGood = ['Jupiter', 'Mercury', 'Venus'].includes(horaLord);
+    signals.push({ ok: horaGood, label: `Current Hora is ${horaLord}`, weight: horaGood ? 'benefic' : 'malefic' });
+    // 3. Choghadiya quality
+    const dl2 = (set - rise) / 8;
+    const cIdx = (now >= rise && now < set) ? Math.floor((now - rise) / dl2) : 0;
+    const cName = _CHOG_SEQ[(_CHOG_SEQ.indexOf(_CHOG_START[now.getDay()]) + cIdx) % 7];
+    const cGood = _CHOG_QUALITY[cName] === 'good';
+    signals.push({ ok: cGood, label: `Choghadiya is ${cName} (${_CHOG_QUALITY[cName]})`, weight: cGood ? 'benefic' : 'malefic' });
+    // 4. Moon phase (waxing = growth in tradition)
+    const norm = x => ((x % 360) + 360) % 360;
+    const e = _eclipticLongitudes(now);
+    const waxing = norm(e.moon - e.sun) < 180;
+    signals.push({ ok: waxing, label: `Moon is ${waxing ? 'waxing (Shukla)' : 'waning (Krishna)'}`, weight: waxing ? 'benefic' : 'malefic' });
+
+    const benefics = signals.filter(s => s.ok).length;
+    const verdict = benefics >= 3 ? { t: `${benefics}/5 aligned — tradition would call this favourable`, c: 'var(--pos)' }
+      : benefics <= 1 ? { t: `${benefics}/5 aligned — tradition would counsel caution`, c: 'var(--neg)' }
+      : { t: `${benefics}/5 aligned — mixed, no clear muhurta`, c: 'var(--muted)' };
+    out.innerHTML = signals.map(s => `
+      <div class="gann-lvl-row ${s.ok ? 'sup' : 'res'}">
+        <span class="lvl-tag">${s.ok ? '✓' : '✗'}</span>
+        <span class="lvl-val" style="font-size:10.5px;flex:1;text-align:left;">${escapeHtml(s.label)}</span>
+        <span class="lvl-dist">${s.weight}</span>
+      </div>`).join('') +
+      `<div class="gann-lvl-row anchor"><span class="lvl-tag">VERDICT</span><span class="lvl-val" style="color:${verdict.c};font-size:10.5px;">${verdict.t}</span><span class="lvl-dist"></span></div>` +
+      '<div class="oc-sub" style="margin-top:4px;">Vedic financial astrology\'s own rule is confluence — at least 3 signals aligning. This panel makes that explicit across Dasha, Hora, Choghadiya and Moon phase. Even at 5/5 it remains LORE: the honest use is as a structured "do I feel rushed?" checklist, never a trade trigger.</div>';
+  }
+
+  function renderVedicTab() {
+    const anchor = _vedicAnchorDate();
+    const now = new Date();
+    _safe(() => renderVedicDasha(anchor, now), 'renderVedicDasha');
+    _safe(() => renderVedicBirth(anchor), 'renderVedicBirth');
+    _safe(() => renderVedicNodes(now), 'renderVedicNodes');
+    _safe(() => renderVedicDrishti(now), 'renderVedicDrishti');
+    _safe(() => renderVedicChoghadiya(now), 'renderVedicChoghadiya');
+    _safe(() => renderVedicHora(now), 'renderVedicHora');
+    _safe(() => renderVedicConfluence(anchor, now), 'renderVedicConfluence');
+  }
+  document.getElementById('vedicGenBtn')?.addEventListener('click', renderVedicTab);
+  document.getElementById('vedicAnchor')?.addEventListener('change', renderVedicTab);
+  document.getElementById('vedicBirthTime')?.addEventListener('change', renderVedicTab);
   document.getElementById('numoUseSpot')?.addEventListener('click', () => {
     const spot = state.lastData?.underlying_value;
     if (spot) { document.getElementById('numoPrice').value = Math.round(spot * 100) / 100; renderNumoTab(); }
@@ -9703,6 +10063,9 @@
         const dInp = document.getElementById('astroDate');
         if (dInp && !dInp.value) dInp.value = new Date().toISOString().slice(0, 10);
         renderAstroTab();
+      }
+      if (tab.dataset.tab === 'vedic') {
+        renderVedicTab();
       }
       if (tab.dataset.tab === 'numerology') {
         const dInp = document.getElementById('numoDate');
@@ -17083,9 +17446,17 @@
     'lvl-stats':         '<strong>Level Report Card</strong>Round-number levels graded on your own recorded days: a touch is price within 0.04% of a 500/1000 level; a bounce is a reversal of ≥0.1% against the approach within ~15 minutes. Bounce rate near 50% = the level does nothing; materially above = genuine reaction tendency. The measured counterpart to the round-number panel\'s microstructure claim.',
     'numo-personal':     '<strong>Personal Day Cycle</strong>Your date of birth folded into today\'s date (classical personal-day formula) vs the universal day number, with a 14-day alignment strip. The DOB is saved only in this browser\'s local settings and sent nowhere. Folklore favors "alignment" days; the arithmetic is exact, the significance is not.',
     'numo-reality':      '<strong>Digit Reality Check</strong>The empirical panel this tab deserves: last-digit and digit-root distributions of actual session ticks vs the uniform expectation. Deviations converge to 0% as ticks accumulate — if prices "vibrated" to particular numbers, it would show here as persistent skew, and it doesn\'t. Tick-size granularity explains any last-digit lumpiness. Numerology, measured.',
-    'astro-natal':       '<strong>Nifty Natal Transits</strong>The "first trade chart" convention of financial astrology: a natal chart cast for the Nifty base date (3 Nov 1995, 09:15 IST), with current transiting planets checked for aspects to natal positions (orb 3°, Moon 4°). Slow-planet transits (Jupiter/Saturn) shown preferentially since Moon aspects everything weekly. The chart is computed correctly; whether an index has a birthday is left to the reader.',
+    'astro-natal':       '<strong>Nifty Natal Transits</strong>The "first trade chart" convention of financial astrology: a natal chart cast for the Nifty launch date (22 Apr 1996, 09:30 IST) — the day the index first went live, which is the astrologically-sounder "first trade" moment than the backdated 3 Nov 1995 base date. Current transiting planets are checked for aspects to natal positions (orb 3°, Moon 4°). Slow-planet transits (Jupiter/Saturn) shown preferentially since Moon aspects everything weekly. The chart is computed correctly; whether an index has a birthday is left to the reader.',
     'astro-moon':        '<strong>Moon Ingress &amp; Void-of-Course</strong>Sign-entry times for the Moon over the next 7 days, each with its void-of-course window — from the Moon\'s last exact aspect until ingress. Trading folklore holds that VoC-period initiatives "come to nothing." Hourly scan with ±40min accuracy (Moon ±0.3°); very short VoC windows can be missed.',
     'astro-hours':       '<strong>Planetary Hours</strong>The classical unequal-hours system: sunrise→sunset (computed for Mumbai) divided into 12 day-hours ruled in Chaldean order starting from the day\'s ruler, shown for NSE market hours with the current hour highlighted. Renaissance timekeeping meeting a modern exchange — offered as the historical curiosity it is.',
+    'vedic-tab':         '<strong>Vedic Astrology</strong>The genuinely Vedic tools the Western Astrology tab lacks: Vimshottari Dasha (the 120-year planetary-period system anchored to your birth Moon), the lunar nodes Rahu &amp; Ketu, whole-sign Graha Drishti aspects, and Choghadiya/Hora muhurta. All sidereal (Lahiri). The astronomy and classical rules are computed correctly and check against any panchang; the market claim carries the same absence of evidence as everything on the Astrology and Numerology tabs. Anchored by default to your DOB from the Numerology tab.',
+    'vedic-dasha':       '<strong>Vimshottari Dasha</strong>The heart of Vedic prediction: your life mapped as a 120-year sequence of planetary periods, in the fixed order Ketu 7y → Venus 20y → Sun 6y → Moon 10y → Mars 7y → Rahu 18y → Jupiter 16y → Saturn 19y → Mercury 17y. Which period you\'re in RIGHT NOW is set by the nakshatra your Moon occupied at birth (so birth time matters — without it, sub-period dates drift). Mahadasha = multi-year theme, Antardasha = months, Pratyantar = weeks. Benefic/malefic is the classical planetary nature, shown for context, not a market forecast.',
+    'vedic-birth':       '<strong>Birth Nakshatra &amp; Moon</strong>Your Janma Nakshatra — the lunar mansion (1 of 27) the Moon occupied at birth — and its ruling planet, which seeds the entire Dasha sequence. Pada is the quarter (1–4) within the star. Moon Rashi is the sidereal Moon-sign. A 5-minute birth-time error can shift the nakshatra fraction and therefore the Dasha balance, so treat the sub-period dates as approximate unless your birth time is exact.',
+    'vedic-nodes':       '<strong>Rahu / Ketu</strong>The Moon\'s orbital nodes — where its path crosses the ecliptic — which Vedic astrology treats as full "shadow planets" (grahas) though they are points, not bodies. Western astrology mostly ignores them. Always exactly 180° apart, always retrograde, completing the zodiac in ~18.6 years. Tradition: Rahu amplifies and obsesses (sudden gains, bubbles, foreign/tech themes), Ketu dissolves and detaches. Computed here as the mean node, sidereal.',
+    'vedic-drishti':     '<strong>Graha Drishti</strong>Vedic aspects work by whole signs, not degree-orbs — a completely different model from the Western tab. Every planet "sees" (aspects) the 7th sign from itself; additionally Mars aspects the 4th &amp; 8th, Jupiter the 5th &amp; 9th, Saturn the 3rd &amp; 10th. Green rows = the aspecting planet is a classical benefic, red = malefic. This is how a jyotishi reads planetary influence — by sign relationships, not exact angles.',
+    'vedic-choghadiya':  '<strong>Choghadiya</strong>The Vedic day-planning system: daytime split into 8 muhurtas, each labelled Amrit/Shubh/Labh (auspicious), Chal (neutral) or Udveg/Rog/Kaal (inauspicious). The starting choghadiya rotates by weekday. Widely consulted in India for timing errands, purchases and journeys; some traders avoid the "bad" slots for fresh entries. Computed from real Mumbai sunrise. Current slot outlined in gold.',
+    'vedic-hora':        '<strong>Hora</strong>The hour ruled by a planet, in the Chaldean order that also underlies the Western planetary hours — but read through Vedic trading lore, where Jupiter and Mercury horas are the classically favourable windows for buying and dealing, Saturn hora counsels caution, Moon hora warns of volatility. The day itself has a lord (Sunday=Sun, Monday=Moon…). Sunrise-based, Mumbai.',
+    'vedic-confluence':  '<strong>Confluence Filter</strong>Traditional Vedic financial astrology insists on confluence — at least three independent signals aligning before acting. This panel makes that rule concrete, scoring five: the benefic/malefic nature of your Dasha and Antardasha lords, the current Hora, the current Choghadiya, and the Moon\'s waxing/waning phase. 3+ green = "favourable" by the tradition\'s own standard. Crucial honesty: even at 5/5 this is LORE — no replicated evidence links any of it to Nifty. Use it as a structured "am I forcing a trade?" pause, never as a signal to take one.',
     'suggest-view':      '<strong>View &amp; Risk Filter</strong>Override the auto regime read with your own directional view (bullish / bearish / neutral / big-move), and optionally restrict to defined-risk structures only. With Auto, the engine infers the view from OC WTT/WTB status and IV context. Each suggestion now shows a live quantified preview — actual strikes, POP, credit/debit, max loss and EV computed from the current chain before you deploy.',
     'iv-rv':             '<strong>IV − Realized Vol Spread</strong>ATM IV minus intraday realized volatility (Parkinson estimator on session high/low, day-scaled, annualized). Positive spread = options are pricing MORE movement than the market is delivering — the core premium-selling edge. Negative = market moving more than options price in — short premium is negative-edge, own gamma instead. Early session readings are noisy (small sample); trust it more after 11:00.',
     'risk-sizing':       '<strong>Risk-Based Lot Sizing</strong>Enter your max acceptable loss per trade; the builder computes max lots = risk ÷ (max loss per lot) for the current structure and warns when your quantity exceeds it. For undefined-risk structures (naked strangles, ratios) it refuses to size by max loss — those must be sized by margin and delta instead. Sizing decided before entry is the discipline that compounds.',
