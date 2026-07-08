@@ -1,0 +1,794 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  S/R CONFLUENCE — Master Ladder for TradingView   (Pine v6)
+//  Ports the NSE dashboard's "Master Confluence Ladder" to native price/volume:
+//  every level source is computed, then levels that STACK within a tolerance are
+//  clustered and weighted — positioning-proxy (VPOC/volume) x3, crowd x2,
+//  geometric x1 — so the strongest zones are the ones many methods agree on.
+//
+//  What Pine can and cannot see:
+//   • It sees OHLCV only — no option chain. So OI walls / max-pain / GEX are NOT
+//     here (they can't be computed on a chart). Their honest price-only proxy is
+//     the Volume Profile VPOC/value-area, which is weighted x3 in their place.
+//   • Everything else (pivots, AVWAP, prior levels, Camarilla, round numbers,
+//     Gann S9) is fully native and exact.
+//
+//  Tiers, matching the dashboard:  MEASURED > CROWD > LORE.
+// ═══════════════════════════════════════════════════════════════════════════
+indicator("S/R Confluence — Master Ladder", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ─────────────────────────── INPUTS ───────────────────────────
+grpSrc   = "Sources (toggle what you trust)"
+useVP    = input.bool(true,  "Volume Profile (VPOC / Value Area)",  group = grpSrc, tooltip = "Highest-volume price nodes over the profile window. Price-only proxy for positioning data — weighted x3.")
+usePiv   = input.bool(true,  "Swing Pivots (structure S/R)",         group = grpSrc, tooltip = "ta.pivothigh/low fractals extended as horizontal S/R until broken. Weighted x3 (real structure).")
+useAVWAP = input.bool(true,  "Anchored VWAP + bands",                group = grpSrc, tooltip = "Session/period VWAP with ±σ bands. Institutional benchmark — weighted x3.")
+usePrior = input.bool(true,  "Prior-period H/L/C",                   group = grpSrc, tooltip = "Previous day/week high, low, close. Widely watched — weighted x2.")
+useCam   = input.bool(true,  "Camarilla pivots (H3/H4/L3/L4)",       group = grpSrc, tooltip = "Classic intraday reversal/breakout levels — weighted x2.")
+useRound = input.bool(true,  "Round numbers",                        group = grpSrc, tooltip = "Psychological round levels where orders cluster (real microstructure) — weighted x2.")
+useGann  = input.bool(true, "Gann Square-of-9 (geometric)",         group = grpSrc, tooltip = "√price ± cardinal harmonics, squared. LORE tier — weighted x1. Contributes to confluence and, if the S9-lines option is on, draws its own labelled levels.")
+useMA    = input.bool(true,  "Moving averages (50/100/200 EMA)",     group = grpSrc, tooltip = "Curated MAs act as dynamic S/R. Each EMA's current value is a weight-2 confluence level.")
+useIB    = input.bool(true,  "Initial Balance (opening-range H/L)",  group = grpSrc, tooltip = "First-N-minutes high/low — heavily watched intraday breakout/reversal levels. Weight 2.")
+useBB    = input.bool(true,  "Bollinger ±2σ bands",                  group = grpSrc, tooltip = "Upper/lower band as reversion levels. Weight 1.")
+useVWAPline = input.bool(true, "Plot session VWAP line",             group = grpSrc, tooltip = "Draw the live session VWAP as a continuous line (separate from the anchored-VWAP confluence source).")
+
+grpVP    = "Volume Profile"
+vpLen    = input.int(200, "Profile lookback (bars)", minval = 20, maxval = 1000, group = grpVP)
+vpBins   = input.int(24,  "Price bins",              minval = 8,  maxval = 60,   group = grpVP)
+vpVApct  = input.float(70, "Value-area %",           minval = 50, maxval = 90,   group = grpVP)
+
+grpPiv   = "Pivots"
+pivLB    = input.int(15, "Pivot lookback L/R", minval = 2, maxval = 60, group = grpPiv)
+pivMax   = input.int(6,  "Max pivots each side", minval = 1, maxval = 20, group = grpPiv)
+
+grpAV    = "Anchored VWAP"
+avAnchor = input.string("Session", "Anchor", options = ["Session", "Week", "Month"], group = grpAV)
+avSD     = input.float(1.0, "σ band multiple", minval = 0.5, maxval = 3.0, step = 0.5, group = grpAV)
+
+grpRound = "Round Numbers"
+roundStep = input.float(0.0, "Round step (0 = auto)", minval = 0, group = grpRound, tooltip = "0 auto-picks a sensible step from price magnitude (e.g. 100 for Nifty, 500 for BankNifty).")
+
+grpMA = "Moving Averages"
+maLen1 = input.int(50,  "EMA 1", minval = 2, group = grpMA)
+maLen2 = input.int(100, "EMA 2", minval = 2, group = grpMA)
+maLen3 = input.int(200, "EMA 3", minval = 2, group = grpMA)
+maPlot = input.bool(true, "Plot the EMA lines too", group = grpMA)
+
+grpIB = "Initial Balance"
+ibMins = input.int(60, "Opening-range minutes", minval = 5, maxval = 240, group = grpIB, tooltip = "Window from session open to define the initial-balance high/low. 60 = first hour; 15 = classic ORB.")
+ibPlot = input.bool(true, "Plot IB high/low lines", group = grpIB)
+
+grpBB = "Bollinger Bands"
+bbLen  = input.int(20, "BB length", minval = 5, group = grpBB)
+bbMult = input.float(2.0, "BB σ multiple", minval = 1.0, maxval = 4.0, step = 0.5, group = grpBB)
+bbPlot = input.bool(true, "Plot BB bands", group = grpBB)
+
+grpCluster = "Confluence Clustering"
+tolPct   = input.float(0.20, "Cluster tolerance %", minval = 0.05, maxval = 1.0, step = 0.05, group = grpCluster, tooltip = "Levels within this % of each other merge into one zone. 0.20% suits index intraday.")
+minScore = input.int(3, "Min zone score to draw", minval = 1, maxval = 12, group = grpCluster, tooltip = "Only draw zones whose summed weight ≥ this. Higher = only strong confluence.")
+showWeak = input.bool(false, "Also draw single-source lines", group = grpCluster)
+
+grpStyle = "Display"
+showZones  = input.bool(true, "Zone boxes (shaded by strength)", group = grpStyle)
+showLines  = input.bool(true, "Level lines",                    group = grpStyle)
+showLabels = input.bool(false, "Labels (score + sources)",       group = grpStyle)
+zoneExtend = input.int(30, "Zone/line extend (bars right)", minval = 5, maxval = 200, group = grpStyle)
+colUp      = input.color(color.new(color.teal, 0),  "Support colour",    group = grpStyle)
+colDn      = input.color(color.new(color.red, 0),   "Resistance colour", group = grpStyle)
+colHot     = input.color(color.new(color.orange, 0),"Strong-zone colour",group = grpStyle)
+
+grpAlert = "Alerts"
+alertOn  = input.bool(true, "Alert on approach to strong zone", group = grpAlert)
+alertPct = input.float(0.10, "Approach distance %", minval = 0.02, maxval = 0.5, step = 0.02, group = grpAlert)
+
+grpMem   = "Zone Memory (Tier 1)"
+useMem     = input.bool(true,  "Track touch reactions (boost proven zones)", group = grpMem, tooltip = "Each time price touches a zone and reacts, its score gains a bonus. Broken zones fade. Turns 'how many methods agree' into 'agree AND the chart confirmed it'.")
+memReactPct = input.float(0.15, "Reaction threshold %", minval = 0.05, maxval = 0.5, step = 0.05, group = grpMem, tooltip = "How far price must reverse off a touch to count as a 'reaction'.")
+memBonus    = input.int(2, "Bonus per confirmed reaction", minval = 1, maxval = 5, group = grpMem)
+memMaxBonus = input.int(6, "Max memory bonus", minval = 1, maxval = 12, group = grpMem)
+markFresh   = input.bool(true, "Mark fresh (untested) zones", group = grpMem, tooltip = "Zones price hasn't reached yet are drawn with a dashed border — often stronger on first touch.")
+
+grpBreak = "Break Quality (Tier 1)"
+useBreak  = input.bool(true, "Volume-confirmed break detection", group = grpBreak, tooltip = "When price breaks a zone, colour it by whether the break came on a volume surge (real) or a drift (likely to reverse).")
+brkVolMult = input.float(1.5, "Break volume surge ×avg", minval = 1.0, maxval = 4.0, step = 0.1, group = grpBreak)
+
+grpMTF   = "Multi-Timeframe (Tier 2)"
+useMTF    = input.bool(true, "Higher-timeframe confirmation bonus", group = grpMTF, tooltip = "Pull HTF volume-POC and pivots; zones that agree with a higher timeframe get a score bonus. HTF levels are stronger.")
+mtfTF     = input.timeframe("D", "Higher timeframe", group = grpMTF)
+mtfBonus  = input.int(2, "HTF agreement bonus", minval = 1, maxval = 5, group = grpMTF)
+
+grpTable = "Status Table (Tier 2)"
+useTable  = input.bool(true, "Show nearest-zones table", group = grpTable)
+tablePos  = input.string("Bottom Right", "Position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = grpTable)
+tableN    = input.int(4, "Zones to list", minval = 2, maxval = 8, group = grpTable)
+
+grpS9    = "Square-of-9 S/R (dedicated display)"
+showS9   = input.bool(true,  "Draw all Sq9 S/R levels (lines + table)", group = grpS9, tooltip = "Independently of confluence, plot the full Square-of-9 support/resistance ladder around price, each tagged with its wheel angle. Cardinal angles (±90/180/270/360) are emphasised.")
+s9Rings  = input.int(4, "Rings each side", minval = 1, maxval = 8, group = grpS9, tooltip = "How many 90°-steps of support and resistance to show above and below price.")
+s9CardOnly = input.bool(false, "Cardinal angles only (90/180/270/360)", group = grpS9)
+s9TablePos = input.string("Top Right", "Sq9 table position", options = ["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group = grpS9)
+s9ColRes  = input.color(color.new(color.red, 0),    "Sq9 colour: +90° and above (resistance)", group = grpS9)
+s9ColSup  = input.color(color.new(color.teal, 0),   "Sq9 colour: −90° and below (support)",    group = grpS9)
+s9ColNear = input.color(color.new(color.orange, 0), "Sq9 colour: ±45° (nearest, width 3)",     group = grpS9)
+
+// ─────────────────────────── HELPERS ───────────────────────────
+// A "level" is carried as parallel arrays: price, weight, source-label.
+var array<float>  Lprice = array.new<float>()
+var array<int>    Lweight = array.new<int>()
+var array<string> Llabel = array.new<string>()
+
+addLevel(float p, int w, string lbl) =>
+    if not na(p) and p > 0
+        array.push(Lprice, p)
+        array.push(Lweight, w)
+        array.push(Llabel, lbl)
+
+// auto round-number step from price magnitude
+f_roundStep() =>
+    s = roundStep
+    if s <= 0
+        p = close
+        s := p >= 30000 ? 500 : p >= 10000 ? 100 : p >= 1000 ? 50 : p >= 100 ? 5 : 1
+    s
+
+// ─────────────────────────── PERSISTENT DRAW POOLS ───────────────────────────
+var array<line>  poolLines  = array.new<line>()
+var array<box>   poolBoxes  = array.new<box>()
+var array<label> poolLabels = array.new<label>()
+var table gTbl = na
+var array<line>  poolS9Lines  = array.new<line>()
+var array<label> poolS9Labels = array.new<label>()
+var table s9Tbl = na
+
+clearPool() =>
+    for ln in poolLines
+        line.delete(ln)
+    array.clear(poolLines)
+    for bx in poolBoxes
+        box.delete(bx)
+    array.clear(poolBoxes)
+    for lb in poolLabels
+        label.delete(lb)
+    array.clear(poolLabels)
+    for ln in poolS9Lines
+        line.delete(ln)
+    array.clear(poolS9Lines)
+    for lb in poolS9Labels
+        label.delete(lb)
+    array.clear(poolS9Labels)
+
+// ─────────────────────────── SOURCE COMPUTATIONS ───────────────────────────
+// These run every bar but we only rebuild the level set + drawings on the last
+// bar (barstate.islast) to stay fast and within object limits.
+
+// Maintain rolling arrays of recent hlc3 and volume so the profile can index
+// them dynamically (Pine's [] operator wants a const/simple offset, but arrays
+// fully support variable indexing — the correct idiom here).
+var array<float> H3buf = array.new<float>()
+var array<float> Vbuf  = array.new<float>()
+array.push(H3buf, hlc3)
+array.push(Vbuf, nz(volume, 1))
+// keep only what the deepest possible profile needs (+ small margin)
+if array.size(H3buf) > 1010
+    array.shift(H3buf)
+    array.shift(Vbuf)
+
+// --- Volume Profile: VPOC + value area over vpLen bars (weight 3) ---
+f_volProfile() =>
+    hi = ta.highest(high, vpLen)
+    lo = ta.lowest(low, vpLen)
+    rng = hi - lo
+    float vpoc = na
+    float vah = na
+    float val = na
+    sz = array.size(H3buf)
+    if rng > 0 and sz > 0
+        binSz = rng / vpBins
+        vol = array.new<float>(vpBins, 0.0)
+        // accumulate volume into the bin of each recent bar's hlc3 (array-indexed)
+        start = math.max(0, sz - vpLen)
+        for i = start to sz - 1
+            price = array.get(H3buf, i)
+            idx = int((price - lo) / binSz)
+            idx := math.max(0, math.min(vpBins - 1, idx))
+            array.set(vol, idx, array.get(vol, idx) + array.get(Vbuf, i))
+        // POC = fullest bin
+        pocIdx = 0
+        maxV = 0.0
+        total = 0.0
+        for b = 0 to vpBins - 1
+            v = array.get(vol, b)
+            total += v
+            if v > maxV
+                maxV := v
+                pocIdx := b
+        vpoc := lo + (pocIdx + 0.5) * binSz
+        // value area: expand from POC until vpVApct% of volume covered
+        target = total * vpVApct / 100.0
+        acc = maxV
+        loI = pocIdx
+        hiI = pocIdx
+        while acc < target and (loI > 0 or hiI < vpBins - 1)
+            below = loI > 0 ? array.get(vol, loI - 1) : -1
+            above = hiI < vpBins - 1 ? array.get(vol, hiI + 1) : -1
+            if above >= below
+                hiI += 1
+                acc += array.get(vol, hiI)
+            else
+                loI -= 1
+                acc += array.get(vol, loI)
+        val := lo + loI * binSz
+        vah := lo + (hiI + 1) * binSz
+    [vpoc, vah, val]
+
+// --- Anchored VWAP + σ bands (weight 3) ---
+f_anchorChanged() =>
+    avAnchor == "Session" ? timeframe.change("D") : avAnchor == "Week" ? timeframe.change("W") : timeframe.change("M")
+
+var float avSum = 0.0
+var float avVol = 0.0
+var float avSum2 = 0.0
+if f_anchorChanged() or bar_index == 0
+    avSum := 0.0
+    avVol := 0.0
+    avSum2 := 0.0
+_v = nz(volume, 1)
+avSum  += hlc3 * _v
+avVol  += _v
+avSum2 += hlc3 * hlc3 * _v
+avwap = avVol > 0 ? avSum / avVol : na
+avvar = avVol > 0 ? math.max(0.0, avSum2 / avVol - avwap * avwap) : 0.0
+avsd  = math.sqrt(avvar)
+
+// --- Camarilla (weight 2), from prior day ---
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead = barmerge.lookahead_on)
+pdc = request.security(syminfo.tickerid, "D", close[1],lookahead = barmerge.lookahead_on)
+camRange = pdh - pdl
+camH4 = pdc + camRange * 1.1 / 2.0
+camH3 = pdc + camRange * 1.1 / 4.0
+camL3 = pdc - camRange * 1.1 / 4.0
+camL4 = pdc - camRange * 1.1 / 2.0
+
+// --- Gann Square-of-9 cardinal levels (weight 1) ---
+f_gannLevels() =>
+    r = math.sqrt(close)
+    out = array.new<float>()
+    if r > 0
+        for k = 1 to 3
+            // ±90°(0.5) ±180°(1.0) ±270°(1.5) steps on the root
+            step = k * 0.5
+            up = math.pow(r + step, 2)
+            dn = math.pow(r - step, 2)
+            array.push(out, up)
+            if dn > 0
+                array.push(out, dn)
+    out
+
+// Dedicated Square-of-9 S/R ladder WITH angle labels, resistance above /
+// support below, `s9Rings` 90°-steps each side. 360° = one full wheel turn
+// (±1.0 on the root). Cardinal = multiples of 90°.
+f_gannLadder(int rings, bool cardinalOnly) =>
+    r = math.sqrt(close)
+    prices = array.new<float>()
+    angles = array.new<int>()
+    isRes  = array.new<bool>()
+    isCard = array.new<bool>()
+    if r > 0
+        // step of 45° = 0.25 on the root; cardinal every 90° (0.5)
+        stepRoot = cardinalOnly ? 0.5 : 0.25
+        stepDeg  = cardinalOnly ? 90 : 45
+        maxSteps = rings * (cardinalOnly ? 1 : 2)
+        for k = 1 to maxSteps
+            deg = k * stepDeg
+            up = math.pow(r + k * stepRoot, 2)
+            dn = math.pow(r - k * stepRoot, 2)
+            card = deg % 90 == 0
+            array.push(prices, up)
+            array.push(angles, deg)
+            array.push(isRes, true)
+            array.push(isCard, card)
+            if dn > 0
+                array.push(prices, dn)
+                array.push(angles, -deg)
+                array.push(isRes, false)
+                array.push(isCard, card)
+    [prices, angles, isRes, isCard]
+
+// --- Prior period H/L/C (weight 2) ---
+pwh = request.security(syminfo.tickerid, "W", high[1],  lookahead = barmerge.lookahead_on)
+pwl = request.security(syminfo.tickerid, "W", low[1],   lookahead = barmerge.lookahead_on)
+
+// --- Moving averages (weight 2 confluence + optional plot) ---
+ema1 = ta.ema(close, maLen1)
+ema2 = ta.ema(close, maLen2)
+ema3 = ta.ema(close, maLen3)
+plot(useMA and maPlot ? ema1 : na, "EMA 1", color = color.new(color.aqua, 0),   linewidth = 1)
+plot(useMA and maPlot ? ema2 : na, "EMA 2", color = color.new(color.blue, 0),   linewidth = 1)
+plot(useMA and maPlot ? ema3 : na, "EMA 3", color = color.new(color.fuchsia, 0),linewidth = 2)
+
+// --- Session VWAP line (weight-3 anchored-VWAP source already exists; this is
+//     just the continuous plotted line for visual reference) ---
+vwapVal = ta.vwap(hlc3)
+// Intraday-only plots (VWAP, IB) show only on ≤5-minute charts, where they're
+// meaningful; on higher timeframes they'd be noise.
+isIntradayTF = timeframe.in_seconds() <= 300
+plot(useVWAPline and isIntradayTF ? vwapVal : na, "VWAP", color = color.new(color.yellow, 0), linewidth = 2, linestyle = plot.linestyle_dashed)
+
+// --- Bollinger Bands (weight 1 confluence + optional plot) ---
+bbBasis = ta.sma(close, bbLen)
+bbDev = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+pU = plot(useBB and bbPlot ? bbUpper : na, "BB Upper", color = color.new(color.gray, 30), linewidth = 2)
+pL = plot(useBB and bbPlot ? bbLower : na, "BB Lower", color = color.new(color.gray, 30), linewidth = 2)
+fill(pU, pL, color = useBB and bbPlot ? color.new(color.gray, 92) : na)
+
+// --- Initial Balance (opening-range high/low, weight 2) ---
+var float ibHigh = na
+var float ibLow = na
+var int   ibDay = na
+// session detection: reset at each new day; accumulate H/L for first ibMins
+isNewDay = ta.change(time("D")) != 0
+if isNewDay
+    ibHigh := high
+    ibLow := low
+    ibDay := time
+// minutes since session open (approx via bar time vs day start)
+minsSinceOpen = na(ibDay) ? 0 : (time - ibDay) / 60000
+if not na(ibDay) and minsSinceOpen <= ibMins
+    ibHigh := math.max(nz(ibHigh, high), high)
+    ibLow  := math.min(nz(ibLow, low), low)
+plot(useIB and ibPlot and isIntradayTF ? ibHigh : na, "IB High", color = color.new(color.orange, 20), style = plot.style_stepline, linewidth = 1)
+plot(useIB and ibPlot and isIntradayTF ? ibLow  : na, "IB Low",  color = color.new(color.orange, 20), style = plot.style_stepline, linewidth = 1)
+
+// --- Swing pivots harvested continuously into arrays (weight 3) ---
+var array<float> PivH = array.new<float>()
+var array<float> PivL = array.new<float>()
+_ph = ta.pivothigh(high, pivLB, pivLB)
+_pl = ta.pivotlow(low, pivLB, pivLB)
+if not na(_ph)
+    array.push(PivH, _ph)
+    if array.size(PivH) > 40
+        array.shift(PivH)
+if not na(_pl)
+    array.push(PivL, _pl)
+    if array.size(PivL) > 40
+        array.shift(PivL)
+
+// --- Higher-timeframe confirmation levels (Tier 2) ---
+// HTF pivots + prior HTF close give strong reference prices; a live zone that
+// lands on one gets a bonus. Computed globally (request.security rule).
+mtfPH = request.security(syminfo.tickerid, mtfTF, ta.pivothigh(high, 3, 3), lookahead = barmerge.lookahead_off)
+mtfPL = request.security(syminfo.tickerid, mtfTF, ta.pivotlow(low, 3, 3),  lookahead = barmerge.lookahead_off)
+mtfHi = request.security(syminfo.tickerid, mtfTF, high[1], lookahead = barmerge.lookahead_on)
+mtfLo = request.security(syminfo.tickerid, mtfTF, low[1],  lookahead = barmerge.lookahead_on)
+var array<float> MtfRef = array.new<float>()
+if barstate.islast and useMTF
+    array.clear(MtfRef)
+    if not na(mtfPH)
+        array.push(MtfRef, mtfPH)
+    if not na(mtfPL)
+        array.push(MtfRef, mtfPL)
+    if not na(mtfHi)
+        array.push(MtfRef, mtfHi)
+    if not na(mtfLo)
+        array.push(MtfRef, mtfLo)
+
+// ─────────────────────────── ZONE MEMORY (Tier 1) ───────────────────────────
+// Persistent zones survive across bars so we can watch how price interacts with
+// them: count reactions (touch + reversal), mark fresh (never-touched) zones,
+// and detect volume-confirmed breaks. These arrays persist; the rebuild each
+// last-bar refreshes base scores but preserves memory keyed by price proximity.
+var array<float> ZmPrice   = array.new<float>()   // zone centre
+var array<int>   ZmBase    = array.new<int>()     // base confluence score
+var array<int>   ZmBonus   = array.new<int>()     // earned memory bonus
+var array<int>   ZmTouch   = array.new<int>()     // reaction count
+var array<bool>  ZmTested  = array.new<bool>()    // has price ever touched it
+var array<int>   ZmBreak   = array.new<int>()     // 0 none, 1 clean break (vol), 2 weak break
+var array<string> ZmLabel  = array.new<string>()
+
+avgVol = ta.sma(volume, 20)
+
+// Every bar: update touch/reaction/break state for existing memory zones
+if array.size(ZmPrice) > 0
+    tolTouch = memReactPct / 100.0
+    for i = 0 to array.size(ZmPrice) - 1
+        zp = array.get(ZmPrice, i)
+        if zp > 0
+            touchedNow = low <= zp and high >= zp
+            // Role from the APPROACH side (previous bar's close): if price was
+            // above the zone, it's acting as support (breaks DOWN on a close
+            // below); if below, resistance (breaks UP). This stays stable even
+            // when the current bar closes through.
+            wasAbove = close[1] >= zp
+            brokeDn = wasAbove and close < zp * (1 - tolTouch)
+            brokeUp = (not wasAbove) and close > zp * (1 + tolTouch)
+            didBreak = useBreak and touchedNow and (brokeUp or brokeDn)
+            if didBreak
+                volSurge = not na(avgVol) and volume >= avgVol * brkVolMult
+                array.set(ZmBreak, i, volSurge ? 1 : 2)
+                array.set(ZmBonus, i, 0)   // broken level loses earned memory
+                array.set(ZmTested, i, true)
+            else if touchedNow
+                if not array.get(ZmTested, i)
+                    array.set(ZmTested, i, true)
+                // reaction = wick touched but bar CLOSED back on the approach side
+                nearSide = wasAbove ? (close >= zp * (1 + tolTouch)) : (close <= zp * (1 - tolTouch))
+                if useMem and nearSide
+                    nb = math.min(array.get(ZmBonus, i) + memBonus, memMaxBonus)
+                    array.set(ZmBonus, i, nb)
+                    array.set(ZmTouch, i, array.get(ZmTouch, i) + 1)
+                    if array.get(ZmBreak, i) == 2
+                        array.set(ZmBreak, i, 0)
+
+// ─────────────────────────── BUILD + DRAW (last bar only) ───────────────────────────
+[vpoc, vah, val] = f_volProfile()
+
+if barstate.islast
+    // 1) collect every enabled source into the level arrays
+    array.clear(Lprice)
+    array.clear(Lweight)
+    array.clear(Llabel)
+
+    if useVP
+        addLevel(vpoc, 3, "VPOC")
+        addLevel(vah,  3, "VAH")
+        addLevel(val,  3, "VAL")
+
+    if usePiv
+        // most recent pivMax pivot highs/lows from the running arrays
+        // (harvested every bar in the global scope above)
+        nH = array.size(PivH)
+        nL = array.size(PivL)
+        for i = math.max(0, nH - pivMax) to nH - 1
+            addLevel(array.get(PivH, i), 3, "Pivot H")
+        for i = math.max(0, nL - pivMax) to nL - 1
+            addLevel(array.get(PivL, i), 3, "Pivot L")
+
+    if useAVWAP
+        addLevel(avwap, 3, "AVWAP")
+        addLevel(avwap + avSD * avsd, 3, "AVWAP+σ")
+        addLevel(avwap - avSD * avsd, 3, "AVWAP−σ")
+
+    if usePrior
+        addLevel(pdh, 2, "PDH")
+        addLevel(pdl, 2, "PDL")
+        addLevel(pdc, 2, "PDC")
+        addLevel(pwh, 2, "PWH")
+        addLevel(pwl, 2, "PWL")
+
+    if useCam
+        addLevel(camH4, 2, "Cam H4")
+        addLevel(camH3, 2, "Cam H3")
+        addLevel(camL3, 2, "Cam L3")
+        addLevel(camL4, 2, "Cam L4")
+
+    if useRound
+        st = f_roundStep()
+        base = math.floor(close / st) * st
+        for k = -3 to 4
+            addLevel(base + k * st, 2, "Round")
+
+    if useGann
+        g = f_gannLevels()
+        if array.size(g) > 0
+            for i = 0 to array.size(g) - 1
+                lv = array.get(g, i)
+                if math.abs(lv - close) / close < 0.05
+                    addLevel(lv, 1, "Gann S9")
+
+    if useMA
+        addLevel(ema1, 2, "EMA" + str.tostring(maLen1))
+        addLevel(ema2, 2, "EMA" + str.tostring(maLen2))
+        addLevel(ema3, 2, "EMA" + str.tostring(maLen3))
+
+    if useIB
+        addLevel(ibHigh, 2, "IB High")
+        addLevel(ibLow,  2, "IB Low")
+
+    if useBB
+        addLevel(bbUpper, 1, "BB Upper")
+        addLevel(bbLower, 1, "BB Lower")
+
+    // 2) sort levels ascending by price (simple insertion via index array)
+    n = array.size(Lprice)
+    if n > 0
+        order = array.new<int>()
+        for i = 0 to n - 1
+            array.push(order, i)
+        // insertion sort on price (n is small, <~40)
+        for i = 1 to n - 1
+            ki = array.get(order, i)
+            kp = array.get(Lprice, ki)
+            j = i - 1
+            while j >= 0 and array.get(Lprice, array.get(order, j)) > kp
+                array.set(order, j + 1, array.get(order, j))
+                j -= 1
+            array.set(order, j + 1, ki)
+
+        // 3) cluster adjacent levels within tolPct into zones
+        clearPool()
+        tol = tolPct / 100.0
+        // zone accumulators
+        zLo = array.new<float>()
+        zHi = array.new<float>()
+        zCenter = array.new<float>()
+        zScore = array.new<int>()
+        zLabels = array.new<string>()
+        zWsum = array.new<float>()   // for weighted centre
+
+        for oi = 0 to n - 1
+            idx = array.get(order, oi)
+            p = array.get(Lprice, idx)
+            w = array.get(Lweight, idx)
+            lbl = array.get(Llabel, idx)
+            zn = array.size(zCenter)
+            merged = false
+            if zn > 0
+                c = array.get(zCenter, zn - 1)
+                if math.abs(p - c) / c < tol
+                    // merge into last zone
+                    ws = array.get(zWsum, zn - 1)
+                    newWsum = ws + w
+                    array.set(zCenter, zn - 1, (c * ws + p * w) / newWsum)
+                    array.set(zWsum, zn - 1, newWsum)
+                    array.set(zScore, zn - 1, array.get(zScore, zn - 1) + w)
+                    array.set(zLo, zn - 1, math.min(array.get(zLo, zn - 1), p))
+                    array.set(zHi, zn - 1, math.max(array.get(zHi, zn - 1), p))
+                    prevL = array.get(zLabels, zn - 1)
+                    if not str.contains(prevL, lbl)
+                        array.set(zLabels, zn - 1, prevL + "+" + lbl)
+                    merged := true
+            if not merged
+                array.push(zCenter, p)
+                array.push(zWsum, w)
+                array.push(zScore, w)
+                array.push(zLo, p)
+                array.push(zHi, p)
+                array.push(zLabels, lbl)
+
+        // 3b) apply HTF-agreement bonus to base score
+        if useMTF and array.size(MtfRef) > 0
+            for zi = 0 to array.size(zCenter) - 1
+                c = array.get(zCenter, zi)
+                agree = false
+                for mi = 0 to array.size(MtfRef) - 1
+                    if math.abs(array.get(MtfRef, mi) - c) / c < tol * 2
+                        agree := true
+                        agree
+                if agree
+                    array.set(zScore, zi, array.get(zScore, zi) + mtfBonus)
+                    array.set(zLabels, zi, array.get(zLabels, zi) + "+HTF")
+
+        // 3c) sync clustered zones into persistent memory (carry touch bonus)
+        // rebuild memory to the current zone set, preserving bonus/touch/tested
+        // for zones that still exist (matched by price proximity).
+        oldP = array.copy(ZmPrice)
+        oldBonus = array.copy(ZmBonus)
+        oldTouch = array.copy(ZmTouch)
+        oldTested = array.copy(ZmTested)
+        oldBreak = array.copy(ZmBreak)
+        array.clear(ZmPrice)
+        array.clear(ZmBase)
+        array.clear(ZmBonus)
+        array.clear(ZmTouch)
+        array.clear(ZmTested)
+        array.clear(ZmBreak)
+        array.clear(ZmLabel)
+        for zi = 0 to array.size(zCenter) - 1
+            c = array.get(zCenter, zi)
+            array.push(ZmPrice, c)
+            array.push(ZmBase, array.get(zScore, zi))
+            array.push(ZmLabel, array.get(zLabels, zi))
+            // find prior memory for this price
+            pb = 0
+            pt = 0
+            pTested = false
+            pBreak = 0
+            if array.size(oldP) > 0
+                for k = 0 to array.size(oldP) - 1
+                    if array.get(oldP, k) > 0 and math.abs(array.get(oldP, k) - c) / c < tol
+                        pb := array.get(oldBonus, k)
+                        pt := array.get(oldTouch, k)
+                        pTested := array.get(oldTested, k)
+                        pBreak := array.get(oldBreak, k)
+                        break
+            array.push(ZmBonus, pb)
+            array.push(ZmTouch, pt)
+            array.push(ZmTested, pTested)
+            array.push(ZmBreak, pBreak)
+
+        // 3d) effective score = base + memory bonus (already includes HTF)
+        for zi = 0 to array.size(zScore) - 1
+            eff = array.get(zScore, zi) + (useMem ? array.get(ZmBonus, zi) : 0)
+            array.set(zScore, zi, eff)
+
+        // 4) draw zones/lines
+        rightBar = bar_index + zoneExtend
+        maxScore = 1
+        for zi = 0 to array.size(zScore) - 1
+            maxScore := math.max(maxScore, array.get(zScore, zi))
+
+        for zi = 0 to array.size(zCenter) - 1
+            sc = array.get(zScore, zi)
+            singleSrc = array.get(zLo, zi) == array.get(zHi, zi)
+            // draw only if the zone meets the score bar (or weak-lines is on for singles)
+            if sc >= minScore or (showWeak and singleSrc)
+                c = array.get(zCenter, zi)
+                isSup = c < close
+                tested = array.get(ZmTested, zi)
+                touches = array.get(ZmTouch, zi)
+                brk = array.get(ZmBreak, zi)
+                baseCol = sc >= math.max(minScore + 2, maxScore * 0.8) ? colHot : (isSup ? colUp : colDn)
+                // break recolours: clean vol break = grey (respect it broke), weak break = keep colour dimmed
+                zoneCol = brk == 1 ? color.new(color.gray, 0) : baseCol
+                transZone = int(math.max(70, 92 - sc * 3))
+                fresh = markFresh and not tested
+                bStyle = fresh ? line.style_dashed : line.style_solid
+
+                if showZones and not singleSrc
+                    lo = array.get(zLo, zi)
+                    hi = array.get(zHi, zi)
+                    // pad a hairline so tight clusters are still visible
+                    if hi - lo < close * 0.0005
+                        lo := c - close * 0.0004
+                        hi := c + close * 0.0004
+                    bx = box.new(bar_index, hi, rightBar, lo, border_color = color.new(zoneCol, fresh ? 10 : 40), bgcolor = color.new(zoneCol, transZone), border_width = fresh ? 2 : 1, border_style = bStyle)
+                    array.push(poolBoxes, bx)
+
+                if showLines
+                    ln = line.new(bar_index, c, rightBar, c, color = color.new(zoneCol, 20), width = sc >= minScore ? 2 : 1, style = singleSrc ? line.style_dotted : bStyle)
+                    array.push(poolLines, ln)
+
+                if showLabels and sc >= minScore
+                    tag = (touches > 0 ? " ✓" + str.tostring(touches) : "") + (fresh ? " ◆fresh" : "") + (brk == 1 ? " ✗broke" : "")
+                    txt = "⚡" + str.tostring(sc) + tag + "  " + array.get(zLabels, zi) + "\n" + str.tostring(int(math.round(c)))
+                    lb = label.new(rightBar, c, txt, xloc = xloc.bar_index, style = label.style_label_left, textcolor = color.white, color = color.new(zoneCol, 25), size = size.small)
+                    array.push(poolLabels, lb)
+
+        // 5) alert on approach to a strong zone — richer payload
+        if alertOn
+            for zi = 0 to array.size(zCenter) - 1
+                if array.get(zScore, zi) >= minScore
+                    c = array.get(zCenter, zi)
+                    if math.abs(close - c) / c <= alertPct / 100.0
+                        tside = c < close ? "support" : "resistance"
+                        ttouch = array.get(ZmTouch, zi)
+                        tfresh = not array.get(ZmTested, zi)
+                        msg = "⚡" + str.tostring(array.get(zScore, zi)) + " " + tside + " @ " + str.tostring(int(math.round(c))) + " [" + array.get(ZmLabel, zi) + "]" + (ttouch > 0 ? " · held " + str.tostring(ttouch) + "×" : tfresh ? " · FRESH (untested)" : "")
+                        alert(msg, alert.freq_once_per_bar)
+
+        // 6) status table — nearest zones by distance
+        if useTable and array.size(zCenter) > 0
+            tpos = tablePos == "Top Right" ? position.top_right : tablePos == "Top Left" ? position.top_left : tablePos == "Bottom Right" ? position.bottom_right : position.bottom_left
+            if not na(gTbl)
+                table.delete(gTbl)
+            gTbl := table.new(tpos, 5, tableN + 1, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+            table.cell(gTbl, 0, 0, "Zone",  text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
+            table.cell(gTbl, 1, 0, "Score", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
+            table.cell(gTbl, 2, 0, "Dist",  text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
+            table.cell(gTbl, 3, 0, "State", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
+            table.cell(gTbl, 4, 0, "Sources", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
+            // build (score-qualified) zone index list, sort by distance to close
+            distOrder = array.new<int>()
+            for zi = 0 to array.size(zCenter) - 1
+                if array.get(zScore, zi) >= minScore
+                    array.push(distOrder, zi)
+            // insertion sort by |price-close|
+            dn = array.size(distOrder)
+            if dn > 1
+                for a = 1 to dn - 1
+                    ka = array.get(distOrder, a)
+                    kd = math.abs(array.get(zCenter, ka) - close)
+                    b = a - 1
+                    while b >= 0 and math.abs(array.get(zCenter, array.get(distOrder, b)) - close) > kd
+                        array.set(distOrder, b + 1, array.get(distOrder, b))
+                        b -= 1
+                    array.set(distOrder, b + 1, ka)
+            rowsToShow = math.min(tableN, array.size(distOrder))
+            if rowsToShow > 0
+                for r = 0 to rowsToShow - 1
+                    zi = array.get(distOrder, r)
+                    c = array.get(zCenter, zi)
+                    isSup = c < close
+                    sc = array.get(zScore, zi)
+                    touches = array.get(ZmTouch, zi)
+                    fresh = not array.get(ZmTested, zi)
+                    brk = array.get(ZmBreak, zi)
+                    rc = isSup ? color.new(colUp, 75) : color.new(colDn, 75)
+                    dpts = math.round(math.abs(c - close))
+                    dpct = math.abs(c - close) / close * 100
+                    stateTxt = brk == 1 ? "✗broke" : fresh ? "◆fresh" : touches > 0 ? "✓" + str.tostring(touches) + "×" : "—"
+                    table.cell(gTbl, 0, r + 1, (isSup ? "S " : "R ") + str.tostring(int(math.round(c))), text_color = color.white, text_size = size.small, bgcolor = rc)
+                    table.cell(gTbl, 1, r + 1, "⚡" + str.tostring(sc), text_color = color.white, text_size = size.small, bgcolor = rc)
+                    table.cell(gTbl, 2, r + 1, str.tostring(dpts) + " (" + str.tostring(dpct, "#.##") + "%)", text_color = color.white, text_size = size.small, bgcolor = rc)
+                    table.cell(gTbl, 3, r + 1, stateTxt, text_color = color.white, text_size = size.small, bgcolor = rc)
+                    srcTxt = array.get(zLabels, zi)
+                    table.cell(gTbl, 4, r + 1, str.length(srcTxt) > 26 ? str.substring(srcTxt, 0, 26) + "…" : srcTxt, text_color = color.new(color.white, 20), text_size = size.small, bgcolor = rc)
+
+// ─────────────────────────── SQUARE-OF-9 S/R LADDER (dedicated) ───────────────────────────
+// Independent of the confluence engine: draws the full Sq9 support/resistance
+// ladder with angle labels, and lists it in its own table. LORE tier — shown
+// because it's core to Gann practice; read it as geometry, size from confluence.
+if barstate.islast and showS9
+    // clear prior S9 drawings
+    for ln in poolS9Lines
+        line.delete(ln)
+    array.clear(poolS9Lines)
+    for lb in poolS9Labels
+        label.delete(lb)
+    array.clear(poolS9Labels)
+
+    [s9p, s9a, s9r, s9c] = f_gannLadder(s9Rings, s9CardOnly)
+    rb = bar_index + zoneExtend
+    nS9 = array.size(s9p)
+
+    if nS9 > 0
+        for i = 0 to nS9 - 1
+            lv = array.get(s9p, i)
+            deg = array.get(s9a, i)
+            res = array.get(s9r, i)
+            card = array.get(s9c, i)
+            // colour by angle group: ±45° = nearest (own colour, width 3);
+            // +90° and above = resistance colour; −90° and below = support colour
+            isNear = math.abs(deg) == 45
+            s9c_col = isNear ? s9ColNear : (deg > 0 ? s9ColRes : s9ColSup)
+            // cardinal angles solid + thicker; ±45 forced width 3; other diagonals dotted
+            lstyle = (card or isNear) ? line.style_solid : line.style_dotted
+            lwidth = isNear ? 3 : (card ? 2 : 1)
+            trans = (card or isNear) ? 15 : 45
+            ln = line.new(bar_index, lv, rb, lv, color = color.new(s9c_col, trans), width = lwidth, style = lstyle, extend = extend.both)
+            array.push(poolS9Lines, ln)
+            degTxt = (deg > 0 ? "+" : "") + str.tostring(deg) + "°"
+            lbTxt = "S9 " + degTxt + (card ? " ●" : "") + "  " + str.tostring(int(math.round(lv)))
+            lb = label.new(rb, lv, lbTxt, xloc = xloc.bar_index, style = label.style_label_left, textcolor = color.white, color = color.new(s9c_col, (card or isNear) ? 20 : 45), size = size.small)
+            array.push(poolS9Labels, lb)
+
+        // Sq9 table — full ladder, resistance (top) down to support (bottom)
+        s9pos = s9TablePos == "Top Right" ? position.top_right : s9TablePos == "Top Left" ? position.top_left : s9TablePos == "Bottom Right" ? position.bottom_right : position.bottom_left
+        if not na(s9Tbl)
+            table.delete(s9Tbl)
+        s9Tbl := table.new(s9pos, 3, nS9 + 2, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+        table.cell(s9Tbl, 0, 0, "Sq9 Angle", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 30))
+        table.cell(s9Tbl, 1, 0, "Level",     text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 30))
+        table.cell(s9Tbl, 2, 0, "Dist",      text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 30))
+        // build display order: resistances high→low, then support marker, then supports high→low
+        // simplest: iterate levels sorted descending by price
+        ord = array.new<int>()
+        for i = 0 to nS9 - 1
+            array.push(ord, i)
+        for a = 1 to nS9 - 1
+            ka = array.get(ord, a)
+            kp = array.get(s9p, ka)
+            b = a - 1
+            while b >= 0 and array.get(s9p, array.get(ord, b)) < kp
+                array.set(ord, b + 1, array.get(ord, b))
+                b -= 1
+            array.set(ord, b + 1, ka)
+        row = 1
+        priceMarked = false
+        for oi = 0 to nS9 - 1
+            i = array.get(ord, oi)
+            lv = array.get(s9p, i)
+            // insert a "◄ price" separator row once we cross below current price
+            if not priceMarked and lv < close
+                table.cell(s9Tbl, 0, row, "── price", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
+                table.cell(s9Tbl, 1, row, str.tostring(int(math.round(close))), text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
+                table.cell(s9Tbl, 2, row, "now", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
+                row += 1
+                priceMarked := true
+            deg = array.get(s9a, i)
+            res = array.get(s9r, i)
+            card = array.get(s9c, i)
+            degTxt = (deg > 0 ? "+" : "") + str.tostring(deg) + "°" + (card ? " ●" : "")
+            rc = res ? color.new(colDn, 78) : color.new(colUp, 78)
+            dpts = math.round(math.abs(lv - close))
+            table.cell(s9Tbl, 0, row, degTxt, text_color = color.white, text_size = size.small, bgcolor = rc)
+            table.cell(s9Tbl, 1, row, str.tostring(int(math.round(lv))), text_color = color.white, text_size = size.small, bgcolor = rc)
+            table.cell(s9Tbl, 2, row, str.tostring(dpts), text_color = color.white, text_size = size.small, bgcolor = rc)
+            row += 1
+        // if price is below every level, mark it at the bottom
+        if not priceMarked
+            table.cell(s9Tbl, 0, row, "── price", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
+            table.cell(s9Tbl, 1, row, str.tostring(int(math.round(close))), text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
+            table.cell(s9Tbl, 2, row, "now", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))

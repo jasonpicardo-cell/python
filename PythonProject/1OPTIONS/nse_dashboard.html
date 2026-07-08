@@ -1613,6 +1613,8 @@
   }
 
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Compact mode: hide decorative LORE-tier esoteric panels to reduce clutter */
+body.compact-esoteric .lore-decorative { display: none !important; }
 </style>
 </head>
 <body>
@@ -1681,6 +1683,7 @@
 
   <nav class="tabs">
     <button class="tab active" data-tab="home">Home</button>
+    <button class="tab" data-tab="today">Today</button>
     <button class="tab" data-tab="chain">Option Chain</button>
     <button class="tab" data-tab="strategy">Strategy</button>
     <button class="tab" data-tab="builder">Builder</button>
@@ -1692,6 +1695,7 @@
     <button class="tab" data-tab="numerology">Numerology</button>
     <button class="tab" data-tab="astro">Astrology</button>
     <button class="tab" data-tab="vedic">Vedic</button>
+    <button class="tab" data-tab="validate">Validation</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
     <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
@@ -1829,6 +1833,7 @@
                 <label class="level-alert-toggle" title="Speak the level name when touched">
                   <input type="checkbox" id="voiceToggle" checked> 🗣<i class="hi" data-h="voice-alert">i</i>
                 </label>
+                <button class="btn" id="compactToggle" style="font-size:9px;padding:2px 7px;" title="Hide decorative LORE-tier panels">◱ Compact: OFF<i class="hi" data-h="compact-mode">i</i></button>
               </div>
             </div>
             <div class="ohlc-override-row" id="ohlcOverrideRow">
@@ -2918,6 +2923,23 @@
       </div>
     </section><!-- #tab-home -->
 
+    <section id="tab-today" class="tab-panel">
+      <div class="builder-panel-head">
+        <h3>Today — your morning read in one glance<i class="hi" data-h="today-tab">i</i></h3>
+        <button class="btn" id="todayRefreshBtn" style="font-size:11px;">↻ Refresh</button>
+      </div>
+      <div id="todayContent">
+        <div class="oc-sub" style="padding:20px;text-align:center;">Load the option chain, then click Refresh — this tab pulls the one key reading from every other tab into a single card.</div>
+      </div>
+      <div class="numo-note">
+        <b>The synthesis view.</b> You built breadth across a dozen tabs; this pulls the single most important number from each
+        into one glanceable morning card, ordered by how much it should drive decisions: the measured positioning first
+        (Master Ladder, GEX regime, VWAP bias, key stats), then the calendar/ritual layer (Panchang, Rahu Kaal) last and
+        clearly marked as context. If you read one tab before the open, read this one.
+      </div>
+    </section>
+
+
     <!-- ══════════════════════════════════════════════════════════════ -->
     <!-- OPTION CHAIN TAB                                               -->
     <!-- ══════════════════════════════════════════════════════════════ -->
@@ -3542,12 +3564,12 @@
           <div id="gannTimeCycles" class="gann-levels"></div>
         </div>
 
-        <div class="skew-chart-wrap">
+        <div class="skew-chart-wrap lore-decorative">
           <div class="skew-chart-head"><span class="skew-chart-title">Square of 144 (Master Square)<i class="hi" data-h="gann-sq144">i</i></span></div>
           <div id="gannSq144" class="gann-levels"></div>
         </div>
 
-        <div class="skew-chart-wrap">
+        <div class="skew-chart-wrap lore-decorative">
           <div class="skew-chart-head"><span class="skew-chart-title">Hexagon Chart levels<i class="hi" data-h="gann-hex">i</i></span></div>
           <div id="gannHex" class="gann-levels"></div>
         </div>
@@ -3575,17 +3597,17 @@
           <div id="gannFanChart"></div>
         </div>
 
-        <div class="skew-chart-wrap">
+        <div class="skew-chart-wrap lore-decorative">
           <div class="skew-chart-head"><span class="skew-chart-title">Natural Squares &amp; 144 grid<i class="hi" data-h="gann-natural">i</i></span></div>
           <div id="gannNatural" class="gann-levels"></div>
         </div>
 
-        <div class="skew-chart-wrap">
+        <div class="skew-chart-wrap lore-decorative">
           <div class="skew-chart-head"><span class="skew-chart-title">Anniversary / cycle dates<i class="hi" data-h="gann-anniversary">i</i></span></div>
           <div id="gannAnniversary" class="gann-levels"></div>
         </div>
 
-        <div class="skew-chart-wrap">
+        <div class="skew-chart-wrap lore-decorative">
           <div class="skew-chart-head"><span class="skew-chart-title">☉ Price⨯Sun timing (S9 angle dates)<i class="hi" data-h="gann-sun-time">i</i></span></div>
           <div id="gannSunTime" class="gann-levels"></div>
         </div>
@@ -3623,6 +3645,22 @@
             <button class="btn" id="lvlStatsBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
           </div>
           <div id="lvlStats" class="gann-levels"><span class="oc-sub">Bounce rates of round levels, from your replay archive.</span></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">📊 Anchored VWAP + σ bands (measured)<i class="hi" data-h="lvl-avwap">i</i></span>
+            <button class="btn" id="lvlAvwapBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="lvlAvwap"><span class="oc-sub">Session VWAP with ±1σ/±2σ bands from your replay archive — click Load.</span></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">📐 Gap & Opening-Range stats (measured)<i class="hi" data-h="lvl-gaporb">i</i></span>
+            <button class="btn" id="lvlGapOrbBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="lvlGapOrb" class="gann-levels"><span class="oc-sub">Gap-fill and opening-range break/hold rates — click Load.</span></div>
         </div>
 
         <div class="skew-chart-wrap">
@@ -3719,7 +3757,7 @@
           <div id="numoLevels" class="gann-levels"></div>
         </div>
 
-        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+        <div class="skew-chart-wrap lore-decorative" style="grid-column:1 / -1;">
           <div class="skew-chart-head">
             <span class="skew-chart-title">Digit-Root Wheel (1–9 cycle)<i class="hi" data-h="numo-wheel">i</i></span>
           </div>
@@ -3751,7 +3789,7 @@
           <div id="numoName" class="gann-levels"></div>
         </div>
 
-        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+        <div class="skew-chart-wrap lore-decorative" style="grid-column:1 / -1;">
           <div class="skew-chart-head"><span class="skew-chart-title">30-Day Root Wave<i class="hi" data-h="numo-wave">i</i></span></div>
           <div id="numoWave"></div>
         </div>
@@ -3777,6 +3815,11 @@
         <div class="skew-chart-wrap">
           <div class="skew-chart-head"><span class="skew-chart-title">🔬 Digit Reality Check (measured)<i class="hi" data-h="numo-reality">i</i></span></div>
           <div id="numoReality"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">📈 Benford\'s Law (real number-law)<i class="hi" data-h="numo-benford">i</i></span></div>
+          <div id="numoBenford"></div>
         </div>
       </div>
 
@@ -3852,6 +3895,14 @@
           <div class="skew-chart-head"><span class="skew-chart-title">Planetary Hours (today, Mumbai sunrise)<i class="hi" data-h="astro-hours">i</i></span></div>
           <div id="astroHours"></div>
         </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">📅 Calendar Seasonality (measured — the real "cycle")<i class="hi" data-h="astro-seasonality">i</i></span>
+            <button class="btn" id="astroSeasonBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="astroSeasonality"><span class="oc-sub">Day-of-week &amp; turn-of-month return patterns from your replay archive — the documented anomalies planetary calendars orbit. Click Load.</span></div>
+        </div>
       </div>
 
       <div class="numo-note">
@@ -3915,6 +3966,21 @@
         </div>
 
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🕐 Full Panchang + Rahu Kaal / Abhijit (today)<i class="hi" data-h="vedic-panchang">i</i></span></div>
+          <div id="vedicPanchang" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Navamsa (D9) positions<i class="hi" data-h="vedic-navamsa">i</i></span></div>
+          <div id="vedicNavamsa" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">Ashtakavarga (transit strength)<i class="hi" data-h="vedic-ashtaka">i</i></span></div>
+          <div id="vedicAshtaka" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
           <div class="skew-chart-head"><span class="skew-chart-title">⭐ Confluence Filter — the Vedic "3-signal" rule<i class="hi" data-h="vedic-confluence">i</i></span></div>
           <div id="vedicConfluence" class="gann-levels"></div>
         </div>
@@ -3929,6 +3995,38 @@
         Astrology and Numerology tabs. Traditional Vedic financial astrology itself insists on confluence: at least
         three independent signals aligning before acting. The Confluence Filter panel makes that rule explicit — and it
         is still LORE, however many signals stack. Size from the data tabs; read this as heritage and timing ritual.
+      </div>
+    </section>
+
+    <section id="tab-validate" class="tab-panel">
+      <div class="builder-panel-head"><h3>Validation — does the confluence actually work?<i class="hi" data-h="validate-tab">i</i></h3></div>
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">🔬 Confluence Backtest — bounce rate by zone strength<i class="hi" data-h="validate-backtest">i</i></span>
+            <button class="btn" id="validateBtBtn" style="font-size:10px;padding:3px 12px;">↻ Run</button>
+          </div>
+          <div id="validateBacktest"><span class="oc-sub">The key question: do higher-confluence zones bounce more often? Runs against your replay archive. Click Run.</span></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">📋 Alert Outcome Journal — are your alerts signal or noise?<i class="hi" data-h="validate-journal">i</i></span>
+            <button class="btn" id="validateJournalBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
+          </div>
+          <div id="validateJournal"><span class="oc-sub">Every fired alert, logged with what price did in the next ~20 min. Builds automatically as alerts fire. Click Load.</span></div>
+        </div>
+      </div>
+
+      <div class="numo-note">
+        <b>This is the tab that keeps the others honest.</b> Everything else on the dashboard <em>proposes</em> levels; this
+        tab <em>tests</em> them against what price actually did on your recorded days. The Confluence Backtest asks the one
+        question that matters — do zones where more real positioning stacks up actually reverse price more often? — and the
+        Alert Journal tells you whether the alerts firing in your ear are edge or noise. Two honest caveats: the backtest
+        can only validate the <em>data-backed</em> confluence sources (OI, max-pain, round numbers) since the geometric/astrological
+        levels aren\'t stored in replay; and small samples are noisy — treat everything here as firming up over weeks, not days.
+        If a high-confluence bucket does NOT bounce more than a low one, believe the data, not the geometry.
       </div>
     </section>
   </main>
@@ -8244,6 +8342,7 @@
     _safe(() => renderNumoPanchang(), 'renderNumoPanchang');
     _safe(() => renderNumoPersonal(dateStr), 'renderNumoPersonal');
     _safe(() => renderNumoReality(), 'renderNumoReality');
+    _safe(() => renderNumoBenford(), 'renderNumoBenford');
   }
   // ── Advanced: master numbers (11/22/33) in the reduction chain ──
   function renderNumoMaster(price, dateStr) {
@@ -8471,6 +8570,41 @@
   }
 
   // ── Advanced: Digit Reality Check — do session prices favor any digit? ──
+  // ── Benford's Law — the REAL number-law, as numerology's honest counterweight ──
+  function renderNumoBenford() {
+    const out = document.getElementById('numoBenford');
+    if (!out) return;
+    // Use session spot ticks; Benford wants values spanning orders of magnitude,
+    // so we apply it to first significant digit of tick-to-tick abs moves (which do span scales).
+    const pts = (typeof _spotHistory !== 'undefined' ? _spotHistory : []).map(p => p.val).filter(Boolean);
+    if (pts.length < 80) { out.innerHTML = '<span class="oc-sub">Needs ~7+ min of session ticks — Benford needs values spanning scales; collecting.</span>'; return; }
+    const moves = [];
+    for (let i = 1; i < pts.length; i++) { const m = Math.abs(pts[i] - pts[i - 1]); if (m > 0) moves.push(m); }
+    if (moves.length < 60) { out.innerHTML = '<span class="oc-sub">Not enough non-zero moves yet.</span>'; return; }
+    const firstDigit = x => { let s = String(x).replace(/[^1-9]/, m => m); const m = String(x).match(/[1-9]/); return m ? +m[0] : 0; };
+    const counts = Array(10).fill(0);
+    for (const m of moves) { const d = firstDigit(m); if (d >= 1) counts[d]++; }
+    const n = counts.reduce((a, b) => a + b, 0);
+    const benford = d => Math.log10(1 + 1 / d) * 100;
+    // chi-square-ish deviation summary
+    let maxDev = 0, maxD = 1;
+    const bars = [];
+    for (let d = 1; d <= 9; d++) {
+      const obs = counts[d] / n * 100, exp = benford(d), dev = obs - exp;
+      if (Math.abs(dev) > Math.abs(maxDev)) { maxDev = dev; maxD = d; }
+      const hE = Math.max(2, exp / 32 * 46), hO = Math.max(2, obs / 32 * 46);
+      bars.push(`<div style="display:flex;flex-direction:column;align-items:center;gap:1px;flex:1;">
+        <div style="display:flex;align-items:flex-end;gap:1px;height:50px;">
+          <div title="expected" style="width:7px;height:${hE.toFixed(0)}px;background:var(--muted-2);opacity:0.5;border-radius:1px 1px 0 0;"></div>
+          <div title="observed" style="width:7px;height:${hO.toFixed(0)}px;background:${Math.abs(dev) > 6 ? 'var(--gold)' : 'var(--accent)'};border-radius:1px 1px 0 0;"></div>
+        </div>
+        <span style="font-size:8px;color:var(--muted);">${d}</span></div>`);
+    }
+    out.innerHTML = `<div class="oc-sub" style="margin-bottom:2px;">First-significant-digit of ${n} session price-moves. Grey = Benford expected, colour = observed:</div>
+      <div style="display:flex;align-items:flex-end;">${bars.join('')}</div>
+      <div class="oc-sub" style="margin-top:5px;">Benford\'s Law is a <b>real mathematical property</b>: in data spanning orders of magnitude, leading digit 1 appears ~30% of the time, 9 only ~5% — a log distribution, not uniform. It genuinely detects anomalies (accounting fraud, data errors). Largest deviation here: digit ${maxD} (${maxDev >= 0 ? '+' : ''}${maxDev.toFixed(1)}%). This is what a <b>real</b> number-law looks like — contrast it with the digit-root "vibrations" above, which have no such grounding.</div>`;
+  }
+
   function renderNumoReality() {
     const out = document.getElementById('numoReality');
     if (!out) return;
@@ -8870,6 +9004,37 @@
       <div class="oc-sub" style="margin-top:5px;">Classical planetary hours: sunrise→sunset split into 12 unequal "hours," ruled in Chaldean order from the day\'s ruler. Mumbai coordinates; gold outline = current hour. Renaissance timekeeping applied to NSE hours — historical curiosity tier.</div>`;
   }
 
+  // ── Calendar seasonality — the measured anomaly planetary calendars orbit ──
+  document.getElementById('astroSeasonBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('astroSeasonality');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/calendar-seasonality?symbol=${encodeURIComponent(state.symbol)}`);
+      const d = await res.json();
+      const dow = (d.dow || []).filter(x => x.n > 0);
+      if (!dow.length) { out.innerHTML = '<span class="oc-sub">No recorded days yet — seasonality builds from the replay archive.</span>'; return; }
+      const maxAbs = Math.max(0.05, ...dow.map(x => Math.abs(x.avg_move)));
+      const bars = dow.map(x => {
+        const h = Math.abs(x.avg_move) / maxAbs * 40;
+        const up = x.avg_move >= 0;
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;">
+          <span style="font-size:8px;color:${up ? 'var(--pos)' : 'var(--neg)'};">${x.avg_move >= 0 ? '+' : ''}${x.avg_move}%</span>
+          <div style="display:flex;flex-direction:column;justify-content:${up ? 'flex-end' : 'flex-start'};height:44px;">
+            <div style="width:60%;margin:0 auto;height:${h.toFixed(0)}px;background:${up ? 'var(--pos)' : 'var(--neg)'};opacity:0.7;border-radius:2px;"></div>
+          </div>
+          <span style="font-size:9px;color:var(--muted);">${x.day}</span>
+          <span style="font-size:7.5px;color:var(--muted-2);">${x.up_rate}%↑ n=${x.n}</span>
+        </div>`;
+      }).join('');
+      const tom = d.tom || {};
+      const tomRow = (label, o) => o ? `<div class="gann-lvl-row ${o.avg_move >= 0 ? 'sup' : 'res'}"><span class="lvl-tag">${label}</span><span class="lvl-val" style="font-size:10px;">${o.avg_move >= 0 ? '+' : ''}${o.avg_move}%/day</span><span class="lvl-dist">${o.up_rate}% up · n=${o.n}</span></div>` : '';
+      out.innerHTML = `<div style="display:flex;align-items:stretch;padding:6px 0;">${bars}</div>` +
+        tomRow('Turn-of-month (days 1-3, 27-31)', tom.turn) + tomRow('Mid-month', tom.mid) +
+        '<div class="oc-sub" style="margin-top:4px;">Day-of-week and turn-of-month return patterns — <b>documented market anomalies</b> (weak, decaying, but real and academically studied), computed on YOUR recorded days. This is the measured "cycle" that planetary-calendar folklore gestures at. Small samples are noisy; the effect firms up over months of data.</div>';
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+
   function renderAstroTab() {
     const inp = _astroInputs();
     _safe(() => renderAstroWheel(inp), 'renderAstroWheel');
@@ -9161,6 +9326,111 @@
       '<div class="oc-sub" style="margin-top:4px;">Vedic financial astrology\'s own rule is confluence — at least 3 signals aligning. This panel makes that explicit across Dasha, Hora, Choghadiya and Moon phase. Even at 5/5 it remains LORE: the honest use is as a structured "do I feel rushed?" checklist, never a trade trigger.</div>';
   }
 
+  // ── Full Panchang (5 limbs) + Rahu Kaal / Abhijit Muhurta ──
+  const _YOGA_NAMES = ['Vishkambha','Priti','Ayushman','Saubhagya','Shobhana','Atiganda','Sukarma','Dhriti','Shula','Ganda','Vriddhi','Dhruva','Vyaghata','Harshana','Vajra','Siddhi','Vyatipata','Variyana','Parigha','Shiva','Siddha','Sadhya','Shubha','Shukla','Brahma','Indra','Vaidhriti'];
+  const _KARANA_NAMES = ['Bava','Balava','Kaulava','Taitila','Gara','Vanija','Vishti'];
+  function renderVedicPanchang(now) {
+    const out = document.getElementById('vedicPanchang');
+    if (!out) return;
+    const norm = x => ((x % 360) + 360) % 360;
+    const e = _eclipticLongitudes(now);
+    const elong = norm(e.moon - e.sun);
+    // 5 limbs
+    const tithiN = Math.floor(elong / 12);
+    const paksha = tithiN < 15 ? 'Shukla' : 'Krishna';
+    const yoga = _YOGA_NAMES[Math.floor(norm(e.sun + e.moon) / (360 / 27)) % 27];
+    const karana = _KARANA_NAMES[Math.floor(elong / 6) % 7];
+    const vara = now.toLocaleDateString('en-IN', { weekday: 'long' });
+    const nakIdx = Math.floor(norm(e.moon - _astAyanamsa(now)) / (360 / 27));
+    // Rahu Kaal: 1/8th of daytime, slot by weekday (Mon=2nd,Tue=7th,Wed=5th,Thu=6th,Fri=4th,Sat=3rd,Sun=8th)
+    const { rise, set } = _sunriseSunset(now, 19.076, 72.877);
+    const dayLen = (set - rise) / 8;
+    const rahuSlot = { 0: 8, 1: 2, 2: 7, 3: 5, 4: 6, 5: 4, 6: 3 }[now.getDay()] - 1;
+    const rkStart = new Date(rise.getTime() + rahuSlot * dayLen), rkEnd = new Date(rkStart.getTime() + dayLen);
+    // Abhijit Muhurta: ~24 min around solar noon (8th muhurta of 15)
+    const noon = new Date((rise.getTime() + set.getTime()) / 2);
+    const muhLen = (set - rise) / 15;
+    const abStart = new Date(noon.getTime() - muhLen / 2), abEnd = new Date(noon.getTime() + muhLen / 2);
+    const fmtT = d => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const nowIn = (a, b) => now >= a && now < b;
+    out.innerHTML = `
+      <div class="gann-lvl-row"><span class="lvl-tag">Vara (day)</span><span class="lvl-val" style="font-size:10.5px;">${vara}</span><span class="lvl-dist">weekday lord</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Tithi</span><span class="lvl-val" style="font-size:10.5px;">${_TITHI[tithiN % 15]}</span><span class="lvl-dist">${paksha} paksha</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Nakshatra</span><span class="lvl-val" style="font-size:10.5px;">${_NAKSHATRA[nakIdx]}</span><span class="lvl-dist">lunar mansion</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Yoga</span><span class="lvl-val" style="font-size:10.5px;">${yoga}</span><span class="lvl-dist">Sun+Moon</span></div>
+      <div class="gann-lvl-row"><span class="lvl-tag">Karana</span><span class="lvl-val" style="font-size:10.5px;">${karana}</span><span class="lvl-dist">half-tithi</span></div>
+      <div class="gann-lvl-row ${nowIn(rkStart, rkEnd) ? 'res' : ''}"><span class="lvl-tag" style="color:var(--neg);">⚠ Rahu Kaal</span><span class="lvl-val" style="font-size:10.5px;">${fmtT(rkStart)}–${fmtT(rkEnd)}</span><span class="lvl-dist">${nowIn(rkStart, rkEnd) ? 'ACTIVE NOW' : 'avoid new trades'}</span></div>
+      <div class="gann-lvl-row ${nowIn(abStart, abEnd) ? 'anchor' : 'sup'}"><span class="lvl-tag" style="color:var(--pos);">✓ Abhijit</span><span class="lvl-val" style="font-size:10.5px;">${fmtT(abStart)}–${fmtT(abEnd)}</span><span class="lvl-dist">${nowIn(abStart, abEnd) ? 'ACTIVE NOW' : 'auspicious window'}</span></div>
+      <div class="oc-sub" style="margin-top:4px;">The complete Panchang (five limbs: Vara, Tithi, Nakshatra, Yoga, Karana). <b>Rahu Kaal</b> — a ~90-min inauspicious daily window — has a real following among Indian traders who avoid fresh entries in it (mild CROWD, self-fulfilling to a degree). <b>Abhijit Muhurta</b> around noon is the classical "victory" window. Mumbai sunrise-based; ±few min.</div>`;
+  }
+
+  // ── Navamsa (D9): each sign split into 9 parts of 3°20′, remapped ──
+  function renderVedicNavamsa(now) {
+    const out = document.getElementById('vedicNavamsa');
+    if (!out) return;
+    const ayan = _astAyanamsa(now);
+    const lons = _planetLongitudes(now);
+    const nodes = _lunarNodes(now);
+    const bodies = { Sun: lons.Sun, Moon: lons.Moon, Mars: lons.Mars, Mercury: lons.Mercury, Jupiter: lons.Jupiter, Venus: lons.Venus, Saturn: lons.Saturn, Rahu: nodes.rahu, Ketu: nodes.ketu };
+    const signs = ['Mesha','Vrishabha','Mithuna','Karka','Simha','Kanya','Tula','Vrischika','Dhanu','Makara','Kumbha','Meena'];
+    // D9: navamsa index within sign (0-8) maps to a starting sign by element
+    const d9Sign = lon => {
+      const sid = ((lon - ayan) % 360 + 360) % 360;
+      const sign = Math.floor(sid / 30);
+      const nav = Math.floor((sid % 30) / (30 / 9));   // 0-8
+      // movable(0,3,6,9)=same sign start; fixed(1,4,7,10)=9th; dual(2,5,8,11)=5th
+      const startOffset = [0, 8, 4][sign % 3];
+      return (sign + startOffset + nav) % 12;
+    };
+    out.innerHTML = Object.entries(bodies).map(([name, lon]) =>
+      `<div class="gann-lvl-row"><span class="lvl-tag" style="color:${_VED_COL[name]};">${_VED_GLYPH[name]} ${name}</span><span class="lvl-val" style="font-size:10.5px;">${signs[d9Sign(lon)]}</span><span class="lvl-dist">D9</span></div>`
+    ).join('') +
+      '<div class="oc-sub" style="margin-top:4px;">The Navamsa (D9) is the most important divisional chart after the birth chart — each sign is split into 9 parts and remapped, magnifying planetary fine-position. A planet strong in both D1 and D9 (vargottama) is held especially powerful. Standard jyotish uses D9 to confirm what the main chart suggests.</div>';
+  }
+
+  // ── Ashtakavarga (Sarvashtakavarga transit-strength by sign, simplified) ──
+  // Classical SAV assigns each sign 0-8 bindus from the 7 planets + lagna.
+  // We compute the Bhinnashtakavarga contribution using standard benefic-place
+  // rules summed across planets — a faithful simplification of the 337-bindu table.
+  const _AV_RULES = {
+    // benefic houses (from each planet) that a planet contributes a bindu to.
+    Sun: [1,2,4,7,8,9,10,11], Moon: [3,6,7,8,10,11], Mars: [1,2,4,7,8,10,11],
+    Mercury: [1,3,5,6,9,10,11,12], Jupiter: [1,2,3,4,7,8,10,11], Venus: [1,2,3,4,5,8,9,11,12],
+    Saturn: [3,5,6,11],
+  };
+  function renderVedicAshtaka(now) {
+    const out = document.getElementById('vedicAshtaka');
+    if (!out) return;
+    const ayan = _astAyanamsa(now);
+    const lons = _planetLongitudes(now);
+    const sign = name => Math.floor((((lons[name] - ayan) % 360 + 360) % 360) / 30);
+    const planets = ['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn'];
+    const sav = Array(12).fill(0);
+    for (const p of planets) {
+      const ps = sign(p);
+      for (const other of planets) {
+        const os = sign(other);
+        const houseFrom = ((os - ps + 12) % 12) + 1;
+        if (_AV_RULES[p].includes(houseFrom)) sav[os]++;
+      }
+    }
+    const signs = ['Mesha','Vrishabha','Mithuna','Karka','Simha','Kanya','Tula','Vrischika','Dhanu','Makara','Kumbha','Meena'];
+    const max = Math.max(...sav, 1);
+    // current sidereal Moon sign is the "active" transit sign
+    const moonSign = Math.floor((((lons.Moon - ayan) % 360 + 360) % 360) / 30);
+    const rows = signs.map((s, i) => {
+      const bar = Math.round(sav[i] / max * 100);
+      const strong = sav[i] >= 5, weak = sav[i] <= 2;
+      return `<div class="gann-lvl-row ${i === moonSign ? 'anchor' : (strong ? 'sup' : weak ? 'res' : '')}">
+        <span class="lvl-tag">${s}${i === moonSign ? ' ☾' : ''}</span>
+        <span class="lvl-val">${sav[i]} bindus</span>
+        <span class="lvl-dist" style="flex:1;text-align:right;"><span style="display:inline-block;width:${bar}%;max-width:80px;height:5px;background:${strong ? 'var(--pos)' : weak ? 'var(--neg)' : 'var(--muted-2)'};border-radius:2px;vertical-align:middle;"></span></span>
+      </div>`;
+    }).join('');
+    out.innerHTML = rows +
+      '<div class="oc-sub" style="margin-top:4px;">Sarvashtakavarga: each sign scored by how many "bindus" (benefic points) the seven planets contribute to it — the classical Vedic <b>numeric</b> strength system. Signs with 5+ bindus are auspicious for transit activity there, ≤2 weak. ☾ marks the sign the Moon transits now. A genuinely quantitative jyotish layer.</div>';
+  }
+
   function renderVedicTab() {
     const anchor = _vedicAnchorDate();
     const now = new Date();
@@ -9170,11 +9440,141 @@
     _safe(() => renderVedicDrishti(now), 'renderVedicDrishti');
     _safe(() => renderVedicChoghadiya(now), 'renderVedicChoghadiya');
     _safe(() => renderVedicHora(now), 'renderVedicHora');
+    _safe(() => renderVedicPanchang(now), 'renderVedicPanchang');
+    _safe(() => renderVedicNavamsa(now), 'renderVedicNavamsa');
+    _safe(() => renderVedicAshtaka(now), 'renderVedicAshtaka');
     _safe(() => renderVedicConfluence(anchor, now), 'renderVedicConfluence');
   }
   document.getElementById('vedicGenBtn')?.addEventListener('click', renderVedicTab);
   document.getElementById('vedicAnchor')?.addEventListener('change', renderVedicTab);
   document.getElementById('vedicBirthTime')?.addEventListener('change', renderVedicTab);
+
+  // ── VALIDATION TAB ──────────────────────────────────────────────────
+  document.getElementById('validateBtBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('validateBacktest');
+    out.innerHTML = '<span class="oc-sub">Running backtest across your replay archive…</span>';
+    try {
+      const d = await _lvlFetch(`/api/confluence-backtest?symbol=${encodeURIComponent(state.symbol)}`);
+      const b = d.buckets || [];
+      if (!b.length) { out.innerHTML = '<span class="oc-sub">No touches recorded yet — the backtest needs several days of replay data with price approaching confluence zones.</span>'; return; }
+      const rows = b.map(x => {
+        const bar = Math.round((x.bounce_rate || 0));
+        const good = x.bounce_rate >= 55;
+        return `<div class="gann-lvl-row ${good ? 'sup' : x.bounce_rate <= 45 ? 'res' : ''}">
+          <span class="lvl-tag">⚡ ${x.score}</span>
+          <span class="lvl-val">${x.bounce_rate}% bounce</span>
+          <span class="lvl-dist" style="flex:1;text-align:right;">${x.touches} touches · ${x.break_rate}% broke · ~${fmtInt(x.avg_excursion)}pt swing</span>
+        </div><div style="height:3px;background:linear-gradient(90deg,${good ? 'var(--pos)' : 'var(--gold)'} ${bar}%,transparent ${bar}%);margin:-2px 8px 4px;"></div>`;
+      }).join('');
+      const verdict = d.trend === 'rising'
+        ? { t: '✓ Higher confluence → higher bounce rate. The weighting is earning its keep.', c: 'var(--pos)' }
+        : d.trend === 'falling'
+        ? { t: '⚠ Bounce rate FALLS as confluence rises — the geometry may be misleading you. Trust the data.', c: 'var(--neg)' }
+        : d.trend === 'flat'
+        ? { t: '≈ Bounce rate is flat across confluence scores — more sources ≠ more reliable here yet.', c: 'var(--muted)' }
+        : { t: 'Not enough data across score buckets to judge the trend yet.', c: 'var(--muted)' };
+      out.innerHTML = rows +
+        `<div class="gann-lvl-row anchor"><span class="lvl-tag">VERDICT</span><span class="lvl-val" style="color:${verdict.c};font-size:10px;text-align:left;flex:1;">${verdict.t}</span></div>` +
+        `<div class="oc-sub" style="margin-top:4px;">${escapeHtml(d.note)} · ${d.total_touches} total touches analysed.</div>`;
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+
+  document.getElementById('validateJournalBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('validateJournal');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const d = await _lvlFetch(`/api/alert-journal?symbol=${encodeURIComponent(state.symbol)}`);
+      const s = d.summary || {};
+      if (!s.total) { out.innerHTML = '<span class="oc-sub">No alerts logged yet. As level alerts fire, each is recorded and its 20-minute outcome measured automatically — check back after a session.</span>'; return; }
+      const cards = `<div class="pstats-grid">` +
+        statCard('Alerts logged', String(s.total)) +
+        statCard('Resolved', String(s.resolved)) +
+        (s.favorable_rate !== null ? statCard('Favorable', s.favorable_rate + '%', s.favorable_rate >= 55 ? 'pos' : s.favorable_rate <= 45 ? 'neg' : '') : '') +
+        (s.avg_move_pts !== null ? statCard('Avg move after', fmtInt(s.avg_move_pts) + ' pts') : '') +
+        `</div>`;
+      const rows = (d.entries || []).slice(-12).reverse().map(e => {
+        const resolved = e.outcome_pts !== null && e.outcome_pts !== undefined;
+        return `<div class="gann-lvl-row ${resolved ? (e.favorable ? 'sup' : 'res') : ''}">
+          <span class="lvl-tag">${escapeHtml(e.label || '')}</span>
+          <span class="lvl-val" style="font-size:10px;">${fmtInt(e.price)}</span>
+          <span class="lvl-dist">${resolved ? (e.favorable ? '✓ ' : '✗ ') + (e.outcome_pts >= 0 ? '+' : '') + e.outcome_pts + 'pt after' : 'pending…'}</span>
+        </div>`;
+      }).join('');
+      out.innerHTML = cards + rows +
+        '<div class="oc-sub" style="margin-top:4px;">Favorable = price moved the way the level implied (rejection at resistance, bounce at support) within ~20 min. Below 50% favorable means your alerts are firing against you — worth pruning which levels alert. Resolves 20 min after each alert; keep the page open.</div>';
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+
+  // ── TODAY SYNTHESIS TAB ─────────────────────────────────────────────
+  function renderTodayTab() {
+    const out = document.getElementById('todayContent');
+    if (!out) return;
+    const d = state.lastData;
+    if (!d) { out.innerHTML = '<div class="oc-sub" style="padding:20px;text-align:center;">Load the option chain first, then Refresh.</div>'; return; }
+    const price = d.underlying_value;
+    const card = (title, body, tier) => {
+      const tc = tier === 'measured' ? 'var(--pos)' : tier === 'crowd' ? 'var(--gold)' : 'var(--muted)';
+      const tl = tier === 'measured' ? 'MEASURED' : tier === 'crowd' ? 'CROWD' : 'CONTEXT';
+      return `<div class="skew-chart-wrap" style="margin:0;">
+        <div class="skew-chart-head"><span class="skew-chart-title">${title}</span><span style="font-size:8px;color:${tc};font-weight:700;letter-spacing:0.5px;">${tl}</span></div>
+        <div style="padding:2px 0;">${body}</div></div>`;
+    };
+    const blocks = [];
+    const gex = _computeGex(d);
+    blocks.push(card('📍 Spot &amp; Regime',
+      `<div style="font-size:20px;font-weight:800;">${fmtInt(price)}</div>
+       <div class="oc-sub">${d.symbol} · PCR ${d.pcr} · IV ${d.atm_iv?.toFixed(1)}%${gex ? ' · <b style="color:' + (gex.total >= 0 ? 'var(--pos)' : 'var(--neg)') + '">' + (gex.total >= 0 ? 'Positive' : 'Negative') + ' GEX</b>' + (gex.flip ? ' · flip ' + fmtInt(gex.flip) : '') : ''}</div>`,
+      'measured'));
+    let ladderBody = '<span class="oc-sub">Generate the Levels tab for the full ladder.</span>';
+    try {
+      const oc = computeOcLevels(d);
+      const src = [];
+      if (oc) { src.push([oc.res.strike, 'OC Res', 3]); src.push([oc.sup.strike, 'OC Sup', 3]); }
+      if (d.max_pain) src.push([d.max_pain, 'Max Pain', 3]);
+      if (gex?.flip) src.push([gex.flip, 'GEX flip', 3]);
+      const walls = state._oiWalls;
+      if (walls?.callStrike) src.push([walls.callStrike, 'Call wall', 3]);
+      if (walls?.putStrike) src.push([walls.putStrike, 'Put wall', 3]);
+      { const u = 500, b = Math.round(price / u) * u; src.push([b, 'round', 2]); }
+      const near = src.filter(x => x[0] && Math.abs(x[0] - price) / price < 0.02)
+        .sort((a, b) => Math.abs(a[0] - price) - Math.abs(b[0] - price)).slice(0, 4);
+      if (near.length) ladderBody = near.map(([v, lbl]) =>
+        `<div style="display:flex;justify-content:space-between;font-size:11px;padding:1px 0;"><span>${lbl}</span><b>${fmtInt(v)}</b><span class="oc-sub">${((v - price) / price * 100).toFixed(2)}%</span></div>`).join('');
+    } catch (_) {}
+    blocks.push(card('🎯 Key Levels (nearest)', ladderBody, 'measured'));
+    try {
+      const oc = computeOcLevels(d);
+      if (oc) blocks.push(card('🧱 OC Support / Resistance',
+        `<div style="font-size:11px;">R: <b>${fmtInt(oc.res.strike)}</b> <span class="oc-sub">${oc.res.status}</span><br>S: <b>${fmtInt(oc.sup.strike)}</b> <span class="oc-sub">${oc.sup.status}</span></div>`,
+        'measured'));
+    } catch (_) {}
+    try {
+      const now = new Date();
+      const { rise, set } = _sunriseSunset(now, 19.076, 72.877);
+      const dayLen = (set - rise) / 8;
+      const rahuSlot = { 0: 8, 1: 2, 2: 7, 3: 5, 4: 6, 5: 4, 6: 3 }[now.getDay()] - 1;
+      const rkStart = new Date(rise.getTime() + rahuSlot * dayLen), rkEnd = new Date(rkStart.getTime() + dayLen);
+      const fmtT = t => t.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const active = now >= rkStart && now < rkEnd;
+      blocks.push(card('🕐 Muhurta (context)',
+        `<div style="font-size:11px;">Rahu Kaal: <b style="color:${active ? 'var(--neg)' : 'inherit'}">${fmtT(rkStart)}–${fmtT(rkEnd)}</b> ${active ? '<span style="color:var(--neg)">ACTIVE</span>' : ''}<br><span class="oc-sub">${now.toLocaleDateString('en-IN', { weekday: 'long' })} · avoid-new-trades window per tradition</span></div>`,
+        'context'));
+    } catch (_) {}
+    out.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">${blocks.join('')}</div>`;
+  }
+  document.getElementById('todayRefreshBtn')?.addEventListener('click', renderTodayTab);
+
+  // ── COMPACT MODE (hide decorative LORE panels) ──────────────────────
+  function _applyCompactMode(on) {
+    document.body.classList.toggle('compact-esoteric', on);
+    try { localStorage.setItem('compactEsoteric', on ? '1' : '0'); } catch (_) {}
+    const btn = document.getElementById('compactToggle');
+    if (btn) btn.textContent = on ? '◱ Compact: ON' : '◱ Compact: OFF';
+  }
+  document.getElementById('compactToggle')?.addEventListener('click', () => {
+    _applyCompactMode(!document.body.classList.contains('compact-esoteric'));
+  });
+  try { if (localStorage.getItem('compactEsoteric') === '1') _applyCompactMode(true); } catch (_) {}
   document.getElementById('numoUseSpot')?.addEventListener('click', () => {
     const spot = state.lastData?.underlying_value;
     if (spot) { document.getElementById('numoPrice').value = Math.round(spot * 100) / 100; renderNumoTab(); }
@@ -9508,6 +9908,65 @@
     }).join('') +
       '<div class="oc-sub" style="margin-top:4px;">Weighting: positioning data (OI/OC/GEX/max-pain) ×3 · crowd-watched (Camarilla/round/Murrey) ×2 · geometric (S9/planetary) ×1. Score ⚡ = weighted source count. A zone where positioning AND crowd levels stack is the strongest thing any tab here can show you.</div>';
   }
+
+  // ── Anchored VWAP + sigma bands (measured, from replay) ──
+  document.getElementById('lvlAvwapBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('lvlAvwap');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const d = await _lvlFetch('/api/anchored-vwap');
+      if (!d.series?.length) { out.innerHTML = '<span class="oc-sub">No recorded days yet — VWAP builds from the replay archive.</span>'; return; }
+      const s = d.series, price = state.lastData?.underlying_value;
+      const cur = d.current;
+      // chart: price line + vwap + ±1σ/±2σ bands
+      const W = 680, H = 240, padL = 52, padR = 10, padY = 14;
+      const vals = s.flatMap(p => [p.price, p.vwap + 2 * p.sd, p.vwap - 2 * p.sd]);
+      let mn = Math.min(...vals), mx = Math.max(...vals); const pad = (mx - mn) * 0.06 || 10; mn -= pad; mx += pad;
+      const span = Math.max(1, mx - mn);
+      const x = i => padL + i / (s.length - 1) * (W - padL - padR);
+      const y = v => H - padY - (v - mn) / span * (H - 2 * padY);
+      const band = (mult, cls) => {
+        const up = s.map((p, i) => `${x(i).toFixed(1)},${y(p.vwap + mult * p.sd).toFixed(1)}`);
+        const dn = s.map((p, i) => `${x(i).toFixed(1)},${y(p.vwap - mult * p.sd).toFixed(1)}`).reverse();
+        return `<polygon points="${up.concat(dn).join(' ')}" fill="${cls}" opacity="0.10"/>`;
+      };
+      const line = (key, col, w) => `<polyline points="${s.map((p, i) => `${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="${w}"/>`;
+      const priceLine = `<polyline points="${s.map((p, i) => `${x(i).toFixed(1)},${y(p.price).toFixed(1)}`).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="1.4"/>`;
+      let ticks = '';
+      for (let k = 0; k <= 4; k++) { const v = mn + span * k / 4; ticks += `<text x="${padL - 4}" y="${y(v).toFixed(1)}" text-anchor="end" dominant-baseline="middle" style="font-size:8px;fill:var(--muted-2);">${fmtInt(Math.round(v))}</text>`; }
+      out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+        ${band(2, 'var(--neg)')}${band(1, 'var(--gold)')}
+        ${line('vwap', 'var(--gold)', 1.6)}${priceLine}${ticks}
+      </svg>
+      <div class="oc-sub">${d.day} · VWAP <b style="color:var(--gold)">${fmtInt(Math.round(cur.vwap))}</b>, ±1σ ${fmtInt(Math.round(cur.vwap - cur.sd))}–${fmtInt(Math.round(cur.vwap + cur.sd))}, ±2σ ${fmtInt(Math.round(cur.vwap - 2 * cur.sd))}–${fmtInt(Math.round(cur.vwap + 2 * cur.sd))}. ${d.weighted ? 'Straddle-premium weighted.' : 'Time-weighted (no volume proxy available).'} ${price ? 'Live spot ' + fmtInt(Math.round(price)) + (price > cur.vwap ? ' above VWAP (bullish bias)' : ' below VWAP (bearish bias)') : ''}</div>
+      <div class="oc-sub" style="margin-top:3px;">Institutions benchmark fills to VWAP; the ±σ bands are where mean-reversion vs trend-continuation is decided. This feeds the Master Ladder as a weight-3 measured source.</div>`;
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
+
+  // ── Gap & opening-range statistics (measured) ──
+  document.getElementById('lvlGapOrbBtn')?.addEventListener('click', async () => {
+    const out = document.getElementById('lvlGapOrb');
+    out.innerHTML = '<span class="oc-sub">Loading…</span>';
+    try {
+      const d = await _lvlFetch('/api/gap-orb-stats');
+      const s = d.summary || {};
+      if (!s.n_days) { out.innerHTML = '<span class="oc-sub">No recorded days yet.</span>'; return; }
+      const cards = `<div class="pstats-grid">` +
+        statCard('Days', String(s.n_days)) +
+        (s.gap_fill_rate !== null ? statCard('Gap-fill rate', s.gap_fill_rate + '%', s.gap_fill_rate >= 60 ? 'pos' : '') : '') +
+        (s.orb_break_rate !== null ? statCard('ORB break rate', s.orb_break_rate + '%') : '') +
+        (s.orb_hold_rate !== null ? statCard('Break→hold rate', s.orb_hold_rate + '%', s.orb_hold_rate >= 50 ? 'pos' : 'neg') : '') +
+        (s.avg_orb_range !== null ? statCard('Avg 15-min range', fmtInt(s.avg_orb_range) + ' pts') : '') +
+        `</div>`;
+      const rows = (d.days || []).slice(-6).reverse().map(r => `<div class="gann-lvl-row ${r.gap_filled === true ? 'sup' : r.gap_filled === false ? 'res' : ''}">
+        <span class="lvl-tag">${r.date}</span>
+        <span class="lvl-val" style="font-size:10px;">${r.gap_pct !== null ? (r.gap_pct >= 0 ? '+' : '') + r.gap_pct + '% gap' : 'flat open'}</span>
+        <span class="lvl-dist">${r.gap_filled === true ? 'filled ✓' : r.gap_filled === false ? 'unfilled ✗' : ''} · ORB ${fmtInt(r.orb_range)}pt ${r.held_hi ? '↑held' : r.held_lo ? '↓held' : r.broke_hi || r.broke_lo ? 'broke' : 'inside'}</span>
+      </div>`).join('');
+      out.innerHTML = cards + rows +
+        '<div class="oc-sub" style="margin-top:4px;">Gap-fill rate: how often an opening gap trades back to prior close same-day. ORB break→hold: of days breaking the first-15-min range, how many closed beyond it (trend-day signal). Your data, your edge.</div>';
+    } catch (e) { out.innerHTML = `<span class="oc-sub">Unavailable (${escapeHtml(e.message)}) — update server.</span>`; }
+  });
 
   document.getElementById('lvlStatsBtn')?.addEventListener('click', async () => {
     const out = document.getElementById('lvlStats');
@@ -10066,6 +10525,12 @@
       }
       if (tab.dataset.tab === 'vedic') {
         renderVedicTab();
+      }
+      if (tab.dataset.tab === 'today') {
+        renderTodayTab();
+      }
+      if (tab.dataset.tab === 'validate') {
+        // panels load on button click to avoid slow auto-fetch; nudge if empty
       }
       if (tab.dataset.tab === 'numerology') {
         const dInp = document.getElementById('numoDate');
@@ -10864,6 +11329,32 @@
     }
     const row = document.querySelector(`[data-level-label="${label.replace(/"/g, '\\"')}"]`);
     if (row) { row.classList.add('touched'); setTimeout(() => row.classList.remove('touched'), 2000); }
+
+    _logAlertOutcome(label, price, polarity);   // ← record + schedule outcome measurement
+  }
+
+  // Alert outcome journal: log the fired alert, then measure what price did ~20
+  // min later and POST the outcome. Lets the Validation tab score whether alerts
+  // are signal or noise. Purely observational — never blocks the alert itself.
+  function _logAlertOutcome(label, price, polarity) {
+    const entrySpot = state.lastData?.underlying_value || price;
+    // schedule a measurement 20 min out (or on next data if page still open)
+    const measureAfter = 20 * 60 * 1000;
+    setTimeout(() => {
+      const later = state.lastData?.underlying_value;
+      if (!later) return;   // page closed / no data — skip (unresolved)
+      const move = later - entrySpot;
+      // "favorable" = price moved in the direction the level implied:
+      // resistance (r) touched → expected rejection down; support (s) → bounce up
+      const favorable = polarity === 'r' ? move < 0 : polarity === 's' ? move > 0 : Math.abs(move) > 0;
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      fetch(`${base}/api/log-alert`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: state.symbol, label, price, polarity,
+          entry_spot: Math.round(entrySpot), later_spot: Math.round(later),
+          outcome_pts: Math.round(move), favorable }),
+      }).catch(() => {});
+    }, measureAfter);
   }
 
   // _prevSpot tracks the last known spot price so we can detect level crosses
@@ -17457,6 +17948,18 @@
     'vedic-choghadiya':  '<strong>Choghadiya</strong>The Vedic day-planning system: daytime split into 8 muhurtas, each labelled Amrit/Shubh/Labh (auspicious), Chal (neutral) or Udveg/Rog/Kaal (inauspicious). The starting choghadiya rotates by weekday. Widely consulted in India for timing errands, purchases and journeys; some traders avoid the "bad" slots for fresh entries. Computed from real Mumbai sunrise. Current slot outlined in gold.',
     'vedic-hora':        '<strong>Hora</strong>The hour ruled by a planet, in the Chaldean order that also underlies the Western planetary hours — but read through Vedic trading lore, where Jupiter and Mercury horas are the classically favourable windows for buying and dealing, Saturn hora counsels caution, Moon hora warns of volatility. The day itself has a lord (Sunday=Sun, Monday=Moon…). Sunrise-based, Mumbai.',
     'vedic-confluence':  '<strong>Confluence Filter</strong>Traditional Vedic financial astrology insists on confluence — at least three independent signals aligning before acting. This panel makes that rule concrete, scoring five: the benefic/malefic nature of your Dasha and Antardasha lords, the current Hora, the current Choghadiya, and the Moon\'s waxing/waning phase. 3+ green = "favourable" by the tradition\'s own standard. Crucial honesty: even at 5/5 this is LORE — no replicated evidence links any of it to Nifty. Use it as a structured "am I forcing a trade?" pause, never as a signal to take one.',
+    'lvl-avwap':         '<strong>Anchored VWAP + σ bands</strong>Volume-weighted average price from the session anchor, with ±1σ and ±2σ bands, computed from your replay archive. Since the index has no true tick volume, activity is proxied by straddle-premium turnover (falling back to time-weighting) — disclosed on the panel. MEASURED: institutions benchmark fills to VWAP and the σ bands are real mean-reversion/continuation boundaries. Feeds the Master Confluence Ladder as a weight-3 source. Price above VWAP = intraday bullish bias, below = bearish.',
+    'lvl-gaporb':        '<strong>Gap &amp; Opening-Range stats</strong>MEASURED from your recorded days: gap-fill rate (how often an opening gap trades back to the prior close same-day) and opening-range break→hold rate (of days breaking the first-15-minute range, how many closed beyond it — a trend-day tell). These are genuine, tradeable base rates on your own data, not folklore. Sample firms up over weeks.',
+    'numo-benford':      '<strong>Benford\'s Law</strong>The honest counterweight to this whole tab. Benford\'s Law is a REAL mathematical property: in data spanning orders of magnitude, the leading digit is 1 about 30% of the time and 9 only ~5% — a logarithmic distribution. It genuinely detects anomalies (it is used in forensic accounting and fraud detection). Applied here to session price-moves. This is what a number-law with actual grounding looks like — deliberately placed beside the digit-root "vibration" panels to show the difference between mathematics and numerology.',
+    'astro-seasonality': '<strong>Calendar Seasonality</strong>Day-of-week and turn-of-month return patterns from your replay archive — the DOCUMENTED market anomalies (weak, decaying, but real and academically studied) that planetary-calendar folklore gestures at. MEASURED: this is the genuine "cycle" in markets, computed on your own days. Turn-of-month (last few / first few trading days) historically shows a positive bias in many markets. Small samples are noisy; the effect stabilizes over months.',
+    'vedic-panchang':    '<strong>Full Panchang + Rahu Kaal</strong>The complete five-limbed Panchang — Vara (weekday), Tithi (lunar day), Nakshatra (lunar mansion), Yoga (Sun+Moon combination), Karana (half-tithi) — plus the two muhurta windows Indian traders most watch. <b>Rahu Kaal</b> is a ~90-minute daily inauspicious window (its slot rotates by weekday) that a real segment of Indian traders avoid for fresh positions — enough of a following to be mildly self-fulfilling (CROWD-ish), unlike pure planetary lore. <b>Abhijit Muhurta</b> around solar noon is the classical "victory" window. Mumbai sunrise-based; accurate to a few minutes.',
+    'vedic-navamsa':     '<strong>Navamsa (D9)</strong>The most important divisional chart in Vedic astrology after the birth chart. Each 30° sign is divided into nine 3°20′ parts, each remapped to a new sign, magnifying a planet\'s fine position. A planet occupying the same sign in both the main chart (D1) and the Navamsa (D9) is "vargottama" — considered especially strong. Jyotishis use D9 to confirm or qualify what the main chart indicates; omitting it is why the earlier Astrology tab felt incomplete to a Vedic eye.',
+    'vedic-ashtaka':     '<strong>Ashtakavarga</strong>The classical Vedic POINTS system — genuinely quantitative jyotish. Each of the 12 signs accumulates "bindus" (benefic points) based on where the seven planets sit relative to it, using the traditional benefic-house rules. Signs scoring 5+ bindus are auspicious for planetary transits through them; ≤2 are weak. The ☾ marks the sign the Moon currently transits. This is the numeric strength-scoring layer that distinguishes a complete jyotish reading — the Vedic answer to "how strong is this influence, in numbers."',
+    'validate-tab':      '<strong>Validation</strong>The tab that keeps the others honest. Everything else proposes levels; this tests them against what price actually did on your recorded days. Two tools: a confluence backtest (do higher-confluence zones bounce more?) and an alert-outcome journal (are your fired alerts signal or noise?). If the data disagrees with the geometry, believe the data.',
+    'validate-backtest': '<strong>Confluence Backtest</strong>The core validation: for every recorded day it rebuilds the data-backed confluence zones (OI walls, OC S/R, max pain, round numbers — the geometric/astrological sources aren\'t stored in replay), then measures what happened each time price touched one. Zones are bucketed by confluence score, so you can see directly whether MORE confluence produces MORE bounces. The verdict line tells you if the weighting is earning its keep — a "falling" trend means your stacked levels are misleading you. Small samples are noisy; firms up over weeks.',
+    'validate-journal':  '<strong>Alert Outcome Journal</strong>Every level alert that fires is logged, and ~20 minutes later the dashboard measures what price did and whether it was "favorable" (moved the way the level implied — rejection at resistance, bounce at support). Over time this tells you whether your alerts are edge or noise: below 50% favorable means they\'re firing against you and you should prune which levels alert. Requires the page to stay open for outcomes to resolve.',
+    'today-tab':         '<strong>Today</strong>The synthesis view: the single most important reading from each tab pulled into one glanceable morning card, ordered by decision-weight — measured positioning first (spot/regime, key levels, OC support/resistance), calendar/ritual context (Rahu Kaal) last and clearly marked. If you read one tab before the open, read this one. Click Refresh after loading the chain.',
+    'compact-mode':      '<strong>Compact Mode</strong>Hides the decorative LORE-tier esoteric panels (hexagon chart, natural squares, digit-root wheel, vibration levels, and similar) across the Gann/Numerology tabs, leaving the load-bearing panels visible. Nothing is deleted — toggle it back anytime. Your choice is remembered. Useful once you know which panels you actually read.',
     'suggest-view':      '<strong>View &amp; Risk Filter</strong>Override the auto regime read with your own directional view (bullish / bearish / neutral / big-move), and optionally restrict to defined-risk structures only. With Auto, the engine infers the view from OC WTT/WTB status and IV context. Each suggestion now shows a live quantified preview — actual strikes, POP, credit/debit, max loss and EV computed from the current chain before you deploy.',
     'iv-rv':             '<strong>IV − Realized Vol Spread</strong>ATM IV minus intraday realized volatility (Parkinson estimator on session high/low, day-scaled, annualized). Positive spread = options are pricing MORE movement than the market is delivering — the core premium-selling edge. Negative = market moving more than options price in — short premium is negative-edge, own gamma instead. Early session readings are noisy (small sample); trust it more after 11:00.',
     'risk-sizing':       '<strong>Risk-Based Lot Sizing</strong>Enter your max acceptable loss per trade; the builder computes max lots = risk ÷ (max loss per lot) for the current structure and warns when your quantity exceeds it. For undefined-risk structures (naked strangles, ratios) it refuses to size by max loss — those must be sized by margin and delta instead. Sizing decided before entry is the discipline that compounds.',

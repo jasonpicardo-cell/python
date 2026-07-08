@@ -582,6 +582,264 @@ def compute_level_stats(symbol):
             "note": "bounce = reversed ≥0.1% against approach within ~15 min of a touch (±0.04%)"}
 
 
+# ── Anchored VWAP over recorded intraday spot (volume-proxied) ──────────────
+def compute_anchored_vwap(symbol, day=None):
+    """Index has no true tick volume; we proxy 'activity' by straddle premium
+    turnover if present, else equal-weight (=> anchored average price). Bands are
+    +/- 1 and 2 standard deviations of price around the running VWAP."""
+    days = _replay_dates(symbol)
+    if not days:
+        return {"symbol": symbol, "series": [], "note": "No recorded days yet."}
+    day = day or days[-1]
+    snaps = _bt_load_day(symbol, day)
+    pts = []
+    cum_pv = cum_w = cum_pv2 = 0.0
+    for s in snaps:
+        p = s.get("underlying_value")
+        if not p:
+            continue
+        w = s.get("straddle_premium") or 1.0     # proxy weight
+        cum_pv += p * w; cum_w += w; cum_pv2 += p * p * w
+        vwap = cum_pv / cum_w
+        var = max(0.0, cum_pv2 / cum_w - vwap * vwap)
+        sd = var ** 0.5
+        pts.append({"t": _bt_hhmm(s.get("_replay_ts", 0)), "price": round(p, 1),
+                    "vwap": round(vwap, 1), "sd": round(sd, 1)})
+    last = pts[-1] if pts else None
+    return {"symbol": symbol, "day": day, "series": pts,
+            "current": last, "weighted": any(s.get("straddle_premium") for s in snaps)}
+
+# ── Gap & opening-range statistics from the replay archive ──────────────────
+def compute_gap_orb_stats(symbol):
+    days = _replay_dates(symbol)
+    rows = []
+    prev_close = None
+    for day in days:
+        snaps = _bt_load_day(symbol, day)
+        spots = [(s.get("_replay_ts", 0), s.get("underlying_value")) for s in snaps if s.get("underlying_value")]
+        if len(spots) < 20:
+            prev_close = spots[-1][1] if spots else prev_close
+            continue
+        day_open = spots[0][1]
+        day_close = spots[-1][1]
+        day_high = max(p for _, p in spots)
+        day_low = min(p for _, p in spots)
+        # opening range = first 15 minutes
+        t0 = spots[0][0]
+        orb = [p for t, p in spots if t - t0 <= 900]
+        orb_hi, orb_lo = (max(orb), min(orb)) if orb else (day_open, day_open)
+        # did price break the ORB high/low later, and hold to close?
+        after = [p for t, p in spots if t - t0 > 900]
+        broke_hi = any(p > orb_hi for p in after)
+        broke_lo = any(p < orb_lo for p in after)
+        held_hi = broke_hi and day_close > orb_hi
+        held_lo = broke_lo and day_close < orb_lo
+        gap = None
+        gap_filled = None
+        if prev_close:
+            gap = day_open - prev_close
+            # gap fill = price traded back through prev_close during the day
+            if abs(gap) > 0.0005 * prev_close:
+                gap_filled = (day_low <= prev_close <= day_high)
+        rows.append({"date": day, "gap": round(gap, 1) if gap is not None else None,
+                     "gap_pct": round(gap / prev_close * 100, 2) if gap and prev_close else None,
+                     "gap_filled": gap_filled,
+                     "orb_hi": round(orb_hi, 1), "orb_lo": round(orb_lo, 1),
+                     "orb_range": round(orb_hi - orb_lo, 1),
+                     "broke_hi": broke_hi, "broke_lo": broke_lo,
+                     "held_hi": held_hi, "held_lo": held_lo})
+        prev_close = day_close
+    valid = [r for r in rows if r["gap"] is not None]
+    gaps = [r for r in valid if r["gap_pct"] is not None and abs(r["gap_pct"]) > 0.05]
+    orb_breaks = [r for r in rows if r["broke_hi"] or r["broke_lo"]]
+    orb_holds = [r for r in rows if r["held_hi"] or r["held_lo"]]
+    summary = {
+        "n_days": len(rows),
+        "gap_days": len(gaps),
+        "gap_fill_rate": round(sum(1 for r in gaps if r["gap_filled"]) / len(gaps) * 100, 1) if gaps else None,
+        "orb_break_rate": round(len(orb_breaks) / len(rows) * 100, 1) if rows else None,
+        "orb_hold_rate": round(len(orb_holds) / len(orb_breaks) * 100, 1) if orb_breaks else None,
+        "avg_orb_range": round(sum(r["orb_range"] for r in rows) / len(rows), 1) if rows else None,
+    }
+    return {"symbol": symbol, "days": rows[-15:], "summary": summary}
+
+# ── Calendar-effect seasonality (day-of-week, turn-of-month) ────────────────
+def compute_calendar_seasonality(symbol):
+    import datetime as _dt
+    from collections import defaultdict as _dd
+    dow = _dd(list)      # 0=Mon .. 4=Fri -> daily % moves
+    tom = _dd(list)      # 'turn' (last 2 / first 3 trading days) vs 'mid'
+    regime = _dd(list)   # 'low_vix' / 'high_vix' -> daily % moves
+    for day in _replay_dates(symbol):
+        snaps = _bt_load_day(symbol, day)
+        spots = [s.get("underlying_value") for s in snaps if s.get("underlying_value")]
+        if len(spots) < 20:
+            continue
+        move = (spots[-1] - spots[0]) / spots[0] * 100
+        vix_vals = [s.get("india_vix") for s in snaps if s.get("india_vix")]
+        vix = sum(vix_vals) / len(vix_vals) if vix_vals else None
+        try:
+            d = _dt.datetime.strptime(day, "%Y-%m-%d")
+        except ValueError:
+            continue
+        dow[d.weekday()].append(move)
+        dom = d.day
+        bucket = "turn" if (dom <= 3 or dom >= 27) else "mid"
+        tom[bucket].append(move)
+        if vix is not None:
+            regime["high_vix" if vix >= 15 else "low_vix"].append(move)
+    def stats(arr):
+        if not arr:
+            return None
+        avg = sum(arr) / len(arr)
+        up = sum(1 for x in arr if x > 0)
+        return {"n": len(arr), "avg_move": round(avg, 3), "up_rate": round(up / len(arr) * 100, 1)}
+    dow_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    return {"symbol": symbol,
+            "dow": [{"day": dow_names[k], **(stats(dow[k]) or {"n": 0})} for k in range(5)],
+            "tom": {k: stats(v) for k, v in tom.items()},
+            "regime": {k: stats(v) for k, v in regime.items()}}
+
+
+# ── Confluence backtester: does a high-confluence zone actually predict a bounce? ──
+def _snap_levels(s):
+    """Reconstruct the confluence sources present in a replay snapshot.
+    Returns list of (price, source_tier) where tier weights match the dashboard:
+    positioning=3, crowd=2. (Geometric S9/planetary aren't stored, so this
+    validates the DATA-BACKED confluence — the part that should carry signal.)"""
+    out = []
+    sup = s.get("support"); res = s.get("resistance")
+    def strike_of(x):
+        if isinstance(x, dict): return x.get("strike")
+        return x
+    if strike_of(sup): out.append((strike_of(sup), 3, "OC support"))
+    if strike_of(res): out.append((strike_of(res), 3, "OC resistance"))
+    if s.get("max_pain"): out.append((s["max_pain"], 3, "max pain"))
+    # OI walls from strikes (heaviest CE / PE OI)
+    strikes = s.get("strikes") or []
+    if strikes:
+        cw = max(strikes, key=lambda k: k.get("ce_oi", 0) or 0, default=None)
+        pw = max(strikes, key=lambda k: k.get("pe_oi", 0) or 0, default=None)
+        if cw: out.append((cw.get("strike"), 3, "call wall"))
+        if pw: out.append((pw.get("strike"), 3, "put wall"))
+    # crowd: round numbers near spot
+    spot = s.get("underlying_value")
+    if spot:
+        for unit in (1000, 500):
+            below = int(spot // unit) * unit
+            out.append((below, 2, f"round {unit}"))
+            out.append((below + unit, 2, f"round {unit}"))
+    return [(p, w, lbl) for (p, w, lbl) in out if p]
+
+def _cluster_zones(levels, tol_frac):
+    """Cluster nearby levels; zone score = sum of weights."""
+    if not levels: return []
+    levels = sorted(levels, key=lambda x: x[0])
+    zones = []
+    for price, w, lbl in levels:
+        if zones and abs(price - zones[-1]["center"]) / zones[-1]["center"] < tol_frac:
+            z = zones[-1]
+            z["members"].append((price, w, lbl)); z["score"] += w
+            z["center"] = sum(p * ww for p, ww, _ in z["members"]) / sum(ww for _, ww, _ in z["members"])
+        else:
+            zones.append({"center": price, "members": [(price, w, lbl)], "score": w})
+    return zones
+
+def compute_confluence_backtest(symbol, min_score=3):
+    """For each recorded snapshot, build confluence zones, then measure: when
+    spot came within 0.1%% of a zone, did it bounce (reverse >=0.15%% away) or
+    break (continue >=0.15%% through) over the next ~15 samples? Bucketed by the
+    zone's confluence score, so we can see whether MORE confluence => MORE bounce."""
+    buckets = {}   # score -> {"touch":n, "bounce":n, "excursion":[...]}
+    for day in _replay_dates(symbol):
+        snaps = _bt_load_day(symbol, day)
+        spots = [s.get("underlying_value") for s in snaps if s.get("underlying_value")]
+        if len(spots) < 30:
+            continue
+        # build zones once per day from a mid-session snapshot (levels are stable intraday)
+        mid = snaps[len(snaps) // 2]
+        zones = _cluster_zones(_snap_levels(mid), 0.002)
+        zones = [z for z in zones if z["score"] >= min_score]
+        for z in zones:
+            lvl = z["center"]; sc = min(z["score"], 12)
+            seen = False
+            for i in range(3, len(spots) - 16):
+                p = spots[i]
+                if abs(p - lvl) / lvl > 0.001:
+                    continue
+                approach = spots[i] - spots[i - 3]
+                if abs(approach) < lvl * 0.0003:
+                    continue
+                if seen:
+                    continue
+                seen = True
+                fut = spots[i + 1:i + 16]
+                bounced = any((f - lvl) * (1 if approach < 0 else -1) > lvl * 0.0015 for f in fut)
+                broke = any((f - lvl) * (1 if approach > 0 else -1) > lvl * 0.0015 for f in fut)
+                exc = max(abs(f - lvl) for f in fut) if fut else 0
+                b = buckets.setdefault(sc, {"touch": 0, "bounce": 0, "break": 0, "exc": []})
+                b["touch"] += 1
+                if bounced and not broke: b["bounce"] += 1
+                elif broke: b["break"] += 1
+                b["exc"].append(exc)
+    rows = []
+    for sc in sorted(buckets):
+        b = buckets[sc]
+        n = b["touch"]
+        rows.append({"score": sc, "touches": n,
+                     "bounce_rate": round(b["bounce"] / n * 100, 1) if n else None,
+                     "break_rate": round(b["break"] / n * 100, 1) if n else None,
+                     "avg_excursion": round(sum(b["exc"]) / len(b["exc"]), 1) if b["exc"] else None})
+    total = sum(r["touches"] for r in rows)
+    # headline: does bounce rate rise with score? (correlation sign)
+    scored = [(r["score"], r["bounce_rate"]) for r in rows if r["bounce_rate"] is not None and r["touches"] >= 3]
+    trend = None
+    if len(scored) >= 2:
+        xs = [x for x, _ in scored]; ys = [y for _, y in scored]
+        mx = sum(xs) / len(xs); my = sum(ys) / len(ys)
+        num = sum((x - mx) * (y - my) for x, y in scored)
+        den = sum((x - mx) ** 2 for x in xs) or 1
+        slope = num / den
+        trend = "rising" if slope > 1 else "flat" if abs(slope) <= 1 else "falling"
+    return {"symbol": symbol, "min_score": min_score, "buckets": rows,
+            "total_touches": total, "trend": trend,
+            "note": "bounce = reversed ≥0.15% against approach within ~15 samples of a touch (±0.1%); validates data-backed confluence only (geometric sources not stored in replay)"}
+
+# ── Alert outcome journal: what did price do after each fired alert? ──
+_ALERT_LOG = _os.path.join(_REPLAY_DIR, "_alert_journal.jsonl")
+def log_alert_outcome(payload):
+    try:
+        _os.makedirs(_REPLAY_DIR, exist_ok=True)
+        payload["_ts"] = int(time.time())
+        with open(_ALERT_LOG, "a") as f:
+            f.write(json.dumps(payload, separators=(",", ":")) + "\n")
+        return True
+    except Exception as e:
+        print(f"[!] alert-journal write failed: {e}")
+        return False
+
+def compute_alert_journal(symbol):
+    if not _os.path.exists(_ALERT_LOG):
+        return {"symbol": symbol, "entries": [], "summary": {}}
+    entries = []
+    with open(_ALERT_LOG) as f:
+        for line in f:
+            try:
+                e = json.loads(line)
+                if e.get("symbol", "").upper() == symbol.upper():
+                    entries.append(e)
+            except Exception:
+                pass
+    resolved = [e for e in entries if e.get("outcome_pts") is not None]
+    favorable = sum(1 for e in resolved if e.get("favorable"))
+    summary = {
+        "total": len(entries), "resolved": len(resolved),
+        "favorable_rate": round(favorable / len(resolved) * 100, 1) if resolved else None,
+        "avg_move_pts": round(sum(abs(e["outcome_pts"]) for e in resolved) / len(resolved), 1) if resolved else None,
+    }
+    return {"symbol": symbol, "entries": entries[-40:], "summary": summary}
+
+
 # ── Results / earnings calendar (NSE event calendar, cached 1h) ──────────────
 _results_cal_cache = {"ts": 0.0, "data": None}
 
@@ -2281,6 +2539,33 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(_ltp_history_series(symbol, strike, side))
             return
 
+        if parsed.path == "/api/confluence-backtest":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            ms = int(qs.get("min_score", ["3"])[0])
+            self._send_json(compute_confluence_backtest(symbol, ms))
+            return
+
+        if parsed.path == "/api/alert-journal":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(compute_alert_journal(symbol))
+            return
+
+        if parsed.path == "/api/anchored-vwap":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("day", [None])[0]
+            self._send_json(compute_anchored_vwap(symbol, day))
+            return
+
+        if parsed.path == "/api/gap-orb-stats":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(compute_gap_orb_stats(symbol))
+            return
+
+        if parsed.path == "/api/calendar-seasonality":
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            self._send_json(compute_calendar_seasonality(symbol))
+            return
+
         if parsed.path == "/api/level-stats":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             self._send_json(compute_level_stats(symbol))
@@ -2893,6 +3178,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(run_backtest(symbol, body))
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Backtest failed: {e}"}, status=500)
+            return
+
+        if parsed.path == "/api/log-alert":
+            ok = log_alert_outcome(body)
+            self._send_json({"logged": bool(ok)})
             return
 
         if parsed.path == "/api/notify":
