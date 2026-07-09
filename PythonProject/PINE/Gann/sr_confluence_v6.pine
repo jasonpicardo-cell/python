@@ -18,6 +18,9 @@
 indicator("S/R Confluence — Master Ladder", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
 
 // ─────────────────────────── INPUTS ───────────────────────────
+grpPreset = "Instrument Preset (sets sensible defaults)"
+preset = input.string("Auto-detect", "Instrument type", options = ["Auto-detect", "Index", "Stock", "Commodity", "Crypto", "Manual"], group = grpPreset, tooltip = "Auto-configures Square-of-9 on/off, round-number step, and Initial-Balance behaviour for the instrument class. Index keeps Gann S9; Stock/Commodity/Crypto lean on structural sources (Volume Profile, AVWAP, pivots, prior levels) where geometry is weaker. 'Manual' respects all your individual settings.")
+
 grpSrc   = "Sources (toggle what you trust)"
 useVP    = input.bool(true,  "Volume Profile (VPOC / Value Area)",  group = grpSrc, tooltip = "Highest-volume price nodes over the profile window. Price-only proxy for positioning data — weighted x3.")
 usePiv   = input.bool(true,  "Swing Pivots (structure S/R)",         group = grpSrc, tooltip = "ta.pivothigh/low fractals extended as horizontal S/R until broken. Weighted x3 (real structure).")
@@ -29,6 +32,7 @@ useGann  = input.bool(true, "Gann Square-of-9 (geometric)",         group = grpS
 useMA    = input.bool(true,  "Moving averages (50/100/200 EMA)",     group = grpSrc, tooltip = "Curated MAs act as dynamic S/R. Each EMA's current value is a weight-2 confluence level.")
 useIB    = input.bool(true,  "Initial Balance (opening-range H/L)",  group = grpSrc, tooltip = "First-N-minutes high/low — heavily watched intraday breakout/reversal levels. Weight 2.")
 useBB    = input.bool(true,  "Bollinger ±2σ bands",                  group = grpSrc, tooltip = "Upper/lower band as reversion levels. Weight 1.")
+useGHL   = input.bool(true,  "Gann High-Low (trend line)",          group = grpSrc, tooltip = "Trend-following line that flips between SMA-of-highs (in downtrend) and SMA-of-lows (in uptrend). Its current value is a weight-2 dynamic S/R level; crossovers signal trend flips.")
 useVWAPline = input.bool(true, "Plot session VWAP line",             group = grpSrc, tooltip = "Draw the live session VWAP as a continuous line (separate from the anchored-VWAP confluence source).")
 
 grpVP    = "Volume Profile"
@@ -43,6 +47,8 @@ pivMax   = input.int(6,  "Max pivots each side", minval = 1, maxval = 20, group 
 grpAV    = "Anchored VWAP"
 avAnchor = input.string("Session", "Anchor", options = ["Session", "Week", "Month"], group = grpAV)
 avSD     = input.float(1.0, "σ band multiple", minval = 0.5, maxval = 3.0, step = 0.5, group = grpAV)
+avShowBands = input.bool(true, "Show ±1 VWAP bands (line)", group = grpAV, tooltip = "One band above and one below the VWAP line, at ±(σ multiple) standard deviations.")
+avBandCol   = input.color(color.red, "VWAP band colour", group = grpAV)
 
 grpRound = "Round Numbers"
 roundStep = input.float(0.0, "Round step (0 = auto)", minval = 0, group = grpRound, tooltip = "0 auto-picks a sensible step from price magnitude (e.g. 100 for Nifty, 500 for BankNifty).")
@@ -61,6 +67,14 @@ grpBB = "Bollinger Bands"
 bbLen  = input.int(20, "BB length", minval = 5, group = grpBB)
 bbMult = input.float(2.0, "BB σ multiple", minval = 1.0, maxval = 4.0, step = 0.5, group = grpBB)
 bbPlot = input.bool(true, "Plot BB bands", group = grpBB)
+
+grpGHL = "Gann High-Low"
+ghlHigh = input.int(13, "HIGH Period", group = grpGHL)
+ghlLow  = input.int(21, "LOW Period",  group = grpGHL)
+ghlPlot = input.bool(true, "Plot the Gann High-Low line", group = grpGHL)
+ghlWidth = input.int(4, "Line thickness", minval = 1, maxval = 8, group = grpGHL)
+ghlColHigh = input.color(color.red,    "Colour when riding SMA-of-highs (downtrend / resistance)", group = grpGHL)
+ghlColLow  = input.color(color.yellow, "Colour when riding SMA-of-lows (uptrend / support)",       group = grpGHL)
 
 grpCluster = "Confluence Clustering"
 tolPct   = input.float(0.20, "Cluster tolerance %", minval = 0.05, maxval = 1.0, step = 0.05, group = grpCluster, tooltip = "Levels within this % of each other merge into one zone. 0.20% suits index intraday.")
@@ -109,6 +123,45 @@ s9TablePos = input.string("Top Right", "Sq9 table position", options = ["Top Rig
 s9ColRes  = input.color(color.new(color.red, 0),    "Sq9 colour: +90° and above (resistance)", group = grpS9)
 s9ColSup  = input.color(color.new(color.teal, 0),   "Sq9 colour: −90° and below (support)",    group = grpS9)
 s9ColNear = input.color(color.new(color.orange, 0), "Sq9 colour: ±45° (nearest, width 3)",     group = grpS9)
+// Row count for the Sq9 table, derived from INPUTS only (simple int). Passing a
+// series value (e.g. array.size()) as table.new()'s row count makes the table
+// render empty — this is exactly how the confluence table sizes itself.
+s9MaxRows = (s9CardOnly ? s9Rings : s9Rings * 2) * 2 + 2
+
+// ─────────────────────────── PRESET RESOLUTION ───────────────────────────
+// Resolve the instrument class (explicit, or auto-detected from syminfo), then
+// derive effective settings. Presets only OVERRIDE where the class has a clear
+// better default; 'Manual' passes every user setting through untouched.
+f_detectClass() =>
+    t = str.lower(syminfo.type)     // "stock","futures","crypto","index","forex","fund",...
+    tk = str.upper(syminfo.ticker)
+    bc = na(syminfo.basecurrency) ? "" : str.upper(syminfo.basecurrency)
+    isCrypto = t == "crypto" or str.contains(bc, "BTC") or str.contains(bc, "ETH")
+    // Index futures (NIFTY/BANKNIFTY/SENSEX/SPX/NDX...) are index instruments for
+    // our purposes — Sq9 practice treats the index, not the contract wrapper.
+    looksIndex = str.contains(tk, "NIFTY") or str.contains(tk, "SENSEX") or str.contains(tk, "BANKNIFTY") or str.contains(tk, "SPX") or str.contains(tk, "NDX") or str.contains(tk, "DJI")
+    isIndex  = t == "index" or t == "economic" or looksIndex
+    // futures that aren't index futures = commodity/derivative
+    isFut    = t == "futures" and not looksIndex
+    isCrypto ? "Crypto" : isIndex ? "Index" : isFut ? "Commodity" : "Stock"
+
+resolvedClass = preset == "Auto-detect" ? f_detectClass() : preset
+
+// Effective Square-of-9 CONFLUENCE weight: contributes only for Index, since
+// off-index the geometry has no structural basis ('Manual' respects the toggle).
+effUseGann = preset == "Manual" ? useGann : (resolvedClass == "Index" and useGann)
+// Sq9 display (lines + table) likewise shows for Index only, unless Manual.
+effShowS9  = preset == "Manual" ? showS9 : (resolvedClass == "Index" and showS9)
+
+// Effective round-number step: aim for a step ≈0.25–0.5% of price so there are
+// a useful handful of levels within a couple percent, on any instrument/scale.
+f_presetRoundStep() =>
+    p = close
+    resolvedClass == "Crypto" ? (p >= 50000 ? 1000 : p >= 20000 ? 500 : p >= 5000 ? 100 : p >= 2000 ? 25 : p >= 500 ? 10 : p >= 100 ? 1 : p >= 10 ? 0.25 : p >= 1 ? 0.025 : 0.005) : resolvedClass == "Commodity" ? (p >= 50000 ? 200 : p >= 20000 ? 100 : p >= 5000 ? 25 : p >= 2000 ? 10 : p >= 500 ? 5 : p >= 100 ? 1 : 0.5) : resolvedClass == "Stock" ? (p >= 20000 ? 100 : p >= 5000 ? 25 : p >= 2000 ? 10 : p >= 500 ? 5 : p >= 100 ? 2 : p >= 20 ? 0.5 : 0.1) : (p >= 40000 ? 200 : p >= 15000 ? 100 : p >= 5000 ? 50 : p >= 1000 ? 25 : 5)
+
+// Effective IB use: Initial Balance needs a real session, so it's suppressed for
+// 24/7 crypto (no meaningful "opening range").
+effUseIB = preset == "Manual" ? useIB : (useIB and resolvedClass != "Crypto")
 
 // ─────────────────────────── HELPERS ───────────────────────────
 // A "level" is carried as parallel arrays: price, weight, source-label.
@@ -122,12 +175,11 @@ addLevel(float p, int w, string lbl) =>
         array.push(Lweight, w)
         array.push(Llabel, lbl)
 
-// auto round-number step from price magnitude
+// round-number step: manual override wins; else preset-aware auto-scale
 f_roundStep() =>
     s = roundStep
     if s <= 0
-        p = close
-        s := p >= 30000 ? 500 : p >= 10000 ? 100 : p >= 1000 ? 50 : p >= 100 ? 5 : 1
+        s := f_presetRoundStep()
     s
 
 // ─────────────────────────── PERSISTENT DRAW POOLS ───────────────────────────
@@ -306,13 +358,18 @@ plot(useMA and maPlot ? ema1 : na, "EMA 1", color = color.new(color.aqua, 0),   
 plot(useMA and maPlot ? ema2 : na, "EMA 2", color = color.new(color.blue, 0),   linewidth = 1)
 plot(useMA and maPlot ? ema3 : na, "EMA 3", color = color.new(color.fuchsia, 0),linewidth = 2)
 
-// --- Session VWAP line (weight-3 anchored-VWAP source already exists; this is
-//     just the continuous plotted line for visual reference) ---
-vwapVal = ta.vwap(hlc3)
+// --- Session VWAP line + ±σ bands (weight-3 anchored source exists separately;
+//     this is the plotted visual line, now with one band above and below) ---
+_avwapAnchor = timeframe.change("D")
+[vwapVal, vwapUpper, vwapLower] = ta.vwap(hlc3, _avwapAnchor, avSD)
 // Intraday-only plots (VWAP, IB) show only on ≤5-minute charts, where they're
 // meaningful; on higher timeframes they'd be noise.
 isIntradayTF = timeframe.in_seconds() <= 300
+// Gann High-Low is an intraday trend tool — show it only on ≤15-minute charts.
+isGhlTF = timeframe.in_seconds() <= 900
 plot(useVWAPline and isIntradayTF ? vwapVal : na, "VWAP", color = color.new(color.yellow, 0), linewidth = 2, linestyle = plot.linestyle_dashed)
+plot(useVWAPline and avShowBands and isIntradayTF ? vwapUpper : na, "VWAP +band", color = avBandCol, linewidth = 1, linestyle = plot.linestyle_dashed)
+plot(useVWAPline and avShowBands and isIntradayTF ? vwapLower : na, "VWAP −band", color = avBandCol, linewidth = 1, linestyle = plot.linestyle_dashed)
 
 // --- Bollinger Bands (weight 1 confluence + optional plot) ---
 bbBasis = ta.sma(close, bbLen)
@@ -322,6 +379,22 @@ bbLower = bbBasis - bbDev
 pU = plot(useBB and bbPlot ? bbUpper : na, "BB Upper", color = color.new(color.gray, 30), linewidth = 2)
 pL = plot(useBB and bbPlot ? bbLower : na, "BB Lower", color = color.new(color.gray, 30), linewidth = 2)
 fill(pU, pL, color = useBB and bbPlot ? color.new(color.gray, 92) : na)
+
+// --- Gann High-Low (trend line, weight 2 + optional plot) ---
+// User's exact v6 code, adapted only to feed our confluence engine + toggle.
+ghl_iff = close < nz(ta.sma(low, ghlLow))[1] ? -1 : 0
+ghl_HLd = close > nz(ta.sma(high, ghlHigh))[1] ? 1 : ghl_iff
+ghl_HLv = ta.valuewhen(ghl_HLd != 0, ghl_HLd, 0)
+ghl_sma1 = ta.sma(high, ghlHigh)
+ghl_sma2 = ta.sma(low, ghlLow)
+ghl_HiLo = ghl_HLv == -1 ? ghl_sma1 : ghl_sma2
+ghl_col = ghl_HLv == -1 ? ghlColHigh : ghlColLow
+plot(useGHL and ghlPlot and isGhlTF ? ghl_HiLo : na, "Gann High-Low", color = ghl_col, linewidth = ghlWidth)
+
+// Alerts on price crossing the Gann High-Low line (trend flips)
+alertcondition(ta.cross(close, ghl_HiLo),      title = "GHL Cross",     message = "Price - HiLo Crossing!")
+alertcondition(ta.crossover(close, ghl_HiLo),  title = "GHL CrossOver", message = "LAST PRICE is ABOVE HiLo")
+alertcondition(ta.crossunder(close, ghl_HiLo), title = "GHL CrossUnder",message = "LAST PRICE is BELOW HiLo!")
 
 // --- Initial Balance (opening-range high/low, weight 2) ---
 var float ibHigh = na
@@ -338,8 +411,8 @@ minsSinceOpen = na(ibDay) ? 0 : (time - ibDay) / 60000
 if not na(ibDay) and minsSinceOpen <= ibMins
     ibHigh := math.max(nz(ibHigh, high), high)
     ibLow  := math.min(nz(ibLow, low), low)
-plot(useIB and ibPlot and isIntradayTF ? ibHigh : na, "IB High", color = color.new(color.orange, 20), style = plot.style_stepline, linewidth = 1)
-plot(useIB and ibPlot and isIntradayTF ? ibLow  : na, "IB Low",  color = color.new(color.orange, 20), style = plot.style_stepline, linewidth = 1)
+plot(effUseIB and ibPlot and isIntradayTF ? ibHigh : na, "IB High", color = color.new(color.orange, 20), style = plot.style_stepline, linewidth = 1)
+plot(effUseIB and ibPlot and isIntradayTF ? ibLow  : na, "IB Low",  color = color.new(color.orange, 20), style = plot.style_stepline, linewidth = 1)
 
 // --- Swing pivots harvested continuously into arrays (weight 3) ---
 var array<float> PivH = array.new<float>()
@@ -469,7 +542,7 @@ if barstate.islast
         for k = -3 to 4
             addLevel(base + k * st, 2, "Round")
 
-    if useGann
+    if effUseGann
         g = f_gannLevels()
         if array.size(g) > 0
             for i = 0 to array.size(g) - 1
@@ -482,13 +555,16 @@ if barstate.islast
         addLevel(ema2, 2, "EMA" + str.tostring(maLen2))
         addLevel(ema3, 2, "EMA" + str.tostring(maLen3))
 
-    if useIB
+    if effUseIB
         addLevel(ibHigh, 2, "IB High")
         addLevel(ibLow,  2, "IB Low")
 
     if useBB
         addLevel(bbUpper, 1, "BB Upper")
         addLevel(bbLower, 1, "BB Lower")
+
+    if useGHL
+        addLevel(ghl_HiLo, 2, "Gann HiLo")
 
     // 2) sort levels ascending by price (simple insertion via index array)
     n = array.size(Lprice)
@@ -664,7 +740,7 @@ if barstate.islast
             if not na(gTbl)
                 table.delete(gTbl)
             gTbl := table.new(tpos, 5, tableN + 1, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
-            table.cell(gTbl, 0, 0, "Zone",  text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
+            table.cell(gTbl, 0, 0, resolvedClass,  text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
             table.cell(gTbl, 1, 0, "Score", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
             table.cell(gTbl, 2, 0, "Dist",  text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
             table.cell(gTbl, 3, 0, "State", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 20))
@@ -710,7 +786,7 @@ if barstate.islast
 // Independent of the confluence engine: draws the full Sq9 support/resistance
 // ladder with angle labels, and lists it in its own table. LORE tier — shown
 // because it's core to Gann practice; read it as geometry, size from confluence.
-if barstate.islast and showS9
+if barstate.islast and effShowS9
     // clear prior S9 drawings
     for ln in poolS9Lines
         line.delete(ln)
@@ -744,51 +820,55 @@ if barstate.islast and showS9
             lb = label.new(rb, lv, lbTxt, xloc = xloc.bar_index, style = label.style_label_left, textcolor = color.white, color = color.new(s9c_col, (card or isNear) ? 20 : 45), size = size.small)
             array.push(poolS9Labels, lb)
 
-        // Sq9 table — full ladder, resistance (top) down to support (bottom)
+        // Sq9 table — built with the same proven pattern as the confluence table:
+        // delete + recreate each last-bar pass, with a row count that is a SIMPLE
+        // int derived from the inputs (never from array.size(), which is a series
+        // value and yields a table that renders empty).
         s9pos = s9TablePos == "Top Right" ? position.top_right : s9TablePos == "Top Left" ? position.top_left : s9TablePos == "Bottom Right" ? position.bottom_right : position.bottom_left
         if not na(s9Tbl)
             table.delete(s9Tbl)
-        s9Tbl := table.new(s9pos, 3, nS9 + 2, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
+        s9Tbl := table.new(s9pos, 3, s9MaxRows, border_width = 1, frame_color = color.new(color.gray, 50), frame_width = 1)
         table.cell(s9Tbl, 0, 0, "Sq9 Angle", text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 30))
         table.cell(s9Tbl, 1, 0, "Level",     text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 30))
         table.cell(s9Tbl, 2, 0, "Dist",      text_color = color.white, text_size = size.small, bgcolor = color.new(color.gray, 30))
-        // build display order: resistances high→low, then support marker, then supports high→low
-        // simplest: iterate levels sorted descending by price
+        // display order: levels sorted descending by price (resistance → support)
         ord = array.new<int>()
-        for i = 0 to nS9 - 1
-            array.push(ord, i)
-        for a = 1 to nS9 - 1
-            ka = array.get(ord, a)
-            kp = array.get(s9p, ka)
-            b = a - 1
-            while b >= 0 and array.get(s9p, array.get(ord, b)) < kp
-                array.set(ord, b + 1, array.get(ord, b))
-                b -= 1
-            array.set(ord, b + 1, ka)
+        for k = 0 to nS9 - 1
+            array.push(ord, k)
+        if nS9 > 1
+            for a = 1 to nS9 - 1
+                ka = array.get(ord, a)
+                kp = array.get(s9p, ka)
+                b = a - 1
+                while b >= 0 and array.get(s9p, array.get(ord, b)) < kp
+                    array.set(ord, b + 1, array.get(ord, b))
+                    b -= 1
+                array.set(ord, b + 1, ka)
         row = 1
         priceMarked = false
         for oi = 0 to nS9 - 1
-            i = array.get(ord, oi)
-            lv = array.get(s9p, i)
-            // insert a "◄ price" separator row once we cross below current price
-            if not priceMarked and lv < close
+            si = array.get(ord, oi)
+            lv2 = array.get(s9p, si)
+            // insert a "── price" separator row once we cross below current price
+            if not priceMarked and lv2 < close and row < s9MaxRows - 1
                 table.cell(s9Tbl, 0, row, "── price", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
                 table.cell(s9Tbl, 1, row, str.tostring(int(math.round(close))), text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
                 table.cell(s9Tbl, 2, row, "now", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
                 row += 1
                 priceMarked := true
-            deg = array.get(s9a, i)
-            res = array.get(s9r, i)
-            card = array.get(s9c, i)
-            degTxt = (deg > 0 ? "+" : "") + str.tostring(deg) + "°" + (card ? " ●" : "")
-            rc = res ? color.new(colDn, 78) : color.new(colUp, 78)
-            dpts = math.round(math.abs(lv - close))
-            table.cell(s9Tbl, 0, row, degTxt, text_color = color.white, text_size = size.small, bgcolor = rc)
-            table.cell(s9Tbl, 1, row, str.tostring(int(math.round(lv))), text_color = color.white, text_size = size.small, bgcolor = rc)
-            table.cell(s9Tbl, 2, row, str.tostring(dpts), text_color = color.white, text_size = size.small, bgcolor = rc)
-            row += 1
+            if row < s9MaxRows
+                deg2 = array.get(s9a, si)
+                res2 = array.get(s9r, si)
+                card2 = array.get(s9c, si)
+                degTxt2 = (deg2 > 0 ? "+" : "") + str.tostring(deg2) + "°" + (card2 ? " ●" : "")
+                rc = res2 ? color.new(colDn, 78) : color.new(colUp, 78)
+                dpts = int(math.round(math.abs(lv2 - close)))
+                table.cell(s9Tbl, 0, row, degTxt2, text_color = color.white, text_size = size.small, bgcolor = rc)
+                table.cell(s9Tbl, 1, row, str.tostring(int(math.round(lv2))), text_color = color.white, text_size = size.small, bgcolor = rc)
+                table.cell(s9Tbl, 2, row, str.tostring(dpts), text_color = color.white, text_size = size.small, bgcolor = rc)
+                row += 1
         // if price is below every level, mark it at the bottom
-        if not priceMarked
+        if not priceMarked and row < s9MaxRows
             table.cell(s9Tbl, 0, row, "── price", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
             table.cell(s9Tbl, 1, row, str.tostring(int(math.round(close))), text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
             table.cell(s9Tbl, 2, row, "now", text_color = color.yellow, text_size = size.small, bgcolor = color.new(color.yellow, 80))
