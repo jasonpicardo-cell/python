@@ -626,6 +626,10 @@
   .pmgr-box label { display:flex; gap:7px; align-items:center; font-size:11px; padding:3px 0; cursor:pointer; }
   /* ── Delta templates ── */
   .dtpl-row { display:flex; gap:5px; flex-wrap:wrap; padding:4px 0; }
+  .layman-note { margin-top:5px; border-top:1px dashed rgba(255,255,255,0.08); padding-top:3px; }
+  .layman-note summary { font-size:9px; color:var(--muted,#789); cursor:pointer; user-select:none; opacity:0.75; }
+  .layman-note summary:hover { opacity:1; color:var(--gold,#d4af37); }
+  .layman-note .layman-body { font-size:10px; color:#b8c4cc; line-height:1.45; padding:4px 2px 2px; }
   .dtpl-row .btn { font-size:9.5px; padding:3px 10px; }
   /* ── Gann tab ── */
   .gann-controls { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; padding:10px 4px; }
@@ -1647,7 +1651,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <button class="pill" data-symbol="FINNIFTY">FINNIFTY</button>
       <button class="pill" data-symbol="MIDCPNIFTY">MIDCPNIFTY</button>
       <div class="symbol-search-wrap">
-        <input class="symbol-search" id="symbolSearch" type="text" placeholder="+ Add stock/index..." list="fnoSymbolList" autocomplete="off">
+        <input class="symbol-search" id="symbolSearch" type="text" placeholder="+ Add F&O stock/index..." list="fnoSymbolList" autocomplete="off" title="Option chains are available only for F&O symbols (indices + ~180 F&O stocks). For cash stocks, use the Gann/Levels/esoteric tabs.">
         <datalist id="fnoSymbolList"></datalist>
       </div>
     </div>
@@ -1660,6 +1664,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <button class="btn" id="exportCsvBtn" title="Export the current chain as CSV">⬇ CSV</button>
       <label class="auto-label"><input type="checkbox" id="autoToggle" checked> Auto 5s</label>
       <input class="server-url" id="serverUrl" type="text" value="http://127.0.0.1:8765" title="Backend server URL">
+      <span class="zoom-controls" style="display:inline-flex;align-items:center;gap:2px;margin-left:4px;" title="Zoom the whole dashboard">
+        <button class="btn" id="zoomOutBtn" style="padding:2px 7px;font-size:12px;line-height:1;" title="Zoom out (Ctrl -)">−</button>
+        <span id="zoomLevel" style="font-size:10px;min-width:34px;text-align:center;color:var(--muted,#9aa);">100%</span>
+        <button class="btn" id="zoomInBtn" style="padding:2px 7px;font-size:12px;line-height:1;" title="Zoom in (Ctrl +)">+</button>
+        <button class="btn" id="zoomResetBtn" style="padding:2px 6px;font-size:9px;line-height:1;" title="Reset zoom">⟲</button>
+      </span>
       <span class="status-dot" id="statusDot" title="Connection status"></span>
     </div>
   </div>
@@ -3286,7 +3296,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div id="stratNameBadge" style="display:none;"></div>
           <div class="legs-list" id="legsList"></div>
           <button class="add-leg-btn" id="addLegBtn">+ Add Leg</button>
-          <div class="dtpl-row">
+          <div class="dtpl-row" id="builderDtplRow">
             <span style="font-size:9px;color:var(--muted);align-self:center;">Δ-templates<i class="hi" data-h="delta-templates">i</i>:</span>
             <button class="btn" data-dtpl="strangle20">Strangle 20Δ</button>
             <button class="btn" data-dtpl="ic2510">Iron Condor 25/10Δ</button>
@@ -3295,6 +3305,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <button class="btn" data-dtpl="bps30">Bull Put Spread 30/15Δ</button>
             <button class="btn" data-dtpl="bcs30">Bear Call Spread 30/15Δ</button>
             <button class="btn" data-dtpl="calendar">Calendar (ATM near/far)</button>
+            <button class="btn" data-dtpl="dblcal">Double Calendar (±1 step)</button>
             <button class="btn" data-dtpl="mpfly">Max-Pain Fly</button>
             <button class="btn" data-dtpl="jade">Jade Lizard</button>
             <button class="btn" data-dtpl="bwb">Broken-Wing Fly (PE)</button>
@@ -3517,6 +3528,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <section id="tab-gann" class="tab-panel">
       <div class="builder-panel-head"><h3>Gann Analysis<i class="hi" data-h="gann-tab">i</i></h3></div>
 
+      <div class="eso-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin-bottom:8px;background:var(--panel-2,rgba(255,255,255,0.03));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:8px;">
+        <span style="font-size:11px;font-weight:700;color:var(--gold,#d4af37);">📊 Instrument:</span>
+        <input type="text" class="eso-sym-input ohlc-inp" placeholder="NSE stock e.g. RELIANCE" style="font-size:11px;width:180px;text-transform:uppercase;">
+        <button class="btn eso-load-btn" style="font-size:10px;padding:3px 12px;">Load stock</button>
+        <button class="btn eso-star-btn" style="font-size:10px;padding:3px 9px;" title="Save to watchlist">★</button>
+        <button class="btn eso-clear-btn" style="font-size:10px;padding:3px 10px;">↺ Index</button>
+        <span class="eso-status oc-sub" style="font-size:10px;">Using index spot</span>
+        <i class="hi" data-h="eso-symbol">i</i>
+        <div class="eso-wl" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;margin-top:4px;"></div>
+      </div>
+
       <div class="gann-controls">
         <label>Price
           <input type="number" id="gannPrice" class="ohlc-inp" step="0.05" placeholder="auto = spot">
@@ -3608,6 +3630,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>
 
         <div class="skew-chart-wrap lore-decorative">
+          <div class="skew-chart-head"><span class="skew-chart-title">⏱ Fib Time Zones + Gann anniversaries (from swing)<i class="hi" data-h="gann-timezones">i</i></span></div>
+          <div class="dtpl-row" style="align-items:center;">
+            <label style="font-size:9px;color:var(--muted);">Swing anchor date <input type="date" id="gannTzAnchor" class="ohlc-inp" style="width:130px;"></label>
+            <span class="oc-sub" style="font-size:9px;">pick a major high/low date</span>
+          </div>
+          <div id="gannTimeZones" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap lore-decorative">
           <div class="skew-chart-head"><span class="skew-chart-title">☉ Price⨯Sun timing (S9 angle dates)<i class="hi" data-h="gann-sun-time">i</i></span></div>
           <div id="gannSunTime" class="gann-levels"></div>
         </div>
@@ -3627,6 +3658,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     <section id="tab-levels" class="tab-panel">
       <div class="builder-panel-head"><h3>Market Levels<i class="hi" data-h="levels-tab">i</i></h3></div>
+
+      <div class="eso-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin-bottom:8px;background:var(--panel-2,rgba(255,255,255,0.03));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:8px;">
+        <span style="font-size:11px;font-weight:700;color:var(--gold,#d4af37);">📊 Instrument:</span>
+        <input type="text" class="eso-sym-input ohlc-inp" placeholder="NSE stock e.g. RELIANCE" style="font-size:11px;width:180px;text-transform:uppercase;">
+        <button class="btn eso-load-btn" style="font-size:10px;padding:3px 12px;">Load stock</button>
+        <button class="btn eso-star-btn" style="font-size:10px;padding:3px 9px;" title="Save to watchlist">★</button>
+        <button class="btn eso-clear-btn" style="font-size:10px;padding:3px 10px;">↺ Index</button>
+        <span class="eso-status oc-sub" style="font-size:10px;">Using index spot</span>
+        <i class="hi" data-h="eso-symbol">i</i>
+        <div class="eso-wl" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;margin-top:4px;"></div>
+      </div>
 
       <div class="gann-controls">
         <button class="btn" id="levelsGenBtn" style="font-size:11px;font-weight:700;">Generate all</button>
@@ -3661,6 +3703,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <button class="btn" id="lvlGapOrbBtn" style="font-size:10px;padding:3px 12px;">↻ Load</button>
           </div>
           <div id="lvlGapOrb" class="gann-levels"><span class="oc-sub">Gap-fill and opening-range break/hold rates — click Load.</span></div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">🎯 CPR — Central Pivot Range<i class="hi" data-h="lvl-cpr">i</i></span></div>
+          <div id="lvlCpr" class="gann-levels"></div>
         </div>
 
         <div class="skew-chart-wrap">
@@ -3729,6 +3776,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     <section id="tab-numerology" class="tab-panel">
       <div class="builder-panel-head"><h3>Numerology<i class="hi" data-h="numo-tab">i</i></h3></div>
+      <div class="eso-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin-bottom:8px;background:var(--panel-2,rgba(255,255,255,0.03));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:8px;">
+        <span style="font-size:11px;font-weight:700;color:var(--gold,#d4af37);">📊 Instrument:</span>
+        <input type="text" class="eso-sym-input ohlc-inp" placeholder="NSE stock e.g. RELIANCE" style="font-size:11px;width:180px;text-transform:uppercase;">
+        <button class="btn eso-load-btn" style="font-size:10px;padding:3px 12px;">Load stock</button>
+        <button class="btn eso-star-btn" style="font-size:10px;padding:3px 9px;" title="Save to watchlist">★</button>
+        <button class="btn eso-clear-btn" style="font-size:10px;padding:3px 10px;">↺ Index</button>
+        <span class="eso-status oc-sub" style="font-size:10px;">Using index spot</span>
+        <i class="hi" data-h="eso-symbol">i</i>
+        <div class="eso-wl" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;margin-top:4px;"></div>
+      </div>
+
 
       <div class="gann-controls">
         <label>Price / number
@@ -3835,6 +3893,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     <section id="tab-astro" class="tab-panel">
       <div class="builder-panel-head"><h3>Astrology<i class="hi" data-h="astro-tab">i</i></h3></div>
+      <div class="eso-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin-bottom:8px;background:var(--panel-2,rgba(255,255,255,0.03));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:8px;">
+        <span style="font-size:11px;font-weight:700;color:var(--gold,#d4af37);">📊 Instrument:</span>
+        <input type="text" class="eso-sym-input ohlc-inp" placeholder="NSE stock e.g. RELIANCE" style="font-size:11px;width:180px;text-transform:uppercase;">
+        <button class="btn eso-load-btn" style="font-size:10px;padding:3px 12px;">Load stock</button>
+        <button class="btn eso-star-btn" style="font-size:10px;padding:3px 9px;" title="Save to watchlist">★</button>
+        <button class="btn eso-clear-btn" style="font-size:10px;padding:3px 10px;">↺ Index</button>
+        <span class="eso-status oc-sub" style="font-size:10px;">Using index spot</span>
+        <i class="hi" data-h="eso-symbol">i</i>
+        <div class="eso-wl" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;margin-top:4px;"></div>
+      </div>
+
 
       <div class="gann-controls">
         <label>Zodiac
@@ -3881,6 +3950,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div id="astroLines" class="gann-levels"></div>
         </div>
 
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">📉 Bradley Siderograph — turn-date windows<i class="hi" data-h="astro-bradley">i</i></span></div>
+          <div id="astroBradley" class="gann-levels"></div>
+        </div>
+
         <div class="skew-chart-wrap">
           <div class="skew-chart-head"><span class="skew-chart-title">Nifty "Natal" Transits<i class="hi" data-h="astro-natal">i</i></span></div>
           <div id="astroNatal" class="gann-levels"></div>
@@ -3917,6 +3991,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     <section id="tab-vedic" class="tab-panel">
       <div class="builder-panel-head"><h3>Vedic Astrology<i class="hi" data-h="vedic-tab">i</i></h3></div>
+      <div class="eso-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin-bottom:8px;background:var(--panel-2,rgba(255,255,255,0.03));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:8px;">
+        <span style="font-size:11px;font-weight:700;color:var(--gold,#d4af37);">📊 Instrument:</span>
+        <input type="text" class="eso-sym-input ohlc-inp" placeholder="NSE stock e.g. RELIANCE" style="font-size:11px;width:180px;text-transform:uppercase;">
+        <button class="btn eso-load-btn" style="font-size:10px;padding:3px 12px;">Load stock</button>
+        <button class="btn eso-star-btn" style="font-size:10px;padding:3px 9px;" title="Save to watchlist">★</button>
+        <button class="btn eso-clear-btn" style="font-size:10px;padding:3px 10px;">↺ Index</button>
+        <span class="eso-status oc-sub" style="font-size:10px;">Using index spot</span>
+        <i class="hi" data-h="eso-symbol">i</i>
+        <div class="eso-wl" style="flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;margin-top:4px;"></div>
+      </div>
+
 
       <div class="gann-controls">
         <label>Anchor
@@ -3968,6 +4053,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
           <div class="skew-chart-head"><span class="skew-chart-title">🕐 Full Panchang + Rahu Kaal / Abhijit (today)<i class="hi" data-h="vedic-panchang">i</i></span></div>
           <div id="vedicPanchang" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap lore-decorative">
+          <div class="skew-chart-head"><span class="skew-chart-title">🌑 Lunar calendar + eclipse windows (60d)<i class="hi" data-h="vedic-lunar-cal">i</i></span></div>
+          <div id="vedicLunarCal" class="gann-levels"></div>
         </div>
 
         <div class="skew-chart-wrap">
@@ -6812,6 +6902,31 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         instrument_type: 'OPTION', entry_price: null, notes: 'far leg' };
       return { name: `Calendar ${d.expiry}→${far}`, legs: [nearLeg, farLeg] };
     },
+    dblcal: () => {
+      // DOUBLE calendar — balanced both sides: sell near-expiry CE and PE one
+      // strike step out from ATM, buy far-expiry at the SAME strikes. Near
+      // decay finances long far vega on both wings → the "all-weather" range
+      // structure: earns in quiet drift either way, far legs cushion IV spikes,
+      // max loss = net debit (defined).
+      const d = state.lastData;
+      const atm = d?.atm, far = d?.far_expiry;
+      if (!atm || !far || far === d.expiry) return null;
+      const strikes = (d.strikes || []).map(s => s.strike).sort((a, b) => a - b);
+      const i = strikes.indexOf(atm);
+      const step = (i > 0 && i < strikes.length - 1) ? Math.min(atm - strikes[i - 1], strikes[i + 1] - atm) : 0;
+      const ceK = step ? atm + step : atm, peK = step ? atm - step : atm;
+      const farInfo = d.expiries_data?.[far];
+      const farCe = (farInfo?.strikes || []).find(s => s.strike === ceK);
+      const farPe = (farInfo?.strikes || []).find(s => s.strike === peK);
+      if (!farCe?.ce_ltp || !farPe?.pe_ltp) return null;
+      const nearCe = _mkLegFromChain(ceK, 'CE', 'SELL');
+      const nearPe = _mkLegFromChain(peK, 'PE', 'SELL');
+      if (!nearCe || !nearPe) return null;
+      const mkFar = (k, t, ltp, iv) => ({ action: 'BUY', option_type: t, strike: k, qty_lots: 1,
+        premium: ltp, iv: iv || d.atm_iv, expiry: far, instrument_type: 'OPTION', entry_price: null, notes: 'far leg' });
+      return { name: `Double Calendar ${peK}P/${ceK}C ${d.expiry}→${far}`,
+        legs: [nearCe, nearPe, mkFar(ceK, 'CE', farCe.ce_ltp, farCe.ce_iv), mkFar(peK, 'PE', farPe.pe_ltp, farPe.pe_iv)] };
+    },
     mpfly: () => {
       // Butterfly centered on max pain — expiry pin play.
       const d = state.lastData;
@@ -6864,7 +6979,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return { name: 'CE Backspread 1×2 (35/20Δ)', legs: [_mkLegFromChain(s.strike, 'CE', 'SELL'), long] };
     },
   };
-  document.querySelector('.dtpl-row')?.addEventListener('click', (e) => {
+  // Bind by id — NOT querySelector('.dtpl-row'), which grabs whichever row
+  // happens to be first in the DOM (the suggester's "My view" row reuses the
+  // class for styling and silently hijacked the listener).
+  document.getElementById('builderDtplRow')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-dtpl]');
     if (!btn) return;
     if (!state.lastData) { showToast('Load the option chain first'); return; }
@@ -7204,6 +7322,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     if (slope !== null && slope < -0.5)
       out.push({ tpl: 'calendar', name: 'Calendar Spread', why: [`term structure in backwardation (${slope.toFixed(1)} IV pts) — near expiry rich vs far`, 'sell the expensive near ATM, own the cheap far ATM'] });
+    if (slope !== null && slope < -0.5 && rangy)
+      out.push({ tpl: 'dblcal', name: 'Double Calendar (±1 step)', why: [`backwardation (${slope.toFixed(1)} pts) on BOTH wings — near CE+PE rich vs far`, 'balanced: sells near call AND put, owns far both sides', 'all-weather profile: earns quiet drift either way, far vega cushions IV spikes, risk = net debit (defined)'] });
+    if (ivLow && rangy && dte >= 2)
+      out.push({ tpl: 'dblcal', name: 'Double Calendar (cheap far vega)', why: [ivSrc + ' — far-month vega is cheap to own', 'both walls STRONG: spot likely stays between the strikes while near legs decay', 'defined risk, no naked side — the conservative rangebound structure'] });
     if (dte <= 1 && nearMaxPain && gex === 'pos')
       out.push({ tpl: 'mpfly', name: 'Max-Pain Butterfly', why: [`expiry ${dte === 0 ? 'today' : 'tomorrow'} · spot within 1.5 strikes of max pain ${fmtInt(d.max_pain)}`, '+GEX regime supports pinning'] });
     if (ivHigh && rangy && gex === 'pos')
@@ -7808,21 +7930,300 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     out.innerHTML = `<div class="oc-sub" style="margin-bottom:4px;">Calendar-day cycles from today (${fmtD(anchor)}). Square (90) and opposition (180) days are the classic turn windows.</div>` + rows;
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // SHARED ESOTERIC SYMBOL — lets Gann/Levels/Numerology/Astrology/Vedic work
+  // for ANY NSE stock, not just the index. When a stock is loaded here, its
+  // live price + swing H/L feed every esoteric tab's price resolver. Cleared =
+  // tabs fall back to the option-chain index spot as before.
+  // ══════════════════════════════════════════════════════════════════════
+  const _eso = { symbol: null, price: null, hi: null, lo: null, prevClose: null, name: null, isFno: false };
+
+  // ── Stock watchlist (localStorage-backed, separate from the F&O chain strip) ──
+  const _ESO_WL_KEY = 'esoStockWatchlist';
+  let _esoWatchlist = [];
+  function _esoWlLoad() {
+    try { _esoWatchlist = JSON.parse(localStorage.getItem(_ESO_WL_KEY) || '[]'); }
+    catch (_) { _esoWatchlist = []; }
+    if (!Array.isArray(_esoWatchlist)) _esoWatchlist = [];
+  }
+  function _esoWlSave() {
+    try { localStorage.setItem(_ESO_WL_KEY, JSON.stringify(_esoWatchlist)); } catch (_) {}
+  }
+  function _esoWlAdd(sym) {
+    sym = (sym || '').trim().toUpperCase();
+    if (!sym) return;
+    if (!_esoWatchlist.includes(sym)) { _esoWatchlist.push(sym); _esoWlSave(); }
+    _esoRenderWatchlists();
+    _esoWlRefreshQuotes();
+  }
+  function _esoWlRemove(sym) {
+    _esoWatchlist = _esoWatchlist.filter(s => s !== sym);
+    _esoWlSave();
+    _esoRenderWatchlists();
+  }
+  // Render TradingView-style watchlist rows inside every eso-bar: symbol,
+  // live price, % change (green/red), click-to-load, × to remove.
+  let _esoWlQuotes = {};        // sym → {price, pChange, ...}
+  let _esoWlTimer = null;
+  function _esoRenderWatchlists() {
+    document.querySelectorAll('.eso-wl').forEach(wl => {
+      if (!_esoWatchlist.length) {
+        wl.innerHTML = '<span class="oc-sub" style="font-size:9px;opacity:0.6;">no saved stocks — load one and click ★</span>';
+        return;
+      }
+      wl.innerHTML = _esoWatchlist.map(s => {
+        const q = _esoWlQuotes[s];
+        const on = (_eso.symbol === s);
+        const chgCls = q ? (q.pChange > 0 ? 'var(--green,#26a69a)' : q.pChange < 0 ? 'var(--red,#ef5350)' : '#9aa') : '#666';
+        const px = q ? q.price.toLocaleString('en-IN') : '—';
+        const pc = q ? ((q.pChange > 0 ? '+' : '') + q.pChange.toFixed(2) + '%') : '';
+        return `<span class="eso-wl-chip" data-sym="${s}" style="display:inline-flex;align-items:center;gap:6px;padding:3px 8px;margin:2px 3px 0 0;font-size:10px;border:1px solid ${on ? 'var(--gold,#d4af37)' : 'rgba(255,255,255,0.15)'};border-radius:6px;cursor:pointer;${on ? 'background:rgba(212,175,55,0.18);' : ''}">
+          <b>${s}</b>
+          <span style="color:#cbd;">${px}</span>
+          <span style="color:${chgCls};font-weight:700;">${pc}</span>
+          <span class="eso-wl-del" data-sym="${s}" style="opacity:0.5;cursor:pointer;font-size:11px;line-height:1;" title="Remove">×</span>
+        </span>`;
+      }).join('');
+    });
+    _esoWireWatchlistChips();
+  }
+
+  // Fetch live prices for all watchlist symbols (batch, no caching server-side).
+  async function _esoWlRefreshQuotes() {
+    if (!_esoWatchlist.length) return;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/watchlist-prices?symbols=${encodeURIComponent(_esoWatchlist.join(','))}`);
+      const d = await res.json();
+      if (d.quotes) {
+        _esoWlQuotes = d.quotes;
+        _esoRenderWatchlists();
+      }
+    } catch (_) { /* silent — rows show — until next tick */ }
+  }
+  function _esoWlStartAutoRefresh() {
+    if (_esoWlTimer) clearInterval(_esoWlTimer);
+    // 30s cadence: light on NSE, fresh enough for a watchlist
+    _esoWlTimer = setInterval(_esoWlRefreshQuotes, 30000);
+    _esoWlRefreshQuotes();
+  }
+  function _esoWireWatchlistChips() {
+    document.querySelectorAll('.eso-wl-chip').forEach(chip => {
+      if (chip._wired) return; chip._wired = true;
+      chip.addEventListener('click', e => {
+        if (e.target.classList.contains('eso-wl-del')) {
+          e.stopPropagation();
+          _esoWlRemove(e.target.dataset.sym);
+        } else {
+          _esoLoadStock(chip.dataset.sym);
+        }
+      });
+    });
+  }
+
+  function _esoActive() { return !!(_eso.symbol && _eso.price); }
+
+  // The single price all esoteric tabs resolve to: stock if loaded, else index spot.
+  function _esoPrice() {
+    if (_esoActive()) return _eso.price;
+    return state.lastData?.underlying_value || null;
+  }
+  function _esoLabel() {
+    return _esoActive() ? _eso.symbol : (state.symbol || 'INDEX');
+  }
+
+  async function _esoLoadStock(sym) {
+    sym = (sym || '').trim().toUpperCase();
+    if (!sym) return;
+    _esoSetStatus('Loading ' + sym + '…');
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/stock-pivot?symbol=${encodeURIComponent(sym)}&mode=daily`);
+      const d = await res.json();
+      if (d.error || !d.price) {
+        _esoSetStatus('⚠ ' + (d.error || 'no data for ' + sym));
+        return;
+      }
+      _eso.symbol = d.symbol;
+      _eso.price = d.price;
+      _eso.hi = d.ohlc?.H || d.price * 1.01;
+      _eso.lo = d.ohlc?.L || d.price * 0.99;
+      _eso.prevClose = d.ohlc?.C || null;
+      _eso.name = d.symbol;
+      _eso.isFno = false;
+      _esoSetStatus('✓ ' + d.symbol + ' ₹' + d.price + (d.live ? ' (live)' : ' (EOD)'));
+      _esoSyncInputs(d.symbol);
+      _esoRenderWatchlists();
+      _esoRefreshActiveTab();
+    } catch (e) {
+      _esoSetStatus('⚠ ' + e.message);
+    }
+  }
+
+  // Update every eso-bar's status label and symbol input (bars exist per-tab).
+  function _esoSetStatus(txt) {
+    document.querySelectorAll('.eso-status').forEach(s => { s.textContent = txt; });
+  }
+  function _esoSyncInputs(val) {
+    document.querySelectorAll('.eso-sym-input').forEach(i => { i.value = val; });
+  }
+
+  function _esoClear() {
+    _eso.symbol = _eso.price = _eso.hi = _eso.lo = _eso.prevClose = _eso.name = null;
+    _eso.isFno = false;
+    _esoSetStatus('Using index spot');
+    _esoSyncInputs('');
+    _esoRefreshActiveTab();
+  }
+
+  // Re-render whichever esoteric tab is currently visible.
+  function _esoRefreshActiveTab() {
+    const active = document.querySelector('.tab-panel.active')?.id || '';
+    if (active === 'tab-gann') _safe(() => renderGannTab(), 'renderGannTab');
+    else if (active === 'tab-levels') _safe(() => renderLevelsTab(), 'renderLevelsTab');
+    else if (active === 'tab-numerology') _safe(() => renderNumoTab(), 'renderNumoTab');
+    else if (active === 'tab-astro') _safe(() => renderAstroTab(), 'renderAstroTab');
+    else if (active === 'tab-vedic') _safe(() => renderVedicTab(), 'renderVedicTab');
+  }
+
+  // Wire the shared bar's controls (present on each esoteric tab via injected HTML).
+  function _esoWireBar() {
+    document.querySelectorAll('.eso-load-btn').forEach(b => {
+      if (b._wired) return; b._wired = true;
+      b.addEventListener('click', () => {
+        const inp = b.closest('.eso-bar')?.querySelector('.eso-sym-input');
+        _esoLoadStock(inp?.value);
+        _esoHideSuggest();
+      });
+    });
+    document.querySelectorAll('.eso-sym-input').forEach(inp => {
+      if (inp._wired) return; inp._wired = true;
+      inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); _esoLoadStock(inp.value); _esoHideSuggest(); }
+        else if (e.key === 'Escape') { _esoHideSuggest(); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); _esoMoveSuggest(1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); _esoMoveSuggest(-1); }
+      });
+      inp.addEventListener('input', () => _esoQuerySuggest(inp));
+      inp.addEventListener('blur', () => setTimeout(_esoHideSuggest, 150));
+    });
+    document.querySelectorAll('.eso-clear-btn').forEach(b => {
+      if (b._wired) return; b._wired = true;
+      b.addEventListener('click', () => { _esoClear(); _esoHideSuggest(); });
+    });
+    // ★ add-to-watchlist buttons
+    document.querySelectorAll('.eso-star-btn').forEach(b => {
+      if (b._wired) return; b._wired = true;
+      b.addEventListener('click', () => {
+        const inp = b.closest('.eso-bar')?.querySelector('.eso-sym-input');
+        const sym = (inp?.value || _eso.symbol || '').trim().toUpperCase();
+        if (sym) { _esoWlAdd(sym); showToast('★ ' + sym + ' added to watchlist'); }
+      });
+    });
+    _esoWlLoad();
+    _esoRenderWatchlists();
+    _esoWlStartAutoRefresh();
+  }
+
+  // ── Autocomplete ──
+  let _esoSuggestTimer = null;
+  let _esoSuggestItems = [];
+  let _esoSuggestIdx = -1;
+  let _esoSuggestBox = null;
+
+  function _esoEnsureSuggestBox(inp) {
+    if (_esoSuggestBox && _esoSuggestBox._owner === inp) return _esoSuggestBox;
+    _esoHideSuggest();
+    const box = document.createElement('div');
+    box.className = 'eso-suggest';
+    box._owner = inp;
+    box.style.cssText = 'position:absolute;z-index:9999;max-height:240px;overflow-y:auto;min-width:220px;background:#1a1d23;border:1px solid rgba(255,255,255,0.15);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.5);font-size:11px;';
+    document.body.appendChild(box);
+    const r = inp.getBoundingClientRect();
+    box.style.left = (r.left + window.scrollX) + 'px';
+    box.style.top = (r.bottom + window.scrollY + 2) + 'px';
+    box.style.width = Math.max(220, r.width) + 'px';
+    _esoSuggestBox = box;
+    return box;
+  }
+
+  function _esoHideSuggest() {
+    if (_esoSuggestBox) { _esoSuggestBox.remove(); _esoSuggestBox = null; }
+    _esoSuggestItems = []; _esoSuggestIdx = -1;
+  }
+
+  function _esoQuerySuggest(inp) {
+    const q = (inp.value || '').trim();
+    if (q.length < 1) { _esoHideSuggest(); return; }
+    clearTimeout(_esoSuggestTimer);
+    _esoSuggestTimer = setTimeout(async () => {
+      try {
+        const base = els.serverUrl.value.replace(/\/+$/, '');
+        const res = await fetch(`${base}/api/stock-search?q=${encodeURIComponent(q)}`);
+        const d = await res.json();
+        _esoSuggestItems = (d.results || []).slice(0, 12);
+        _esoRenderSuggest(inp);
+      } catch (_) { _esoHideSuggest(); }
+    }, 180);
+  }
+
+  function _esoRenderSuggest(inp) {
+    if (!_esoSuggestItems.length) { _esoHideSuggest(); return; }
+    const box = _esoEnsureSuggestBox(inp);
+    _esoSuggestIdx = -1;
+    box.innerHTML = _esoSuggestItems.map((it, i) =>
+      `<div class="eso-suggest-item" data-i="${i}" style="padding:5px 9px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.05);">
+        <b style="color:var(--gold,#d4af37);">${escapeHtml(it.s)}</b>
+        <span style="color:#9aa;font-size:10px;"> ${escapeHtml((it.n && it.n !== it.s) ? it.n : '')}</span>
+      </div>`).join('');
+    box.querySelectorAll('.eso-suggest-item').forEach(el => {
+      el.addEventListener('mousedown', e => {
+        e.preventDefault();
+        const it = _esoSuggestItems[+el.dataset.i];
+        inp.value = it.s;
+        _esoLoadStock(it.s);
+        _esoHideSuggest();
+      });
+      el.addEventListener('mouseenter', () => {
+        _esoSuggestIdx = +el.dataset.i;
+        _esoHighlightSuggest();
+      });
+    });
+  }
+
+  function _esoMoveSuggest(dir) {
+    if (!_esoSuggestItems.length) return;
+    _esoSuggestIdx = (_esoSuggestIdx + dir + _esoSuggestItems.length) % _esoSuggestItems.length;
+    _esoHighlightSuggest();
+    const inp = _esoSuggestBox?._owner;
+    if (inp && _esoSuggestItems[_esoSuggestIdx]) inp.value = _esoSuggestItems[_esoSuggestIdx].s;
+  }
+
+  function _esoHighlightSuggest() {
+    if (!_esoSuggestBox) return;
+    _esoSuggestBox.querySelectorAll('.eso-suggest-item').forEach((el, i) => {
+      el.style.background = i === _esoSuggestIdx ? 'rgba(212,175,55,0.18)' : 'transparent';
+    });
+  }
+
   function _gannResolveInputs() {
     const d = state.lastData;
-    const spot = d?.underlying_value;
+    // Prefer an explicitly-loaded esoteric stock; else index spot.
+    const esoOn = _esoActive();
+    const spot = esoOn ? _eso.price : d?.underlying_value;
     let price = parseFloat(document.getElementById('gannPrice')?.value);
     if (!price || price <= 0) price = spot || null;
     let hi = parseFloat(document.getElementById('gannSwingHigh')?.value);
     let lo = parseFloat(document.getElementById('gannSwingLow')?.value);
-    // default swing range: session OHLC, else prev-day, else ±1% of price
+    // default swing range: stock H/L, else session OHLC, else prev-day, else ±1%
+    if ((!hi || !lo) && esoOn) { hi = hi || _eso.hi; lo = lo || _eso.lo; }
     if ((!hi || !lo) && d?.session_ohlc?.high && d?.session_ohlc?.low) {
       hi = hi || d.session_ohlc.high; lo = lo || d.session_ohlc.low;
     }
     if ((!hi || !lo) && price) { hi = hi || price * 1.01; lo = lo || price * 0.99; }
     let trend = document.getElementById('gannTrend')?.value || 'auto';
     if (trend === 'auto') {
-      const prevClose = (typeof state_ohlc !== 'undefined' && state_ohlc?.close) || d?.session_ohlc?.open;
+      const prevClose = esoOn ? _eso.prevClose : ((typeof state_ohlc !== 'undefined' && state_ohlc?.close) || d?.session_ohlc?.open);
       trend = (prevClose && price >= prevClose) ? 'up' : 'down';
     }
     return { price, hi, lo, trend };
@@ -7843,6 +8244,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => renderGannFanChart(price, trend), 'renderGannFanChart');
     _safe(() => renderGannNatural(price), 'renderGannNatural');
     _safe(() => renderGannAnniversary(), 'renderGannAnniversary');
+    _safe(() => renderGannTimeZones(), 'renderGannTimeZones');
+    _safe(() => _refreshLayman(), '_refreshLayman');
     _safe(() => renderGannSq144(price, lo), 'renderGannSq144');
     _safe(() => renderGannHex(price), 'renderGannHex');
     _safe(() => renderGannPlanet(price), 'renderGannPlanet');
@@ -7855,6 +8258,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function renderGannConfluence(price) {
     const out = document.getElementById('gannConfluence');
     if (!out) return;
+    // When an esoteric STOCK is loaded, the index option-chain positioning
+    // (OI/GEX/max-pain) is not this instrument's data — don't cross-reference it.
+    if (_esoActive()) {
+      out.innerHTML = '<span class="oc-sub">Cross-referencing Gann levels with live option positioning isn\'t available for individual stocks here (that data is index-only). The Gann geometry above is computed on ' + escapeHtml(_eso.symbol) + '\'s price; use it with the Levels-tab confluence instead.</span>';
+      return;
+    }
     const d = state.lastData;
     if (!d) { out.innerHTML = '<span class="oc-sub">Load the option chain to cross-reference Gann levels with live positioning.</span>'; return; }
     const s9 = _gannSq9Levels(price);
@@ -8008,6 +8417,41 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }).join('');
     out.innerHTML = rows + anniv + '<div class="oc-sub" style="margin-top:4px;">Count from today. 144 days (★) is Gann\'s key cycle. Anniversaries mark where past turns may echo.</div>';
   }
+
+  // ── Fib Time Zones + Gann anniversary extensions (from a chosen swing date) ──
+  function renderGannTimeZones() {
+    const out = document.getElementById('gannTimeZones');
+    if (!out) return;
+    const anchorStr = document.getElementById('gannTzAnchor')?.value;
+    if (!anchorStr) {
+      out.innerHTML = '<span class="oc-sub">Pick the date of a major swing high/low above — Fib counts and Gann calendar increments project forward from it, flagging dates where time-symmetry watchers expect turns.</span>';
+      return;
+    }
+    const anchor = new Date(anchorStr + 'T09:15:00');
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+    const mk = (days, tag, note, strong) => {
+      const d = new Date(anchor); d.setDate(d.getDate() + days);
+      const away = Math.round((d - today) / 86400000);
+      if (away < -10) return '';   // long past — noise
+      const state = away < 0 ? 'past' : away === 0 ? '★ TODAY' : `+${away}d`;
+      return `<div class="gann-lvl-row ${strong ? 'anchor' : (away >= 0 && away <= 7 ? 'res' : '')}">
+        <span class="lvl-tag">${tag}${strong ? ' ★' : ''}</span>
+        <span class="lvl-val" style="font-size:10px;">${fmtD(d)}</span>
+        <span class="lvl-dist">${note} · ${state}</span>
+      </div>`;
+    };
+    const fib = [8, 13, 21, 34, 55, 89, 144, 233, 377];
+    const gann = [[30, '30d', 'Gann ⅟₁₂ yr'], [45, '45d', 'Gann ⅛ yr'], [60, '60d', 'Gann ⅙ yr'], [90, '90d', 'Gann ¼ yr'],
+                  [120, '120d', 'Gann ⅓ yr'], [144, '144d', 'master sq'], [180, '180d', 'Gann ½ yr'],
+                  [270, '270d', 'Gann ¾ yr'], [365, '1 yr', 'anniversary']];
+    let rows = fib.map(n => mk(n, `F${n}`, 'Fib zone', n === 144)).join('');
+    rows += gann.map(([d, t, n]) => mk(d, t, n, d === 144 || d === 365)).join('');
+    const dSince = Math.round((today - anchor) / 86400000);
+    out.innerHTML = rows +
+      `<div class="oc-sub" style="margin-top:4px;">Anchor ${fmtD(anchor)} (${dSince >= 0 ? dSince + ' days ago' : 'future date?'}). Fib zones: bars/days at Fibonacci counts from the swing. Gann increments: calendar subdivisions of the year — 90/180/365 are his primary counts, 144 the master square. Rows within a week highlight. LORE: time-symmetry has no validated edge; dates cluster meaning only in hindsight. Use as calendar context, never as a signal.</div>`;
+  }
+  document.getElementById('gannTzAnchor')?.addEventListener('change', renderGannTimeZones);
 
   // ── Advanced: Square of 144 — fixed 144-pt master grid from swing low ──
   function renderGannSq144(price, lo) {
@@ -8185,6 +8629,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   document.getElementById('gannCalcBtn')?.addEventListener('click', renderGannTab);
+  _esoWireBar();
   document.getElementById('gannUseSpot')?.addEventListener('click', () => {
     const spot = state.lastData?.underlying_value;
     if (spot) { document.getElementById('gannPrice').value = Math.round(spot * 100) / 100; renderGannTab(); }
@@ -8327,7 +8772,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function renderNumoTab() {
-    const spot = state.lastData?.underlying_value;
+    const spot = _esoActive() ? _eso.price : state.lastData?.underlying_value;
     let price = parseFloat(document.getElementById('numoPrice')?.value);
     if (!price || price <= 0) price = spot || 0;
     const dateStr = document.getElementById('numoDate')?.value;
@@ -8343,6 +8788,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => renderNumoPersonal(dateStr), 'renderNumoPersonal');
     _safe(() => renderNumoReality(), 'renderNumoReality');
     _safe(() => renderNumoBenford(), 'renderNumoBenford');
+    _safe(() => _refreshLayman(), '_refreshLayman');
   }
   // ── Advanced: master numbers (11/22/33) in the reduction chain ──
   function renderNumoMaster(price, dateStr) {
@@ -8671,6 +9117,59 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const lon = _astNorm(v / _AST_RAD + w);
     return { x: r * Math.cos(lon * _AST_RAD), y: r * Math.sin(lon * _AST_RAD) };
   }
+  // ── Bradley Siderograph (reduced implementation) ──
+  // Donald Bradley's 1948 astro-composite: aspect-scored planet pairs summed
+  // into one curve whose local extrema are claimed as market turn DATES.
+  // Long terms = pairs among Jupiter..Pluto (×3 weight); middle terms = pairs
+  // involving Sun/Mercury/Venus/Mars; + Venus/Mars declination term. Moon excluded.
+  // Outer planets use J2000 Kepler elements (Pluto ±1-2° — fine for turn windows).
+  const _BRADLEY_OUTER = {
+    Uranus:  d => ({ N: 74.0005 + 1.3978e-5 * d, i: 0.7733, w: 96.6612 + 3.0565e-5 * d, a: 19.18171, e: 0.047318 + 7.45e-9 * d, M: 142.5905 + 0.011725806 * d }),
+    Neptune: d => ({ N: 131.7806 + 3.0173e-5 * d, i: 1.7700, w: 272.8461 - 6.027e-6 * d, a: 30.05826, e: 0.008606 + 2.15e-9 * d, M: 260.2471 + 0.005995147 * d }),
+    Pluto:   d => ({ N: 110.30, i: 17.14, w: 113.76, a: 39.482, e: 0.2488, M: 14.882 + 0.00397 * d }),
+  };
+  function _bradleyLongs(date) {
+    const d = _astDays(date);
+    const sun = _astSunXY(d);
+    const lons = {};
+    for (const [name, elFn] of Object.entries(_AST_ELEMENTS)) {
+      const h = _astHelio(elFn(d));
+      lons[name] = _astNorm(Math.atan2(h.y + sun.y, h.x + sun.x) / _AST_RAD);
+    }
+    for (const [name, elFn] of Object.entries(_BRADLEY_OUTER)) {
+      const h = _astHelio(elFn(d));
+      lons[name] = _astNorm(Math.atan2(h.y + sun.y, h.x + sun.x) / _AST_RAD);
+    }
+    lons.Sun = _eclipticLongitudes(date).sun;
+    return lons;
+  }
+  // Aspect valence per Bradley: 0/60/120 harmonious (+), 90/180 discordant (−), 15° orb, linear taper.
+  function _bradleyAspectScore(sep) {
+    const A = [[0, 1], [60, 1], [120, 1], [90, -1], [180, -1]];
+    let s = 0;
+    for (const [ang, sign] of A) {
+      const dev = Math.abs(sep - ang);
+      if (dev < 15) s += sign * (1 - dev / 15) * 10;
+    }
+    return s;
+  }
+  function _bradleyValue(date) {
+    const L = _bradleyLongs(date);
+    const slow = ['Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+    const fast = ['Sun', 'Mercury', 'Venus', 'Mars'];
+    const sep = (a, b) => { let x = Math.abs(L[a] - L[b]) % 360; return x > 180 ? 360 - x : x; };
+    let long = 0, mid = 0;
+    for (let i = 0; i < slow.length; i++)
+      for (let j = i + 1; j < slow.length; j++) long += _bradleyAspectScore(sep(slow[i], slow[j]));
+    for (const f of fast) {
+      for (const s of slow) mid += _bradleyAspectScore(sep(f, s));
+      for (const f2 of fast) if (f2 > f) mid += _bradleyAspectScore(sep(f, f2));
+    }
+    // declination term ≈ asin(sin ε · sin λ) for near-ecliptic Venus/Mars
+    const decl = lon => Math.asin(Math.sin(23.44 * _AST_RAD) * Math.sin(lon * _AST_RAD)) / _AST_RAD;
+    const dTerm = decl(L.Venus) + decl(L.Mars);
+    return 3 * long + mid + dTerm;
+  }
   function _planetLongitudes(date) {
     const d = _astDays(date);
     const sun = _astSunXY(d);
@@ -8869,12 +9368,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function renderAstroLines({ tropLons }) {
     const out = document.getElementById('astroLines');
     if (!out) return;
-    const price = state.lastData?.underlying_value;
-    if (!price) { out.innerHTML = '<span class="oc-sub">Load the option chain for spot.</span>'; return; }
+    const price = _esoActive() ? _eso.price : state.lastData?.underlying_value;
+    if (!price) { out.innerHTML = '<span class="oc-sub">Load a stock above, or the option chain for index spot.</span>'; return; }
     const rows = [];
+    // Wheel scaling (the classic Gann "drop the zeros" convention): pick a
+    // power-of-10 scale so one full 360° wheel ≈ 1-2% of price. On Nifty
+    // (~24k) that's the standard 1 pt/°; on a ₹500 stock it's 0.01 pt/°.
+    const wheelScale = Math.pow(10, Math.round(Math.log10(price * 0.015 / 360)));
+    const wheel = 360 * wheelScale;
     for (const [name, lon] of Object.entries(tropLons)) {
-      const k = Math.round((price - lon) / 360);
-      const lvl = k * 360 + lon;
+      const lonPts = lon * wheelScale;
+      const k = Math.round((price - lonPts) / wheel);
+      const lvl = k * wheel + lonPts;
       if (lvl > 0) rows.push({ name, lon, val: lvl });
     }
     rows.sort((a, b) => b.val - a.val);
@@ -8885,7 +9390,56 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span class="lvl-val">${fmtInt(Math.round(r.val))}</span>
         <span class="lvl-dist">${r.lon.toFixed(1)}° · ${((r.val - price) / price * 100).toFixed(2)}%</span>
       </div>`).join('') +
-      '<div class="oc-sub" style="margin-top:4px;">Gann longitude→price at 1 pt/° (tropical longitudes, per convention). Jupiter/Saturn lines are near-static (0.08°/0.03° daily); Moon sweeps ~13 pts/day.</div>';
+      `<div class="oc-sub" style="margin-top:4px;">Gann longitude→price (tropical, per convention), wheel scaled ×${wheelScale >= 1 ? wheelScale : wheelScale.toFixed(wheelScale >= 0.01 ? 2 : 4)} to fit the price ("drop the zeros" rule — one wheel ≈ 1-2% of price). Jupiter/Saturn lines near-static; Moon sweeps fastest.</div>`;
+  }
+
+  // ── Bradley Siderograph panel: curve + upcoming turn windows ──
+  function renderBradley() {
+    const out = document.getElementById('astroBradley');
+    if (!out) return;
+    const today = new Date(); today.setHours(9, 15, 0, 0);
+    const from = -30, to = 120;
+    const vals = [];
+    for (let k = from; k <= to; k++) {
+      const d = new Date(today); d.setDate(d.getDate() + k);
+      vals.push({ k, date: d, v: _bradleyValue(d) });
+    }
+    // light 3-day smoothing, then local extrema = claimed turn windows
+    const sm = vals.map((p, i) => {
+      const a = vals[Math.max(0, i - 1)].v, b = p.v, c = vals[Math.min(vals.length - 1, i + 1)].v;
+      return { ...p, s: (a + b + c) / 3 };
+    });
+    const turns = [];
+    for (let i = 2; i < sm.length - 2; i++) {
+      const w = [sm[i - 2].s, sm[i - 1].s, sm[i].s, sm[i + 1].s, sm[i + 2].s];
+      if (sm[i].s === Math.max(...w)) turns.push({ ...sm[i], kind: 'HIGH' });
+      else if (sm[i].s === Math.min(...w)) turns.push({ ...sm[i], kind: 'LOW' });
+    }
+    // SVG curve
+    const W = 680, H = 170, padL = 40, padR = 10, padY = 12;
+    let mn = Math.min(...sm.map(p => p.s)), mx = Math.max(...sm.map(p => p.s));
+    const pad = (mx - mn) * 0.08 || 1; mn -= pad; mx += pad;
+    const x = i => padL + i / (sm.length - 1) * (W - padL - padR);
+    const y = v => H - padY - (v - mn) / (mx - mn) * (H - 2 * padY);
+    const todayX = x(-from);
+    const line = `<polyline points="${sm.map((p, i) => `${x(i).toFixed(1)},${y(p.s).toFixed(1)}`).join(' ')}" fill="none" stroke="var(--gold,#d4af37)" stroke-width="1.6"/>`;
+    const marks = turns.map(t => `<circle cx="${x(t.k - from).toFixed(1)}" cy="${y(t.s).toFixed(1)}" r="3" fill="${t.kind === 'HIGH' ? 'var(--red,#ef5350)' : 'var(--green,#26a69a)'}"/>`).join('');
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    const upcoming = turns.filter(t => t.k >= 0).slice(0, 6);
+    const rows = upcoming.map(t => {
+      const days = t.k;
+      return `<div class="gann-lvl-row ${t.kind === 'HIGH' ? 'res' : 'sup'}">
+        <span class="lvl-tag">${t.kind === 'HIGH' ? '▲ turn-high' : '▼ turn-low'}</span>
+        <span class="lvl-val" style="font-size:10px;">${fmtD(t.date)}</span>
+        <span class="lvl-dist">${days === 0 ? 'today' : '+' + days + 'd'} · ±4d window</span>
+      </div>`;
+    }).join('') || '<span class="oc-sub">No inflections in the next 120 days (rare — usually indicates a flat aspect period).</span>';
+    out.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+        <line x1="${todayX.toFixed(1)}" y1="${padY}" x2="${todayX.toFixed(1)}" y2="${H - padY}" stroke="var(--muted-2,#567)" stroke-dasharray="3,3"/>
+        <text x="${todayX.toFixed(1)}" y="${padY - 2}" text-anchor="middle" style="font-size:8px;fill:var(--muted-2);">today</text>
+        ${line}${marks}
+      </svg>` + rows +
+      '<div class="oc-sub" style="margin-top:4px;">Reduced Bradley (1948): aspect-scored planet pairs — long terms (Jupiter→Pluto pairs, ×3) + middle terms (Sun/Mercury/Venus/Mars pairs) + Venus+Mars declination. Turn windows ±4 days; the curve\'s DIRECTION is explicitly meaningless per Bradley himself — only inflection timing is claimed. Outer planets on J2000 elements (Pluto ±1-2°). PURE LORE: zero validated edge; treat as a calendar curiosity beside your measured tools.</div>';
   }
 
   // ── Advanced: Nifty "natal" transits (launch date 22 Apr 1996) ──
@@ -9043,6 +9597,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => renderAstroUpcoming(inp), 'renderAstroUpcoming');
     _safe(() => renderAstroRetro(inp), 'renderAstroRetro');
     _safe(() => renderAstroLines(inp), 'renderAstroLines');
+    _safe(() => renderBradley(), 'renderBradley');
+    _safe(() => _refreshLayman(), '_refreshLayman');
     _safe(() => renderAstroNatal(inp), 'renderAstroNatal');
     _safe(() => renderAstroMoon(inp), 'renderAstroMoon');
     _safe(() => renderAstroHours(), 'renderAstroHours');
@@ -9364,6 +9920,48 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div class="oc-sub" style="margin-top:4px;">The complete Panchang (five limbs: Vara, Tithi, Nakshatra, Yoga, Karana). <b>Rahu Kaal</b> — a ~90-min inauspicious daily window — has a real following among Indian traders who avoid fresh entries in it (mild CROWD, self-fulfilling to a degree). <b>Abhijit Muhurta</b> around noon is the classical "victory" window. Mumbai sunrise-based; ±few min.</div>`;
   }
 
+  // ── Lunar calendar: Amavasya/Purnima next 60 days + eclipse-window flags ──
+  function renderVedicLunarCal(now) {
+    const out = document.getElementById('vedicLunarCal');
+    if (!out) return;
+    const norm = x => ((x % 360) + 360) % 360;
+    // mean lunar node (Schlyter): N = 125.1228 − 0.0529538083·d, same d as _astDays
+    const nodeLon = d0 => norm(125.1228 - 0.0529538083 * d0);
+    const elongAt = dt => { const e = _eclipticLongitudes(dt); return norm(e.moon - e.sun); };
+    const events = [];
+    let prev = elongAt(now);
+    for (let k = 1; k <= 60 && events.length < 6; k++) {
+      const dt = new Date(now); dt.setDate(dt.getDate() + k); dt.setHours(12, 0, 0, 0);
+      const el = elongAt(dt);
+      // new moon: elongation wraps 360→0; full: crosses 180 upward
+      const crossedNew = prev > 300 && el < 60;
+      const crossedFull = prev < 180 && el >= 180;
+      if (crossedNew || crossedFull) {
+        const e = _eclipticLongitudes(dt);
+        const N = nodeLon(_astDays(dt));
+        // distance of Moon from either node
+        const dN = Math.min(Math.abs(norm(e.moon - N) > 180 ? 360 - norm(e.moon - N) : norm(e.moon - N)),
+                            Math.abs(norm(e.moon - N - 180) > 180 ? 360 - norm(e.moon - N - 180) : norm(e.moon - N - 180)));
+        const eclipseLimit = crossedNew ? 17 : 12;   // solar vs lunar ecliptic limits (approx)
+        events.push({ date: new Date(dt), kind: crossedNew ? 'Amavasya 🌑' : 'Purnima 🌕',
+                      isNew: crossedNew, nodeDist: dN, eclipse: dN < eclipseLimit });
+      }
+      prev = el;
+    }
+    const fmtD = d => d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+    const today = new Date(now); today.setHours(0, 0, 0, 0);
+    const rows = events.map(ev => {
+      const away = Math.round((ev.date - today) / 86400000);
+      return `<div class="gann-lvl-row ${ev.eclipse ? 'anchor' : ''}">
+        <span class="lvl-tag">${ev.kind}</span>
+        <span class="lvl-val" style="font-size:10px;">${fmtD(ev.date)}</span>
+        <span class="lvl-dist">+${away}d${ev.eclipse ? ` · ⚠ ECLIPSE WINDOW (Moon ${ev.nodeDist.toFixed(0)}° from node)` : ''}</span>
+      </div>`;
+    }).join('') || '<span class="oc-sub">No syzygies found (unexpected — check date).</span>';
+    out.innerHTML = rows +
+      '<div class="oc-sub" style="margin-top:4px;">New/full moons for 60 days; ★ rows fall within ecliptic limits of the lunar node → possible eclipse (approx: mean node, ±1-2 days). Context worth knowing: the lunar-cycle effect is the ONE astro-adjacent claim with published academic work — Dichev &amp; Janes (2003), Yuan/Zheng/Zhu (2006) reported modestly lower returns near full moons across markets; the effect is small, contested, and faded in later replications. Eclipses are heavily watched culturally in India (NSE even closes for none, but Muhurat trading exists) — crowd-attention dates, not causal forces.</div>';
+  }
+
   // ── Navamsa (D9): each sign split into 9 parts of 3°20′, remapped ──
   function renderVedicNavamsa(now) {
     const out = document.getElementById('vedicNavamsa');
@@ -9441,9 +10039,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => renderVedicChoghadiya(now), 'renderVedicChoghadiya');
     _safe(() => renderVedicHora(now), 'renderVedicHora');
     _safe(() => renderVedicPanchang(now), 'renderVedicPanchang');
+    _safe(() => renderVedicLunarCal(now), 'renderVedicLunarCal');
     _safe(() => renderVedicNavamsa(now), 'renderVedicNavamsa');
     _safe(() => renderVedicAshtaka(now), 'renderVedicAshtaka');
     _safe(() => renderVedicConfluence(anchor, now), 'renderVedicConfluence');
+    _safe(() => _refreshLayman(), '_refreshLayman');
   }
   document.getElementById('vedicGenBtn')?.addEventListener('click', renderVedicTab);
   document.getElementById('vedicAnchor')?.addEventListener('change', renderVedicTab);
@@ -9506,6 +10106,234 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   });
 
   // ── TODAY SYNTHESIS TAB ─────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════
+  // PLAIN-LANGUAGE NOTES v2 — dynamic "How to read this" under every
+  // widget. Entries may be strings OR functions; functions recompute on
+  // every tab render so the explanation talks about the ACTUAL values
+  // currently shown (e.g. names the sign Rahu is in and explains it).
+  // ══════════════════════════════════════════════════════════════════
+  // ── glossaries the dynamic notes draw from ──
+  const _G_SIGN = [
+    { t: 'Aries', v: 'Mesha', sym: '♈', el: 'Fire', lord: 'Mars', th: 'initiative, impulse, aggression — lore reads it as fast, headstrong action' },
+    { t: 'Taurus', v: 'Vrishabha', sym: '♉', el: 'Earth', lord: 'Venus', th: 'stability, wealth, stubbornness — slow steady accumulation' },
+    { t: 'Gemini', v: 'Mithuna', sym: '♊', el: 'Air', lord: 'Mercury', th: 'communication, duality, quick changes — choppy two-sided moves' },
+    { t: 'Cancer', v: 'Karka', sym: '♋', el: 'Water', lord: 'Moon', th: 'emotion, protection, home — sentiment-driven swings' },
+    { t: 'Leo', v: 'Simha', sym: '♌', el: 'Fire', lord: 'Sun', th: 'authority, pride, visibility — leadership stocks, ego-driven tops' },
+    { t: 'Virgo', v: 'Kanya', sym: '♍', el: 'Earth', lord: 'Mercury', th: 'analysis, detail, correction — refinement and pullbacks' },
+    { t: 'Libra', v: 'Tula', sym: '♎', el: 'Air', lord: 'Venus', th: 'balance, trade, indecision — rangebound equilibrium' },
+    { t: 'Scorpio', v: 'Vrischika', sym: '♏', el: 'Water', lord: 'Mars', th: 'intensity, secrets, transformation — deep sell-offs and V-turns' },
+    { t: 'Sagittarius', v: 'Dhanu', sym: '♐', el: 'Fire', lord: 'Jupiter', th: 'expansion, optimism, overreach — bullish excess' },
+    { t: 'Capricorn', v: 'Makara', sym: '♑', el: 'Earth', lord: 'Saturn', th: 'discipline, structure, grind — slow institutional trends' },
+    { t: 'Aquarius', v: 'Kumbha', sym: '♒', el: 'Air', lord: 'Saturn', th: 'innovation, disruption, crowds — technology, sudden collective shifts' },
+    { t: 'Pisces', v: 'Meena', sym: '♓', el: 'Water', lord: 'Jupiter', th: 'dissolution, dreams, confusion — foggy, trendless drift' },
+  ];
+  const _G_PLANET = {
+    Sun: 'the self, authority, government — in market lore: leadership, PSU/government themes, the index itself',
+    Moon: 'mind, moods, the public — lore: retail sentiment, liquidity, day-to-day emotional swings',
+    Mercury: 'communication, commerce, calculation — lore: trading activity itself, IT, media; retrogrades blamed for confusion',
+    Venus: 'comfort, luxury, money — lore: banking, consumption, luxury goods, market "pleasantness"',
+    Mars: 'energy, aggression, conflict — lore: metals, defence, energy; sharp aggressive moves',
+    Jupiter: 'expansion, wisdom, wealth — lore: the great bull-market planet; banking/finance; optimism and growth',
+    Saturn: 'restriction, discipline, delay — lore: the great bear-market planet; oil/mining/labour; corrections, fear, long grinds',
+    Rahu: 'the Moon\'s NORTH node — not a physical body but the eclipse point where the Moon\'s path crosses the Sun\'s, moving backwards through the zodiac (~18.6-year loop). Vedic meaning: obsession, amplification, illusion, foreign/new things, sudden inflations. Market lore: speculation, bubbles, manias, derivatives themselves',
+    Ketu: 'the Moon\'s SOUTH node — the opposite eclipse point, always exactly 180° from Rahu. Vedic meaning: detachment, endings, dissolution, past karma. Market lore: sudden deflations, sell-offs, loss of interest, illiquidity',
+  };
+  const _G_DIGIT = {
+    1: 'Sun — leadership, beginnings, independence', 2: 'Moon — sensitivity, partnership, fluctuation',
+    3: 'Jupiter — growth, expression, optimism', 4: 'Rahu — structure, sudden change, unconventional paths',
+    5: 'Mercury — commerce, movement, adaptability (the "trader\'s number")', 6: 'Venus — harmony, luxury, comfort',
+    7: 'Ketu — introspection, mystery, spirituality', 8: 'Saturn — discipline, karma, delayed reward, money itself',
+    9: 'Mars — completion, drive, aggression',
+  };
+  const _G_TITHI_GROUP = ['Nanda (joy — lore: good for beginnings)', 'Bhadra (health — steady work)', 'Jaya (victory — favourable for action)', 'Rikta (empty — traditionally AVOIDED for new ventures)', 'Purna (full — completion, culmination)'];
+  const _G_ASPECT = {
+    Conjunction: '0° — the two planets stand together; their significations fuse and intensify',
+    Sextile: '60° — an easy, supportive angle; mild cooperation',
+    Square: '90° — friction; the two agendas clash; lore reads tension/volatility',
+    Trine: '120° — effortless flow; harmony between the two significations',
+    Opposition: '180° — face-off; polarity, culminations, tug-of-war',
+  };
+  const _laySec = (h, b) => `<div style="margin-top:3px;"><b style="color:var(--gold,#d4af37);font-size:9.5px;">${h}</b> ${b}</div>`;
+  const _sidSign = lon => { const s = ((lon % 360) + 360) % 360; return _G_SIGN[Math.floor(s / 30) % 12]; };
+  const _signStr = g => `<b>${g.v} (${g.t} ${g.sym})</b> — ${g.el} sign ruled by ${g.lord}: ${g.th}`;
+  const _layPrice = () => (_esoActive() ? _eso.price : state.lastData?.underlying_value) || null;
+  const _layLbl = () => _esoActive() ? _eso.symbol : (state.symbol || 'the index');
+
+  const _LAYMAN = {
+    // ══ GANN ══
+    gannSq9Levels: () => { const p = _layPrice();
+      let now = 'Load the chain or a stock to see live numbers.';
+      if (p) { const r = Math.sqrt(p); now = `${_layLbl()} is at <b>${fmtInt(Math.round(p))}</b>. Its square root is ${r.toFixed(2)}; adding/subtracting quarter-steps and re-squaring gives the nearest "spiral" prices: support ~<b>${fmtInt(Math.round(Math.pow(r - 0.25, 2)))}</b>, resistance ~<b>${fmtInt(Math.round(Math.pow(r + 0.25, 2)))}</b>. Each ±45° row in the table is one more quarter-step of the root.`; }
+      return _laySec('What it is', 'W.D. Gann\'s Square of 9 — prices arranged in a spiral like numbered squares on a snail shell. Prices that land on the same "spoke" of the spiral are claimed to act as floors and ceilings.') +
+        _laySec('Right now', now) +
+        _laySec('How to read', 'Treat the level nearest ABOVE price as a possible ceiling and nearest BELOW as a possible floor. ● marks cardinal (90°-multiple) levels — considered strongest in the tradition.') +
+        _laySec('Reality check', 'Pure geometry on one number — no supply/demand behind it. If it works at all it\'s because other Gann traders place orders at the same prices. Use only as confluence with real levels.'); },
+    gannWheel: 'WHAT: the same Square-of-9 numbers drawn on a circular wheel so you can SEE which prices share a spoke. HOW TO READ: find the current price on the wheel; prices on the same spoke or at 90°/180° across are the "related" levels the table lists. Cardinal cross (N/S/E/W spokes) = strongest claim. REALITY: identical content to the level list — the wheel is tradition\'s visual aid, nothing extra.',
+    gannAngles: () => { const p = _layPrice();
+      return _laySec('What it is', 'Gann angles are trend-speed lines: 1×1 rises 1 point per day, 2×1 rises 2/day, 1×2 rises 0.5/day, drawn from a swing low (or falling from a high).') +
+        _laySec('Right now', p ? `Angles are drawn from the current swing inputs for ${_layLbl()}. The panel shows where each speed-line sits TODAY — compare price to the 1×1 value.` : 'Set swing inputs above to position the fan.') +
+        _laySec('How to read', 'Price ABOVE the 1×1 = trend running faster than 1 pt/day, called healthy. Each break to a flatter angle = the trend downshifting a gear. The 1×1 is the traditional bull/bear divider.') +
+        _laySec('Reality check', 'A point-per-DAY grid is arbitrary (depends on chart scale), which is the standard criticism. Useful as a trend-speed ruler; not a physical law.'); },
+    gannRetrace: 'WHAT: the swing high→low move divided into EIGHTHS (12.5%, 25%, 37.5%, 50%…) — Gann\'s version of Fibonacci retracement. HOW TO READ: after a rally, pullbacks to 3/8–4/8 (37.5–50%) are "normal"; holding above 50% keeps the up-move structurally intact; losing 5/8 (62.5%) says the rally is in doubt. The 50% line is the one level watched by nearly everyone, Gann or not. REALITY: retracement zones are self-fulfilling focal points — real only because they\'re watched. The 50% level has genuine crowd weight.',
+    gannTimeCycles: 'WHAT: Gann held that markets turn at fixed TIME intervals from prior turns — 30, 45, 60, 90, 120, 144, 180, 270, 360 days (calendar fractions of a year, plus 144 = 12²). The panel counts these forward and lists "cycle completion" dates. HOW TO READ: a date where several counts land together is a "time cluster" — Gann traders watch those days for a turn, in either direction. REALITY: no statistical study has validated fixed-day cycles; with this many counts something always lands near any turn (hindsight bias). Calendar context only.',
+    gannSq144: () => { const p = _layPrice();
+      return _laySec('What it is', 'Gann called 144 (=12×12) the "Master Square" — a fixed grid of 144-point cells (auto-scaled for cheaper instruments) laid up from the swing low.') +
+        _laySec('Right now', p ? `Grid anchored for ${_layLbl()} @ ${fmtInt(Math.round(p))}; lines every half-cell, full-cell lines strongest.` : 'Awaiting price.') +
+        _laySec('How to read', 'Treat full-144 multiples as the major shelf lines, half-cells (72) as minor. A price stalling repeatedly at a grid line is the pattern Gann traders look for.') +
+        _laySec('Reality check', 'A fixed grid will always "catch" some turns by chance — count the misses too before trusting it.'); },
+    gannHex: 'WHAT: the Hexagon chart — Gann\'s OTHER price spiral, cells arranged in rings of 6 instead of squares of 8, giving different level spacing than Sq9. HOW TO READ: same as Sq9 — nearest hexagon numbers above/below are candidate ceiling/floor. Where a Hexagon level AND a Sq9 level coincide, tradition weights it double. REALITY: two arbitrary spirals agreeing is still arbitrary — but the coincidence levels are the only ones worth even noting.',
+    gannPlanet: 'WHAT: each planet\'s current zodiac degree converted directly into a price (with the wheel scaled to fit the instrument — "drop the zeros"). So Jupiter at 15° Gemini = 75° = a specific price line. HOW TO READ: the listed price per planet is where that planet\'s "line" sits today; slow planets (Jupiter/Saturn) give near-static lines, the Moon\'s sweeps ~13°/day. Astro-traders watch price touching a slow planet\'s line. REALITY: sky angles have no pathway to order flow. This is the most decorative panel on the tab — shown for completeness of the Gann toolkit.',
+    gannSqTime: 'WHAT: "squaring price and time" — Gann\'s idea that a move is COMPLETE when elapsed time equals distance travelled (e.g. 250 points in 250 days = "squared"). The panel lists upcoming dates where current swings square. HOW TO READ: a squaring date is watched as exhaustion timing — the move has "used up" its symmetry. REALITY: depends entirely on the units chosen (points vs days is scale-arbitrary), which is the standard criticism. Curiosity tier.',
+    gannConfluence: 'WHAT: the one Gann panel anchored to REAL data — it cross-references Gann levels against the option chain\'s open-interest walls, max pain, and GEX flip (index only; stocks have no chain here). HOW TO READ: a Gann level alone is lore; a Gann level sitting ON a 50-lakh-contract OI wall is a real level that happens to have a Gann label. Trade the OI wall, enjoy the label. REALITY: the OI/GEX side is measured market structure; the Gann side is decoration. This panel exists to show which decorations happen to hang on real walls.',
+    gannFanChart: 'WHAT: the Gann angle fan drawn as an actual picture — the same 1×1/2×1/1×2 speed-lines from the Angles panel, visualised. HOW TO READ: watch which "lane" price is travelling in; lane changes (breaking below a steeper line into a flatter lane) mark trend deceleration. The 1×1 diagonal is the traditional bull/bear boundary. REALITY: same caveat as the angles — the grid depends on the points-per-day scale chosen.',
+    gannNatural: 'WHAT: "natural squares" — perfect squares (100, 121, 144, 169…) and round hundreds/thousands near price. Gann considered square-of-integer prices inherently important. HOW TO READ: nearest natural square above/below = candidate shelf. ROUND numbers here are the genuinely real part: humans cluster orders at 24,000-type prices, visible in any order book. REALITY: round-number clustering is documented microstructure; the "squares of integers" part is numerology riding along.',
+    gannAnniversary: 'WHAT: dates counted forward from TODAY at Fibonacci day-spans (21/34/55/89/144/233) and calendar anniversaries (3mo/6mo/1yr/2yr). Gann taught that markets "remember" old turn dates and echo them. HOW TO READ: mark the listed dates on your calendar; tradition expects turns near cycle-completions, especially the 144-day (★) and 1-year marks. REALITY: markets do show weak SEASONALITY (certain months behave differently) but no evidence supports day-precise anniversaries. Calendar wallpaper with a famous name.',
+    gannTimeZones: 'WHAT: the same time-counting idea but anchored to a swing date YOU choose (a major high or low) — Fibonacci counts (F8…F377 days) plus Gann\'s year-fractions (30/45/60/90/120/144/180/270/365 days) projected forward from it. HOW TO READ: pick the date of the last major turn; rows landing THIS WEEK highlight — those are the dates time-symmetry watchers have circled. ★ marks the 144-day master count and the 1-year anniversary. REALITY: with ~18 projected dates per anchor, hits are guaranteed in hindsight — that\'s the mechanism of the belief, not evidence. Context only.',
+    gannSunTime: 'WHAT: the solar calendar\'s power dates — solstices (Sun\'s extremes), equinoxes (day=night), and the 45° cross-quarter midpoints. Gann built his year-cycle on these. HOW TO READ: the next solar date is listed with its count-down; tradition watches ±3 days around each for trend changes. REALITY: genuine seasonal patterns exist in markets (e.g. year-end effects) but they don\'t pivot on astronomical days. The solstice itself trades like any Tuesday.',
+    gannSwings: 'WHAT: plain price history — the recent swing highs and lows this tab measures everything else from. No lore in this panel; it\'s the raw material. HOW TO READ: verify the auto-detected swings match what you\'d mark by eye; if not, type your own swing high/low in the inputs above — every Gann calculation downstream uses them. REALITY: 100% real data. The only panel here you can\'t argue with.',
+    // ══ NUMEROLOGY ══
+    numoRoot: () => { const p = _layPrice();
+      let now = 'Load a price first.';
+      if (p) { let n = Math.round(p), steps = [n]; while (n > 9) { n = String(n).split('').reduce((a, b) => a + +b, 0); steps.push(n); }
+        now = `${_layLbl()} at <b>${fmtInt(Math.round(p))}</b> reduces: ${steps.join(' → ')}. Root <b>${n}</b> = ${_G_DIGIT[n]}.`; }
+      return _laySec('What it is', 'Digit-sum reduction: add all digits of the price repeatedly until one digit remains. Numerology assigns each digit a planet and character (see the meanings in this panel).') +
+        _laySec('Right now', now) +
+        _laySec('How to read', 'Practitioners call prices rooting to 1/5/9 "action numbers", 8 a "Saturn price" (heavy, karmic), 6 "comfortable". A price crossing from one root to the next changes its "flavour".') +
+        _laySec('Reality check', 'The root changes when the price moves ~1 point — any signal that flips on a 1-point move carries no information. Digit-play, honestly labeled.'); },
+    numoDay: () => { const t = new Date();
+      const dig = n => { while (n > 9 && n !== 11 && n !== 22 && n !== 33) n = String(n).split('').reduce((a, b) => a + +b, 0); return n; };
+      const dayN = dig(t.getDate()), univ = dig(t.getDate() + (t.getMonth() + 1) + t.getFullYear());
+      const wl = ['Sun ☉ (Sunday)', 'Moon ☾ (Monday)', 'Mars ♂ (Tuesday)', 'Mercury ☿ (Wednesday)', 'Jupiter ♃ (Thursday)', 'Venus ♀ (Friday)', 'Saturn ♄ (Saturday)'][t.getDay()];
+      return _laySec('Right now', `Today is a <b>${dayN}</b> day-number (${_G_DIGIT[dayN] || 'master number'}) with universal number <b>${univ}</b> (${_G_DIGIT[univ] || 'master number — amplified'}); weekday lord: <b>${wl}</b>.`) +
+        _laySec('What it means', 'The day-number is today\'s date reduced; the universal number reduces the full date. Each maps to a planet whose character numerologists project onto the day (e.g. an 8 day = Saturn = heavy/disciplined; a 5 day = Mercury = fast trading). The weekday lord is the classical planet ruling the weekday — same system as the Vedic hora.') +
+        _laySec('Reality check', 'Day-quality by digit has no evidence behind it. Fine as cultural colour; never a trade reason.'); },
+    numoLevels: 'WHAT: nearby prices whose digits reduce to "strong" roots (1, 5, 9 = action numbers; 8 = Saturn). HOW TO READ: the table lists the nearest price above and below for each root — practitioners treat "9-prices" as completion levels and "8-prices" as heavy resistance. REALITY: every 9th integer roots to 9 — these levels are everywhere by construction. The only conceivable effect is a handful of numerology traders watching the same numbers.',
+    numoWheel: 'WHAT: the 1→9 digit cycle drawn as a wheel, showing where the current price-root sits in the cycle. HOW TO READ: numerology treats the cycle as phases — 1 begins, 5 pivots, 9 completes, then reset. A price "at 9" is read as a move finishing. REALITY: decoration for the root panel above it; same information, prettier shape.',
+    numoCalendar: 'WHAT: upcoming dates with striking digit patterns — repeats (8/8), palindromes (12-02-2021), sequences — plus each date\'s universal number. HOW TO READ: pattern dates get folk attention ("8-8 is a Saturn gate")… and that\'s the whole method. REALITY: fun calendar. Some pattern dates do see social-media buzz, which is the closest thing to a mechanism here.',
+    numoMaster: 'WHAT: prices near the current level containing MASTER numbers — 11, 22, 33 — which numerology treats as amplified (11 = intuition, 22 = the builder, 33 = the teacher) and refuses to reduce further. HOW TO READ: a price like 24,220 "contains 22" and is listed as a master level. REALITY: substring-spotting in decimal representations. Listed because the tradition exists; carries nothing.',
+    numoLoShu: () => { const t = new Date();
+      return _laySec('What it is', 'The Lo Shu — a 3×3 Chinese magic square (every row/column/diagonal sums to 15) used in Vedic-Chinese numerology: today\'s date digits are placed into the grid and the FILLED vs EMPTY cells are read as present/absent energies.') +
+        _laySec('Right now', `Today\'s digits (${t.toLocaleDateString('en-IN')}) populate the grid shown; rows are read as planes — top = mind (4-9-2), middle = emotion (3-5-7), bottom = practical (8-1-6). A complete row/column is called a "raj yoga" of that plane.`) +
+        _laySec('Reality check', 'A 4,000-year-old mathematical curiosity (the magic square is genuinely elegant) wearing a fortune-telling costume. Zero market content — pure cultural artifact.'); },
+    numoSpecial: 'WHAT: flags "special" prices near the market — repdigits (24,444), straights (12,345), palindromes (24,642), powers. HOW TO READ: these do get noticed — you\'ll see 24,444 screenshots on trading Twitter — creating a whisper of focal-point behaviour (tiny order clusters). REALITY: the weakest real effect on this tab, but arguably not zero: humans genuinely gawk at pretty numbers.',
+    numoName: () => _laySec('What it is', 'Chaldean name-numerology: each LETTER carries a number (A=1, B=2, C=3, D=4, E=5, F=8, G=3, H=5, I=1 … — the Chaldean table, not simple position), the company name\'s letters are summed and reduced to a root + a compound number, each with traditional meanings.') +
+      _laySec('Right now', _esoActive() ? `Computed for <b>${_eso.symbol}</b> — the panel shows its name-root and reading.` : 'Load a stock in the instrument bar above and its name gets computed automatically.') +
+      _laySec('How to read', 'Practitioners compare the name-root to "fortunate" numbers (1, 3, 5, 6) vs "karmic" ones (4, 8) and famously blame 8-rooted names for corporate trouble. Some Indian promoters genuinely rename companies over this.') +
+      _laySec('Reality check', 'That renaming happens is a real cultural fact; that it changes returns is not. Entertainment with authentic tradition behind it.'),
+    numoWave: 'WHAT: a sine wave fitted to the 9-digit cycle, drawn over coming days — numerology\'s "biorhythm for the market". HOW TO READ: wave peaks = "9-energy completion days", troughs = "1-energy fresh starts". REALITY: a smooth curve generated from digit cycles contains exactly as much information as the digits: none. The prettiest zero on the tab.',
+    numoLunar: 'WHAT: numerology applied to the LUNAR day (tithi number) instead of the calendar date — double tradition. HOW TO READ: the tithi\'s digit gets the same planet-meanings as the day-number panel. REALITY: stacking two symbolic systems doesn\'t make either real, but tithi-awareness itself has cultural weight in India (see the Vedic tab for the proper treatment).',
+    numoPanchang: 'WHAT: the Hindu almanac elements (tithi, nakshatra, yoga…) each reduced to their index-digit and read numerologically — a bridge panel between this tab and the Vedic tab. HOW TO READ: as flavour text. The real panchang with proper meanings lives on the Vedic tab. REALITY: an index number of a tradition, reduced by another tradition. Twice removed from anything tradeable.',
+    numoPersonal: 'WHAT: YOUR numbers — personal year/month/day computed from the birth date you enter, using the standard numerology formulas (birth day+month+current year, reduced). HOW TO READ: numerology assigns each personal year a theme (1 = new starts … 9 = completion) and practitioners time big decisions by it. REALITY: harmless self-reflection. Keep it firmly away from position sizing — your P&L doesn\'t know your birthday.',
+    numoReality: 'WHAT: this tab\'s conscience — a plain statement of what controlled studies find about numerology (no predictive power, ever, in any domain tested) and why it FEELS like it works (confirmation bias: hits get remembered, misses evaporate). HOW TO READ: once, carefully. Then enjoy the rest of the tab as the cultural artifact it is. REALITY: this panel is the most accurate one here.',
+    numoBenford: 'WHAT: Benford\'s Law — the genuine mathematical fact that in natural datasets, leading digit 1 appears ~30% of the time, 9 only ~4.6% (log distribution). The panel checks recent prices against it. HOW TO READ: conformity is expected and means nothing for direction; big DEVIATIONS in reported figures are what forensic accountants use to sniff manipulation (Benford famously helped expose accounting fraud). REALITY: the one panel on this tab built on real mathematics — included as the honest counterpoint: this is what a TRUE number-pattern looks like, and even it predicts nothing about tomorrow.',
+    // ══ ASTROLOGY ══
+    astroWheel: () => { const L = _planetLongitudes(new Date());
+      const items = Object.entries(L).slice(0, 7).map(([n, lon]) => `${_PLANET_GLYPH[n] || ''}${n} in ${_sidSign(lon).t}`).join(' · ');
+      return _laySec('Right now', items) +
+        _laySec('What it is', 'The zodiac as a wheel with each planet placed at its current degree — the reference picture every other astro panel reads from. The zodiac is simply the Sun\'s apparent yearly path split into twelve 30° segments, each with an ancient character (see Positions below for meanings).') +
+        _laySec('Reality check', 'The positions are real astronomy (computed from orbital elements, accurate to ~1°). Everything read INTO them is tradition.'); },
+    astroPositions: () => { const L = _planetLongitudes(new Date());
+      const rows = Object.entries(L).slice(0, 7).map(([n, lon]) => { const g = _sidSign(lon); return `<div style="margin-top:2px;">${_PLANET_GLYPH[n] || ''} <b>${n}</b> (${_G_PLANET[n] ? _G_PLANET[n].split(' — ')[0] : ''}) in ${_signStr(g)}</div>`; }).join('');
+      return _laySec('Right now — each planet, what it "rules", and the sign it\'s in', rows) +
+        _laySec('How to read', 'Astro-finance reads a planet\'s sign as colouring its themes — e.g. Saturn (restriction) in an Earth sign = "slow grind in tangible sectors". Slow planets (Jupiter ~1yr/sign, Saturn ~2.5yr/sign) define eras; fast ones add daily texture.') +
+        _laySec('Reality check', 'Astronomy real, interpretation traditional, market effect: none demonstrated. The sign meanings above are the standard Western/Vedic blend used in Indian astro-finance.'); },
+    astroAspects: () => {
+      const rows = Object.entries(_G_ASPECT).map(([n, d]) => `<div style="margin-top:2px;"><b>${n}</b>: ${d}</div>`).join('');
+      return _laySec('What it is', 'Aspects are specific ANGLES between two planets as seen from Earth. The panel lists which pairs are in aspect today (within a few degrees of exact — the "orb").') +
+        _laySec('The five classical aspects', rows) +
+        _laySec('How to read', 'Lore combines the planets\' meanings through the angle\'s nature: Jupiter (expansion) square Saturn (restriction) = "growth fighting limits" = tension; Venus trine Jupiter = "money flowing easily". Tighter orb = stronger claim.') +
+        _laySec('Reality check', 'Angles between planets have no channel to order flow. Aspect dates ARE watched in astro-finance circles, making them weak attention-dates at most.'); },
+    astroUpcoming: 'WHAT: the forward calendar of EXACT aspects — the dates when planet pairs hit their precise angles (the moment lore considers the aspect "perfected" and strongest). HOW TO READ: astro-traders mark exact-dates of slow-planet aspects (Jupiter/Saturn pairs) as multi-week mood shifts, and fast-planet exacts as day-flavour. REALITY: an ephemeris calendar — real astronomy, traditional meanings, no validated market effect. Its only power is shared attention on the same dates.',
+    astroRetro: () => { const t = new Date(), t2 = new Date(t.getTime() - 2 * 86400000);
+      const L1 = _planetLongitudes(t), L0 = _planetLongitudes(t2);
+      const retro = Object.keys(L1).filter(n => n !== 'Sun' && n !== 'Moon' && ((L1[n] - L0[n] + 540) % 360 - 180) < 0);
+      return _laySec('Right now', retro.length ? `Currently retrograde: <b>${retro.join(', ')}</b>.` : 'No planets retrograde at the moment.') +
+        _laySec('What retrograde actually is', 'An optical illusion: as Earth overtakes (or is overtaken by) another planet, that planet APPEARS to move backwards against the stars for weeks. Nothing changes physically — it\'s the view from a moving platform.') +
+        _laySec('The lore', 'Retrogrades are read as the planet\'s themes turning inward/glitchy — Mercury retrograde (3-4× a year) is folklore\'s favourite scapegoat for miscommunication and botched trades; Venus retro = money matters revisited; Mars retro = stalled aggression.') +
+        _laySec('Reality check', 'Studies find no Mercury-retrograde effect on returns or volatility. Its fame IS its only effect: some traders genuinely hesitate during it.'); },
+    astroLines: 'WHAT: each planet\'s sky degree converted to a PRICE (wheel scaled to the instrument — "drop the zeros"), giving a horizontal line per planet. HOW TO READ: slow planets (Jupiter/Saturn) give lines that barely move for months — astro-traders treat those as standing S/R; the Moon\'s line sweeps the whole wheel monthly and is ignored for levels. Price touching a slow line is their signal to watch. REALITY: the mapping from sky angle to rupees is arbitrary at every step (which wheel? which scale?). Decoration with coordinates.',
+    astroBradley: 'WHAT: Donald Bradley\'s 1948 "siderograph" — every planet-pair\'s angle is scored (harmonious angles +, discordant −, 15° orb), weighted (slow pairs ×3), summed with a Venus+Mars declination term into ONE curve. Its BENDS are claimed as market turn dates. HOW TO READ: dots mark upcoming inflections ±4 days — a claimed turn WINDOW, direction unspecified (Bradley himself insisted the curve\'s up/down means nothing, only the timing of bends). HONEST STATUS: the most famous astro-finance tool ever built; tested repeatedly, never validated. The engine here is the real formula (Moon excluded per spec, outer planets on J2000 elements) — a faithful reproduction of a beautiful null result.',
+    astroNatal: 'WHAT: the Nifty\'s "birth chart" — planet positions at the index\'s launch (22 Apr 1996) — with today\'s planets compared against it ("transits"). A transit hitting a natal position is read as activating that natal theme. HOW TO READ: astro-finance treats transit-Saturn touching a natal point as pressure/tests, transit-Jupiter as expansion windows. The tighter the orb, the louder the claim. REALITY: applying birth-chart astrology to a stock index\'s incorporation date is lore squared — but it\'s exactly what financial astrologers in India actually do, so it\'s reproduced faithfully.',
+    astroMoon: () => { const e = _eclipticLongitudes(new Date());
+      const el = ((e.moon - e.sun) % 360 + 360) % 360;
+      const ill = Math.round((1 - Math.cos(el * Math.PI / 180)) / 2 * 100);
+      const ph = el < 20 || el > 340 ? 'New Moon 🌑 (Amavasya)' : Math.abs(el - 180) < 20 ? 'Full Moon 🌕 (Purnima)' : el < 180 ? 'Waxing 🌒 (Shukla paksha — brightening)' : 'Waning 🌘 (Krishna paksha — darkening)';
+      const g = _sidSign(e.moon - _astAyanamsa(new Date()));
+      return _laySec('Right now', `<b>${ph}</b>, ${ill}% illuminated, Moon in ${_signStr(g)}.`) +
+        _laySec('Why the Moon gets its own panel', 'It\'s the ONE astro body with peer-reviewed market literature: Dichev &amp; Janes (2003) and Yuan, Zheng &amp; Zhu (2006) found returns around full moons ran modestly LOWER than around new moons across dozens of countries — a real published anomaly, though small, contested, and faded in later replications.') +
+        _laySec('The lore layer', 'Waxing = building/accumulation, waning = release/decline; the Moon\'s sign colours the public mood (Moon rules "the masses" in tradition).') +
+        _laySec('Reality check', 'Even the published effect was too small to trade after costs. Interesting; not actionable.'); },
+    astroHours: 'WHAT: planetary hours — the ancient system dividing daylight into 12 unequal "hours", each ruled by a planet in the Chaldean order (Saturn→Jupiter→Mars→Sun→Venus→Mercury→Moon, repeating). The weekday itself is named for its first hour\'s ruler — that\'s literally why Saturday is Saturn\'s day. HOW TO READ: tradition times activities to matching hours (money matters in Venus/Jupiter hours; avoid Saturn/Mars hours for new ventures). REALITY: a genuinely elegant piece of calendar history — the source of our weekday names — with zero market content. The Vedic tab\'s Hora panel is the same system in Indian dress.',
+    astroSeasonality: 'WHAT: month-of-year and turn-of-month tendencies — the one panel here based on REAL statistics. Documented effects include the turn-of-month effect, year-end/January patterns, and "sell in May" seasonality — all published, all debated, all far weaker than folklore claims. HOW TO READ: treat as base-rate context ("this month has historically leaned X") never as a signal; effects are small, unstable, and often arbitraged once famous. REALITY: MEASURED tier — actual return statistics — placed on this tab because tradition claims the calendar, but only this panel earns it with data.',
+    // ══ VEDIC ══
+    vedicDasha: 'WHAT: the Vimshottari dasha — Vedic astrology\'s master TIMING system. Life (here: the Nifty\'s "life" since its 1996 launch) is divided into planetary periods totalling 120 years: Ketu 7y → Venus 20y → Sun 6y → Moon 10y → Mars 7y → Rahu 18y → Jupiter 16y → Saturn 19y → Mercury 17y, each subdivided into sub-periods (antardasha) in the same order. The starting point comes from the Moon\'s nakshatra at "birth". HOW TO READ: the running mahadasha (major period) sets the era\'s theme per the ruling planet — a Venus dasha is read as comfortable/prosperous, Saturn as disciplined/heavy, Rahu as speculative/manic (see each planet\'s meaning in the Positions note on the Astro tab). The antardasha adds a second flavour: "Rahu-Saturn" reads as speculation meeting restriction. REALITY: applying a life-timing system to an index\'s launch date is pure tradition — but it\'s precisely what Indian financial astrologers publish, reproduced here faithfully.',
+    vedicBirth: 'WHAT: the Nifty\'s janma kundali — its Vedic birth chart, cast for the launch moment (22 Apr 1996), showing each planet\'s sidereal sign at "birth". This chart is the fixed reference the Dasha, transit, and Ashtakavarga panels all measure against. HOW TO READ: in Vedic tradition the birth Moon\'s nakshatra seeds the dasha sequence; natal planet strengths colour how their periods play out. You don\'t trade this panel — you use it to understand what the others are pointing at. REALITY: real ephemeris math on an arbitrary "birth" — the founding document of a beautiful fiction.',
+    vedicNodes: () => { const norm = x => ((x % 360) + 360) % 360;
+      const d0 = _astDays(new Date());
+      const rahuLon = norm(125.1228 - 0.0529538083 * d0) - _astAyanamsa(new Date());
+      const gR = _sidSign(rahuLon), gK = _sidSign(rahuLon + 180);
+      return _laySec('Right now', `<b>Rahu in ${gR.v} (${gR.t} ${gR.sym})</b> and <b>Ketu in ${gK.v} (${gK.t} ${gK.sym})</b> — they\'re always exactly opposite.`) +
+        _laySec('What Rahu and Ketu ARE', `${_G_PLANET.Rahu}. ${_G_PLANET.Ketu}.`) +
+        _laySec('What the signs add', `Rahu\'s sign shows WHERE the amplification/obsession expresses: ${gR.v} = ${gR.th}. Ketu\'s sign shows what\'s being released/dissolved: ${gK.v} = ${gK.th}.`) +
+        _laySec('Why traders watch them', 'The nodes creep backwards ~19°/year, changing sign every ~18 months — those ingress dates are circled in Indian astro-finance as regime shifts. And eclipses can ONLY happen near the nodes, which is why eclipse windows (see Lunar Calendar) exist at all — that part is real astronomy.') +
+        _laySec('Reality check', 'The nodes are geometry (orbit intersections), not bodies; their "influence" is tradition. The eclipse mechanics are real; the market meanings are not evidence-based.'); },
+    vedicDrishti: 'WHAT: drishti ("glance") — Vedic aspects, which differ from Western ones: every planet aspects the 7th sign from itself, and three get EXTRA glances — Mars also hits the 4th &amp; 8th, Jupiter the 5th &amp; 9th, Saturn the 3rd &amp; 10th. The panel shows today\'s active glances. HOW TO READ: a planet\'s aspect projects its nature onto the target — Saturn\'s glance is read as delay/pressure on whatever it touches, Jupiter\'s as protection/growth, Mars\'s as agitation. In market lore: Saturn aspecting the Moon = public mood under pressure. REALITY: a rule-set with internal logic and external silence — no measurable market linkage. Included because no Vedic toolkit is complete without it.',
+    vedicChoghadiya: 'WHAT: the trading day sliced into ~90-minute muhurta blocks, each labelled auspicious or not: Amrit (nectar — best), Shubh (auspicious), Labh (gain), Char (movement — neutral-good), Rog (disease), Kaal (death), Udveg (anxiety) — the "avoid" three. The sequence rotates by weekday. HOW TO READ: tradition starts ventures in Amrit/Shubh/Labh and avoids Rog/Kaal/Udveg; some Indian traders genuinely schedule entries this way, and Muhurat trading (Diwali) is this system writ large on the whole exchange. REALITY: the cultural practice is real and marginally shapes intraday flow; the metaphysics is not. Crowd-context, thin but nonzero.',
+    vedicHora: 'WHAT: the Vedic planetary hour — each hour of the day ruled by a planet in the Chaldean sequence, starting from the weekday\'s lord at sunrise (identical system to the Astro tab\'s "planetary hours"; hora is its Sanskrit name — and the source of the English word "hour"). HOW TO READ: money matters favoured in Jupiter/Venus/Mercury horas; Saturn/Mars horas traditionally avoided for fresh positions. REALITY: gorgeous etymology, zero alpha.',
+    vedicPanchang: () => { const e = _eclipticLongitudes(new Date());
+      const el = ((e.moon - e.sun) % 360 + 360) % 360;
+      const tn = Math.floor(el / 12); const grp = _G_TITHI_GROUP[tn % 5];
+      const nakIdx = Math.floor((((e.moon - _astAyanamsa(new Date())) % 360) + 360) % 360 / (360 / 27));
+      return _laySec('Right now', `Tithi <b>${_TITHI[tn % 15]}</b> (#${tn % 15 + 1} of the ${tn < 15 ? 'Shukla/waxing' : 'Krishna/waning'} fortnight) — group <b>${grp}</b>. Moon\'s nakshatra: <b>${_NAKSHATRA[nakIdx]}</b>.`) +
+        _laySec('The five limbs, in plain words', '<b>Vara</b> = weekday (with its planet lord). <b>Tithi</b> = lunar day — each 12° the Moon gains on the Sun; 15 per fortnight; grouped into five repeating qualities: Nanda(joy)/Bhadra(health)/Jaya(victory)/Rikta(empty — avoided for starts)/Purna(complete). <b>Nakshatra</b> = which of 27 lunar mansions (13°20′ each) the Moon occupies — each has its own deity and temperament. <b>Yoga</b> = a Sun+Moon angle cycle (27 of them). <b>Karana</b> = half a tithi.') +
+        _laySec('Rahu Kaal', 'The day\'s ~90-minute "avoid new ventures" slot — 1/8th of daylight, position rotating by weekday. Widely respected in Indian business culture; the panel flags it live.') +
+        _laySec('Reality check', 'The panchang is real, ancient calendar astronomy — the interpretive layer (auspicious/inauspicious) is tradition. Its market relevance is purely that many Indian participants observe it.'); },
+    vedicLunarCal: 'WHAT: every new moon (Amavasya 🌑) and full moon (Purnima 🌕) for the next 60 days, each checked against the lunar NODE — syzygies within the ecliptic limits get an ECLIPSE WINDOW flag, because eclipses can only occur when the Moon is near a node at new/full. This detector correctly identifies real eclipses (validated against the actual 2026 pair). HOW TO READ: ★ rows = possible eclipse (±1-2 days precision, mean-node approximation). Eclipse dates carry enormous cultural weight in India — temples close, ritual baths, and yes, some traders square off. WHY IT\'S HERE: the lunar cycle is the single astro claim with peer-reviewed literature (small, contested full-moon return effect — Dichev &amp; Janes 2003), and eclipse attention in India is a genuine crowd phenomenon. The astronomy is exact; the meanings are borrowed.',
+    vedicNavamsa: 'WHAT: the Navamsa (D9) — Vedic astrology\'s most important divisional chart: each sign is split into nine 3°20′ slices and remapped, producing a second zodiac position for every planet. Tradition treats D9 as the "fruit" behind the main chart\'s "tree" — a planet strong in both charts (vargottama) is considered truly strong. HOW TO READ: compare a planet\'s main-chart sign to its D9 sign; agreement = conviction, contradiction = the theme is weaker than it looks. In market lore, applied to the Nifty natal chart. REALITY: an intricate, internally-consistent refinement of a system with no external validity. Deep tradition, faithfully computed.',
+    vedicAshtaka: 'WHAT: Ashtakavarga — Vedic astrology\'s POINT-SCORING system: each of 7 planets contributes benefic points to each sign based on classical rules, giving every sign a 0-8 score (and the whole zodiac a 337-point budget). Signs scoring 30+ in the combined (sarva) table are "strong houses"; below 25, weak. HOW TO READ: transits through high-scoring signs are read as smooth, through low-scoring as obstructed — so lore watches, e.g., Saturn entering a weak sign as a rough patch. REALITY: essentially a spreadsheet from 1,500 years ago — genuinely systematic, admirably quantified, and never once validated against returns. The most "quant-looking" piece of pure lore on the dashboard.',
+    vedicConfluence: 'WHAT: the tab\'s roll-up — dasha lord condition, node placements, panchang quality, hora, and transit scores merged into one daily Vedic reading. HOW TO READ: as the tradition\'s overall "weather report" for the day — the same way a panchang column in a Hindi daily reads. Remember what feeds it: every input is lore-tier, so the aggregate is too (averaging ten guesses is still a guess). REALITY: useful as a one-glance summary OF THE TRADITION, never as a signal. For real levels, the Levels tab; for real positioning, the option chain.',
+      // ══ LEVELS (preserved) ══
+    lvlMaster: 'THE summary panel: every level system on this tab (and option-market walls, on index) merged into one ladder, scored by how many systems agree. A price where 3-4 different methods stack up is a stronger zone than any single method. Start here.',
+    lvlStats: 'How often price has respected each level type recently — a running scorecard so you can see which systems have actually been working.',
+    lvlAvwap: 'Volume-weighted average price anchored to a date — the average price real money paid since then. Above it = buyers since the anchor are in profit. Index only (needs recorded intraday data).',
+    lvlGapOrb: 'Today\'s opening gap and the first-hour range (ORB). Breaks of the first-hour high/low are a classic momentum trigger — this is real, widely-used intraday structure.',
+    lvlCpr: 'Central Pivot Range — three lines from yesterday\'s prices. Narrow CPR → market often trends that day; wide → often stays rangebound. Price above = bullish lean, below = bearish, inside = undecided. Hugely watched in India, so it partly works because everyone watches it.',
+    lvlCamarilla: 'Reversal lines (H3/L3) and breakout lines (H4/L4) from yesterday\'s range. The standard read: fade moves at H3/L3, go with moves through H4/L4. Same "everyone watches it" power as CPR.',
+    lvlMurrey: 'Divides the recent range into eighths with rule-of-thumb meanings (8/8 = hard ceiling, 4/8 = pivot). A cousin of Gann eighths with a fixed frame.',
+    lvlFibClusters: 'Fibonacci retracements drawn from several swings at once; where different swings\' fibs LAND ON THE SAME PRICE, that cluster is the interesting level.',
+    lvlRound: 'Nearest round numbers. Genuinely real: orders cluster at 24,000-type prices because humans think in round numbers.',
+    lvlSq12: 'A fine 12-step grid (auto-scaled on stocks) from the day\'s low. Gann micro-levels for intraday scalping context.',
+    lvlHarmonic: 'Musical/harmonic ratios applied to price (octaves, fifths). The most speculative panel here — decorative.',
+    lvlTpo: 'Time-at-price profile: which prices the market SPENT TIME at today. Prices with lots of time = accepted value; thin prices = rejection zones. Real market-structure data (index).',
+    lvlMpStats: 'Summary numbers from the profile above (value area, point of control). The value-area edges often act as support/resistance — real structure.',
+    lvlTod: 'Time-of-day tendencies (open drive, lunch lull, closing hour). Real intraday rhythm statistics.',
+  };
+
+  function _laymanBody(id) {
+    const v = _LAYMAN[id];
+    try { return typeof v === 'function' ? v() : v; }
+    catch (e) { return typeof v === 'string' ? v : 'Explanation unavailable until data loads — open the tab with a chain or stock loaded.'; }
+  }
+  function _injectAllLayman() {
+    for (const id of Object.keys(_LAYMAN)) {
+      const el = document.getElementById(id);
+      if (!el || el._laymanDone) continue;
+      el._laymanDone = true;
+      const det = document.createElement('details');
+      det.className = 'layman-note';
+      det.innerHTML = `<summary>❓ How to read this (plain language)</summary><div class="layman-body" data-layman="${id}">${_laymanBody(id)}</div>`;
+      el.insertAdjacentElement('afterend', det);
+    }
+  }
+  // Re-evaluate the dynamic notes so they describe the CURRENT values.
+  function _refreshLayman() {
+    document.querySelectorAll('.layman-body[data-layman]').forEach(b => {
+      const v = _LAYMAN[b.dataset.layman];
+      if (typeof v === 'function') b.innerHTML = _laymanBody(b.dataset.layman);
+    });
+  }
+  _injectAllLayman();   // safe here: _LAYMAN is initialized just above, DOM already parsed
+
   function renderTodayTab() {
     const out = document.getElementById('todayContent');
     if (!out) return;
@@ -9560,11 +10388,249 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         `<div style="font-size:11px;">Rahu Kaal: <b style="color:${active ? 'var(--neg)' : 'inherit'}">${fmtT(rkStart)}–${fmtT(rkEnd)}</b> ${active ? '<span style="color:var(--neg)">ACTIVE</span>' : ''}<br><span class="oc-sub">${now.toLocaleDateString('en-IN', { weekday: 'long' })} · avoid-new-trades window per tradition</span></div>`,
         'context'));
     } catch (_) {}
+    // ── ⏰ Trade windows today: session structure + cultural overlays ──
+    try {
+      const tchip = t => `<span style="font-size:7.5px;font-weight:700;letter-spacing:0.4px;padding:1px 4px;border-radius:3px;background:${t === 'CROWD' ? 'rgba(212,175,55,0.15);color:var(--gold)' : t === 'MEASURED' ? 'rgba(38,166,154,0.15);color:var(--pos)' : 'rgba(120,136,153,0.15);color:var(--muted)'};">${t}</span>`;
+      const now2 = new Date();
+      const mins = now2.getHours() * 60 + now2.getMinutes();
+      const inWin = (a, b) => mins >= a && mins < b;
+      const winRow = (t0, t1, name, read, tier, avoid) => {
+        const active = inWin(t0, t1);
+        const f = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+        return `<div style="display:flex;gap:6px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;${active ? 'background:rgba(212,175,55,0.08);border-left:2px solid var(--gold);' : ''}">
+          <span style="min-width:88px;font-size:10px;font-weight:700;color:${avoid ? 'var(--red,#ef5350)' : 'var(--pos,#26a69a)'};">${f(t0)}–${f(t1)}</span>
+          <span style="font-size:10px;font-weight:700;">${name}${active ? ' ◀ NOW' : ''}</span>
+          ${tchip(tier)}
+          <span style="font-size:9.5px;color:#9ab;flex-basis:100%;padding-left:2px;">${read}</span>
+        </div>`;
+      };
+      const isTue = now2.getDay() === 2;
+      let wRows =
+        winRow(555, 585, 'Opening drive', 'Highest volume + volatility of the day (documented U-shape pattern). Fast, gappy moves — best for PREPARED momentum entries with stops; worst for reactive chasing. Many pros watch the first 15-30 min without trading.', 'MEASURED', false) +
+        winRow(585, 660, 'Trend establishment', 'The day\'s direction is often set here — first VWAP tests, opening-range breaks (see Gap/ORB on Levels). The highest-quality trend entries typically live in this window.', 'MEASURED', false) +
+        winRow(660, 810, 'Midday lull', 'Volume dries up, ranges compress, false breakouts multiply — statistically the weakest edge of the day. Mean-reversion scalps only, or sit out. "No trade" is a position.', 'MEASURED', true) +
+        winRow(810, 870, 'Afternoon build', 'Institutions position for the close; volume returns gradually. Trends resuming from the lull often make their second leg here.', 'MEASURED', false) +
+        winRow(870, 930, 'Closing hour', 'Volume spikes again (the U-shape\'s right side): MOC flows, day-trader square-off' + (isTue ? ', and — TODAY IS TUESDAY — weekly expiry gamma: pinning/whips around max-pain strikes intensify after 14:30' : '') + '. Fast but crowded.', 'MEASURED', false);
+      // cultural overlays (computed live)
+      try {
+        if (typeof _sunriseSunset === 'function') {
+          const { rise, set } = _sunriseSunset(now2, 19.076, 72.877);
+          const slot = { 0: 8, 1: 2, 2: 7, 3: 5, 4: 6, 5: 4, 6: 3 }[now2.getDay()] - 1;
+          const dl = (set - rise) / 8;
+          const rs = new Date(rise.getTime() + slot * dl), re3 = new Date(rs.getTime() + dl);
+          const m0 = rs.getHours() * 60 + rs.getMinutes(), m1 = re3.getHours() * 60 + re3.getMinutes();
+          wRows += winRow(m0, m1, '⚠ Rahu Kaal', 'The traditional "avoid new ventures" window — no causal force, but a real slice of Indian flow genuinely avoids initiating here, and it overlaps market hours today as shown.', 'LORE', true);
+          const noon = new Date((rise.getTime() + set.getTime()) / 2), ml = (set - rise) / 15;
+          const a0 = new Date(noon.getTime() - ml / 2), a1 = new Date(noon.getTime() + ml / 2);
+          wRows += winRow(a0.getHours() * 60 + a0.getMinutes(), a1.getHours() * 60 + a1.getMinutes(), '✦ Abhijit Muhurta', 'Tradition\'s most auspicious daily window (~24 min around solar noon) — the mirror of Rahu Kaal. Cultural context only.', 'LORE', false);
+        }
+      } catch (_) {}
+      blocks.push(`<div class="skew-chart-wrap" style="margin:0;grid-column:1 / -1;">
+        <div class="skew-chart-head"><span class="skew-chart-title">⏰ Trade windows today — ${now2.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short' })}${isTue ? ' · WEEKLY EXPIRY DAY' : ''}</span><span style="font-size:8px;color:var(--muted);font-weight:700;">WHEN TO TRADE / STAND ASIDE</span></div>
+        <div style="padding:2px 0;">${wRows}
+        <div class="oc-sub" style="margin-top:5px;">Session structure (green/red times) is real, documented microstructure — the intraday volume "U-shape". The highlighted row is where you are right now. Overlay rows are tradition, chipped LORE. None of this replaces your setup rules; it tells you when the market\'s odds are with or against activity itself.</div></div></div>`);
+    } catch (_) {}
+
+    // ── 📅 Significant dates — next 3 months ──
+    try {
+      const tchip2 = t => `<span style="font-size:7.5px;font-weight:700;letter-spacing:0.4px;padding:1px 4px;border-radius:3px;background:${t === 'CROWD' ? 'rgba(212,175,55,0.15);color:var(--gold)' : t === 'MEASURED' ? 'rgba(38,166,154,0.15);color:var(--pos)' : 'rgba(120,136,153,0.15);color:var(--muted)'};">${t}</span>`;
+      const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+      const horizon = new Date(t0); horizon.setDate(horizon.getDate() + 92);
+      const evts = [];
+      // monthly expiries: last Tuesday of each month in window (NSE cycle; holidays shift)
+      for (let m = 0; m < 4; m++) {
+        const d1 = new Date(t0.getFullYear(), t0.getMonth() + m + 1, 0);
+        while (d1.getDay() !== 2) d1.setDate(d1.getDate() - 1);
+        if (d1 >= t0 && d1 <= horizon) evts.push({ d: new Date(d1), name: 'Monthly F&O expiry', why: 'Largest OI unwind of the month — elevated volume, pinning battles, and post-expiry drift. The single most reliable "big activity" date on the calendar.', tier: 'MEASURED' });
+      }
+      // eclipse windows via syzygy + node scan (validated engine)
+      try {
+        const norm = x => ((x % 360) + 360) % 360;
+        const nodeLon = dd => norm(125.1228 - 0.0529538083 * dd);
+        let prevEl = null;
+        for (let k = 0; k <= 92; k++) {
+          const dt = new Date(t0); dt.setDate(dt.getDate() + k); dt.setHours(12, 0, 0, 0);
+          const e4 = _eclipticLongitudes(dt);
+          const el4 = norm(e4.moon - e4.sun);
+          if (prevEl !== null) {
+            const cN = prevEl > 300 && el4 < 60, cF = prevEl < 180 && el4 >= 180;
+            if (cN || cF) {
+              const N = nodeLon(_astDays(dt));
+              const dd2 = a => { a = norm(a); return a > 180 ? 360 - a : a; };
+              const dN = Math.min(dd2(e4.moon - N), dd2(e4.moon - N - 180));
+              if (dN < (cN ? 17 : 12)) evts.push({ d: new Date(dt), name: cN ? 'Solar eclipse window 🌑' : 'Lunar eclipse window 🌕', why: `Moon ${dN.toFixed(0)}° from node at ${cN ? 'new' : 'full'} moon (±1-2d). Heavily watched culturally in India — some flow squares off; an attention date, not a force.`, tier: 'CROWD' });
+            }
+          }
+          prevEl = el4;
+        }
+      } catch (_) {}
+      // Bradley turns in window
+      try {
+        if (typeof _bradleyValue === 'function') {
+          const vs = [];
+          for (let k = 0; k <= 92; k++) { const dd3 = new Date(t0); dd3.setDate(dd3.getDate() + k); vs.push(_bradleyValue(dd3)); }
+          for (let i = 2; i < vs.length - 2; i++) {
+            const w = vs.slice(i - 2, i + 3);
+            if (vs[i] === Math.max(...w) || vs[i] === Math.min(...w)) {
+              const dd4 = new Date(t0); dd4.setDate(dd4.getDate() + i);
+              evts.push({ d: dd4, name: `Bradley turn-${vs[i] === Math.max(...w) ? 'high' : 'low'}`, why: 'Claimed astro turn window ±4d (direction meaningless per Bradley himself). Zero validated edge — listed because astro-finance circles watch these dates.', tier: 'LORE' });
+            }
+          }
+        }
+      } catch (_) {}
+      // solar dates in window
+      for (const [mm, dd5, nm] of [[2, 20, 'Equinox'], [5, 21, 'Solstice'], [8, 22, 'Equinox'], [11, 21, 'Solstice']]) {
+        for (const yr of [t0.getFullYear(), t0.getFullYear() + 1]) {
+          const sd = new Date(yr, mm, dd5);
+          if (sd >= t0 && sd <= horizon) evts.push({ d: sd, name: nm + ' ☀', why: 'Gann\'s seasonal power date. Real market seasonality exists, but doesn\'t pivot on astronomical days — calendar lore.', tier: 'LORE' });
+        }
+      }
+      evts.sort((a, b) => a.d - b.d);
+      const fmtD2 = d => d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
+      const eRows = evts.slice(0, 14).map(ev => {
+        const away = Math.round((ev.d - t0) / 86400000);
+        return `<div style="display:flex;gap:6px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;">
+          <span style="min-width:96px;font-size:10px;font-weight:700;">${fmtD2(ev.d)}</span>
+          <span style="font-size:10px;font-weight:700;">${ev.name}</span>
+          <span style="font-size:9px;color:var(--muted);">+${away}d</span>
+          ${tchip2(ev.tier)}
+          <span style="font-size:9.5px;color:#9ab;flex-basis:100%;padding-left:2px;">${ev.why}</span>
+        </div>`;
+      }).join('');
+      blocks.push(`<div class="skew-chart-wrap" style="margin:0;grid-column:1 / -1;">
+        <div class="skew-chart-head"><span class="skew-chart-title">📅 Significant dates — next 3 months</span><span style="font-size:8px;color:var(--muted);font-weight:700;">BIG-MOVE CANDIDATES</span></div>
+        <div style="padding:2px 0;">${eRows}
+        <div class="oc-sub" style="margin-top:5px;">Computed from what this tool can know: expiry cycle (assumes NSE Tuesday expiries — holidays shift them, verify against the exchange calendar), the validated eclipse detector, Bradley inflections, and solar dates. The genuinely biggest movers — <b>RBI MPC, US Fed, Union Budget, results season, elections</b> — are announced dates this offline tool can\'t compute: overlay them from the RBI/Fed/NSE calendars. Weekly (every Tuesday) expiries are omitted to avoid noise; monthlies listed.</div></div></div>`);
+    } catch (_) {}
+
+    // ── 🧭 Cross-tab digest: one plain-language line from each esoteric tab ──
+    try {
+      const digRows = [];
+      const chip = t => `<span style="font-size:7.5px;font-weight:700;letter-spacing:0.4px;padding:1px 4px;border-radius:3px;background:${t === 'CROWD' ? 'rgba(212,175,55,0.15);color:var(--gold)' : t === 'MEASURED' ? 'rgba(38,166,154,0.15);color:var(--pos)' : 'rgba(120,136,153,0.15);color:var(--muted)'};">${t}</span>`;
+      const row = (icon, label, val, read, tier) =>
+        `<div style="display:flex;gap:6px;align-items:baseline;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;">
+          <span style="min-width:110px;font-size:10px;font-weight:700;">${icon} ${label}</span>
+          <span style="font-size:10.5px;color:#dde;">${val}</span>
+          ${chip(tier)}
+          <span style="font-size:9.5px;color:#9ab;flex-basis:100%;padding-left:2px;">${read}</span>
+        </div>`;
+      const digestPrice = _esoActive() ? _eso.price : price;
+      const digestLbl = _esoActive() ? _eso.symbol : (state.symbol || 'NIFTY');
+      // CPR (Levels)
+      try {
+        const o = _lvlOhlc();
+        if (o) {
+          const cpr = computeCpr(o.h, o.l, o.c);
+          const posTxt = digestPrice > cpr.TC ? 'above the CPR → bullish lean; the band below may act as a floor'
+                        : digestPrice < cpr.BC ? 'below the CPR → bearish lean; the band above may act as a ceiling'
+                        : 'inside the CPR → market undecided; wait for it to pick a side';
+          const wTxt = cpr.widthPct < 0.25 ? 'Narrow band → trending day more likely.' : cpr.widthPct > 0.55 ? 'Wide band → rangy day more likely.' : '';
+          digRows.push(row('🎯', 'CPR (Levels)', `${fmtInt(Math.round(cpr.BC))}–${fmtInt(Math.round(cpr.TC))} (${cpr.widthPct.toFixed(2)}%)`, `Price is ${posTxt}. ${wTxt}`, 'CROWD'));
+        }
+      } catch (_) {}
+      // Gann Sq9 nearest (Gann)
+      try {
+        const r = Math.sqrt(digestPrice);
+        const up = Math.pow(r + 0.25, 2), dn = Math.pow(r - 0.25, 2);
+        digRows.push(row('📐', 'Gann Sq9', `support ~${fmtInt(Math.round(dn))} · resistance ~${fmtInt(Math.round(up))}`,
+          'The nearest "spiral" prices above and below. Only meaningful if price actually reacts there — watch, don\'t assume.', 'LORE'));
+      } catch (_) {}
+      // Numerology (day + price root)
+      try {
+        const dig = n => { n = Math.abs(Math.round(n)); while (n > 9) n = String(n).split('').reduce((a, b) => a + +b, 0); return n; };
+        const t2 = new Date();
+        const dayRoot = dig(t2.getDate() + (t2.getMonth() + 1) + t2.getFullYear());
+        digRows.push(row('🔢', 'Numerology', `day number ${dayRoot} · price root ${dig(digestPrice)}`,
+          'Digit-sum play. No mechanism — listed because the tab exists; never a reason to trade.', 'LORE'));
+      } catch (_) {}
+      // Bradley next turn (Astro)
+      try {
+        if (typeof _bradleyValue === 'function') {
+          const t0 = new Date(); t0.setHours(9, 15, 0, 0);
+          const vs = [];
+          for (let k = 0; k <= 45; k++) { const dd = new Date(t0); dd.setDate(dd.getDate() + k); vs.push(_bradleyValue(dd)); }
+          let turn = null;
+          for (let i = 2; i < vs.length - 2 && !turn; i++) {
+            const w = vs.slice(i - 2, i + 3);
+            if (vs[i] === Math.max(...w) || vs[i] === Math.min(...w)) turn = { k: i, kind: vs[i] === Math.max(...w) ? 'high' : 'low' };
+          }
+          if (turn) {
+            const td = new Date(t0); td.setDate(td.getDate() + turn.k);
+            digRows.push(row('📉', 'Bradley (Astro)', `next claimed turn-${turn.kind}: ${td.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} (±4d)`,
+              'A 1948 planetary formula\'s next inflection. Zero validated edge — a calendar curiosity.', 'LORE'));
+          }
+        }
+      } catch (_) {}
+      // Panchang + Rahu Kaal (Vedic)
+      try {
+        const e2 = _eclipticLongitudes(new Date());
+        const el2 = ((e2.moon - e2.sun) % 360 + 360) % 360;
+        const tn = Math.floor(el2 / 12);
+        const paksha = tn < 15 ? 'Shukla (waxing)' : 'Krishna (waning)';
+        let rk = '';
+        if (typeof _sunriseSunset === 'function') {
+          const { rise, set } = _sunriseSunset(new Date(), 19.076, 72.877);
+          const slot = { 0: 8, 1: 2, 2: 7, 3: 5, 4: 6, 5: 4, 6: 3 }[new Date().getDay()] - 1;
+          const dl = (set - rise) / 8;
+          const rs = new Date(rise.getTime() + slot * dl), re2 = new Date(rs.getTime() + dl);
+          const ft = d2 => d2.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+          rk = ` · Rahu Kaal ${ft(rs)}–${ft(re2)}`;
+        }
+        digRows.push(row('🕉', 'Vedic (Panchang)', `tithi ${tn % 15 + 1} ${paksha}${rk}`,
+          'Hindu-calendar day + the traditional "avoid new ventures" window. Cultural context some Indian flow respects.', 'LORE'));
+      } catch (_) {}
+      // Moon phase (Astro/Vedic bridge)
+      try {
+        const e3 = _eclipticLongitudes(new Date());
+        const el3 = ((e3.moon - e3.sun) % 360 + 360) % 360;
+        const ill = Math.round((1 - Math.cos(el3 * Math.PI / 180)) / 2 * 100);
+        const phase = el3 < 20 || el3 > 340 ? 'New moon 🌑' : Math.abs(el3 - 180) < 20 ? 'Full moon 🌕' : el3 < 180 ? 'Waxing 🌒' : 'Waning 🌘';
+        digRows.push(row('🌙', 'Moon', `${phase} · ${ill}% lit`,
+          'The one astro item with academic study: slightly weaker returns near full moons (small, contested effect).', 'LORE'));
+      } catch (_) {}
+      if (digRows.length) {
+        blocks.push(`<div class="skew-chart-wrap" style="margin:0;grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🧭 Cross-tab digest — ${escapeHtml(digestLbl)} in plain language</span><span style="font-size:8px;color:var(--muted);font-weight:700;">ONE LINE PER TAB</span></div>
+          <div style="padding:2px 0;">${digRows.join('')}
+          <div class="oc-sub" style="margin-top:5px;">Each line is that tab\'s single most-summarisable output, in plain words, with an honesty chip: <b style="color:var(--pos);">MEASURED</b> = real market data · <b style="color:var(--gold);">CROWD</b> = works partly because many traders watch it · <b style="color:var(--muted);">LORE</b> = tradition with no validated edge. Open the tab itself for the full picture; open the ❓ note under any widget for what it means.</div></div></div>`);
+      }
+    } catch (_) {}
     out.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">${blocks.join('')}</div>`;
   }
   document.getElementById('todayRefreshBtn')?.addEventListener('click', renderTodayTab);
 
   // ── COMPACT MODE (hide decorative LORE panels) ──────────────────────
+  // ── Page zoom (whole-dashboard scaling, persisted) ──
+  let _zoomLevel = 100;
+  function _applyZoom(pct) {
+    _zoomLevel = Math.max(50, Math.min(200, Math.round(pct / 5) * 5));
+    // CSS zoom scales layout cleanly in Chromium/Edge; transform fallback for others.
+    const supportsZoom = 'zoom' in document.body.style;
+    if (supportsZoom) {
+      document.body.style.zoom = (_zoomLevel / 100).toString();
+    } else {
+      document.body.style.transform = `scale(${_zoomLevel / 100})`;
+      document.body.style.transformOrigin = 'top center';
+    }
+    const lbl = document.getElementById('zoomLevel');
+    if (lbl) lbl.textContent = _zoomLevel + '%';
+    try { localStorage.setItem('dashZoom', String(_zoomLevel)); } catch (_) {}
+  }
+  document.getElementById('zoomInBtn')?.addEventListener('click', () => _applyZoom(_zoomLevel + 10));
+  document.getElementById('zoomOutBtn')?.addEventListener('click', () => _applyZoom(_zoomLevel - 10));
+  document.getElementById('zoomResetBtn')?.addEventListener('click', () => _applyZoom(100));
+  // Ctrl/Cmd +/- keyboard zoom
+  document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); _applyZoom(_zoomLevel + 10); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); _applyZoom(_zoomLevel - 10); }
+    else if (e.key === '0') { e.preventDefault(); _applyZoom(100); }
+  });
+  try {
+    const savedZoom = parseInt(localStorage.getItem('dashZoom') || '100', 10);
+    if (savedZoom && savedZoom !== 100) _applyZoom(savedZoom);
+  } catch (_) {}
+
   function _applyCompactMode(on) {
     document.body.classList.toggle('compact-esoteric', on);
     try { localStorage.setItem('compactEsoteric', on ? '1' : '0'); } catch (_) {}
@@ -9594,12 +10660,55 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     </div>`;
   }
   function _lvlOhlc() {
-    // prev-day OHLC preferred; session as fallback
+    // If an esoteric stock is loaded, use ITS OHLC (live from NSE).
+    if (_esoActive() && _eso.hi && _eso.lo) {
+      return { h: _eso.hi, l: _eso.lo, c: _eso.prevClose || _eso.price, src: _eso.symbol };
+    }
+    // else index: prev-day OHLC preferred; session as fallback
     const so = state.lastData?.session_ohlc;
     const p = state_ohlc;
     if (p?.high && p?.low && p?.close) return { h: p.high, l: p.low, c: p.close, src: 'prev-day' };
     if (so?.high && so?.low) return { h: so.high, l: so.low, c: so.close || so.open, src: 'session' };
     return null;
+  }
+
+  // ── 0. CPR — Central Pivot Range (TC / Pivot / BC) ──
+  function computeCpr(h, l, c) {
+    const P = (h + l + c) / 3;
+    let BC = (h + l) / 2;
+    let TC = 2 * P - BC;
+    if (TC < BC) { const t = TC; TC = BC; BC = t; }   // TC is always the upper bound
+    const widthPct = P > 0 ? (TC - BC) / P * 100 : 0;
+    return { P, TC, BC, widthPct };
+  }
+  function renderCpr(price) {
+    const out = document.getElementById('lvlCpr');
+    if (!out) return;
+    const o = _lvlOhlc();
+    if (!o) { out.innerHTML = '<span class="oc-sub">Needs OHLC (load Market View pivots or a stock).</span>'; state._cpr = null; return; }
+    const cpr = computeCpr(o.h, o.l, o.c);
+    state._cpr = cpr;   // consumed by the Master Ladder
+    // Width classification — the CPR width signal traders actually use:
+    // narrow CPR → breakout/trend-day tendency; wide → rangebound tendency.
+    const wp = cpr.widthPct;
+    const wCls = wp < 0.25 ? ['NARROW', 'trend-day tendency — breakouts travel', 'var(--gold,#d4af37)']
+               : wp < 0.55 ? ['AVERAGE', 'no strong day-type signal', '#9aa']
+               : ['WIDE', 'rangebound tendency — fade the extremes', 'var(--muted,#789)'];
+    const pos = price > cpr.TC ? ['Above CPR', 'bullish bias — CPR acts as support below', 'var(--green,#26a69a)']
+              : price < cpr.BC ? ['Below CPR', 'bearish bias — CPR acts as resistance above', 'var(--red,#ef5350)']
+              : ['Inside CPR', 'indecision — wait for a side to claim it', '#9aa'];
+    // Stock mode caveat: NSE's live quote has no prev-day H/L, so a loaded
+    // stock's CPR is built from TODAY's developing OHLC = tomorrow's CPR preview.
+    const stockNote = (_esoActive())
+      ? `<div class="oc-sub" style="margin-top:3px;">⚠ ${escapeHtml(_eso.symbol)}: built from today's developing H/L + prev close (NSE's live quote doesn't expose yesterday's H/L, and nothing is cached locally) — read it as tomorrow's CPR preview, not today's level.</div>`
+      : '';
+    out.innerHTML =
+      _lvlRow('TC (top)', cpr.TC, price) +
+      `<div class="gann-lvl-row anchor"><span class="lvl-tag">PIVOT</span><span class="lvl-val">${fmtInt(Math.round(cpr.P))}</span><span class="lvl-dist">${o.src}</span></div>` +
+      _lvlRow('BC (bottom)', cpr.BC, price) +
+      `<div class="oc-sub" style="margin-top:4px;">Width <b style="color:${wCls[2]};">${wp.toFixed(2)}% ${wCls[0]}</b> — ${wCls[1]}. Price <b style="color:${pos[2]};">${pos[0]}</b>: ${pos[1]}.</div>` +
+      stockNote +
+      '<div class="oc-sub" style="margin-top:2px;">CPR (Frank Ochoa) is, with Camarilla, the most-watched intraday frame in Indian retail flow — crowd tier: levels work partly because everyone watches them. Narrow-CPR→trend-day is a testable claim, not a law.</div>';
   }
 
   // ── 1. Camarilla pivots ──
@@ -9654,9 +10763,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const out = document.getElementById('lvlFibClusters');
     if (!out) return;
     const swings = [];
-    const so = state.lastData?.session_ohlc;
-    if (so?.high && so?.low) swings.push(['session', so.high, so.low]);
-    if (state_ohlc?.high && state_ohlc?.low) swings.push(['prev-day', state_ohlc.high, state_ohlc.low]);
+    if (_esoActive() && _eso.hi && _eso.lo) {
+      swings.push(['stock day', _eso.hi, _eso.lo]);
+    } else {
+      const so = state.lastData?.session_ohlc;
+      if (so?.high && so?.low) swings.push(['session', so.high, so.low]);
+      if (state_ohlc?.high && state_ohlc?.low) swings.push(['prev-day', state_ohlc.high, state_ohlc.low]);
+    }
     const gh = parseFloat(document.getElementById('gannSwingHigh')?.value), gl = parseFloat(document.getElementById('gannSwingLow')?.value);
     if (gh && gl && gh > gl) swings.push(['manual', gh, gl]);
     if (!swings.length) { out.innerHTML = '<span class="oc-sub">No swings available yet.</span>'; return; }
@@ -9712,17 +10825,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function renderSq12(price) {
     const out = document.getElementById('lvlSq12');
     if (!out) return;
-    const lo = parseFloat(document.getElementById('gannSwingLow')?.value) || state_ohlc?.low || price;
-    const startK = Math.max(0, Math.floor((price - lo) / 12) - 4);
+    // Anchor: manual swing-low input → stock's day low (stock mode) → index prev-day low → price
+    const stockLo = (_esoActive() && _eso.lo) ? _eso.lo : null;
+    const lo = parseFloat(document.getElementById('gannSwingLow')?.value) || stockLo || state_ohlc?.low || price;
+    // Grid step: 12 pts suits index-scale prices; scale down for cheaper stocks
+    // so the grid stays ~0.3-0.5% of price rather than vanishing or spamming.
+    const step = price >= 10000 ? 12 : price >= 2000 ? 6 : price >= 500 ? 3 : price >= 100 ? 1 : 0.25;
+    const startK = Math.max(0, Math.floor((price - lo) / step) - 4);
     let rows = '';
     for (let k = startK + 9; k >= startK; k--) {
-      const v = lo + k * 12;
+      const v = lo + k * step;
       const major = (k % 12 === 0);
       if (Math.abs(v - price) / price > 0.01 && !major) continue;
-      rows += _lvlRow(major ? `${k / 12}×144 ★` : `+${k}×12`, v, price);
+      rows += _lvlRow(major ? `${k / 12}×${step * 12} ★` : `+${k}×${step}`, v, price);
     }
     out.innerHTML = (rows || '<span class="oc-sub">No 12-grid lines within ±1%.</span>') +
-      `<div class="oc-sub" style="margin-top:4px;">12-pt micro-grid from anchor ${fmtInt(Math.round(lo))}; every 12th line (=144) is a Master Square level. Fine-grained cousin of the Sq144 panel on the Gann tab.</div>`;
+      `<div class="oc-sub" style="margin-top:4px;">${step}-pt micro-grid from anchor ${fmtInt(Math.round(lo))}${stockLo && !document.getElementById('gannSwingLow')?.value ? ' (' + _eso.symbol + ' day low)' : ''}; every 12th line is a Master Square level. Grid step auto-scales to price (12 on index, finer on stocks).</div>`;
   }
 
   // ── 6. Harmonic pattern scanner (XABCD on session swings) ──
@@ -9840,30 +10958,50 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function renderLvlMaster(price) {
     const out = document.getElementById('lvlMaster');
     if (!out) return;
-    const d = state.lastData;
+    const stockMode = _esoActive();
+    const d = stockMode ? null : state.lastData;   // stock has no index option chain
     const src = [];
-    // measured / positioning (w3)
-    const oc = (typeof computeOcLevels === 'function' && d) ? computeOcLevels(d) : null;
-    if (oc) {
-      src.push({ v: oc.res.strike, s: 'OC Resistance', w: 3 });
-      src.push({ v: oc.sup.strike, s: 'OC Support', w: 3 });
-      if (state._ocReversals?.call) src.push({ v: state._ocReversals.call, s: 'C-Rev', w: 3 });
-      if (state._ocReversals?.put)  src.push({ v: state._ocReversals.put,  s: 'P-Rev', w: 3 });
+    // measured / positioning (w3) — INDEX ONLY (option-chain data). Skipped for stocks.
+    if (!stockMode) {
+      const oc = (typeof computeOcLevels === 'function' && d) ? computeOcLevels(d) : null;
+      if (oc) {
+        src.push({ v: oc.res.strike, s: 'OC Resistance', w: 3 });
+        src.push({ v: oc.sup.strike, s: 'OC Support', w: 3 });
+        if (state._ocReversals?.call) src.push({ v: state._ocReversals.call, s: 'C-Rev', w: 3 });
+        if (state._ocReversals?.put)  src.push({ v: state._ocReversals.put,  s: 'P-Rev', w: 3 });
+      }
+      if (d?.max_pain) src.push({ v: d.max_pain, s: 'Max Pain', w: 3 });
+      const gex = (typeof _computeGex === 'function' && d) ? _computeGex(d) : null;
+      if (gex?.flip) src.push({ v: gex.flip, s: 'GEX flip', w: 3 });
+      if (state._oiWalls?.callStrike) src.push({ v: state._oiWalls.callStrike, s: 'Call OI wall', w: 3 });
+      if (state._oiWalls?.putStrike)  src.push({ v: state._oiWalls.putStrike,  s: 'Put OI wall',  w: 3 });
     }
-    if (d?.max_pain) src.push({ v: d.max_pain, s: 'Max Pain', w: 3 });
-    const gex = (typeof _computeGex === 'function' && d) ? _computeGex(d) : null;
-    if (gex?.flip) src.push({ v: gex.flip, s: 'GEX flip', w: 3 });
-    if (state._oiWalls?.callStrike) src.push({ v: state._oiWalls.callStrike, s: 'Call OI wall', w: 3 });
-    if (state._oiWalls?.putStrike)  src.push({ v: state._oiWalls.putStrike,  s: 'Put OI wall',  w: 3 });
-    // crowd-watched (w2)
-    if (state._camarilla) for (const [k, lbl] of [['h4', 'Cam H4'], ['h3', 'Cam H3'], ['l3', 'Cam L3'], ['l4', 'Cam L4']]) src.push({ v: state._camarilla[k], s: lbl, w: 2 });
-    for (const unit of [1000, 500]) {
+    // crowd-watched (w2) — price-derived, works for stocks too
+    // Camarilla: recompute from stock OHLC when in stock mode
+    if (stockMode && _eso.hi && _eso.lo && _eso.prevClose) {
+      const R = _eso.hi - _eso.lo;
+      src.push({ v: _eso.prevClose + R * 1.1 / 2, s: 'Cam H4', w: 2 });
+      src.push({ v: _eso.prevClose + R * 1.1 / 4, s: 'Cam H3', w: 2 });
+      src.push({ v: _eso.prevClose - R * 1.1 / 4, s: 'Cam L3', w: 2 });
+      src.push({ v: _eso.prevClose - R * 1.1 / 2, s: 'Cam L4', w: 2 });
+    } else if (state._camarilla) {
+      for (const [k, lbl] of [['h4', 'Cam H4'], ['h3', 'Cam H3'], ['l3', 'Cam L3'], ['l4', 'Cam L4']]) src.push({ v: state._camarilla[k], s: lbl, w: 2 });
+    }
+    // CPR TC/P/BC (crowd-watched, works index + stocks; renderCpr fills state._cpr)
+    if (state._cpr) {
+      src.push({ v: state._cpr.TC, s: 'CPR TC', w: 2 });
+      src.push({ v: state._cpr.P,  s: 'CPR Pivot', w: 2 });
+      src.push({ v: state._cpr.BC, s: 'CPR BC', w: 2 });
+    }
+    // round numbers — scale the step to the price magnitude (stock-aware)
+    const rUnits = price >= 20000 ? [1000, 500] : price >= 5000 ? [500, 100] : price >= 1000 ? [100, 50] : price >= 200 ? [50, 10] : [10, 5];
+    for (const unit of rUnits) {
       const below = Math.floor(price / unit) * unit;
       src.push({ v: below, s: `round ${unit}`, w: 2 });
       src.push({ v: below + unit, s: `round ${unit}`, w: 2 });
     }
-    const o = _lvlOhlc();
-    if (o) {
+    const o = stockMode ? { h: _eso.hi, l: _eso.lo } : _lvlOhlc();
+    if (o && o.h && o.l) {
       const m = computeMurrey(o.h, o.l);
       for (let i = 0; i <= 8; i++) {
         const v = m.base + i * m.step;
@@ -9875,8 +11013,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (s9) for (const x of [...s9.res, ...s9.sup]) if (Math.abs(x.deg) % 90 === 0) src.push({ v: x.val, s: `S9 ${x.deg > 0 ? '+' : ''}${x.deg}°`, w: 1 });
     if (typeof _planetLongitudes === 'function') {
       const tl = _planetLongitudes(new Date());
+      const wScale = Math.pow(10, Math.round(Math.log10(price * 0.015 / 360)));
+      const wWheel = 360 * wScale;
       for (const [name, lon] of Object.entries(tl)) {
-        const lvl = Math.round((price - lon) / 360) * 360 + lon;
+        const lonPts = lon * wScale;
+        const lvl = Math.round((price - lonPts) / wWheel) * wWheel + lonPts;
         if (lvl > 0 && Math.abs(lvl - price) / price < 0.03) src.push({ v: lvl, s: `${_PLANET_GLYPH[name] || ''}${name} line`, w: 1 });
       }
     }
@@ -9912,6 +11053,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ── Anchored VWAP + sigma bands (measured, from replay) ──
   document.getElementById('lvlAvwapBtn')?.addEventListener('click', async () => {
     const out = document.getElementById('lvlAvwap');
+    if (_esoActive()) {
+      out.innerHTML = '<span class="oc-sub">Anchored VWAP isn\'t available for individual stocks: it\'s computed from the dashboard\'s replay archive, which records index option-chain snapshots (with straddle-premium as the volume proxy). There\'s no equivalent intraday series for a stock here — NSE\'s quote endpoint gives only the current snapshot, not the day\'s tick history. Your TradingView S/R indicator has a session VWAP that works on any chart; use that for ' + escapeHtml(_eso.symbol) + '.</span>';
+      return;
+    }
     out.innerHTML = '<span class="oc-sub">Loading…</span>';
     try {
       const d = await _lvlFetch('/api/anchored-vwap');
@@ -9986,8 +11131,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   });
 
   function renderLevelsTab() {
-    const price = state.lastData?.underlying_value;
-    if (!price) { document.getElementById('levelsStatus').textContent = 'Load the option chain first — spot needed.'; return; }
+    const price = _esoActive() ? _eso.price : state.lastData?.underlying_value;
+    if (!price) { document.getElementById('levelsStatus').textContent = _esoActive() ? 'Loading stock…' : 'Load a stock above, or load the option chain first — spot needed.'; return; }
+    const lbl = _esoActive() ? _eso.symbol : (state.symbol || 'index');
+    const st = document.getElementById('levelsStatus');
+    if (st) st.textContent = `Levels for ${lbl} @ ${price}. Uses OHLC + live price.`;
+    _safe(() => renderCpr(price), 'renderCpr');
     _safe(() => renderCamarilla(price), 'renderCamarilla');
     _safe(() => renderMurrey(price), 'renderMurrey');
     _safe(() => renderFibClusters(price), 'renderFibClusters');
@@ -14257,6 +15406,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ====================================================================
   // F&O SYMBOL SEARCH (stocks + indices, fetched live — not hardcoded)
   // ====================================================================
+  let _fnoSymbolSet = null;   // populated from /api/fno-symbols; used to validate chain requests
   async function loadFnoSymbolList() {
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
@@ -14264,6 +15414,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const data = await resp.json();
       if (data.symbols) {
         els.fnoSymbolList.innerHTML = data.symbols.map(s => `<option value="${s}">`).join('');
+        _fnoSymbolSet = new Set(data.symbols.map(s => s.toUpperCase()));
       }
     } catch (e) {
       // non-fatal — search input just won't autocomplete; user can still type a symbol manually
@@ -14274,6 +15425,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (e.key !== 'Enter') return;
     const sym = els.symbolSearch.value.trim().toUpperCase();
     if (!sym) return;
+    // Option chains exist only for F&O symbols — reject cash stocks up front.
+    if (_fnoSymbolSet && _fnoSymbolSet.size && !_fnoSymbolSet.has(sym)) {
+      showToast(`⚠ ${sym} is not an F&O symbol — no option chain. Use the Gann/Levels/esoteric tabs for cash stocks.`);
+      return;
+    }
     addCustomSymbolPill(sym);
     els.symbolSearch.value = '';
   });
@@ -17887,6 +19043,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'strat-chart':       '<strong>Strategy P&amp;L Chart</strong>The current Builder position marked-to-market through the session, in ₹ vs the first sample after loading legs. Shows the path, not just the endpoint: a position that went +4k → +1k reads very differently from one that ground steadily to +1k. Resets when legs change.',
     'vol-surface':       '<strong>Volatility Surface</strong>IV heatmap across expiries (rows, by DTE) and strikes (columns, ATM ±5). Hot cells = expensive vol. Read vertically for term structure at a strike, horizontally for skew at an expiry. Calendar spreads live in vertical gradients; skew trades in horizontal ones.',
     'results-cal':       '<strong>Results Calendar</strong>Upcoming F&amp;O earnings dates from the NSE event calendar (cached 1h server-side). IV typically ramps into results and crushes after: long-vol/calendar setups favor the ramp, and short straddles held through the event are a vega coin-flip — size accordingly or step aside.',
+        'vedic-lunar-cal':  '<strong>Lunar calendar + eclipse windows</strong>Amavasya (new moon) and Purnima (full moon) dates for the next 60 days, computed from the same ephemeris as the rest of the tab. Rows marked ★ fall within the ecliptic limits of the mean lunar node — a possible solar (new) or lunar (full) eclipse window, approximate to ±1-2 days. Why this panel exists at all: the lunar cycle is the single astro-adjacent claim with peer-reviewed literature — Dichev &amp; Janes (2003) and Yuan, Zheng &amp; Zhu (2006) reported modestly lower equity returns around full moons across dozens of markets. Honest status: the effect was small, is contested, and largely faded in later replications — so treat even this as weak calendar context, not signal. Eclipses carry heavy cultural weight in Indian markets (crowd-attention dates), which is a focal-point argument, not a causal one.',
+    'lvl-cpr':           '<strong>CPR — Central Pivot Range</strong>Frank Ochoa\'s three-line frame from prev-day OHLC: Pivot=(H+L+C)/3, BC=(H+L)/2, TC=2P−BC. With Camarilla, the most-watched intraday levels in Indian retail flow (crowd tier — partly self-fulfilling). The extras that make it useful: WIDTH (narrow CPR → trend-day tendency, wide → rangebound) and POSITION (above=bullish bias / inside=indecision / below=bearish). TC/P/BC feed the Master Ladder at weight 2. Stock mode caveat: NSE\'s live quote lacks yesterday\'s H/L, so a stock\'s CPR is built from today\'s developing OHLC — read it as tomorrow\'s preview.',
+    'astro-bradley':     '<strong>Bradley Siderograph</strong>Donald Bradley\'s 1948 astro-composite: every planet pair is scored by aspect (0/60/120 harmonious, 90/180 discordant, 15° orb), summed into one curve — long terms (Jupiter→Pluto pairs, ×3 weight), middle terms (Sun/Mercury/Venus/Mars pairs), plus a Venus+Mars declination term. Its local inflections are claimed as market turn DATES (±4-day windows) — famously, even Bradley said the curve\'s up/down direction is meaningless, only the timing of bends. This is a reduced implementation (Moon excluded per spec; outer planets on J2000 Kepler elements, Pluto ±1-2°). PURE LORE: no validated edge in any rigorous study; sits on the same shelf as the rest of this tab.',
+    'gann-timezones':    '<strong>Fib Time Zones + Gann anniversaries</strong>Pick the date of a major swing high/low; the panel projects forward: Fibonacci day-counts (8,13,21,34,55,89,144,233,377) and Gann\'s calendar subdivisions (30/45/60/90/120/144/180/270/365 days — quarters and halves of the year were his primary counts, 144 the master square). Dates within a week highlight. LORE tier: time-symmetry has never shown a validated edge — with this many projected dates, some will always "hit" in hindsight (that\'s the mechanism of belief, not evidence). Calendar context only.',
+    'eso-symbol':        '<strong>Instrument selector + watchlist</strong>Loads any NSE stock so the Gann, Numerology, Astrology, Vedic, and Levels tabs work on it instead of the index. Type a symbol (autocomplete suggests matches) and Load — the stock\'s live price and swing high/low feed every esoteric tab, and the choice carries across all of them. Click the star to save a stock to your watchlist (stored locally in your browser, persists across sessions); click a saved chip to load it instantly, or the x to remove it. The Index button switches back to the option-chain index spot. Data note: stock price comes live from NSE via the warmed session (load an option chain first to warm it) — nothing is cached to disk. Honest framing: Gann/numerology/astrology on an individual stock is exactly as much lore as on the index — arguably more, since the geometry has even less footing on a single equity. Use as confluence and context, never a standalone signal.',
     'gann-tab':          '<strong>Gann Analysis</strong>W.D. Gann\'s geometric and time-based techniques applied to your spot/entered price: Square of 9 support/resistance, the S9 wheel, Gann angle fans, price retracements in eighths, price-squaring targets, and calendar time cycles. Important framing: these are deterministic geometric transforms of a single price, not statistical edges — they have no predictive validation the way OI or IV signals do. Their value, if any, is as confluence: a Square-of-9 level that coincides with a max-OI strike or GEX flip is more interesting than either alone. Treat as one lens, never a standalone signal.',
     'gann-sq9':          '<strong>Square of 9 — S/R</strong>Takes √price, rotates around the spiral by ±45° increments (180° = ±1 on the root), and re-squares to get support/resistance levels. The cardinal angles (90/180/270/360°, marked ★) are the "square" and "opposition" points Gann considered strongest. Levels above the price act as resistance, below as support.',
     'gann-wheel':        '<strong>Square of 9 Wheel</strong>The spiral shown as 8 spokes at 45° intervals, each labeled with its price level. Red cardinal spokes (90° apart) are the strong square/opposition levels; gold diagonals are the 45° intermediate levels. Concentric rings mark full 360° cycles outward from the price.',

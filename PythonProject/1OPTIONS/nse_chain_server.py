@@ -1056,6 +1056,72 @@ def _parse_bhavcopy_row(csv_text: str, name_aliases: list[str]) -> dict | None:
     return None
 
 
+def fetch_live_stock(symbol: str, fetcher, headers) -> dict | None:
+    """Fetch live OHLC + last price for ANY NSE equity via the warmed session —
+    no caching, no local CSV. NSE's quote-equity endpoint returns intraday OHLC
+    in priceInfo. Returns dict with price/O/H/L/C/prevClose or None on failure.
+
+    This is 403 to a cold request but succeeds with a warmed session (the same
+    session that fetches the option chain). Tries a couple of endpoints so it
+    also covers non-F&O cash stocks.
+    """
+    sym = (symbol or "").strip().upper()
+    if not sym or fetcher is None:
+        return None
+    sess = getattr(fetcher, "session", None)
+    if sess is None:
+        return None
+    h = headers or {}
+
+    # 1) quote-equity — richest: has priceInfo{lastPrice, open, intraDayHighLow,
+    #    close, previousClose} plus weekHighLow.
+    try:
+        r = sess.get("https://www.nseindia.com/api/quote-equity",
+                     params={"symbol": sym}, headers=h, timeout=12)
+        if r.status_code == 200:
+            j = r.json()
+            pi = j.get("priceInfo") or {}
+            idl = pi.get("intraDayHighLow") or {}
+            last = float(pi.get("lastPrice") or 0)
+            o = float(pi.get("open") or 0)
+            hi = float(idl.get("max") or 0)
+            lo = float(idl.get("min") or 0)
+            prev = float(pi.get("previousClose") or 0)
+            close_ = float(pi.get("close") or 0) or last
+            if last > 0:
+                # if intraday H/L missing (pre-open), fall back to last/prev band
+                if hi <= 0:
+                    hi = max(last, o, prev) or last
+                if lo <= 0:
+                    lo = min(x for x in (last, o, prev) if x > 0)
+                chg = last - prev if prev > 0 else 0.0
+                chg_pct = (chg / prev * 100) if prev > 0 else 0.0
+                return {"symbol": sym, "price": round(last, 2),
+                        "O": round(o or prev or last, 2), "H": round(hi, 2),
+                        "L": round(lo, 2), "C": round(close_ or last, 2),
+                        "prevClose": round(prev or close_ or last, 2),
+                        "change": round(chg, 2), "pChange": round(chg_pct, 2),
+                        "source": "nse-quote-equity", "live": True}
+    except Exception as e:  # noqa: BLE001
+        print(f"[i] quote-equity {sym} failed: {e}")
+
+    # 2) fallback — equity trade-info sometimes succeeds when quote-equity is rate-limited
+    try:
+        r = sess.get("https://www.nseindia.com/api/quote-equity",
+                     params={"symbol": sym, "section": "trade_info"}, headers=h, timeout=12)
+        if r.status_code == 200:
+            j = r.json()
+            pi = (j.get("priceInfo") or {})
+            last = float(pi.get("lastPrice") or 0)
+            if last > 0:
+                return {"symbol": sym, "price": round(last, 2),
+                        "O": last, "H": last, "L": last, "C": last,
+                        "prevClose": last, "source": "nse-trade-info", "live": True}
+    except Exception:
+        pass
+    return None
+
+
 def _get_india_vix(fetcher: NSESession) -> float | None:
     """Best-effort VIX fetch — returns None on failure rather than breaking
     the whole /api/chain response, since VIX is a nice-to-have overlay, not
@@ -2289,13 +2355,28 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 band = 12
 
-            # No longer restricted to the 4 index symbols — any NSE F&O
-            # symbol works (confirmed the underlying endpoint is identical
-            # for stocks). Just a basic sanity check on the format so an
-            # obviously-malformed symbol fails fast with a clear message
-            # rather than burning an NSE round-trip first.
+            # Basic format sanity so an obviously-malformed symbol fails fast.
             if not symbol or not symbol.replace("-", "").replace("&", "").isalnum():
                 self._send_json({"error": f"'{symbol}' doesn't look like a valid NSE symbol."}, status=400)
+                return
+
+            # Option chains exist ONLY for F&O instruments (the indices + the
+            # ~180 F&O stocks). A cash-only stock has no options, so reject it
+            # up front with a clear message instead of a confusing NSE error.
+            # If the F&O list can't be loaded (NSE unreachable), fall through
+            # and let the fetch attempt decide, rather than blocking everything.
+            try:
+                fno_set = {s.upper() for s in nse_lot_sizes.get_fno_symbol_list()}
+            except Exception:
+                fno_set = set()
+            if fno_set and symbol not in fno_set:
+                self._send_json({
+                    "error": f"'{symbol}' is not an F&O symbol — it has no option chain. "
+                             f"Option chains are available only for NIFTY/BANKNIFTY/FINNIFTY and "
+                             f"the ~180 F&O stocks. (For cash stocks, use the Gann/Levels/esoteric "
+                             f"tabs, which work on any NSE stock.)",
+                    "not_fno": True,
+                }, status=400)
                 return
 
             print(f"[i] {self.command} /api/chain symbol={symbol} expiry={expiry} band={band}")
@@ -3085,6 +3166,39 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)})
             return
 
+        if parsed.path == "/api/watchlist-prices":
+            # Batch live prices for the stock watchlist (TradingView-style rows).
+            # ?symbols=RELIANCE,TCS,BALAMINES — live fetch per symbol via the
+            # warmed session, NO caching. Capped to 20 symbols per request.
+            raw_syms = qs.get("symbols", [""])[0]
+            syms = [s.strip().upper() for s in raw_syms.split(",") if s.strip()][:20]
+            if not syms:
+                self._send_json({"error": "symbols parameter required"}, status=400)
+                return
+            ftch = (_shared_fetcher if (
+                _shared_fetcher and getattr(_shared_fetcher, "_warmed", False)
+                and (time.time() - _shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE
+            ) else None)
+            if ftch is None:
+                self._send_json({"error": "NSE session not warmed — load an option chain first.",
+                                 "quotes": {}})
+                return
+            h = None
+            try:
+                from nse_options_strategy import API_HEADERS, NSE_OC_PAGE  # noqa: PLC0415
+                h = dict(API_HEADERS); h["Referer"] = NSE_OC_PAGE
+            except Exception:
+                h = None
+            quotes = {}
+            for s in syms:
+                q = fetch_live_stock(s, ftch, h)
+                if q:
+                    quotes[s] = {"price": q["price"], "change": q.get("change", 0),
+                                 "pChange": q.get("pChange", 0), "H": q["H"], "L": q["L"]}
+            self._send_json({"quotes": quotes, "count": len(quotes),
+                             "asOf": time.strftime("%H:%M:%S")})
+            return
+
         if parsed.path == "/api/stock-search":
             q = qs.get("q", [""])[0].strip().upper()
             try:
@@ -3102,39 +3216,59 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 import nse_pivot_scanner as _ps  # noqa: PLC0415
-                # OHLC: CSV only. The old NSE quote-equity fallback that used
-                # to live here is permanently removed — that endpoint sits
-                # behind a hard Akamai "Access Denied" 403 wall regardless of
-                # headers/cookies/referer (confirmed: every symbol, every
-                # attempt, even with a correctly-warmed session). Attempting
-                # it just wastes a request that can never succeed.
-                ohlc = (_ps.get_weekly_ohlc(sym) if mode == "weekly" else _ps.get_daily_ohlc(sym))
-                if not ohlc:
-                    self._send_json({"error": f"No OHLC data for {sym}. CSV file missing from nse_data_cache."})
-                    return
+                # Live-price fetcher (shared session if warmed).
+                ftch = (_shared_fetcher if (
+                    _shared_fetcher and getattr(_shared_fetcher, "_warmed", False)
+                    and (time.time() - _shared_fetcher_ts) < _SHARED_FETCHER_MAX_AGE
+                ) else None)
+                h = None
+                if ftch:
+                    try:
+                        from nse_options_strategy import API_HEADERS, NSE_OC_PAGE  # noqa: PLC0415
+                        h = dict(API_HEADERS); h["Referer"] = NSE_OC_PAGE
+                    except Exception:
+                        h = None
+
+                # PRIMARY: live NSE quote (no caching). Works for any equity —
+                # index-constituent or not — via the warmed session.
+                live = fetch_live_stock(sym, ftch, h) if ftch else None
+                ohlc = None
+                price = 0.0
+                is_live = False
+                data_src = ""
+                if live:
+                    ohlc = {"O": live["O"], "H": live["H"], "L": live["L"], "C": live["C"]}
+                    price = live["price"]
+                    is_live = True
+                    data_src = live.get("source", "nse-live")
+                else:
+                    # FALLBACK: local CSV only if the user happens to have one.
+                    ohlc_csv, ohlc_err = (_ps.get_weekly_ohlc(sym) if mode == "weekly" else _ps.get_daily_ohlc(sym))
+                    if not ohlc_csv:
+                        self._send_json({"error": (
+                            f"No live data for {sym} (NSE session not warmed yet — "
+                            f"load an option chain first to warm it), and no local CSV. "
+                            f"Detail: {ohlc_err or 'n/a'}")})
+                        return
+                    ohlc = ohlc_csv
+                    price = float(ohlc.get("C", 0))
+                    data_src = "csv"
+
                 pivots = _ps.compute_pivots(
                     H=float(ohlc.get("H", 0)), L=float(ohlc.get("L", 0)),
                     C=float(ohlc.get("C", 0)), O=float(ohlc.get("O") or ohlc.get("C", 0)),
                     pivot_type=pivot_type,
                 )
-                # Current price
-                price = 0.0
-                if ftch:
-                    try:
-                        prices = _ps.get_live_prices([sym], ftch, h)
-                        price = prices.get(sym, 0.0)
-                    except Exception:
-                        pass
-                if not price:
-                    price = float(ohlc.get("C", 0))
                 self._send_json({
                     "symbol": sym, "price": round(price, 2),
-                    "live": bool(ftch), "pivots": pivots,
-                    "ohlc": {k: round(float(v), 2) for k, v in ohlc.items() if k in ("H","L","C","O")},
+                    "live": is_live, "source": data_src, "pivots": pivots,
+                    "ohlc": {k: round(float(v), 2) for k, v in ohlc.items() if k in ("H", "L", "C", "O")},
+                    "prevClose": round(float(live["prevClose"]), 2) if live else None,
                     "mode": mode, "pivot_type": pivot_type,
                 })
+                return
             except Exception as e:  # noqa: BLE001
-                self._send_json({"error": str(e)})
+                self._send_json({"error": str(e), "symbol": sym})
             return
 
         if parsed.path == "/api/nifty-constituents":
