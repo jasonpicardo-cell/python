@@ -2677,6 +2677,93 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"symbol": symbol, "dates": _replay_dates(symbol)})
             return
 
+        if parsed.path == "/api/oi-migration":
+            # Intraday OI velocity from TODAY's replay snapshots: compares the
+            # latest snapshot's per-strike OI against snapshots ~30 and ~60 min
+            # earlier. Shows which walls are BUILDING (absorbing fresh writing)
+            # and which are DECAYING — the live version of the static OI panel.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+            try:
+                if not _os.path.exists(path):
+                    self._send_json({"error": "no replay data yet today — snapshots record while the chain auto-refreshes", "rows": []})
+                    return
+                snaps = []
+                with open(path) as f:
+                    for line in f:
+                        try:
+                            snaps.append(json.loads(line))
+                        except Exception:
+                            continue
+                if len(snaps) < 2:
+                    self._send_json({"error": "need ≥2 snapshots (≈2 min of recording)", "rows": []})
+                    return
+                latest = snaps[-1]
+                t_now = latest.get("_replay_ts", 0)
+                def _closest(mins):
+                    tgt = t_now - mins * 60
+                    return min(snaps[:-1], key=lambda s: abs(s.get("_replay_ts", 0) - tgt))
+                s30, s60 = _closest(30), _closest(60)
+                def _oi_map(snap):
+                    m = {}
+                    for st in snap.get("strikes", []):
+                        m[st.get("strike")] = (st.get("ce_oi") or 0, st.get("pe_oi") or 0)
+                    return m
+                mNow, m30, m60 = _oi_map(latest), _oi_map(s30), _oi_map(s60)
+                spot = latest.get("underlying_value") or 0
+                rows = []
+                for k, (ce, pe) in mNow.items():
+                    if k is None or not spot or abs(k - spot) / spot > 0.04:
+                        continue
+                    c30, p30 = m30.get(k, (ce, pe))
+                    c60, p60 = m60.get(k, (ce, pe))
+                    rows.append({"strike": k,
+                                 "ce_oi": ce, "pe_oi": pe,
+                                 "ce_d30": ce - c30, "pe_d30": pe - p30,
+                                 "ce_d60": ce - c60, "pe_d60": pe - p60})
+                rows.sort(key=lambda r: -(abs(r["ce_d60"]) + abs(r["pe_d60"])))
+                mins30 = round((t_now - s30.get("_replay_ts", t_now)) / 60)
+                mins60 = round((t_now - s60.get("_replay_ts", t_now)) / 60)
+                self._send_json({"symbol": symbol, "spot": spot, "rows": rows[:14],
+                                 "win30": mins30, "win60": mins60,
+                                 "asOf": time.strftime("%H:%M:%S", time.localtime(t_now)),
+                                 "nSnaps": len(snaps)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "rows": []})
+            return
+
+        if parsed.path == "/api/replay-ohlc":
+            # Daily OHLC per recorded replay day, extracted from each day's
+            # snapshots (open = first, close = last, H/L = min/max of spot).
+            # This is the fuel for the client-side "Claims on Trial" tests —
+            # the history grows automatically each day the dashboard runs.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            try:
+                out = []
+                for day in _replay_dates(symbol):
+                    path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+                    vals, ts0 = [], None
+                    try:
+                        with open(path) as f:
+                            for line in f:
+                                try:
+                                    s = json.loads(line)
+                                    v = s.get("underlying_value")
+                                    if v:
+                                        vals.append(float(v))
+                                except Exception:
+                                    continue
+                    except Exception:
+                        continue
+                    if len(vals) >= 3:
+                        out.append({"day": day, "O": vals[0], "H": max(vals), "L": min(vals),
+                                    "C": vals[-1], "n": len(vals)})
+                self._send_json({"symbol": symbol, "days": out, "count": len(out)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "days": []})
+            return
+
         if parsed.path == "/api/replay-index":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
