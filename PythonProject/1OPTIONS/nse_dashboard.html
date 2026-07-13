@@ -1670,6 +1670,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <button class="btn" id="zoomInBtn" style="padding:2px 7px;font-size:12px;line-height:1;" title="Zoom in (Ctrl +)">+</button>
         <button class="btn" id="zoomResetBtn" style="padding:2px 6px;font-size:9px;line-height:1;" title="Reset zoom">⟲</button>
       </span>
+      <span id="opsStrip" style="font-size:9px;color:var(--muted,#789);margin:0 4px;" title="Data freshness"></span>
+      <button class="btn" id="backupBtn" style="font-size:9px;padding:2px 7px;" title="Download ALL app data (watchlist, journal, scorecard, alerts, settings) as JSON — do this weekly; it auto-reminds">💾</button>
+      <button class="btn" id="restoreBtn" style="font-size:9px;padding:2px 7px;" title="Restore from a backup JSON">📥</button>
+      <input type="file" id="restoreFile" accept="application/json" style="display:none;">
+      <span id="expiryChip" style="display:none;font-size:9px;font-weight:800;letter-spacing:0.5px;padding:2px 8px;border-radius:4px;background:rgba(212,175,55,0.2);color:var(--gold,#d4af37);border:1px solid var(--gold,#d4af37);">⚡ EXPIRY DAY</span>
       <span class="status-dot" id="statusDot" title="Connection status"></span>
     </div>
   </div>
@@ -2968,7 +2973,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         (Master Ladder, GEX regime, VWAP bias, key stats), then the calendar/ritual layer (Panchang, Rahu Kaal) last and
         clearly marked as context. If you read one tab before the open, read this one.
       </div>
-    </section>
+    
+      <div class="skew-chart-wrap" style="margin-top:10px;">
+        <div class="skew-chart-head"><span class="skew-chart-title">🔔 Custom Alerts — the dashboard watches your levels<i class="hi" data-h="custom-alerts">i</i></span></div>
+        <div class="dtpl-row" style="align-items:center;">
+          <select id="caType" class="ohlc-inp" style="font-size:10px;">
+            <option value="near">Spot NEAR a level</option>
+            <option value="cross">Spot CROSSES a level</option>
+            <option value="iv_above">IV rank ≥</option>
+            <option value="iv_below">IV rank ≤</option>
+            <option value="oi_decay">Any OI wall decays ≥ %/hr</option>
+          </select>
+          <input type="number" id="caValue" class="ohlc-inp" placeholder="value" style="width:90px;font-size:10px;">
+          <input type="number" id="caPts" class="ohlc-inp" placeholder="± pts (near)" style="width:90px;font-size:10px;">
+          <input type="text" id="caLabel" class="ohlc-inp" placeholder="label e.g. CPR TC" style="width:130px;font-size:10px;">
+          <button class="btn" id="caAddBtn" style="font-size:10px;padding:3px 12px;">+ Add rule</button>
+          <span class="oc-sub" style="font-size:9px;">checked every chain tick · 5-min refire cooldown · toast + browser notification + voice (if 🗣 on)</span>
+        </div>
+        <div id="caRules" style="margin-top:4px;"></div>
+        <div id="caFired" style="margin-top:4px;"></div>
+      </div>
+</section>
 
 
     <!-- ══════════════════════════════════════════════════════════════ -->
@@ -3506,6 +3531,32 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     </section>
 
     <section id="tab-paper" class="tab-panel">
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🛡 Portfolio Greeks — the risk desk<i class="hi" data-h="pf-greeks">i</i></span>
+          <button class="btn" id="pfGreeksBtn" style="font-size:9px;padding:2px 10px;">↻ Recompute</button></div>
+          <div id="pfGreeks" class="gann-levels"></div>
+          <div class="skew-chart-head" style="margin-top:8px;"><span class="skew-chart-title">🌡 Stress heatmap — spot × IV shock</span></div>
+          <div id="pfHeatmap"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">📓 Trade Journal — setup-tagged, stats per setup<i class="hi" data-h="trade-journal">i</i></span></div>
+          <div class="dtpl-row" style="align-items:center;">
+            <input type="text" id="tjSym" class="ohlc-inp" placeholder="Symbol" style="width:90px;font-size:10px;text-transform:uppercase;">
+            <select id="tjDir" class="ohlc-inp" style="font-size:10px;"><option>LONG</option><option>SHORT</option></select>
+            <input type="text" id="tjSetup" class="ohlc-inp" placeholder="Setup tag e.g. CPR narrow trend" style="width:170px;font-size:10px;" list="tjSetupList">
+            <datalist id="tjSetupList"><option>CPR narrow trend</option><option>OI wall fade</option><option>ORB break</option><option>VWAP reclaim</option><option>Expiry pin</option><option>Gamma hour scalp</option><option>IV crush sell</option><option>Confluence zone bounce</option></datalist>
+            <input type="number" id="tjPnl" class="ohlc-inp" placeholder="P&L ₹" style="width:80px;font-size:10px;">
+            <input type="text" id="tjNote" class="ohlc-inp" placeholder="note (optional)" style="width:160px;font-size:10px;">
+            <button class="btn" id="tjAddBtn" style="font-size:10px;padding:3px 12px;">+ Log</button>
+          </div>
+          <div id="tjStats" style="margin-top:4px;"></div>
+          <div id="tjList" style="margin-top:4px;"></div>
+        </div>
+      </div>
+
       <div class="paper-stats-bar" id="paperStatsBar"></div>
       <div class="adjust-panel" id="portfolioPanel" style="display:none;">
         <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:3px;">💼 Portfolio (open positions)<i class="hi" data-h="portfolio-agg">i</i></div>
@@ -3583,7 +3634,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
       <div class="gann-grid">
         <div class="skew-chart-wrap">
-          <div class="skew-chart-head"><span class="skew-chart-title">Square of 9 — Support / Resistance<i class="hi" data-h="gann-sq9">i</i></span></div>
+          <div class="skew-chart-head"><span class="skew-chart-title">Square of 9 — Support / Resistance<i class="hi" data-h="gann-sq9">i</i></span>
+            <select id="sq9Conv" class="level-select" style="font-size:9px;" title="Two live conventions for what 45 degrees means on the wheel">
+              <option value="wheel">Wheel: 360°=2 (classical)</option>
+              <option value="calc">Calculator: 360°=1 (Indian intraday)</option>
+            </select>
+          </div>
           <div id="gannSq9Levels" class="gann-levels"></div>
         </div>
 
@@ -3927,25 +3983,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
 
       <div class="gann-controls">
+        <label>Date<i class="hi" data-h="astro-date">i</i>
+          <input type="date" id="astroDate" class="ohlc-inp" title="Which day's sky to compute — defaults to today. Pick a past date to study a big-move day, or a future date (expiry, Bradley turn) to preview it.">
+        </label>
         <label>Zodiac
-          <select id="astroZodiac" class="ohlc-inp" style="font-size:11px;">
+          <select id="astroZodiac" class="ohlc-inp" style="font-size:11px;" title="Coordinate frame for the SAME sky: sidereal (Vedic/Lahiri) or tropical (Western)">
             <option value="sidereal">Sidereal (Lahiri) — Vedic</option>
             <option value="tropical">Tropical — Western</option>
           </select>
         </label>
-        <label>Natal anchor<i class="hi" data-h="astro-anchor">i</i>
-          <select id="astroAnchor" class="ohlc-inp" style="font-size:11px;">
+        <label>Natal anchor → Transits panel<i class="hi" data-h="astro-anchor">i</i>
+          <select id="astroAnchor" class="ohlc-inp" style="font-size:11px;" title="Only affects the Natal Transits panel: which birth chart the chosen day's sky is compared against">
             <option value="launch" selected>Nifty launch (22 Apr 1996) — first trade</option>
             <option value="dob">My DOB (from Numerology tab)</option>
             <option value="derivatives">Nifty derivatives launch (12 Jun 2000)</option>
             <option value="base">Nifty base date (3 Nov 1995)</option>
           </select>
         </label>
-        <label>Date
-          <input type="date" id="astroDate" class="ohlc-inp">
-        </label>
-        <button class="btn" id="astroGenBtn" style="font-size:11px;font-weight:700;">Generate</button>
-        <span class="oc-sub">Built-in ephemeris: Sun ±0.01°, Moon ±0.3°, planets ±1°.</span>
+        <button class="btn" id="astroGenBtn" style="font-size:11px;font-weight:700;" title="Everything already updates live when you change Date/Zodiac/Anchor. This button just re-computes the same settings — useful to refresh a live today-reading, since the Moon moves ~0.5°/hour and aspects drift through the day.">↻ Refresh</button>
+        <span class="oc-sub">Reads left→right: the sky ON [date] · IN [zodiac frame] · AGAINST [natal chart]. All three update live. Ephemeris: Sun ±0.01°, Moon ±0.3°, planets ±1°.</span>
       </div>
 
       <div class="gann-grid">
@@ -3982,6 +4038,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
           <div class="skew-chart-head"><span class="skew-chart-title">📉 Bradley Siderograph — turn-date windows<i class="hi" data-h="astro-bradley">i</i></span></div>
           <div id="astroBradley" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🚪 Transit Ingress Calendar — sign-change dates + Pushya/Pradosh<i class="hi" data-h="astro-ingress">i</i></span></div>
+          <div id="astroIngress" class="gann-levels"></div>
         </div>
 
         <div class="skew-chart-wrap">
@@ -4089,6 +4150,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div id="vedicLunarCal" class="gann-levels"></div>
         </div>
 
+        <div class="skew-chart-wrap lore-decorative">
+          <div class="skew-chart-head"><span class="skew-chart-title">⛔ Bhadra (Vishti karana) — the avoid-windows<i class="hi" data-h="vedic-bhadra">i</i></span></div>
+          <div id="vedicBhadra" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap lore-decorative">
+          <div class="skew-chart-head"><span class="skew-chart-title">📈 Trending Day — bias vs last Amavasya/Purnima close<i class="hi" data-h="vedic-trending">i</i></span></div>
+          <div class="dtpl-row" style="align-items:center;">
+            <label style="font-size:9px;color:var(--muted);">Reference close (manual override) <input type="number" id="trendRefClose" class="ohlc-inp" style="width:110px;" placeholder="auto from replay"></label>
+          </div>
+          <div id="vedicTrending" class="gann-levels"></div>
+        </div>
+
+        <div class="skew-chart-wrap lore-decorative" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🪐 Stock lists by planetary ruler + commodities<i class="hi" data-h="vedic-stocklists">i</i></span></div>
+          <div id="vedicStockLists" class="gann-levels"></div>
+        </div>
+
         <div class="skew-chart-wrap">
           <div class="skew-chart-head"><span class="skew-chart-title">Navamsa (D9) positions<i class="hi" data-h="vedic-navamsa">i</i></span></div>
           <div id="vedicNavamsa" class="gann-levels"></div>
@@ -4121,6 +4200,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div class="builder-panel-head"><h3>Validation — does the confluence actually work?<i class="hi" data-h="validate-tab">i</i></h3></div>
 
       <div class="gann-grid">
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head">
+            <span class="skew-chart-title">🧪 Historical Astro Lab — the lore vs YEARS of data<i class="hi" data-h="astro-lab">i</i></span>
+            <label class="btn" style="font-size:9px;padding:3px 10px;cursor:pointer;">📂 Load NIFTY history CSV<input type="file" id="astroLabFile" accept=".csv,text/csv" style="display:none;"></label>
+            <button class="btn" id="astroLabBtn" style="font-size:9px;padding:3px 12px;">Run lab</button>
+          </div>
+          <div id="astroLab" class="gann-levels"></div>
+        </div>
+
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
           <div class="skew-chart-head">
             <span class="skew-chart-title">⚖️ Claims on Trial — the lore, scored against your own recorded days<i class="hi" data-h="claims-trial">i</i></span>
@@ -6541,6 +6629,35 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   // FEATURE: Gamma Exposure (GEX) profile + zero-gamma flip level
   // ======================================================================
+  // Delta-neutral level: strike where the chain's cumulative net delta
+  // exposure flips sign — GEX-flip's sibling, often at a different price.
+  function _computeDeltaNeutral(data) {
+    const strikes = data.strikes || [];
+    const spot = data.underlying_value, lot = data.lot_size || 50;
+    const dte = Math.max(0.25, data.dte ?? 1);
+    const T = dte / 365;
+    if (!strikes.length || !spot) return null;
+    const rows = [];
+    for (const s of strikes) {
+      const ceIv = (s.ce_iv || 0) / 100, peIv = (s.pe_iv || 0) / 100;
+      const dCe = ceIv > 0.01 ? bsGreeks(spot, s.strike, T, ceIv, 0.07, 'CE').delta : 0;
+      const dPe = peIv > 0.01 ? bsGreeks(spot, s.strike, T, peIv, 0.07, 'PE').delta : 0;
+      rows.push({ strike: s.strike, nd: (dCe * (s.ce_oi || 0) + dPe * (s.pe_oi || 0)) * lot });
+    }
+    rows.sort((a, b) => a.strike - b.strike);
+    let cum = 0, prevCum = 0, flip = null, prevK = null;
+    for (const r of rows) {
+      prevCum = cum; cum += r.nd;
+      if (prevK !== null && prevCum !== 0 && Math.sign(prevCum) !== Math.sign(cum)) {
+        const f = Math.abs(prevCum) / (Math.abs(prevCum) + Math.abs(cum));
+        flip = prevK + f * (r.strike - prevK);
+        break;
+      }
+      prevK = r.strike;
+    }
+    return flip;
+  }
+
   function _computeGex(data) {
     const strikes = data.strikes || [];
     const spot = data.underlying_value, lot = data.lot_size || 50;
@@ -7337,6 +7454,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const oc = computeOcLevels(d);
     const slope = _termSlope(d);
     const dte = d.dte ?? 99;
+    if ((dte ?? 99) <= 0)
+      out.push({ tpl: null, noDeploy: true, name: '⚡ Expiry day (0-DTE)', why: ['theta burns by the minute — premium-selling structures decay in your favour but gamma risk is extreme near the pin', 'avoid calendars anchored to the dying expiry: deploy against the NEXT expiry instead', 'after 14:30, pinning/whip risk peaks — size down or stand aside'] });
     const gap = d.strike_gap || 50;
     const nearMaxPain = d.max_pain && Math.abs(d.underlying_value - d.max_pain) <= 1.5 * gap;
     const ivSrc = ivRank !== null ? `IV rank ${Math.round(ivRank)}` : (ivp !== null ? `session IVP ${Math.round(ivp)}` : `ATM IV ${d.atm_iv?.toFixed(1)}`);
@@ -7907,8 +8026,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _gannSq9Levels(price) {
     if (!price || price <= 0) return null;
     const root = Math.sqrt(price);
+    // Two live conventions for degree-to-root mapping:
+    //  wheel (classical): 360 deg = +2 on the root - the true spiral geometry
+    //  (ring corners 1,9,25,49 have roots 1,3,5,7 -> 2 per rotation)
+    //  calc (Indian intraday calculators): 360 deg = +1 -> 45 deg = 0.125, half spacing.
+    const conv = (typeof localStorage !== 'undefined' && localStorage.getItem('sq9Conv')) || 'wheel';
+    const div = conv === 'calc' ? 360 : 180;
     const degToLevel = deg => {
-      const v = root + deg / 180;      // 180° = +1 to the square root
+      const v = root + deg / div;
       return v > 0 ? v * v : null;
     };
     const angles = [45, 90, 135, 180, 225, 270, 315, 360];
@@ -8800,6 +8925,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   document.getElementById('gannCalcBtn')?.addEventListener('click', renderGannTab);
+  (() => {
+    const sel = document.getElementById('sq9Conv');
+    if (!sel) return;
+    try { sel.value = localStorage.getItem('sq9Conv') || 'wheel'; } catch (_) {}
+    sel.addEventListener('change', () => {
+      try { localStorage.setItem('sq9Conv', sel.value); } catch (_) {}
+      renderGannTab();
+    });
+  })();
   _esoWireBar();
   document.getElementById('gannUseSpot')?.addEventListener('click', () => {
     const spot = state.lastData?.underlying_value;
@@ -9637,7 +9771,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     hits.sort((a, b) => a.off - b.off);
     const slow = hits.filter(h => !['Moon'].includes(h.tName));
-    out.innerHTML = (slow.length ? slow.slice(0, 8) : hits.slice(0, 5)).map(h => `
+    out.innerHTML = `<div style="font-size:10px;padding:2px 4px 5px;border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:3px;">Transiting planets (chosen date) vs the natal chart of: <b style="color:var(--gold,#d4af37);">${escapeHtml(anc.label)}</b></div>` + (slow.length ? slow.slice(0, 8) : hits.slice(0, 5)).map(h => `
       <div class="gann-lvl-row ${h.ang === 90 || h.ang === 180 ? 'res' : h.ang === 0 ? 'anchor' : 'sup'}">
         <span class="lvl-tag">${_PLANET_GLYPH[h.tName]} ${h.glyph}</span>
         <span class="lvl-val" style="font-size:10px;">transit ${h.tName} ${h.aname} natal ${h.nName}</span>
@@ -9773,6 +9907,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => renderAstroRetro(inp), 'renderAstroRetro');
     _safe(() => renderAstroLines(inp), 'renderAstroLines');
     _safe(() => renderBradley(), 'renderBradley');
+    _safe(() => renderAstroIngress(), 'renderAstroIngress');
     _safe(() => _refreshLayman(), '_refreshLayman');
     _safe(() => renderAstroNatal(inp), 'renderAstroNatal');
     _safe(() => renderAstroMoon(inp), 'renderAstroMoon');
@@ -9780,7 +9915,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   document.getElementById('astroGenBtn')?.addEventListener('click', renderAstroTab);
   document.getElementById('astroZodiac')?.addEventListener('change', renderAstroTab);
-  document.getElementById('astroAnchor')?.addEventListener('change', renderAstroTab);
+  document.getElementById('astroAnchor')?.addEventListener('change', () => {
+    renderAstroTab();
+    // the anchor affects exactly one panel - take the user to it so the
+    // cause->effect is visible instead of happening off-screen
+    const p = document.getElementById('astroNatal');
+    if (p) {
+      p.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const wrap = p.closest('.skew-chart-wrap') || p;
+      wrap.style.transition = 'box-shadow 0.3s';
+      wrap.style.boxShadow = '0 0 0 2px var(--gold, #d4af37)';
+      setTimeout(() => { wrap.style.boxShadow = ''; }, 1400);
+    }
+  });
+  document.getElementById('astroDate')?.addEventListener('change', renderAstroTab);
+  // prefill the date with today so "which day am I looking at" is always explicit
+  try { const ad = document.getElementById('astroDate'); if (ad && !ad.value) ad.value = new Date().toISOString().slice(0, 10); } catch (_) {}
 
   // ======================================================================
   // FEATURE: Vedic Astrology tab
@@ -10216,6 +10366,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => renderVedicHora(now), 'renderVedicHora');
     _safe(() => renderVedicPanchang(now), 'renderVedicPanchang');
     _safe(() => renderVedicLunarCal(now), 'renderVedicLunarCal');
+    _safe(() => renderVedicBhadra(now), 'renderVedicBhadra');
+    _safe(() => renderVedicTrending(now), 'renderVedicTrending');
+    _safe(() => renderVedicStockLists(now), 'renderVedicStockLists');
     _safe(() => renderVedicNavamsa(now), 'renderVedicNavamsa');
     _safe(() => renderVedicAshtaka(now), 'renderVedicAshtaka');
     _safe(() => renderVedicConfluence(anchor, now), 'renderVedicConfluence');
@@ -10339,7 +10492,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // ══ GANN ══
     gannSq9Levels: () => { const p = _layPrice();
       let now = 'Load the chain or a stock to see live numbers.';
-      if (p) { const r = Math.sqrt(p); now = `${_layLbl()} is at <b>${fmtInt(Math.round(p))}</b>. Its square root is ${r.toFixed(2)}; adding/subtracting quarter-steps and re-squaring gives the nearest "spiral" prices: support ~<b>${fmtInt(Math.round(Math.pow(r - 0.25, 2)))}</b>, resistance ~<b>${fmtInt(Math.round(Math.pow(r + 0.25, 2)))}</b>. Each ±45° row in the table is one more quarter-step of the root.`; }
+      if (p) { const r = Math.sqrt(p); const q = (localStorage.getItem('sq9Conv') === 'calc') ? 0.125 : 0.25;
+        now = `${_layLbl()} is at <b>${fmtInt(Math.round(p))}</b>. Its square root is ${r.toFixed(2)}; each 45° adds ${q} to the root, so the nearest spiral prices are: support ~<b>${fmtInt(Math.round(Math.pow(r - q, 2)))}</b>, resistance ~<b>${fmtInt(Math.round(Math.pow(r + q, 2)))}</b> — a step of ≈${(2 * q * r).toFixed(0)} points. The step is √price×${(2 * q).toFixed(2)}, so it GROWS with price but glacially: Nifty must move hundreds of points before it changes by 1, which is why it looks constant day after day. The dropdown above switches between the classical wheel (360°=2) and the Indian intraday-calculator convention (360°=1, half spacing).`; }
       return _laySec('What it is', 'W.D. Gann\'s Square of 9 — prices arranged in a spiral like numbered squares on a snail shell. Prices that land on the same "spoke" of the spiral are claimed to act as floors and ceilings.') +
         _laySec('Right now', now) +
         _laySec('How to read', 'Treat the level nearest ABOVE price as a possible ceiling and nearest BELOW as a possible floor. ● marks cardinal (90°-multiple) levels — considered strongest in the tradition.') +
@@ -10468,6 +10622,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         _laySec('Rahu Kaal', 'The day\'s ~90-minute "avoid new ventures" slot — 1/8th of daylight, position rotating by weekday. Widely respected in Indian business culture; the panel flags it live.') +
         _laySec('Reality check', 'The panchang is real, ancient calendar astronomy — the interpretive layer (auspicious/inauspicious) is tradition. Its market relevance is purely that many Indian participants observe it.'); },
     vedicLunarCal: 'WHAT: every new moon (Amavasya 🌑) and full moon (Purnima 🌕) for the next 60 days, each checked against the lunar NODE — syzygies within the ecliptic limits get an ECLIPSE WINDOW flag, because eclipses can only occur when the Moon is near a node at new/full. This detector correctly identifies real eclipses (validated against the actual 2026 pair). HOW TO READ: ★ rows = possible eclipse (±1-2 days precision, mean-node approximation). Eclipse dates carry enormous cultural weight in India — temples close, ritual baths, and yes, some traders square off. WHY IT\'S HERE: the lunar cycle is the single astro claim with peer-reviewed literature (small, contested full-moon return effect — Dichev &amp; Janes 2003), and eclipse attention in India is a genuine crowd phenomenon. The astronomy is exact; the meanings are borrowed.',
+    vedicBhadra: 'WHAT: half-tithis are called karanas; the 7th movable one — Vishti, known everywhere as BHADRA — recurs ~8 times a month for ~13 hours and is tradition\'s strongest "avoid starting anything" window (weddings, journeys, new ventures all deferred). Trading lore extends this to "choppy, trap-prone sessions". HOW TO READ: the panel shows the karana running right now and the next Bhadra windows; rows flagged ⚠ overlap NSE hours. REALITY: purely a calendar pattern — but with genuine cultural observance in India. Watch a few flagged sessions against actual ranges before giving it any weight.',
+    vedicTrending: 'WHAT: the "Trending Day" method — the CLOSE of the last new/full-moon session becomes the reference level for the whole fortnight: above = bullish bias, below = bearish; Trayodashi (13th lunar day) sessions are claimed to trend hardest. HOW TO READ: the panel finds the last syzygy, pulls that day\'s close from your replay archive (or type it manually), and states the live bias in points and %%. REALITY: an anchored 2-week-old close is at least a coherent reference level — the tithi-day part is pure lore.',
+    vedicStockLists: 'WHAT: each planet classically rules sectors (Jupiter→banks, Mars→metals, Mercury→IT, Saturn→oil/infra…), and the lore "activates" a list via the weekday\'s ruling planet or the lunar phase. HOW TO READ: today\'s day-lord row is highlighted; click any symbol to load it into the Gann/Levels/Astro/Vedic tabs; the bottom section gives the commodity rulers (gold→Jupiter/Sun, silver→Moon/Venus, crude→Saturn/Mars). REALITY: the sector map is real tradition, the activation claim has no mechanism — sector rotation follows flows and earnings, not weekdays.',
     vedicNavamsa: 'WHAT: the Navamsa (D9) — Vedic astrology\'s most important divisional chart: each sign is split into nine 3°20′ slices and remapped, producing a second zodiac position for every planet. Tradition treats D9 as the "fruit" behind the main chart\'s "tree" — a planet strong in both charts (vargottama) is considered truly strong. HOW TO READ: compare a planet\'s main-chart sign to its D9 sign; agreement = conviction, contradiction = the theme is weaker than it looks. In market lore, applied to the Nifty natal chart. REALITY: an intricate, internally-consistent refinement of a system with no external validity. Deep tradition, faithfully computed.',
     vedicAshtaka: 'WHAT: Ashtakavarga — Vedic astrology\'s POINT-SCORING system: each of 7 planets contributes benefic points to each sign based on classical rules, giving every sign a 0-8 score (and the whole zodiac a 337-point budget). Signs scoring 30+ in the combined (sarva) table are "strong houses"; below 25, weak. HOW TO READ: transits through high-scoring signs are read as smooth, through low-scoring as obstructed — so lore watches, e.g., Saturn entering a weak sign as a rough patch. REALITY: essentially a spreadsheet from 1,500 years ago — genuinely systematic, admirably quantified, and never once validated against returns. The most "quant-looking" piece of pure lore on the dashboard.',
     vedicConfluence: 'WHAT: the tab\'s roll-up — dasha lord condition, node placements, panchang quality, hora, and transit scores merged into one daily Vedic reading. HOW TO READ: as the tradition\'s overall "weather report" for the day — the same way a panchang column in a Hindi daily reads. Remember what feeds it: every input is lore-tier, so the aggregate is too (averaging ten guesses is still a guess). REALITY: useful as a one-glance summary OF THE TRADITION, never as a signal. For real levels, the Levels tab; for real positioning, the option chain.',
@@ -10512,6 +10669,657 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     });
   }
   _injectAllLayman();   // safe here: _LAYMAN is initialized just above, DOM already parsed
+
+  // ══ PRO F5: ops status strip ══
+  function _opsTick() {
+    const el = document.getElementById('opsStrip');
+    if (!el) return;
+    const age = state._lastFetchTs ? Math.round((Date.now() - state._lastFetchTs) / 1000) : null;
+    const lat = state._lastLatency, err = state._errCount || 0;
+    const stale = age !== null && age > 30;
+    el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` +
+      (lat ? ` · ⚡${lat}ms` : '') +
+      (err ? ` · <span style="color:var(--neg,#ef5350);">⚠${err}</span>` : '') ;
+    el.style.color = stale ? 'var(--neg,#ef5350)' : 'var(--muted,#789)';
+    el.title = 'Data freshness: chain age · last fetch latency · error count this session' + (stale ? ' — STALE: check auto-refresh/server' : '');
+  }
+  setInterval(_opsTick, 1000);
+
+  // ══ PRO F3: backup all app state (localStorage) ══
+  function _backupExport(auto) {
+    try {
+      const dump = { _meta: { app: '1OPTIONS', when: new Date().toISOString(), keys: localStorage.length } };
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        dump[k] = localStorage.getItem(k);
+      }
+      const blob = new Blob([JSON.stringify(dump, null, 1)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `1options-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      localStorage.setItem('lastBackupTs', String(Date.now()));
+      if (typeof showToast === 'function') showToast(auto ? '💾 Weekly auto-backup downloaded' : '💾 Backup downloaded — keep it safe');
+    } catch (e) { if (typeof showToast === 'function') showToast('Backup failed: ' + e.message); }
+  }
+  function _backupImport(file) {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const d = JSON.parse(r.result);
+        if (!d._meta || d._meta.app !== '1OPTIONS') { if (!confirm('File does not look like a 1OPTIONS backup. Import anyway?')) return; }
+        let n = 0;
+        for (const [k, v] of Object.entries(d)) {
+          if (k === '_meta' || typeof v !== 'string') continue;
+          localStorage.setItem(k, v); n++;
+        }
+        alert(`Restored ${n} keys — reloading.`);
+        location.reload();
+      } catch (e) { alert('Import failed: ' + e.message); }
+    };
+    r.readAsText(file);
+  }
+  document.getElementById('backupBtn')?.addEventListener('click', () => _backupExport(false));
+  document.getElementById('restoreBtn')?.addEventListener('click', () => document.getElementById('restoreFile')?.click());
+  document.getElementById('restoreFile')?.addEventListener('change', e => { if (e.target.files?.[0]) _backupImport(e.target.files[0]); e.target.value = ''; });
+  // auto-weekly: if a week since last backup and there is state worth saving
+  try {
+    const last = +(localStorage.getItem('lastBackupTs') || 0);
+    if (localStorage.length > 2 && Date.now() - last > 7 * 86400000) setTimeout(() => _backupExport(true), 4000);
+  } catch (_) {}
+  // ══ PRO F1: portfolio greeks + stress heatmap (paper positions) ══
+  async function renderPortfolioGreeks() {
+    const gBox = document.getElementById('pfGreeks'), hBox = document.getElementById('pfHeatmap');
+    if (!gBox || !hBox) return;
+    const d = state.lastData;
+    if (!d?.underlying_value) { gBox.innerHTML = '<span class="oc-sub">Load the option chain first — greeks are priced off live spot/IV.</span>'; hBox.innerHTML = ''; return; }
+    gBox.innerHTML = '<span class="oc-sub">Loading positions…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const resp = await fetch(`${base}/api/paper-trades?status=open`, { signal: AbortSignal.timeout(15000) });
+      const pj = await resp.json();
+      const trades = (pj.trades || pj || []).filter(t => (t.status || 'OPEN').toUpperCase() === 'OPEN');
+      if (!trades.length) { gBox.innerHTML = '<span class="oc-sub">No open paper positions. Deploy something from the Builder/Suggester and the risk desk lights up.</span>'; hBox.innerHTML = ''; return; }
+      const spot = d.underlying_value, lot = d.lot_size || 50;
+      const legIv = l => {
+        const pool = (l.expiry === d.expiry) ? d.strikes : (d.expiries_data?.[l.expiry]?.strikes);
+        const sd = (pool || []).find(s => s.strike === l.strike);
+        const iv = sd ? (l.option_type === 'CE' ? sd.ce_iv : sd.pe_iv) : null;
+        return ((iv || l.iv || d.atm_iv || 12) / 100);
+      };
+      const legT = l => Math.max(0.25, (l.expiry ? Math.max(0, (new Date(l.expiry) - new Date()) / 86400000) : (d.dte ?? 1))) / 365;
+      let net = { delta: 0, gamma: 0, theta: 0, vega: 0 }, rows = '';
+      const allLegs = [];
+      for (const t of trades) {
+        let td = 0, tg = 0, tt = 0, tv = 0;
+        for (const l of (t.legs || [])) {
+          const g = bsGreeks(spot, l.strike, legT(l), legIv(l), 0.07, l.option_type);
+          const sign = (l.action === 'SELL' ? -1 : 1) * (l.qty_lots || 1) * lot;
+          td += g.delta * sign; tg += g.gamma * sign; tt += g.theta * sign; tv += g.vega * sign;
+          allLegs.push({ ...l, sign });
+        }
+        net.delta += td; net.gamma += tg; net.theta += tt; net.vega += tv;
+        rows += `<div style="display:flex;gap:10px;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:10px;flex-wrap:wrap;">
+          <b style="min-width:150px;">${escapeHtml(t.name || 'position')}</b>
+          <span>Δ ${td.toFixed(0)}</span><span>Γ ${tg.toFixed(2)}</span>
+          <span style="color:${tt >= 0 ? 'var(--pos)' : 'var(--neg)'};">Θ ${tt.toFixed(0)}/day</span>
+          <span>V ${tv.toFixed(0)}/ivpt</span></div>`;
+      }
+      const dirRead = Math.abs(net.delta) < lot * 0.3 ? 'near delta-neutral' : net.delta > 0 ? `long ~${(net.delta / lot).toFixed(1)} lots of underlying` : `short ~${(-net.delta / lot).toFixed(1)} lots of underlying`;
+      gBox.innerHTML = rows + `<div style="display:flex;gap:12px;padding:5px 4px;font-size:11px;font-weight:700;border-top:1px solid rgba(255,255,255,0.12);flex-wrap:wrap;">
+        <span>NET:</span><span>Δ ${net.delta.toFixed(0)}</span><span>Γ ${net.gamma.toFixed(2)}</span>
+        <span style="color:${net.theta >= 0 ? 'var(--pos)' : 'var(--neg)'};">Θ ${net.theta.toFixed(0)}/day</span>
+        <span>Vega ${net.vega.toFixed(0)}/ivpt</span></div>
+        <div class="oc-sub" style="margin-top:3px;">Book is ${dirRead}. Θ = rupees the book ${net.theta >= 0 ? 'earns' : 'bleeds'} per calendar day at this spot; Vega = P&L per 1 IV point ${net.vega >= 0 ? '(IV spike helps)' : '(IV spike hurts)'}. Per-leg IVs read live from the chain.</div>`;
+      // stress heatmap: spot -3..+3% × IV -5..+5 pts
+      const spotShifts = [-3, -2, -1, 0, 1, 2, 3], ivShifts = [5, 2.5, 0, -2.5, -5];
+      const entryVal = allLegs.reduce((s, l) => s + l.premium * l.sign, 0);
+      let hm = '<table style="border-collapse:collapse;font-size:9.5px;width:100%;"><tr><th style="padding:2px 4px;color:var(--muted);">IV \\ spot</th>' +
+        spotShifts.map(p => `<th style="padding:2px 4px;color:var(--muted);">${p > 0 ? '+' : ''}${p}%</th>`).join('') + '</tr>';
+      let worst = 0, best = 0;
+      const cells = ivShifts.map(iv => spotShifts.map(sp => {
+        const S2 = spot * (1 + sp / 100);
+        let v = 0;
+        for (const l of allLegs) {
+          const iv2 = Math.max(0.02, legIv(l) + iv / 100);
+          v += bsPriceCalc(S2, l.strike, legT(l), iv2, 0.07, l.option_type) * l.sign;
+        }
+        const pnl = (v - entryVal);
+        worst = Math.min(worst, pnl); best = Math.max(best, pnl);
+        return pnl;
+      }));
+      const span = Math.max(Math.abs(worst), Math.abs(best), 1);
+      ivShifts.forEach((iv, i) => {
+        hm += `<tr><td style="padding:2px 4px;color:var(--muted);font-weight:700;">${iv > 0 ? '+' : ''}${iv}</td>` + cells[i].map(p => {
+          const a = Math.min(0.85, Math.abs(p) / span);
+          const bg = p >= 0 ? `rgba(38,166,154,${a})` : `rgba(239,83,80,${a})`;
+          return `<td style="padding:3px 4px;text-align:center;background:${bg};font-weight:${Math.abs(p) > span * 0.6 ? 700 : 400};">${p >= 0 ? '+' : ''}${p.toFixed(0)}</td>`;
+        }).join('') + '</tr>';
+      });
+      hm += '</table>';
+      hBox.innerHTML = hm + `<div class="oc-sub" style="margin-top:4px;">P&amp;L in PREMIUM POINTS per book (×lot ${lot} for ₹) if spot and IV jump to each cell RIGHT NOW (time held constant — theta accrues on top). Worst cell: <b style="color:var(--neg);">${worst.toFixed(0)}</b>, best: <b style="color:var(--pos);">${best.toFixed(0)}</b>. The answer to "what if Nifty drops 2% and IV spikes 5 points" is the top-left region.</div>`;
+    } catch (e) { gBox.innerHTML = `<span class="oc-sub">Failed: ${escapeHtml(e.message)}</span>`; }
+  }
+  document.getElementById('pfGreeksBtn')?.addEventListener('click', renderPortfolioGreeks);
+
+  // ══ PRO F6: trade journal with setup tagging ══
+  const _TJ_KEY = 'tradeJournal';
+  function _tjLoad() { try { const a = JSON.parse(localStorage.getItem(_TJ_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (_) { return []; } }
+  function _tjSave(a) { try { localStorage.setItem(_TJ_KEY, JSON.stringify(a.slice(-500))); } catch (_) {} }
+  function renderTradeJournal() {
+    const box = document.getElementById('tjList'), stats = document.getElementById('tjStats');
+    if (!box) return;
+    const log = _tjLoad();
+    if (!log.length) { box.innerHTML = '<span class="oc-sub">No entries yet. Log every real trade with its setup tag — after ~20 trades per setup, the stats tell you which setups YOU actually execute well (which is a different question from which setups exist).</span>'; if (stats) stats.innerHTML = ''; return; }
+    box.innerHTML = log.slice(-12).reverse().map(e =>
+      `<div style="display:flex;gap:8px;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:10px;flex-wrap:wrap;">
+        <span style="color:var(--muted);min-width:72px;">${new Date(e.ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
+        <b style="min-width:80px;">${escapeHtml(e.sym)}</b>
+        <span style="color:${e.dir === 'LONG' ? 'var(--pos)' : 'var(--neg)'};">${e.dir}</span>
+        <span style="min-width:130px;color:var(--gold);">${escapeHtml(e.setup)}</span>
+        <span style="font-weight:700;color:${e.pnl >= 0 ? 'var(--pos)' : 'var(--neg)'};">${e.pnl >= 0 ? '+' : ''}${e.pnl}</span>
+        ${e.note ? `<span style="color:#9ab;flex-basis:100%;padding-left:80px;">${escapeHtml(e.note)}</span>` : ''}
+        <span class="tj-del" data-ts="${e.ts}" style="cursor:pointer;opacity:0.45;">×</span></div>`).join('');
+    box.querySelectorAll('.tj-del').forEach(x => x.addEventListener('click', () => { _tjSave(_tjLoad().filter(e => e.ts !== +x.dataset.ts)); renderTradeJournal(); }));
+    if (stats) {
+      const by = {};
+      for (const e of log) { const b = by[e.setup] = by[e.setup] || { n: 0, w: 0, sum: 0 }; b.n++; if (e.pnl > 0) b.w++; b.sum += e.pnl; }
+      stats.innerHTML = Object.entries(by).sort((a, b) => b[1].n - a[1].n).map(([s, b]) =>
+        `<div style="display:flex;gap:10px;padding:2px 4px;font-size:10px;border-bottom:1px solid rgba(255,255,255,0.04);">
+          <b style="min-width:150px;color:var(--gold);">${escapeHtml(s)}</b>
+          <span>${b.n} trades</span><span>win ${Math.round(b.w / b.n * 100)}%</span>
+          <span style="font-weight:700;color:${b.sum >= 0 ? 'var(--pos)' : 'var(--neg)'};">net ${b.sum >= 0 ? '+' : ''}${b.sum.toFixed(0)}</span>
+          <span style="color:var(--muted);">avg ${(b.sum / b.n).toFixed(0)}</span></div>`).join('') +
+        '<div class="oc-sub" style="margin-top:3px;">Win% under ~20 trades per setup is noise. This scores YOUR execution; Claims-on-Trial scores the tool. Both need to pass.</div>';
+    }
+  }
+  document.getElementById('tjAddBtn')?.addEventListener('click', () => {
+    const sym = document.getElementById('tjSym')?.value.trim().toUpperCase();
+    const dir = document.getElementById('tjDir')?.value;
+    const setup = document.getElementById('tjSetup')?.value.trim() || 'untagged';
+    const pnl = parseFloat(document.getElementById('tjPnl')?.value);
+    const note = document.getElementById('tjNote')?.value.trim();
+    if (!sym || isNaN(pnl)) { if (typeof showToast === 'function') showToast('Journal needs at least a symbol and a P&L'); return; }
+    const log = _tjLoad(); log.push({ ts: Date.now(), sym, dir, setup, pnl, note }); _tjSave(log);
+    ['tjSym', 'tjPnl', 'tjNote'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    renderTradeJournal();
+  });
+  // render the paper-tab pro panels whenever the tab is opened
+  document.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('[data-tab="paper"]'))
+      setTimeout(() => { renderPortfolioGreeks(); renderTradeJournal(); }, 80);
+  });
+  // ══ PRO F2: custom level-alert engine ══
+  const _CA_KEY = 'customAlerts';
+  function _caLoad() { try { const a = JSON.parse(localStorage.getItem(_CA_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (_) { return []; } }
+  function _caSave(a) { try { localStorage.setItem(_CA_KEY, JSON.stringify(a)); } catch (_) {} }
+  function _caNotify(msg) {
+    if (typeof showToast === 'function') showToast('🔔 ' + msg);
+    try { if ('Notification' in window && Notification.permission === 'granted') new Notification('1OPTIONS alert', { body: msg }); } catch (_) {}
+    try {
+      if (typeof _voiceEnabled === 'function' && _voiceEnabled() && 'speechSynthesis' in window)
+        speechSynthesis.speak(new SpeechSynthesisUtterance(msg));
+    } catch (_) {}
+    const log = JSON.parse(localStorage.getItem('customAlertsFired') || '[]');
+    log.push({ ts: Date.now(), msg });
+    localStorage.setItem('customAlertsFired', JSON.stringify(log.slice(-30)));
+  }
+  function _alertsCheck(d) {
+    if (!d?.underlying_value) return;
+    const spot = d.underlying_value, rules = _caLoad();
+    let dirty = false;
+    const prevSpot = state._caPrevSpot;
+    state._caPrevSpot = spot;
+    for (const r of rules) {
+      if (!r.armed) continue;
+      if (r.lastFired && Date.now() - r.lastFired < 5 * 60 * 1000) continue;   // 5-min refire cooldown
+      let hit = false, msg = '';
+      if (r.type === 'near' && Math.abs(spot - r.value) <= (r.pts || 10)) { hit = true; msg = `Spot ${fmtInt(Math.round(spot))} within ${r.pts || 10} pts of ${r.label || r.value}`; }
+      else if (r.type === 'cross' && prevSpot && Math.sign(prevSpot - r.value) !== Math.sign(spot - r.value) && prevSpot !== spot) { hit = true; msg = `Spot crossed ${r.label || r.value} (${fmtInt(Math.round(prevSpot))} → ${fmtInt(Math.round(spot))})`; }
+      else if (r.type === 'iv_above' && (d.iv_rank ?? -1) >= r.value) { hit = true; msg = `IV rank ${d.iv_rank} ≥ ${r.value} — premium selling regime`; }
+      else if (r.type === 'iv_below' && d.iv_rank !== null && d.iv_rank !== undefined && d.iv_rank <= r.value) { hit = true; msg = `IV rank ${d.iv_rank} ≤ ${r.value} — cheap options regime`; }
+      if (hit) { r.lastFired = Date.now(); dirty = true; _caNotify(msg); }
+    }
+    if (dirty) { _caSave(rules); _caRenderRules(); }
+  }
+  // OI wall decay checker — polls the migration endpoint once a minute
+  async function _caOiCheck() {
+    const rules = _caLoad().filter(r => r.armed && r.type === 'oi_decay' && (!r.lastFired || Date.now() - r.lastFired > 10 * 60 * 1000));
+    if (!rules.length || !state.lastData) return;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/oi-migration?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`);
+      const d = await res.json();
+      if (!d.rows?.length) return;
+      const all = _caLoad(); let dirty = false;
+      for (const r of rules) {
+        for (const row of d.rows) {
+          const ceDecay = row.ce_oi > 0 ? -row.ce_d60 / row.ce_oi * 100 : 0;
+          const peDecay = row.pe_oi > 0 ? -row.pe_d60 / row.pe_oi * 100 : 0;
+          if (Math.max(ceDecay, peDecay) >= r.value) {
+            const side = ceDecay >= peDecay ? 'CALL' : 'PUT';
+            const live = all.find(x => x.id === r.id);
+            if (live) { live.lastFired = Date.now(); dirty = true; }
+            _caNotify(`${side} wall at ${fmtInt(row.strike)} decayed ${Math.max(ceDecay, peDecay).toFixed(0)}% in the last hour — that side is softening`);
+            break;
+          }
+        }
+      }
+      if (dirty) { _caSave(all); _caRenderRules(); }
+    } catch (_) {}
+  }
+  setInterval(_caOiCheck, 60000);
+  function _caRenderRules() {
+    const box = document.getElementById('caRules');
+    if (!box) return;
+    const rules = _caLoad();
+    const typeLbl = { near: 'spot near', cross: 'spot crosses', iv_above: 'IV rank ≥', iv_below: 'IV rank ≤', oi_decay: 'any wall decays ≥%' };
+    box.innerHTML = (rules.length ? rules.map(r =>
+      `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:10px;">
+        <span style="cursor:pointer;" class="ca-arm" data-id="${r.id}" title="arm/disarm">${r.armed ? '🔔' : '🔕'}</span>
+        <b>${typeLbl[r.type] || r.type}</b><span>${r.value}${r.type === 'near' ? ' ±' + (r.pts || 10) + 'pts' : ''}</span>
+        ${r.label ? `<span style="color:var(--gold);">${escapeHtml(r.label)}</span>` : ''}
+        ${r.lastFired ? `<span style="color:var(--muted);font-size:9px;">fired ${new Date(r.lastFired).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>` : ''}
+        <span class="ca-del" data-id="${r.id}" style="margin-left:auto;cursor:pointer;opacity:0.45;">×</span></div>`).join('')
+      : '<span class="oc-sub">No rules yet. A pro tool watches levels FOR you — add one below (e.g. "spot near 24500 ±15" or "any wall decays ≥ 15%").</span>');
+    box.querySelectorAll('.ca-arm').forEach(x => x.addEventListener('click', () => { const a = _caLoad(); const r = a.find(y => y.id === +x.dataset.id); if (r) { r.armed = !r.armed; _caSave(a); _caRenderRules(); } }));
+    box.querySelectorAll('.ca-del').forEach(x => x.addEventListener('click', () => { _caSave(_caLoad().filter(y => y.id !== +x.dataset.id)); _caRenderRules(); }));
+    const fired = JSON.parse(localStorage.getItem('customAlertsFired') || '[]');
+    const fBox = document.getElementById('caFired');
+    if (fBox) fBox.innerHTML = fired.slice(-5).reverse().map(f => `<div style="font-size:9px;color:var(--muted);padding:1px 4px;">${new Date(f.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} — ${escapeHtml(f.msg)}</div>`).join('');
+  }
+  document.getElementById('caAddBtn')?.addEventListener('click', () => {
+    const type = document.getElementById('caType')?.value;
+    const value = parseFloat(document.getElementById('caValue')?.value);
+    const pts = parseFloat(document.getElementById('caPts')?.value) || 10;
+    const label = document.getElementById('caLabel')?.value.trim();
+    if (isNaN(value)) { if (typeof showToast === 'function') showToast('Alert needs a value'); return; }
+    try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch (_) {}
+    const a = _caLoad(); a.push({ id: Date.now(), type, value, pts, label, armed: true }); _caSave(a);
+    document.getElementById('caValue').value = ''; if (document.getElementById('caLabel')) document.getElementById('caLabel').value = '';
+    _caRenderRules();
+  });
+  _caRenderRules();
+  // ══ PRO F4: command palette (Ctrl+K) ══
+  function _palCommands() {
+    const cmds = [];
+    document.querySelectorAll('[data-tab]').forEach(b => {
+      const t = b.dataset.tab; if (!t || b.closest('#cmdPal')) return;
+      cmds.push({ label: 'Go to: ' + (b.textContent.trim() || t), hint: 'tab', run: () => b.click() });
+    });
+    cmds.push({ label: 'Refresh option chain', hint: 'action', run: () => document.getElementById('refreshBtn')?.click() });
+    cmds.push({ label: 'Toggle stock watchlist panel', hint: 'action', run: () => (document.getElementById('tvWlPanel')?.style.display === 'flex' ? document.getElementById('tvWlClose') : document.getElementById('tvWlToggle'))?.click() });
+    cmds.push({ label: 'Run Claims on Trial', hint: 'validate', run: () => { document.querySelector('[data-tab="validate"]')?.click(); setTimeout(() => document.getElementById('claimsTrialBtn')?.click(), 120); } });
+    cmds.push({ label: 'Export backup (all app data)', hint: 'data', run: () => _backupExport(false) });
+    cmds.push({ label: 'Import backup', hint: 'data', run: () => document.getElementById('restoreFile')?.click() });
+    cmds.push({ label: 'Reset zoom (100%)', hint: 'view', run: () => document.getElementById('zoomResetBtn')?.click() });
+    for (const [tpl, name] of [['straddle', 'Deploy: ATM Straddle'], ['dblcal', 'Deploy: Double Calendar'], ['ic2510', 'Deploy: Iron Condor 25/10'], ['strangle20', 'Deploy: 20Δ Strangle']])
+      cmds.push({ label: name, hint: 'builder', run: () => { document.querySelector('[data-tab="builder"]')?.click(); setTimeout(() => document.querySelector(`#builderDtplRow [data-dtpl="${tpl}"]`)?.click(), 150); } });
+    // dynamic: "SYMBOL" → load into esoteric tabs
+    const q = (document.getElementById('cmdPalInput')?.value || '').trim().toUpperCase();
+    const m = q.match(/^([A-Z&\-]{2,15})$/);
+    if (m && !cmds.some(c => c.label.toUpperCase().includes(m[1])))
+      cmds.push({ label: `Load ${m[1]} into esoteric tabs (Gann/Levels/…)`, hint: 'stock', run: () => { _esoLoadStock(m[1]); document.querySelector('[data-tab="gann"]')?.click(); } });
+    return cmds;
+  }
+  let _palIdx = 0;
+  function _palRender() {
+    const q = (document.getElementById('cmdPalInput')?.value || '').toLowerCase();
+    const list = document.getElementById('cmdPalList');
+    const terms = q.split(/\s+/).filter(Boolean);
+    const scored = _palCommands().map(c => {
+      const l = c.label.toLowerCase();
+      const ok = terms.every(t => l.includes(t));
+      return ok ? { c, s: terms.length ? terms.reduce((s, t) => s + (l.indexOf(t) === 0 ? 2 : 1), 0) : 0 } : null;
+    }).filter(Boolean).sort((a, b) => b.s - a.s).slice(0, 10);
+    _palIdx = Math.min(_palIdx, Math.max(0, scored.length - 1));
+    list.innerHTML = scored.map((x, i) =>
+      `<div class="cmdpal-item" data-i="${i}" style="display:flex;gap:8px;padding:6px 10px;cursor:pointer;font-size:11px;${i === _palIdx ? 'background:rgba(212,175,55,0.15);' : ''}">
+        <span>${escapeHtml(x.c.label)}</span><span style="margin-left:auto;font-size:8.5px;color:var(--muted);text-transform:uppercase;">${x.c.hint}</span></div>`).join('')
+      || '<div style="padding:8px 10px;font-size:10px;color:var(--muted);">no match — try a tab name, "deploy", "backup", or a stock symbol</div>';
+    list._items = scored.map(x => x.c);
+    list.querySelectorAll('.cmdpal-item').forEach(el => {
+      el.addEventListener('mousedown', e => { e.preventDefault(); _palRun(list._items[+el.dataset.i]); });
+      el.addEventListener('mouseenter', () => { _palIdx = +el.dataset.i; _palRender(); });
+    });
+  }
+  function _palRun(cmd) { _palClose(); try { cmd?.run(); } catch (e) { if (typeof showToast === 'function') showToast('Command failed: ' + e.message); } }
+  function _palOpen() {
+    const p = document.getElementById('cmdPal'); if (!p) return;
+    p.style.display = 'flex'; _palIdx = 0;
+    const inp = document.getElementById('cmdPalInput'); inp.value = ''; _palRender(); setTimeout(() => inp.focus(), 30);
+  }
+  function _palClose() { const p = document.getElementById('cmdPal'); if (p) p.style.display = 'none'; }
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); _palOpen(); }
+    else if (e.key === 'Escape') _palClose();
+  });
+  document.getElementById('cmdPal')?.addEventListener('mousedown', e => { if (e.target.id === 'cmdPal') _palClose(); });
+  document.getElementById('cmdPalInput')?.addEventListener('input', () => { _palIdx = 0; _palRender(); });
+  document.getElementById('cmdPalInput')?.addEventListener('keydown', e => {
+    const list = document.getElementById('cmdPalList');
+    if (e.key === 'ArrowDown') { e.preventDefault(); _palIdx++; _palRender(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); _palIdx = Math.max(0, _palIdx - 1); _palRender(); }
+    else if (e.key === 'Enter') { e.preventDefault(); _palRun(list._items?.[_palIdx]); }
+  });
+
+  // ══ niftyastrology.com PRO parity: Bhadra / Trending Day / Stock lists ══
+  const _KARANA_MOV = ['Bava', 'Balava', 'Kaulava', 'Taitila', 'Gara', 'Vanija', 'Vishti (Bhadra)'];
+  function _karanaAt(dt) {
+    const e = _eclipticLongitudes(dt);
+    const el = ((e.moon - e.sun) % 360 + 360) % 360;
+    const k = Math.floor(el / 6);   // 60 half-tithis
+    let name;
+    if (k === 0) name = 'Kimstughna (fixed)';
+    else if (k === 57) name = 'Shakuni (fixed)';
+    else if (k === 58) name = 'Chatushpada (fixed)';
+    else if (k === 59) name = 'Naga (fixed)';
+    else name = _KARANA_MOV[(k - 1) % 7];
+    return { k, name, bhadra: name.startsWith('Vishti') };
+  }
+  function renderVedicBhadra(now) {
+    const out = document.getElementById('vedicBhadra');
+    if (!out) return;
+    const cur = _karanaAt(now);
+    // upcoming Bhadra windows over 14 days: coarse 2h scan, refine to 15 min
+    const wins = [];
+    let inB = cur.bhadra, start = inB ? new Date(now) : null;
+    for (let h = 2; h <= 14 * 24 && wins.length < 6; h += 2) {
+      const t = new Date(now.getTime() + h * 3600000);
+      const b = _karanaAt(t).bhadra;
+      if (b && !inB) { // refine start backwards
+        let lo = new Date(t.getTime() - 2 * 3600000), hi = new Date(t);
+        for (let i = 0; i < 4; i++) { const mid = new Date((lo.getTime() + hi.getTime()) / 2); if (_karanaAt(mid).bhadra) hi = mid; else lo = mid; }
+        start = hi; inB = true;
+      } else if (!b && inB) {
+        let lo = new Date(t.getTime() - 2 * 3600000), hi = new Date(t);
+        for (let i = 0; i < 4; i++) { const mid = new Date((lo.getTime() + hi.getTime()) / 2); if (_karanaAt(mid).bhadra) lo = mid; else hi = mid; }
+        if (start) wins.push({ s: start, e: lo });
+        inB = false; start = null;
+      }
+    }
+    const fmtDT = d => d.toLocaleString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+    const mktOverlap = w => { const dayS = new Date(w.s); dayS.setHours(9, 15, 0, 0); const dayE = new Date(w.s); dayE.setHours(15, 30, 0, 0);
+      const e2s = new Date(w.e); const dS2 = new Date(w.e); dS2.setHours(9, 15, 0, 0);
+      return (w.s <= dayE && w.e >= dayS) || (w.e >= dS2 && w.s <= e2s); };
+    const rows = wins.map(w =>
+      `<div class="gann-lvl-row ${mktOverlap(w) ? 'res' : ''}">
+        <span class="lvl-tag">Bhadra</span>
+        <span class="lvl-val" style="font-size:9.5px;">${fmtDT(w.s)} → ${fmtDT(w.e)}</span>
+        <span class="lvl-dist">${mktOverlap(w) ? '⚠ overlaps market hours' : 'outside market hours'}</span>
+      </div>`).join('');
+    out.innerHTML =
+      `<div style="font-size:11px;padding:2px 4px 5px;">Current karana: <b style="color:${cur.bhadra ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)'};">${cur.name}</b>${cur.bhadra ? ' — ⚠ BHADRA ACTIVE NOW' : ''}</div>` + rows +
+      '<div class="oc-sub" style="margin-top:4px;">A karana is HALF a tithi (Moon gains 6° on the Sun); seven movable karanas repeat through the month and the 7th — Vishti, called <b>Bhadra</b> — recurs ~8 times per lunar month for ~13h each. Tradition marks Bhadra as inauspicious for new ventures; astro-trading lore (niftyastrology-style) claims Bhadra sessions lean choppy/whipsaw. Windows overlapping NSE hours are flagged. PURE LORE — log it in Claims-on-Trial spirit: watch a few flagged sessions before believing anything.</div>';
+  }
+
+  // ── Trending Day: bias vs last Amavasya/Purnima close (Trayodashi logic) ──
+  async function renderVedicTrending(now) {
+    const out = document.getElementById('vedicTrending');
+    if (!out) return;
+    // find last syzygy (new or full) scanning backwards, 3h steps
+    const norm = x => ((x % 360) + 360) % 360;
+    const elAt = dt => { const e = _eclipticLongitudes(dt); return norm(e.moon - e.sun); };
+    let syz = null, prev = elAt(now);
+    for (let h = 3; h <= 20 * 24; h += 3) {
+      const t = new Date(now.getTime() - h * 3600000);
+      const el = elAt(t);
+      // moving backwards: elongation decreases; crossing 0 (new) => prev small, el large; crossing 180 (full)
+      if (prev < 60 && el > 300) { syz = { t, kind: 'Amavasya 🌑' }; break; }
+      if (prev >= 180 && el < 180) { syz = { t, kind: 'Purnima 🌕' }; break; }
+      prev = el;
+    }
+    const tithiNow = Math.floor(elAt(now) / 12);
+    const isTrayodashi = (tithiNow % 15) === 12;
+    let refClose = null, refSrc = '';
+    const manual = parseFloat(document.getElementById('trendRefClose')?.value);
+    if (!isNaN(manual) && manual > 0) { refClose = manual; refSrc = 'manual'; }
+    else if (syz) {
+      try {
+        const base = els.serverUrl.value.replace(/\/+$/, '');
+        const res = await fetch(`${base}/api/replay-ohlc?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`);
+        const d = await res.json();
+        const syzDay = syz.t.toISOString().slice(0, 10);
+        const cand = (d.days || []).filter(x => x.day <= syzDay).slice(-1)[0];
+        if (cand) { refClose = cand.C; refSrc = `recorded close ${cand.day}`; }
+      } catch (_) {}
+    }
+    const spot = state.lastData?.underlying_value;
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    let bias = '<span class="oc-sub">Reference close unavailable — the replay archive has no session on/before the last syzygy yet. Enter it manually above (close of the last Amavasya/Purnima day) and this panel computes the bias.</span>';
+    if (refClose && spot) {
+      const diff = spot - refClose, pct = diff / refClose * 100;
+      const dir = Math.abs(pct) < 0.15 ? ['AT REFERENCE', 'var(--muted,#789)', 'no bias — price sits on the lunar reference; per the lore, the next decisive move away from it sets the trend'] :
+        diff > 0 ? ['ABOVE reference — bullish bias', 'var(--pos,#26a69a)', 'lore reads dips toward the reference as buyable while it holds'] :
+        ['BELOW reference — bearish bias', 'var(--neg,#ef5350)', 'lore reads rallies toward the reference as fadeable while it caps'];
+      bias = `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;">
+          <span style="font-size:11px;"><b>Spot</b> ${fmtInt(Math.round(spot))}</span>
+          <span style="font-size:11px;"><b>Ref</b> ${fmtInt(Math.round(refClose))} <span style="color:var(--muted);font-size:9px;">(${refSrc})</span></span>
+          <span style="font-size:11px;font-weight:700;color:${dir[1]};">${diff >= 0 ? '+' : ''}${Math.round(diff)} pts (${pct.toFixed(2)}%) — ${dir[0]}</span>
+        </div><div style="font-size:9.5px;color:#9ab;padding:2px 4px;">${dir[2]}.</div>`;
+    }
+    out.innerHTML =
+      `<div style="font-size:10.5px;padding:2px 4px;">Last syzygy: <b>${syz ? syz.kind + ' ' + fmtD(syz.t) : 'not found'}</b> · today's tithi #${tithiNow % 15 + 1}${isTrayodashi ? ' — <b style="color:var(--gold);">TRAYODASHI (the lore\'s "trending day")</b>' : ''}</div>` + bias +
+      '<div class="oc-sub" style="margin-top:4px;">The niftyastrology "Trending Days" method: the CLOSE of the last Amavasya/Purnima becomes the reference level for the whole fortnight — above it bullish, below bearish — and Trayodashi (13th tithi) sessions are claimed to trend hardest. The reference-level part is at least a coherent rule (it\'s a 2-week-old anchored close, cousin of an anchored VWAP); the tithi part is pure lore. Auto-fills from your replay archive when it has that day; manual override provided.</div>';
+  }
+
+  // ── Planet–sector stock lists + commodities rulers ──
+  const _PLANET_STOCKS = [
+    ['Sun ☀', 'authority, govt, power', 'PSU / Power / Energy', ['NTPC', 'POWERGRID', 'COALINDIA', 'ONGC', 'SBIN']],
+    ['Moon ☾', 'liquidity, public mood', 'FMCG / Dairy / Marine / Hotels', ['HINDUNILVR', 'NESTLEIND', 'BRITANNIA', 'INDHOTEL', 'VBL']],
+    ['Mercury ☿', 'commerce, intellect', 'IT / Telecom / Media / Brokers', ['TCS', 'INFY', 'HCLTECH', 'BHARTIARTL', 'ANGELONE']],
+    ['Venus ♀', 'wealth, luxury, comfort', 'Auto / Retail / Beauty / NBFC', ['MARUTI', 'TITAN', 'TRENT', 'BAJFINANCE', 'DMART']],
+    ['Mars ♂', 'energy, aggression, metal', 'Metals / Defence / Realty / Cement', ['TATASTEEL', 'JSWSTEEL', 'HAL', 'BEL', 'DLF']],
+    ['Jupiter ♃', 'expansion, finance, gold', 'Banks / Finance / Insurance', ['HDFCBANK', 'ICICIBANK', 'KOTAKBANK', 'BAJAJFINSV', 'SBILIFE']],
+    ['Saturn ♄', 'discipline, labour, oil', 'Oil & Gas / Mining / Infra / Labour', ['RELIANCE', 'IOC', 'BPCL', 'VEDL', 'LT']],
+    ['Rahu ☊', 'disruption, obsession', 'New-age tech / Exchanges / Speculatives', ['ZOMATO', 'PAYTM', 'BSE', 'MCX', 'POLICYBZR']],
+    ['Ketu ☋', 'detachment, dissolution', 'Pharma / Chemicals / Spiritual-adjacent', ['SUNPHARMA', 'CIPLA', 'DIVISLAB', 'PIIND', 'AUROPHARMA']],
+  ];
+  function renderVedicStockLists(now) {
+    const out = document.getElementById('vedicStockLists');
+    if (!out) return;
+    const dayLord = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn'][now.getDay()];
+    const e = _eclipticLongitudes(now);
+    const el = ((e.moon - e.sun) % 360 + 360) % 360;
+    const phase = el < 30 || el > 330 ? 'Amavasya window — lore favours Moon/Saturn themes (dark, value, contrarian)' :
+      Math.abs(el - 180) < 30 ? 'Purnima window — lore favours Moon/Jupiter themes (sentiment, finance)' :
+      el < 180 ? 'Shukla (waxing) — lore leans accumulation plays' : 'Krishna (waning) — lore leans profit-taking/defensives';
+    const rows = _PLANET_STOCKS.map(([p, qual, sec, syms]) => {
+      const hot = p.startsWith(dayLord);
+      return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);flex-wrap:wrap;${hot ? 'background:rgba(212,175,55,0.08);border-left:2px solid var(--gold);' : ''}">
+        <b style="min-width:92px;font-size:10.5px;">${p}${hot ? ' ◀ day lord' : ''}</b>
+        <span style="min-width:190px;font-size:9.5px;color:var(--muted);">${sec}</span>
+        <span style="font-size:10px;">${syms.map(s => `<a href="#" class="psx" data-sym="${s}" style="color:var(--gold);text-decoration:none;margin-right:7px;">${s}</a>`).join('')}</span>
+        <span style="font-size:8.5px;color:#9ab;flex-basis:100%;padding-left:96px;">${qual}</span>
+      </div>`;
+    }).join('');
+    out.innerHTML =
+      `<div style="font-size:10px;padding:2px 4px 5px;color:#9ab;">Today: <b style="color:var(--gold);">${dayLord}</b> rules the weekday · ${phase}.</div>` + rows +
+      `<div style="margin-top:7px;padding-top:5px;border-top:1px solid rgba(255,255,255,0.08);">
+        <b style="font-size:10px;">🥇 Commodities rulers (Scholar-tier parity)</b>
+        <div style="font-size:9.5px;color:#9ab;padding:2px 4px;">GOLD → Jupiter &amp; Sun (expansion + sovereignty) · SILVER → Moon &amp; Venus (liquidity + adornment) · CRUDE OIL → Saturn &amp; Mars (extraction + combustion). Lore reads a strong transit to a ruler as that commodity\'s theme activating — e.g. Jupiter changing sign = gold-cycle date. MCX symbols aren\'t on NSE, so no click-to-load; the Astro tab\'s Positions panel shows each ruler\'s current sign.</div>
+      </div>` +
+      '<div class="oc-sub" style="margin-top:4px;">The niftyastrology "stock lists by planet" method: sectors are assigned planetary rulers from classical significations, then the day lord / lunar phase highlights which list is "active". Click a symbol to load it into the esoteric tabs. The sector-planet map is coherent tradition; the activation claim is PURE LORE — sector rotation is real, but it follows flows and earnings, not weekday lords.</div>';
+    out.querySelectorAll('.psx').forEach(a => a.addEventListener('click', ev => {
+      ev.preventDefault();
+      _esoLoadStock(a.dataset.sym);
+      if (typeof showToast === 'function') showToast('Loaded ' + a.dataset.sym + ' into the esoteric tabs');
+    }));
+  }
+  document.getElementById('trendRefClose')?.addEventListener('change', () => renderVedicTrending(new Date()));
+
+  // ══ Historical Astro Lab: score the lore against YEARS of daily data ══
+  const _LAB_KEY = 'astroLabHistory';
+  function _labLoad() { try { const a = JSON.parse(localStorage.getItem(_LAB_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (_) { return []; } }
+  function _labParseCsv(text) {
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 10) throw new Error('too few rows');
+    const split = l => l.match(/("([^"]*)"|[^,]+)/g)?.map(x => x.replace(/^"|"$/g, '').trim()) || [];
+    const head = split(lines[0]).map(h => h.toLowerCase());
+    const col = names => head.findIndex(h => names.some(n => h.includes(n)));
+    const ci = { d: col(['date']), o: col(['open']), h: col(['high']), l: col(['low']), c: col(['close']) };
+    if (ci.d < 0 || ci.c < 0) throw new Error('need at least Date and Close columns (NSE index CSV format works)');
+    const num = s => parseFloat(String(s).replace(/[",\s]/g, ''));
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const f = split(lines[i]);
+      if (f.length < 2) continue;
+      let dt = new Date(f[ci.d]);
+      if (isNaN(dt)) { const m = f[ci.d].match(/(\d{1,2})[-\/](\w{3}|\d{1,2})[-\/](\d{2,4})/); if (m) dt = new Date(`${m[2]} ${m[1]}, ${m[3].length === 2 ? '20' + m[3] : m[3]}`); }
+      if (isNaN(dt)) continue;
+      const c2 = num(f[ci.c]); if (!c2) continue;
+      rows.push({ d: dt.toISOString().slice(0, 10), o: ci.o >= 0 ? num(f[ci.o]) || c2 : c2, h: ci.h >= 0 ? num(f[ci.h]) || c2 : c2, l: ci.l >= 0 ? num(f[ci.l]) || c2 : c2, c: c2 });
+    }
+    rows.sort((a, b) => a.d < b.d ? -1 : 1);
+    const seen = new Set();
+    return rows.filter(r => !seen.has(r.d) && seen.add(r.d));
+  }
+  function renderAstroLab() {
+    const box = document.getElementById('astroLab');
+    if (!box) return;
+    const H = _labLoad();
+    if (!H.length) { box.innerHTML = '<span class="oc-sub">Load a daily OHLC CSV of NIFTY (NSE publishes full history free — any file with Date/Open/High/Low/Close columns works, years of it). Then every lore claim on this dashboard gets tested on thousands of sessions instead of dozens. This is the feature paid astro sites conspicuously never build.</span>'; return; }
+    box.innerHTML = `<span class="oc-sub">Loaded <b>${H.length}</b> sessions (${H[0].d} → ${H[H.length - 1].d}). Crunching ephemeris for every session…</span>`;
+    setTimeout(() => {
+      try {
+        const noon = d => new Date(d + 'T12:00:00');
+        const rets = [], meta = [];
+        for (let i = 1; i < H.length; i++) {
+          const r = (H[i].c - H[i - 1].c) / H[i - 1].c * 100;
+          const rng = H[i].h - H[i].l;
+          const trend = rng > 0 ? Math.abs(H[i].c - H[i].o) / rng >= 0.6 : false;
+          const dt = noon(H[i].d);
+          const e = _eclipticLongitudes(dt);
+          const el = ((e.moon - e.sun) % 360 + 360) % 360;
+          rets.push(r);
+          meta.push({ r, abs: Math.abs(r), rngPct: H[i].c ? rng / H[i].c * 100 : 0, trend, el, tithi: Math.floor(el / 12), kar: _karanaAt(dt).bhadra, dt });
+        }
+        const avg = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0;
+        const pct = a => a.length ? a.filter(Boolean).length / a.length * 100 : 0;
+        const sec = (t, v, d2, tone) => `<div style="padding:5px 4px;border-bottom:1px solid rgba(255,255,255,0.05);"><div style="display:flex;gap:8px;align-items:baseline;"><b style="font-size:10.5px;">${t}</b><span style="font-size:10px;font-weight:700;color:${tone === 'good' ? 'var(--pos)' : tone === 'bad' ? 'var(--neg)' : 'var(--muted)'};">${v}</span></div><div style="font-size:9.5px;color:#9ab;margin-top:2px;">${d2}</div></div>`;
+        let html = '';
+        // 1 — moon phase
+        const full = meta.filter(m => Math.abs(m.el - 180) < 30), newm = meta.filter(m => m.el < 30 || m.el > 330);
+        const dF = avg(full.map(m => m.r)), dN = avg(newm.map(m => m.r));
+        html += sec('1 · Full vs new moon daily returns',
+          Math.abs(dN - dF) < 0.05 ? 'NO EDGE' : dN > dF ? 'full-moon days weaker (matches literature)' : 'full-moon days STRONGER (contradicts)',
+          `near-full ${dF.toFixed(3)}%/day (${full.length}d) vs near-new ${dN.toFixed(3)}%/day (${newm.length}d) — diff ${(dN - dF).toFixed(3)} pts/day. Published effect was ~0.03-0.06; anything under 0.05 here is noise even at this n.`,
+          Math.abs(dN - dF) < 0.05 ? 'na' : 'good');
+        // 2 — Bhadra chop
+        const bh = meta.filter(m => m.kar), nb = meta.filter(m => !m.kar);
+        html += sec('2 · Bhadra sessions choppier?',
+          Math.abs(avg(bh.map(m => m.rngPct)) - avg(nb.map(m => m.rngPct))) < 0.06 ? 'NO EDGE' : avg(bh.map(m => m.rngPct)) > avg(nb.map(m => m.rngPct)) ? 'slightly wider ranges' : 'CONTRADICTED (narrower)',
+          `Bhadra days (${bh.length}): avg range ${avg(bh.map(m => m.rngPct)).toFixed(2)}%, trend-day rate ${pct(bh.map(m => m.trend)).toFixed(0)}% · others (${nb.length}): ${avg(nb.map(m => m.rngPct)).toFixed(2)}%, ${pct(nb.map(m => m.trend)).toFixed(0)}%.`,
+          'na');
+        // 3 — Trayodashi trending
+        const tra = meta.filter(m => (m.tithi % 15) === 12), oth = meta.filter(m => (m.tithi % 15) !== 12);
+        const tDiff = pct(tra.map(m => m.trend)) - pct(oth.map(m => m.trend));
+        html += sec('3 · Trayodashi = trending day?',
+          Math.abs(tDiff) < 5 ? 'NO EDGE' : tDiff > 0 ? `SUPPORTED (+${tDiff.toFixed(0)} pts)` : `CONTRADICTED (${tDiff.toFixed(0)} pts)`,
+          `Trayodashi (${tra.length}d): trend-day rate ${pct(tra.map(m => m.trend)).toFixed(0)}% vs all others ${pct(oth.map(m => m.trend)).toFixed(0)}% (${oth.length}d). The niftyastrology "trending day" claim, finally counted.`,
+          Math.abs(tDiff) < 5 ? 'na' : tDiff > 0 ? 'good' : 'bad');
+        // 4 — Jupiter/Saturn ingress aftermath
+        const ing = [];
+        let pj = null, ps = null;
+        for (let i = 0; i < meta.length; i += 1) {
+          const L = _planetLongitudes(meta[i].dt);
+          const ay = _astAyanamsa(meta[i].dt);
+          const sj = Math.floor((((L.Jupiter - ay) % 360) + 360) % 360 / 30), ss = Math.floor((((L.Saturn - ay) % 360) + 360) % 360 / 30);
+          if (pj !== null && sj !== pj) ing.push(i);
+          if (ps !== null && ss !== ps) ing.push(i);
+          pj = sj; ps = ss;
+        }
+        const after = ing.filter(i => i + 20 < rets.length).map(i => rets.slice(i, i + 20).reduce((s, v) => s + v, 0));
+        html += sec('4 · After Jupiter/Saturn ingress (20 sessions)',
+          after.length < 5 ? `only ${after.length} ingresses in range` : Math.abs(avg(after)) < 1 ? 'NO EDGE' : avg(after) > 0 ? `avg +${avg(after).toFixed(1)}%` : `avg ${avg(after).toFixed(1)}%`,
+          `${ing.length} sidereal sign changes found; avg 20-session forward return ${avg(after).toFixed(2)}% vs unconditional ~${(avg(rets) * 20).toFixed(2)}%. Ingress dates are the lore's biggest claimed regime-shift days.`,
+          'na');
+        // 5 — Mars retrograde volatility
+        const marsRet = meta.map((m, i) => { if (i === 0) return false; const a = _planetLongitudes(meta[i - 1].dt).Mars, b = _planetLongitudes(m.dt).Mars; return (((b - a) % 360) + 540) % 360 - 180 < 0; });
+        const mr = meta.filter((m, i) => marsRet[i]), md = meta.filter((m, i) => !marsRet[i]);
+        html += sec('5 · Mars retrograde = volatility?',
+          Math.abs(avg(mr.map(m => m.abs)) - avg(md.map(m => m.abs))) < 0.05 ? 'NO EDGE' : avg(mr.map(m => m.abs)) > avg(md.map(m => m.abs)) ? 'slightly more volatile' : 'CONTRADICTED (calmer)',
+          `Mars-retro days (${mr.length}): avg |move| ${avg(mr.map(m => m.abs)).toFixed(3)}% vs direct (${md.length}): ${avg(md.map(m => m.abs)).toFixed(3)}%.`,
+          'na');
+        box.innerHTML = `<div style="font-size:10px;padding:2px 4px 5px;color:#9ab;">Sample: <b>${H.length}</b> sessions, ${H[0].d} → ${H[H.length - 1].d}. These are the same claims as Claims-on-Trial, but at a sample size where verdicts mean something.</div>` + html +
+          '<div class="oc-sub" style="margin-top:5px;">Method notes: returns are close-to-close; trend day = |close−open| ≥ 60% of range; moon phase/karana/tithi computed at each session\'s noon with the built-in ephemeris (±0.3° Moon); ingresses are sidereal (Lahiri). Multiple-comparison warning: five tests were run — expect one "edge" per ~20 tests by luck alone. That\'s the honest lens for whatever lit up above.</div>';
+      } catch (e) { box.innerHTML = `<span class="oc-sub">Lab failed: ${escapeHtml(e.message)}</span>`; }
+    }, 60);
+  }
+  document.getElementById('astroLabFile')?.addEventListener('change', ev => {
+    const f = ev.target.files?.[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const rows = _labParseCsv(r.result);
+        if (rows.length < 100) throw new Error('parsed only ' + rows.length + ' rows — need 100+');
+        localStorage.setItem(_LAB_KEY, JSON.stringify(rows.map(x => ({ d: x.d, o: +x.o.toFixed(2), h: +x.h.toFixed(2), l: +x.l.toFixed(2), c: +x.c.toFixed(2) }))));
+        if (typeof showToast === 'function') showToast('Loaded ' + rows.length + ' sessions');
+        renderAstroLab();
+      } catch (e) { alert('CSV parse failed: ' + e.message); }
+    };
+    r.readAsText(f);
+    ev.target.value = '';
+  });
+  document.getElementById('astroLabBtn')?.addEventListener('click', renderAstroLab);
+
+  // ══ Transit ingress calendar + Pushya/Pradosh days ══
+  function _sidSignIdx(lon, dt) { return Math.floor((((lon - _astAyanamsa(dt)) % 360) + 360) % 360 / 30); }
+  function _ingressScan(from, days, planets) {
+    const evts = [];
+    let prev = {};
+    for (let k = 0; k <= days; k++) {
+      const dt = new Date(from.getTime() + k * 86400000); dt.setHours(12, 0, 0, 0);
+      const L = _planetLongitudes(dt);
+      const norm = x => ((x % 360) + 360) % 360;
+      L.Rahu = norm(125.1228 - 0.0529538083 * _astDays(dt));
+      for (const p of planets) {
+        const idx = _sidSignIdx(L[p], dt);
+        if (prev[p] !== undefined && idx !== prev[p] && k > 0)
+          evts.push({ date: new Date(dt), planet: p, from: _G_SIGN[prev[p]], to: _G_SIGN[idx] });
+        prev[p] = idx;
+      }
+    }
+    return evts;
+  }
+  function _pushyaPradoshScan(from, days) {
+    const out = [];
+    for (let k = 0; k <= days; k++) {
+      const dt = new Date(from.getTime() + k * 86400000); dt.setHours(12, 0, 0, 0);
+      const e = _eclipticLongitudes(dt);
+      const nak = Math.floor(((((e.moon - _astAyanamsa(dt)) % 360) + 360) % 360) / (360 / 27));
+      const ev = new Date(dt); ev.setHours(18, 0, 0, 0);
+      const e2 = _eclipticLongitudes(ev);
+      const tithi = Math.floor((((e2.moon - e2.sun) % 360 + 360) % 360) / 12);
+      if (nak === 7) out.push({ date: new Date(dt), kind: 'pushya' });
+      if ((tithi % 15) === 12) out.push({ date: new Date(dt), kind: 'pradosh' });
+    }
+    return out;
+  }
+  function renderAstroIngress() {
+    const out = document.getElementById('astroIngress');
+    if (!out) return;
+    const t0 = new Date(); t0.setHours(12, 0, 0, 0);
+    const slow = _ingressScan(t0, 400, ['Jupiter', 'Saturn', 'Rahu']);
+    const fast = _ingressScan(t0, 120, ['Sun', 'Mars', 'Venus', 'Mercury']);
+    const pp = _pushyaPradoshScan(t0, 60);
+    const fmtD = d => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+    const lore = { Jupiter: 'the lore\'s bull-cycle date — banking/gold themes', Saturn: 'the lore\'s regime-shift date — 2.5yr chapter turn', Rahu: 'the node ingress — 18-month "obsession theme" change (Ketu flips opposite the same day)', Sun: 'Sankranti — monthly solar month change', Mars: 'energy/metals theme shift', Venus: 'consumption/finance mood shift', Mercury: 'trade/communication shift' };
+    const row = (ev, big) => `<div class="gann-lvl-row ${big ? 'anchor' : ''}">
+        <span class="lvl-tag">${ev.planet}</span>
+        <span class="lvl-val" style="font-size:9.5px;">${fmtD(ev.date)} · ${ev.from.v} → ${ev.to.v}</span>
+        <span class="lvl-dist">${lore[ev.planet] || ''}</span></div>`;
+    const ppRows = pp.slice(0, 8).map(x => `<div class="gann-lvl-row">
+        <span class="lvl-tag">${x.kind === 'pushya' ? '✨ Pushya' : '🌆 Pradosh'}</span>
+        <span class="lvl-val" style="font-size:9.5px;">${fmtD(x.date)}</span>
+        <span class="lvl-dist">${x.kind === 'pushya' ? 'Moon in Pushya — tradition\'s most auspicious nakshatra; the classic gold-buying day' : 'Trayodashi evening — Pradosh window; the lore pairs it with the Trending-Day tithi'}</span></div>`).join('');
+    out.innerHTML =
+      (slow.length ? '<div style="font-size:10px;font-weight:700;padding:2px 4px;">Slow movers (12 months)</div>' + slow.map(e => row(e, true)).join('') : '<span class="oc-sub">No Jupiter/Saturn/Rahu ingress in the next 12 months.</span>') +
+      '<div style="font-size:10px;font-weight:700;padding:6px 4px 2px;">Fast movers (4 months)</div>' + fast.slice(0, 10).map(e => row(e, false)).join('') +
+      '<div style="font-size:10px;font-weight:700;padding:6px 4px 2px;">Pushya &amp; Pradosh (60 days)</div>' + ppRows +
+      '<div class="oc-sub" style="margin-top:4px;">Ingress = a planet crossing into the next sidereal sign — the lore\'s biggest claimed dates (their blog\'s "Rahu Transit 2026" pages are exactly this). Dates ±1 day (mean node, noon sampling, Lahiri ayanamsa). The Historical Astro Lab on the Validate tab tests what ingresses actually did to forward returns.</div>';
+  }
 
   // ── OI migration loader (Today card): which strikes are absorbing fresh
   //    writing vs unwinding, from today's 1/min replay snapshots ──
@@ -10654,6 +11462,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   document.getElementById('claimsTrialBtn')?.addEventListener('click', renderClaimsTrial);
+  document.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('[data-tab="validate"]')) setTimeout(renderAstroLab, 80);
+  });
   document.getElementById('sugScorecardBtn')?.addEventListener('click', renderSugScorecard);
 
   function renderTodayTab() {
@@ -10710,6 +11521,31 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         `<div style="font-size:11px;">Rahu Kaal: <b style="color:${active ? 'var(--neg)' : 'inherit'}">${fmtT(rkStart)}–${fmtT(rkEnd)}</b> ${active ? '<span style="color:var(--neg)">ACTIVE</span>' : ''}<br><span class="oc-sub">${now.toLocaleDateString('en-IN', { weekday: 'long' })} · avoid-new-trades window per tradition</span></div>`,
         'context'));
     } catch (_) {}
+    // ── ⚡ Expiry-day mode: pin tracker + gamma-hour countdown ──
+    try {
+      const dEx = state.lastData;
+      if (dEx && (dEx.dte ?? 99) <= 0 && dEx.max_pain && dEx.underlying_value) {
+        const spotE = dEx.underlying_value, mp = dEx.max_pain;
+        const dist = spotE - mp, distPct = dist / spotE * 100;
+        const nowE = new Date();
+        const istM = (() => { const t = new Date(nowE.getTime() + (5.5 * 3600 - nowE.getTimezoneOffset() * 60) * 1000); return t.getHours() * 60 + t.getMinutes(); })();
+        const gh = 870;   // 14:30 IST
+        const cd = istM < gh ? `${Math.floor((gh - istM) / 60)}h ${(gh - istM) % 60}m to gamma hour (14:30)` : istM < 930 ? '🔥 GAMMA HOUR LIVE — pinning and whips strongest now' : 'session over';
+        const pinRead = Math.abs(distPct) < 0.3 ? 'INSIDE the pin zone — max pain is magnetic from here; moves away tend to get pulled back' : distPct > 0 ? 'above max pain — writers profit if price grinds DOWN toward it into the close' : 'below max pain — writers profit if price grinds UP toward it into the close';
+        blocks.unshift(`<div class="skew-chart-wrap" style="margin:0;grid-column:1 / -1;border:1px solid var(--gold,#d4af37);">
+          <div class="skew-chart-head"><span class="skew-chart-title">⚡ EXPIRY DAY MODE — ${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(dEx.expiry || '')}</span><span style="font-size:8px;color:var(--gold);font-weight:700;">0-DTE RULES APPLY</span></div>
+          <div style="padding:4px 2px;">
+            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;">
+              <span style="font-size:11px;"><b>Spot</b> ${fmtInt(Math.round(spotE))}</span>
+              <span style="font-size:11px;"><b>Max pain</b> ${fmtInt(mp)}</span>
+              <span style="font-size:11px;font-weight:700;color:${Math.abs(distPct) < 0.3 ? 'var(--gold)' : dist > 0 ? 'var(--pos)' : 'var(--neg)'};">${dist >= 0 ? '+' : ''}${Math.round(dist)} pts (${distPct.toFixed(2)}%)</span>
+              <span style="font-size:10.5px;color:var(--gold);font-weight:700;">⏱ ${cd}</span>
+            </div>
+            <div style="font-size:9.5px;color:#9ab;padding:3px 4px;">${pinRead}. Theta burns by the MINUTE today; premiums halve fast after lunch. 0-DTE rules: defined risk only, no calendars off the dying expiry (roll to next), respect the OI-migration card below — walls building NOW decide the pin. The suggester is aware and flags what doesn\'t belong today.</div>
+          </div></div>`);
+      }
+    } catch (_) {}
+
     // ── ⏰ Trade windows today: session structure + cultural overlays ──
     try {
       const tchip = t => `<span style="font-size:7.5px;font-weight:700;letter-spacing:0.4px;padding:1px 4px;border-radius:3px;background:${t === 'CROWD' ? 'rgba(212,175,55,0.15);color:var(--gold)' : t === 'MEASURED' ? 'rgba(38,166,154,0.15);color:var(--pos)' : 'rgba(120,136,153,0.15);color:var(--muted)'};">${t}</span>`;
@@ -10751,6 +11587,36 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div class="skew-chart-head"><span class="skew-chart-title">⏰ Trade windows today — ${now2.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'short' })}${isTue ? ' · WEEKLY EXPIRY DAY' : ''}</span><span style="font-size:8px;color:var(--muted);font-weight:700;">WHEN TO TRADE / STAND ASIDE</span></div>
         <div style="padding:2px 0;">${wRows}
         <div class="oc-sub" style="margin-top:5px;">Session structure (green/red times) is real, documented microstructure — the intraday volume "U-shape". The highlighted row is where you are right now. Overlay rows are tradition, chipped LORE. None of this replaces your setup rules; it tells you when the market\'s odds are with or against activity itself.</div></div></div>`);
+    } catch (_) {}
+
+    // ── 🔄 Reversal Times — hora-boundary turn windows (niftyastrology parity) ──
+    try {
+      if (typeof _sunriseSunset === 'function') {
+        const nowR = new Date();
+        const { rise, set } = _sunriseSunset(nowR, 19.076, 72.877);
+        const seg = (set - rise) / 12;
+        const CHALD = ['Saturn', 'Jupiter', 'Mars', 'Sun', 'Venus', 'Mercury', 'Moon'];
+        const lordIdx = { 0: 3, 1: 6, 2: 2, 3: 5, 4: 1, 5: 4, 6: 0 }[nowR.getDay()];
+        const minsNow = nowR.getHours() * 60 + nowR.getMinutes();
+        let rRows = '';
+        for (let k = 1; k <= 11; k++) {
+          const b = new Date(rise.getTime() + k * seg);
+          const m = b.getHours() * 60 + b.getMinutes();
+          if (m < 555 || m > 930) continue;
+          const from = CHALD[(lordIdx + k - 1) % 7], to = CHALD[(lordIdx + k) % 7];
+          const past = m < minsNow;
+          const nextUp = !past && rRows.indexOf('◀ next') === -1;
+          rRows += `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.04);${nextUp ? 'background:rgba(212,175,55,0.08);border-left:2px solid var(--gold);' : ''}opacity:${past ? 0.5 : 1};">
+            <b style="min-width:52px;font-size:10.5px;">${String(b.getHours()).padStart(2, '0')}:${String(b.getMinutes()).padStart(2, '0')}</b>
+            <span style="font-size:9.5px;">${from} hora → ${to} hora${nextUp ? ' ◀ next window' : ''}</span>
+            <span style="font-size:9px;color:var(--muted);">±10 min watch window</span>
+          </div>`;
+        }
+        blocks.push(`<div class="skew-chart-wrap" style="margin:0;grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🔄 Reversal Times — planetary-hour boundaries</span><span style="font-size:8px;color:var(--muted);font-weight:700;">LORE</span></div>
+          <div style="padding:2px 0;">${rRows || '<span class="oc-sub">No hora boundaries inside market hours (unusual — check clock).</span>'}
+          <div class="oc-sub" style="margin-top:5px;">The niftyastrology "Reversal Time" method: each hora boundary (daylight ÷ 12, ruled planet handing over to the next in Chaldean order) is claimed as an intraday turn window ±10 min. Boundaries are real, exactly computable clock times (sunrise-anchored, Mumbai); the reversal claim is PURE LORE — intraday turns cluster at liquidity events (open, Europe open, closing hour), not planetary handovers. Watch a week against the tape before crediting it.</div></div></div>`);
+      }
     } catch (_) {}
 
     // ── 📅 Significant dates — next 3 months ──
@@ -10807,6 +11673,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           if (sd >= t0 && sd <= horizon) evts.push({ d: sd, name: nm + ' ☀', why: 'Gann\'s seasonal power date. Real market seasonality exists, but doesn\'t pivot on astronomical days — calendar lore.', tier: 'LORE' });
         }
       }
+      // transit ingresses + Pushya days within window
+      try {
+        for (const iv of _ingressScan(t0, 92, ['Jupiter', 'Saturn', 'Rahu', 'Sun']))
+          evts.push({ d: iv.date, name: `🚪 ${iv.planet} enters ${iv.to.v}`, why: iv.planet === 'Sun' ? 'Sankranti — monthly solar ingress; minor lore date.' : 'Slow-planet sidereal ingress — the lore\'s biggest claimed regime-shift dates (the "Rahu Transit 2026"-style events). Test tab: Historical Astro Lab.', tier: 'LORE' });
+        for (const x of _pushyaPradoshScan(t0, 92).filter(x => x.kind === 'pushya'))
+          evts.push({ d: x.date, name: '✨ Pushya nakshatra', why: 'Tradition\'s most auspicious lunar mansion — the classic gold-buying day; genuine crowd behaviour in bullion demand.', tier: 'CROWD' });
+      } catch (_) {}
       evts.sort((a, b) => a.d - b.d);
       const fmtD2 = d => d.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' });
       const eRows = evts.slice(0, 14).map(ev => {
@@ -10823,6 +11696,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div class="skew-chart-head"><span class="skew-chart-title">📅 Significant dates — next 3 months</span><span style="font-size:8px;color:var(--muted);font-weight:700;">BIG-MOVE CANDIDATES</span></div>
         <div style="padding:2px 0;">${eRows}
         <div class="oc-sub" style="margin-top:5px;">Computed from what this tool can know: expiry cycle (assumes NSE Tuesday expiries — holidays shift them, verify against the exchange calendar), the validated eclipse detector, Bradley inflections, and solar dates. The genuinely biggest movers — <b>RBI MPC, US Fed, Union Budget, results season, elections</b> — are announced dates this offline tool can\'t compute: overlay them from the RBI/Fed/NSE calendars. Weekly (every Tuesday) expiries are omitted to avoid noise; monthlies listed.</div></div></div>`);
+    } catch (_) {}
+
+    // ── 🚩 Today's astro flags: Bhadra / Pushya / Pradosh / ingress at a glance ──
+    try {
+      const nowF = new Date();
+      const kar = _karanaAt(nowF);
+      const eF = _eclipticLongitudes(nowF);
+      const nakF = Math.floor(((((eF.moon - _astAyanamsa(nowF)) % 360) + 360) % 360) / (360 / 27));
+      const tithiF = Math.floor((((eF.moon - eF.sun) % 360 + 360) % 360) / 12);
+      const isPushya = nakF === 7, isPradosh = (tithiF % 15) === 12;
+      const ingSoon = _ingressScan(nowF, 7, ['Sun', 'Mars', 'Jupiter', 'Saturn', 'Rahu']);
+      const chipF = (txt, tone) => `<span style="font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:4px;background:${tone === 'warn' ? 'rgba(239,83,80,0.15);color:var(--neg,#ef5350)' : tone === 'good' ? 'rgba(38,166,154,0.15);color:var(--pos,#26a69a)' : 'rgba(120,136,153,0.12);color:#9ab'};">${txt}</span>`;
+      const chips = [];
+      chips.push(kar.bhadra ? chipF('⛔ BHADRA active — lore: avoid fresh starts', 'warn') : chipF('Karana: ' + kar.name.split(' ')[0], 'na'));
+      if (isPushya) chips.push(chipF('✨ PUSHYA today — tradition\'s most auspicious nakshatra', 'good'));
+      if (isPradosh) chips.push(chipF('🌆 Pradosh / Trayodashi — the lore\'s trending-day tithi', 'good'));
+      for (const iv of ingSoon.slice(0, 2)) chips.push(chipF(`🚪 ${iv.planet} → ${iv.to.v} in ${Math.max(0, Math.round((iv.date - nowF) / 86400000))}d`, 'na'));
+      blocks.push(`<div class="skew-chart-wrap" style="margin:0;grid-column:1 / -1;">
+        <div class="skew-chart-head"><span class="skew-chart-title">🚩 Today's astro flags</span><span style="font-size:8px;color:var(--muted);font-weight:700;">LORE · AT A GLANCE</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;padding:5px 4px;">${chips.join('')}</div>
+        <div class="oc-sub" style="padding:0 4px 4px;">One-line status of the calendar lore: Bhadra karana (details on the Vedic tab), Pushya/Pradosh days, and any sign ingress within a week (calendar on the Astro tab). All lore-tier — flags, not signals.</div></div>`);
     } catch (_) {}
 
     // ── 🧭 Cross-tab digest: one plain-language line from each esoteric tab ──
@@ -10853,7 +11747,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // Gann Sq9 nearest (Gann)
       try {
         const r = Math.sqrt(digestPrice);
-        const up = Math.pow(r + 0.25, 2), dn = Math.pow(r - 0.25, 2);
+        const q45 = (localStorage.getItem('sq9Conv') === 'calc') ? 0.125 : 0.25;
+        const up = Math.pow(r + q45, 2), dn = Math.pow(r - q45, 2);
         digRows.push(row('📐', 'Gann Sq9', `support ~${fmtInt(Math.round(dn))} · resistance ~${fmtInt(Math.round(up))}`,
           'The nearest "spiral" prices above and below. Only meaningful if price actually reacts there — watch, don\'t assume.', 'LORE'));
       } catch (_) {}
@@ -11303,6 +12198,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (gex?.flip) src.push({ v: gex.flip, s: 'GEX flip', w: 3 });
       if (state._oiWalls?.callStrike) src.push({ v: state._oiWalls.callStrike, s: 'Call OI wall', w: 3 });
       if (state._oiWalls?.putStrike)  src.push({ v: state._oiWalls.putStrike,  s: 'Put OI wall',  w: 3 });
+      const dnl = (typeof _computeDeltaNeutral === 'function' && d) ? _computeDeltaNeutral(d) : null;
+      if (dnl) src.push({ v: dnl, s: 'Δ-neutral', w: 3 });
     }
     // crowd-watched (w2) — price-derived, works for stocks too
     // Camarilla: recompute from stock OHLC when in stock mode
@@ -12163,6 +13060,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     setStatus('pending');
     els.refreshBtn.disabled = true;
     els.refreshIcon.classList.add('spin');
+    const _ft0 = performance.now();
 
     const base = els.serverUrl.value.replace(/\/+$/, '');
     const params = new URLSearchParams({ symbol: state.symbol, band: String(state.band) });
@@ -12179,6 +13077,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         throw tagged;
       }
       const data = await resp.json();
+      state._lastLatency = Math.round(performance.now() - _ft0);
+      state._lastFetchTs = Date.now();
 
       if (!resp.ok || data.error) {
         throw new Error(data.error || `HTTP ${resp.status}`);
@@ -12235,7 +13135,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
   }
 
+  const _origSetStatus = typeof setStatus === 'function' ? setStatus : null;
+  if (_origSetStatus) {
+    setStatus = function (s) { if (s === 'error') state._errCount = (state._errCount || 0) + 1; return _origSetStatus(s); };
+  }
+
   function render(data) {
+    try {
+      const ec = document.getElementById('expiryChip');
+      if (ec) ec.style.display = ((data?.dte ?? 99) <= 0) ? 'inline-block' : 'none';
+    } catch (_) {}
+    try { _alertsCheck(data); } catch (_) {}
     // ─── Save scroll position BEFORE any DOM mutations ───────────────────
     // This is the primary guard against refresh-caused scroll jumps.
     // We save both window scroll (for the page-level scroll) and each
@@ -12507,11 +13417,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     },
     classic: (H, L, C) => PIVOT_TYPES.traditional(H, L, C),
     woodie: (H, L, C, O) => {
-      const P = (H + L + 2*C) / 4, r = H - L;
-      // Woodie uses different PP formula but same R3+ pattern
+      // TradingView "Woodie" parity: PP uses the CURRENT session's open, not
+      // prev close — (H + L + 2·Open_today)/4. Falls back to prev close if
+      // today's open isn't known yet (pre-open / server just started).
+      const tOpen = (state._todayOpen?.open) || state.lastData?.session_ohlc?.open || O || C;
+      const P = (H + L + 2 * tOpen) / 4, r = H - L;
+      // TV level formulas: R3 = H + 2(PP−L), S3 = L − 2(H−PP); R4/S4 extend by range.
+      const R3 = H + 2 * (P - L), S3 = L - 2 * (H - P);
       return { P,
-        R1: 2*P-L,  R2: P+r,    R3: P+2*r,  R4: P+3*r,  R5: P+4*r,
-        S1: 2*P-H,  S2: P-r,    S3: P-2*r,  S4: P-3*r,  S5: P-4*r };
+        R1: 2 * P - L, R2: P + r, R3, R4: R3 + r, R5: R3 + 2 * r,
+        S1: 2 * P - H, S2: P - r, S3, S4: S3 - r, S5: S3 - 2 * r };
     },
     camarilla: (H, L, C) => {
       const r = H - L;
@@ -12957,17 +13872,44 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const isDaily  = !isManual;
     const srcEl = document.getElementById('pivotSource');
     if (srcEl) {
-      srcEl.textContent = `· ${isManual ? 'Manual' : 'Prev day'} · H:${fmtInt(H)} L:${fmtInt(L)} C:${fmtInt(C)}`;
+      let line = `· ${src === 'bhavcopy_week' ? 'Prev week' : isManual ? 'Manual' : 'Prev day'} [${src}] · O:${fmtInt(O || C)} H:${fmtInt(H)} L:${fmtInt(L)} C:${fmtInt(C)}`;
+      if (pivotType === 'woodie') {
+        const off = state._todayOpen?.open, polled = state.lastData?.session_ohlc?.open;
+        line += off ? ` · Woodie O(today):${fmtInt(off)} [official]`
+              : polled ? ` · Woodie O(today):${fmtInt(polled)} [polled — fetching official…]`
+              : ' · Woodie O(today): n/a → using prev close (levels shift at open)';
+        // Official opening print: fetch once per symbol per day, then re-render.
+        // The polled session open can be minutes late if the server started
+        // after 09:15 — the classic cause of Woodie mismatches vs TradingView.
+        const ck = (state.symbol || 'NIFTY') + new Date().toDateString();
+        if (!off && state._todayOpenTried !== ck) {
+          state._todayOpenTried = ck;
+          (async () => {
+            try {
+              const base = els.serverUrl.value.replace(/\/+$/, '');
+              const r = await fetch(`${base}/api/today-open?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`);
+              const j = await r.json();
+              if (j.open) { state._todayOpen = j; renderPivotLevels(); }
+            } catch (_) {}
+          })();
+        }
+      }
+      srcEl.textContent = line;
       srcEl.style.color = 'var(--pos)';
+      srcEl.title = 'The exact inputs the pivots are computed from. To diagnose any mismatch with TradingView: hover yesterday\'s candle on the TV chart (NSE:NIFTY — the INDEX, not futures) and compare these four numbers first. If inputs match, formulas are TradingView-verified; if they differ, the source tag in [brackets] says where ours came from.';
     }
 
+    // TradingView parity: each type draws a different number of levels (only
+    // Traditional/Camarilla/Fib go to 5; Woodie & Classic stop at R4; DeMark
+    // defines only R1/S1). Extra rows read as "mismatches" against TV.
+    const _maxLvl = { traditional: 5, camarilla: 5, fibonacci: 5, classic: 4, woodie: 4, demark: 1 }[pivotType] ?? 5;
     const levels = [
       ['R5', pv.R5, 'r'], ['R4', pv.R4, 'r'], ['R3', pv.R3, 'r'],
       ['R2', pv.R2, 'r'], ['R1', pv.R1, 'r'],
       ['Pivot', pv.P, 'p'],
       ['S1', pv.S1, 's'], ['S2', pv.S2, 's'], ['S3', pv.S3, 's'],
       ['S4', pv.S4, 's'], ['S5', pv.S5, 's'],
-    ].filter(([, p]) => p != null && isFinite(p));
+    ].filter(([n, p]) => p != null && isFinite(p) && (n === 'Pivot' || +n.slice(1) <= _maxLvl));
 
     checkLevelTouches(levels, spot);
 
@@ -19196,6 +20138,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   document.getElementById('pivotPeriodSelect')?.addEventListener('change', () => {
     // When switching to Weekly, fetch weekly OHLC from server
     const period = document.getElementById('pivotPeriodSelect')?.value;
+    // The period switch is a legitimate source change: clear today's freeze
+    // (same pattern as the manual-override path) so the incoming OHLC —
+    // weekly or daily — actually takes effect without a page reload.
+    delete _frozenOhlc[state.symbol];
+    const srcEl = document.getElementById('pivotSource');
+    if (srcEl) { srcEl.textContent = period === 'weekly' ? '· Fetching weekly…' : '· Fetching daily…'; srcEl.style.color = 'var(--muted)'; }
     if (period === 'weekly') {
       fetchWeeklyOhlcForPivots();
     } else {
@@ -19374,8 +20322,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'strat-chart':       '<strong>Strategy P&amp;L Chart</strong>The current Builder position marked-to-market through the session, in ₹ vs the first sample after loading legs. Shows the path, not just the endpoint: a position that went +4k → +1k reads very differently from one that ground steadily to +1k. Resets when legs change.',
     'vol-surface':       '<strong>Volatility Surface</strong>IV heatmap across expiries (rows, by DTE) and strikes (columns, ATM ±5). Hot cells = expensive vol. Read vertically for term structure at a strike, horizontally for skew at an expiry. Calendar spreads live in vertical gradients; skew trades in horizontal ones.',
     'results-cal':       '<strong>Results Calendar</strong>Upcoming F&amp;O earnings dates from the NSE event calendar (cached 1h server-side). IV typically ramps into results and crushes after: long-vol/calendar setups favor the ramp, and short straddles held through the event are a vega coin-flip — size accordingly or step aside.',
-        'vedic-lunar-cal':  '<strong>Lunar calendar + eclipse windows</strong>Amavasya (new moon) and Purnima (full moon) dates for the next 60 days, computed from the same ephemeris as the rest of the tab. Rows marked ★ fall within the ecliptic limits of the mean lunar node — a possible solar (new) or lunar (full) eclipse window, approximate to ±1-2 days. Why this panel exists at all: the lunar cycle is the single astro-adjacent claim with peer-reviewed literature — Dichev &amp; Janes (2003) and Yuan, Zheng &amp; Zhu (2006) reported modestly lower equity returns around full moons across dozens of markets. Honest status: the effect was small, is contested, and largely faded in later replications — so treat even this as weak calendar context, not signal. Eclipses carry heavy cultural weight in Indian markets (crowd-attention dates), which is a focal-point argument, not a causal one.',
+        'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it, free) and every lore claim gets scored on THOUSANDS of sessions: full-vs-new-moon daily returns, Bhadra-session ranges, Trayodashi trend-day rates, forward returns after Jupiter/Saturn ingresses, Mars-retrograde volatility. Method: close-to-close returns, noon ephemeris per session, sidereal ingresses. The honest lens is printed with the results: five tests invite one fluke "edge" by chance alone. This is the feature paid astro platforms never build — because at this sample size the lore usually flatlines, and that is exactly the information worth having.',
+    'astro-ingress':     '<strong>Transit Ingress Calendar</strong>The dates planets cross into the next sidereal sign — the single most-cited event type in financial astrology (every "Rahu Transit 2026" blog post is one of these). Slow movers (Jupiter ~13mo/sign, Saturn ~2.5yr, Rahu/Ketu ~18mo backwards) scanned 12 months ahead; fast movers 4 months; plus 60 days of Pushya nakshatra days (tradition\'s gold-buying day — real bullion-demand crowd effect) and Pradosh/Trayodashi evenings. Dates ±1 day (noon sampling, mean node, Lahiri). Ingress dates feed the Today tab\'s Significant Dates automatically. The Lab tests what ingresses historically did.',
+    'vedic-bhadra':      '<strong>Bhadra (Vishti karana)</strong>A karana is half a tithi — the Moon gaining 6° on the Sun. Seven movable karanas cycle ~8 times per lunar month; the seventh, Vishti — universally called <b>Bhadra</b> — is tradition\'s most avoided window (~13 hours, ~8 times a month). Hindu culture defers new ventures, journeys and ceremonies during Bhadra; astro-trading lore extends this to claim choppy, whipsaw-prone sessions. The panel computes current karana live and lists upcoming Bhadra windows, flagging those that overlap NSE hours. PURE LORE with a real cultural following — the honest test is watching flagged sessions against realized ranges.',
+    'vedic-trending':    '<strong>Trending Day (Trayodashi logic)</strong>The niftyastrology method: take the CLOSE of the last Amavasya or Purnima session as the fortnight\'s reference level — price above it = bullish bias, below = bearish — and Trayodashi (13th tithi) days are claimed to trend hardest. Two honest observations: an anchored two-week-old close is a coherent reference (a cousin of anchored VWAP — the CROWD argument applies if enough followers watch it), while the tithi-day claim is pure lore. Auto-fills the reference from your replay archive when it recorded that day; manual override otherwise.',
+    'vedic-stocklists':  '<strong>Stock lists by planetary ruler</strong>Classical significations map each Graha to sectors: Sun→PSU/power, Moon→FMCG/liquidity themes, Mercury→IT/commerce, Venus→luxury/auto, Mars→metals/defence, Jupiter→banking/finance, Saturn→oil/infra/labour, Rahu→disruptive tech, Ketu→pharma/chemicals. The lore then "activates" a list via the weekday lord or lunar phase (Amavasya/Purnima lists — the niftyastrology stock-prediction method). Click any symbol to load it into the esoteric tabs. The sector map is coherent tradition; the activation claim has no mechanism — real sector rotation follows flows and earnings. Commodities: gold→Jupiter/Sun, silver→Moon/Venus, crude→Saturn/Mars.',
+    'vedic-lunar-cal':  '<strong>Lunar calendar + eclipse windows</strong>Amavasya (new moon) and Purnima (full moon) dates for the next 60 days, computed from the same ephemeris as the rest of the tab. Rows marked ★ fall within the ecliptic limits of the mean lunar node — a possible solar (new) or lunar (full) eclipse window, approximate to ±1-2 days. Why this panel exists at all: the lunar cycle is the single astro-adjacent claim with peer-reviewed literature — Dichev &amp; Janes (2003) and Yuan, Zheng &amp; Zhu (2006) reported modestly lower equity returns around full moons across dozens of markets. Honest status: the effect was small, is contested, and largely faded in later replications — so treat even this as weak calendar context, not signal. Eclipses carry heavy cultural weight in Indian markets (crowd-attention dates), which is a focal-point argument, not a causal one.',
+    'astro-date':        '<strong>Date — the primary input</strong>Which day\'s sky the whole tab computes. Defaults to today (prefilled). Why it exists: the ephemeris works for ANY date — pick a past date to study which aspects were active on a big-move day (post-mortems), or a future date to preview what\'s in force on an expiry, a Bradley turn window, or an eclipse. Every panel follows this date: wheel, positions, aspects, retrogrades, planetary lines, and the transits (compared against the Natal anchor). The right sequence is simply left to right: pick the Date, choose the Zodiac frame, choose the Natal anchor — each change re-renders instantly; Generate just re-runs the same thing (useful to refresh "now" as the day moves on).',
     'astro-anchor':      '<strong>Natal anchor</strong>Which "birth moment" the transit panel measures against. Nifty launch (22 Apr 1996, 09:30 IST) is the astrologically-correct first-trade chart; the F&amp;O launch (12 Jun 2000) is the derivatives-era chart some astro-traders prefer for options work; the base date (3 Nov 1995) is a backdated index reference (no real "birth" happened then — included for completeness); My DOB casts YOUR birth chart instead, turning the panel into personal transits (set date on the Numerology tab, birth time on the Vedic tab). Same selector as the Vedic tab, so both tabs can point at the same chart. Choice of anchor changes which lore you\'re reading — none of them changes its evidence status.',
+    'pf-greeks':         '<strong>Portfolio Greeks + stress heatmap</strong>Aggregates every OPEN paper position into net delta / gamma / theta / vega, priced with live per-strike IVs from the chain. Net delta tells you the book\'s hidden directional bet in lots of underlying; theta is the daily bleed/earn; vega is P&amp;L per IV point. The heatmap answers the pro question directly: what happens if spot and IV jump to any combination RIGHT NOW (time held constant — theta accrues on top of every cell). The top-left region is the crash-plus-IV-spike scenario. Values in premium points per book; multiply by lot size for rupees.',
+    'custom-alerts':     '<strong>Custom Alerts</strong>User-defined triggers checked on every chain refresh: spot NEAR a level (±pts), spot CROSSES a level, IV-rank thresholds, and OI-wall decay (any near-spot wall losing ≥X%%/hour — polled each minute from the migration engine). Fires toast + browser notification + voice (if 🗣 enabled), with a 5-minute refire cooldown per rule. Rules and the fired-log persist locally and are included in 💾 backups. Tip: set alerts on the levels the Master Ladder scores highest — let the tool watch them so you don\'t have to.',
+    'trade-journal':     '<strong>Trade Journal</strong>Log every REAL trade with a setup tag (CPR narrow trend, OI wall fade, ORB break…) and P&amp;L; the stats table shows per-setup count, win%%, net and average. This closes the loop Claims-on-Trial opens: that panel scores the TOOL\'s claims, this one scores YOUR execution of them — both need to pass before a setup deserves size. Win%% under ~20 trades per tag is noise. Stored locally, included in backups.',
     'claims-trial':      '<strong>Claims on Trial</strong>Scores three testable claims from the esoteric tabs against YOUR recorded sessions (daily OHLC extracted from the replay archive): (1) does a narrow CPR actually precede trend days, (2) are full-moon day returns weaker than new-moon days, (3) do price turns land inside Bradley ±4-day windows more often than those windows cover by chance (the coverage-corrected test believers never run). Verdicts unlock at 20+ sessions and firm up with size — under ~60 days nothing deserves conviction either way. This panel is the dashboard\'s philosophy applied to itself: MEASURED beats CROWD beats LORE, so measure the lore.',
     'sug-scorecard':     '<strong>Suggestion Scorecard</strong>Every deployable structure the AI suggester proposes is logged automatically (template, legs, premiums, spot, IV at the time) and marked to market against the live chain on later visits; after expiry, legs settle at intrinsic value (approximate — uses the spot seen after expiry, not official settlement). Per-template stats: count, open/settled, average P&amp;L in premium points per 1-lot, win rate. Under ~20 samples per template the win%% is noise — the point is accountability: the suggester keeps receipts, and after a few weeks you\'ll know which regimes it actually reads well.',
     'lvl-cpr':           '<strong>CPR — Central Pivot Range</strong>Frank Ochoa\'s three-line frame from prev-day OHLC: Pivot=(H+L+C)/3, BC=(H+L)/2, TC=2P−BC. With Camarilla, the most-watched intraday levels in Indian retail flow (crowd tier — partly self-fulfilling). The extras that make it useful: WIDTH (narrow CPR → trend-day tendency, wide → rangebound) and POSITION (above=bullish bias / inside=indecision / below=bearish). TC/P/BC feed the Master Ladder at weight 2. Stock mode caveat: NSE\'s live quote lacks yesterday\'s H/L, so a stock\'s CPR is built from today\'s developing OHLC — read it as tomorrow\'s preview.',
@@ -19506,5 +20463,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   <div id="pmgrList"></div>
   <div style="font-size:9px;color:var(--muted-2);margin-top:8px;">Hidden panels skip rendering too — lighter refreshes.</div>
 </div></div>
+
+  <div id="cmdPal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,0.55);align-items:flex-start;justify-content:center;padding-top:12vh;">
+    <div style="width:min(560px,92vw);background:var(--panel,#15171c);border:1px solid rgba(255,255,255,0.18);border-radius:10px;box-shadow:0 18px 60px rgba(0,0,0,0.6);overflow:hidden;">
+      <input id="cmdPalInput" type="text" placeholder="Type a command… tab name, 'deploy', 'backup', or a stock symbol (Ctrl+K)" style="width:100%;box-sizing:border-box;padding:11px 14px;font-size:13px;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,0.1);color:#dde;outline:none;">
+      <div id="cmdPalList" style="max-height:46vh;overflow-y:auto;"></div>
+    </div>
+  </div>
 </body>
 </html>

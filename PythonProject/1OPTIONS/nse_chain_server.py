@@ -2590,6 +2590,44 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)})
             return
 
+        if parsed.path == "/api/today-open":
+            # Official TODAY open for an index (allIndices feed) — needed for
+            # TradingView-parity Woodie pivots. The polled session open can be
+            # minutes late if the server starts after 09:15; this is the real
+            # opening print. Cached 5 minutes.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            names = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                     "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
+            try:
+                global _today_open_cache
+                try:
+                    _today_open_cache
+                except NameError:
+                    _today_open_cache = {}
+                ck = symbol + time.strftime("%Y-%m-%d")
+                hit = _today_open_cache.get(ck)
+                if hit and time.time() - hit[0] < 300:
+                    self._send_json(hit[1])
+                    return
+                from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+                fetcher = _shared_fetcher if (_shared_fetcher and getattr(_shared_fetcher, "_warmed", False)) else None
+                if fetcher is None:
+                    self._send_json({"error": "session not warmed — load a chain first", "open": None})
+                    return
+                h = dict(API_HEADERS); h["Referer"] = NSE_OC_PAGE
+                r = fetcher.session.get("https://www.nseindia.com/api/allIndices", headers=h, timeout=10)
+                row = next((x for x in r.json().get("data", []) if x.get("index") == names.get(symbol)), None)
+                if not row or not row.get("open"):
+                    self._send_json({"error": "index not found in allIndices", "open": None})
+                    return
+                out = {"symbol": symbol, "open": float(row["open"]), "source": "allIndices_official",
+                       "asOf": time.strftime("%H:%M:%S")}
+                _today_open_cache[ck] = (time.time(), out)
+                self._send_json(out)
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "open": None})
+            return
+
         if parsed.path == "/api/ohlc":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             try:
