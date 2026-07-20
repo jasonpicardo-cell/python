@@ -7658,39 +7658,152 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   // FEATURE: Adjustment suggester
   // ======================================================================
+  // ══ Roll & Adjust Engine: concrete mechanics + one-click apply ══
+  function _detectStructure(legs) {
+    const o = legs.filter(l => l.instrument_type !== 'FUTURES');
+    const S = o.filter(l => l.action === 'SELL'), B = o.filter(l => l.action === 'BUY');
+    const exps = new Set(o.map(l => l.expiry));
+    if (o.length === 2 && S.length === 1 && B.length === 1 && S[0].strike === B[0].strike && S[0].option_type === B[0].option_type && exps.size === 2) return 'Calendar';
+    if (o.length === 4 && S.length === 2 && B.length === 2 && exps.size === 2) return 'Double Calendar';
+    if (o.length === 2 && S.length === 2 && S[0].option_type !== S[1].option_type) return S[0].strike === S[1].strike ? 'Short Straddle' : 'Short Strangle';
+    if (o.length === 2 && B.length === 2 && B[0].option_type !== B[1].option_type) return B[0].strike === B[1].strike ? 'Long Straddle' : 'Long Strangle';
+    if (o.length === 4 && S.length === 2 && B.length === 2) return 'Iron Condor/Fly';
+    if (o.length === 2 && S.length === 1 && B.length === 1 && S[0].option_type === B[0].option_type) {
+      const credit = (S[0].entry_price || 0) > (B[0].entry_price || 0);
+      return (credit ? 'Credit ' : 'Debit ') + S[0].option_type + ' Spread';
+    }
+    if (o.length === 1 && S.length === 1) return 'Naked Short ' + S[0].option_type;
+    if (o.length === 1 && B.length === 1) return 'Long ' + B[0].option_type;
+    return 'Custom (' + o.length + ' legs)';
+  }
+  function _adjNextExpiry(afterExp) {
+    const d = state.lastData;
+    const exps = (d?.all_expiries || Object.keys(d?.expiries_data || {})).slice();
+    exps.sort((a, b) => new Date(a) - new Date(b));
+    const i = exps.indexOf(afterExp);
+    return (i >= 0 && i + 1 < exps.length) ? exps[i + 1] : (d?.far_expiry && d.far_expiry !== afterExp ? d.far_expiry : null);
+  }
+  function _adjQuote(strike, type, expiry) {
+    const sd = findChainStrikeData(strike, expiry);
+    if (!sd) return null;
+    const p = type === 'CE' ? sd.ce_ltp : sd.pe_ltp;
+    return (p || p === 0) ? p : null;
+  }
   function _renderAdjustSuggestions(legs, spot, netDelta, gap) {
     const panel = document.getElementById('adjustPanel');
     const list  = document.getElementById('adjustList');
     if (!panel || !list) return;
+    const d = state.lastData;
     const items = [];
+    const opt = legs.filter(l => l.instrument_type !== 'FUTURES');
+    const structure = _detectStructure(legs);
+    const card = (sev, txt, mech, action) => items.push({ sev, txt, mech, action });
+    const fmtP = v => (v == null ? '—' : v.toFixed(1));
 
-    for (const leg of legs) {
+    for (let li = 0; li < legs.length; li++) {
+      const leg = legs[li];
       if (leg.instrument_type === 'FUTURES') continue;
-      const chain = findChainStrikeData(leg.strike, leg.expiry);
-      const ltp = chain ? (leg.option_type === 'CE' ? chain.ce_ltp : chain.pe_ltp) : null;
+      const ltp = _adjQuote(leg.strike, leg.option_type, leg.expiry);
+      const nextExp = _adjNextExpiry(leg.expiry || d?.expiry);
+      const dirOut = leg.option_type === 'CE' ? 1 : -1;   // further OTM direction
 
-      // Short leg breached 2× entry credit
-      if (leg.action === 'SELL' && leg.entry_price && ltp && ltp >= 2 * leg.entry_price) {
-        items.push({ sev: 'hi', txt: `Short ${leg.option_type} ${fmtInt(leg.strike)} at ${(ltp/leg.entry_price).toFixed(1)}× entry credit (${fmtPrice(leg.entry_price)}→${fmtPrice(ltp)}). Standard exits: close leg, roll ${leg.option_type==='CE'?'up':'down'}-and-out, or convert to spread by buying a further ${leg.option_type}.` });
+      if (leg.action === 'SELL' && leg.entry_price && ltp != null && ltp >= 2 * leg.entry_price) {
+        // ROLL OUT: same strike, next expiry
+        if (nextExp) {
+          const farP = _adjQuote(leg.strike, leg.option_type, nextExp);
+          if (farP != null) card('hi',
+            `Short ${leg.option_type} ${fmtInt(leg.strike)} tested at ${(ltp / leg.entry_price).toFixed(1)}× entry.`,
+            `ROLL OUT → ${nextExp}: buy back ${fmtP(ltp)}, sell same strike ${fmtP(farP)} = net ${farP - ltp >= 0 ? 'CREDIT +' : 'DEBIT '}${fmtP(farP - ltp)}. Same risk profile, more time, paid to wait.`,
+            { t: 'rollout', li, exp: nextExp, newPrem: farP });
+        }
+        // ROLL OUT-AND-AWAY: next expiry, 2 strikes further OTM
+        if (nextExp) {
+          const k2 = leg.strike + dirOut * 2 * gap;
+          const farP2 = _adjQuote(k2, leg.option_type, nextExp);
+          if (farP2 != null) card('hi', '',
+            `ROLL ${leg.option_type === 'CE' ? 'UP' : 'DOWN'}-AND-OUT → ${fmtInt(k2)} @ ${nextExp}: buy back ${fmtP(ltp)}, sell ${fmtP(farP2)} = net ${farP2 - ltp >= 0 ? '+' : ''}${fmtP(farP2 - ltp)}. More breathing room; accept smaller credit.`,
+            { t: 'rollstrike', li, exp: nextExp, k: k2, newPrem: farP2 });
+        }
+        // CONVERT TO SPREAD: buy a wing 2 gaps further out, same expiry
+        const wingK = leg.strike + dirOut * 2 * gap;
+        const wingP = _adjQuote(wingK, leg.option_type, leg.expiry);
+        if (wingP != null) card('hi', '',
+          `CAP THE RISK: buy ${leg.option_type} ${fmtInt(wingK)} (same expiry) for ${fmtP(wingP)} → defined-risk spread, max loss ${fmtP(2 * gap - (leg.entry_price - wingP))} pts. Costs theta; buys sleep.`,
+          { t: 'addwing', li, k: wingK, prem: wingP });
       }
-      // Spot approaching short strike
-      if (leg.action === 'SELL' && ltp !== null && Math.abs(spot - leg.strike) <= gap) {
-        items.push({ sev: 'md', txt: `Spot ${fmtInt(spot)} within 1 strike of short ${leg.option_type} ${fmtInt(leg.strike)}. Gamma risk rises sharply here — decide roll/defend level BEFORE breach.` });
+      // Approaching short strike — pre-breach warning + untested-side play
+      if (leg.action === 'SELL' && ltp != null && Math.abs(spot - leg.strike) <= gap && (structure.includes('Strangle') || structure.includes('Condor') || structure.includes('Straddle'))) {
+        const other = opt.find(l => l.action === 'SELL' && l.option_type !== leg.option_type);
+        if (other) {
+          const oLtp = _adjQuote(other.strike, other.option_type, other.expiry);
+          const inK = other.strike + (other.option_type === 'CE' ? -1 : 1) * gap;
+          const inP = _adjQuote(inK, other.option_type, other.expiry);
+          if (oLtp != null && inP != null) card('md',
+            `Spot ${fmtInt(spot)} pressing the short ${leg.option_type} ${fmtInt(leg.strike)}.`,
+            `CLASSIC DEFENSE — roll the UNTESTED ${other.option_type} in: ${fmtInt(other.strike)}→${fmtInt(inK)}, buy back ${fmtP(oLtp)}, sell ${fmtP(inP)} = extra credit +${fmtP(inP - oLtp)}. Narrows the tent, finances the tested side. Do NOT touch the tested leg yet.`,
+            { t: 'rollstrike', li: legs.indexOf(other), exp: other.expiry, k: inK, newPrem: inP });
+        }
       }
-      // Deep-ITM long leg: mostly intrinsic, little leverage left
-      if (leg.action === 'BUY' && leg.entry_price && ltp && ltp >= 3 * leg.entry_price) {
-        items.push({ sev: 'lo', txt: `Long ${leg.option_type} ${fmtInt(leg.strike)} at ${(ltp/leg.entry_price).toFixed(1)}× — consider booking partial or rolling ${leg.option_type==='CE'?'up':'down'} to strip profit while staying in the move.` });
+      // Long winner: roll to bank profit
+      if (leg.action === 'BUY' && leg.entry_price && ltp != null && ltp >= 2 * leg.entry_price && !structure.includes('Calendar')) {
+        const upK = leg.strike + dirOut * gap;
+        const upP = _adjQuote(upK, leg.option_type, leg.expiry);
+        if (upP != null) card('lo',
+          `Long ${leg.option_type} ${fmtInt(leg.strike)} at ${(ltp / leg.entry_price).toFixed(1)}×.`,
+          `ROLL ${leg.option_type === 'CE' ? 'UP' : 'DOWN'}: sell ${fmtP(ltp)}, buy ${fmtInt(upK)} for ${fmtP(upP)} → bank ${fmtP(ltp - upP)} pts, stay in the move with house money.`,
+          { t: 'rollstrike', li, exp: leg.expiry, k: upK, newPrem: upP });
       }
     }
-    // Portfolio delta breach
-    if (legs.length >= 2 && Math.abs(netDelta) > 0.15) {
-      const need = netDelta > 0 ? `sell ~${Math.ceil(Math.abs(netDelta)/0.4)} ATM CE or buy PE` : `sell ~${Math.ceil(Math.abs(netDelta)/0.4)} ATM PE or buy CE`;
-      items.push({ sev: 'md', txt: `Net delta ${netDelta>=0?'+':''}${netDelta.toFixed(2)} — to re-neutralise: ${need} (≈0.4Δ each).` });
+    // Calendar recentre
+    if ((structure === 'Calendar' || structure === 'Double Calendar') && d) {
+      const anyK = opt[0]?.strike, atm = d.atm;
+      if (anyK && atm && Math.abs(spot - anyK) > 1.5 * gap && Math.abs(atm - anyK) >= gap)
+        card('md', `${structure} centred at ${fmtInt(anyK)} but spot has walked to ${fmtInt(spot)}.`,
+          `RECENTRE to ATM ${fmtInt(atm)}: close all legs, reopen the same structure at ${fmtInt(atm)} (use the Δ-template button — it prices every leg live). A calendar off-centre is just a weak directional bet.`,
+          null);
     }
+    // Expiry-day roll-all
+    if (d && (d.dte ?? 99) <= 0 && opt.some(l => l.action === 'SELL' && l.expiry === d.expiry)) {
+      const nx = _adjNextExpiry(d.expiry);
+      if (nx) {
+        let net = 0, ok = true;
+        for (const l of opt) { if (l.expiry !== d.expiry) continue;
+          const cur = _adjQuote(l.strike, l.option_type, l.expiry), far = _adjQuote(l.strike, l.option_type, nx);
+          if (cur == null || far == null) { ok = false; break; }
+          net += (l.action === 'SELL' ? (far - cur) : (cur - far));
+        }
+        if (ok) card('md', `EXPIRY DAY — legs on today's expiry.`,
+          `ROLL EVERYTHING → ${nx} at same strikes: net ${net >= 0 ? 'CREDIT +' : 'DEBIT '}${fmtP(net)} for the whole book. Decide before 14:30 gamma hour, not during it.`,
+          { t: 'rollall', exp: nx });
+      }
+    }
+    // Delta drift (kept from v1, with sizing)
+    if (opt.length >= 2 && Math.abs(netDelta) > 0.15)
+      card('md', `Net delta ${netDelta >= 0 ? '+' : ''}${netDelta.toFixed(2)} — the book has become a directional bet.`,
+        `Neutralise: ${netDelta > 0 ? 'sell ~' + Math.ceil(Math.abs(netDelta) / 0.4) + ' ATM CE or buy PE' : 'sell ~' + Math.ceil(Math.abs(netDelta) / 0.4) + ' ATM PE or buy CE'} (≈0.4Δ each) — or use a roll above, which often fixes delta as a side effect.`, null);
 
     if (!items.length) { panel.style.display = 'none'; return; }
     panel.style.display = '';
-    list.innerHTML = items.map(i => `<div class="adjust-item"><span class="sev sev-${i.sev}">${i.sev==='hi'?'ACT':'WATCH'}</span><span>${i.txt}</span></div>`).join('');
+    list.innerHTML = `<div style="font-size:9.5px;color:var(--muted);padding:2px 4px;">Detected structure: <b style="color:var(--gold);">${structure}</b> · quotes live from the chain · APPLY rewrites the builder legs (position management, not edge — every roll trades P&L for time or room)</div>` +
+      items.map((i, ix) => `<div class="adjust-item" style="align-items:flex-start;">
+        <span class="sev sev-${i.sev}">${i.sev === 'hi' ? 'ACT' : i.sev === 'md' ? 'WATCH' : 'IDEA'}</span>
+        <span style="flex:1;">${i.txt ? i.txt + '<br>' : ''}<b style="color:#cdd;">${i.mech || ''}</b></span>
+        ${i.action ? `<button class="btn adj-apply" data-ix="${ix}" style="font-size:9px;padding:2px 9px;">Apply</button>` : ''}
+      </div>`).join('') +
+      `<details class="layman-note"><summary>📖 The adjustment playbook (reference)</summary><div class="layman-body">
+        <b>Short strangle/straddle:</b> tested side → FIRST roll the untested side in (credit finances defense); breach worsens → roll tested out in time (same or further strike) for credit; never roll for a debit into the same risk. <b>Credit spread:</b> loss ≥ 2× credit received is the classic mechanical exit; rolling out only if it pays a credit. <b>Iron condor:</b> defend at short-strike touch, not breakeven; roll untested in, or roll the whole structure out at ~21 DTE. <b>Long options:</b> at 2×, roll a strike out and bank the difference — repeat; never let a double round-trip to zero. <b>Calendars:</b> recentre when spot walks a strike-and-a-half away. <b>Universal:</b> every adjustment is a NEW trade — it must make sense at today's prices on its own; "getting back to breakeven" is not a strategy, it\'s hope with commissions.</div></details>`;
+    list.querySelectorAll('.adj-apply').forEach(b => b.addEventListener('click', () => {
+      const a = items[+b.dataset.ix]?.action;
+      if (!a) return;
+      if (a.t === 'rollout') { const L = builderState.legs[a.li]; L.expiry = a.exp; L.entry_price = a.newPrem; L.premium = a.newPrem; }
+      else if (a.t === 'rollstrike') { const L = builderState.legs[a.li]; L.strike = a.k; L.expiry = a.exp; L.entry_price = a.newPrem; L.premium = a.newPrem; }
+      else if (a.t === 'addwing') { const src = builderState.legs[a.li];
+        builderState.legs.push({ action: 'BUY', option_type: src.option_type, strike: a.k, qty_lots: src.qty_lots || 1, entry_price: a.prem, premium: a.prem, expiry: src.expiry, instrument_type: 'OPTION' }); }
+      else if (a.t === 'rollall') { for (const L of builderState.legs) { if (L.instrument_type === 'FUTURES' || L.expiry !== state.lastData?.expiry) continue;
+          const np = _adjQuote(L.strike, L.option_type, a.exp); if (np != null) { L.expiry = a.exp; L.entry_price = np; L.premium = np; } } }
+      if (typeof showToast === 'function') showToast('Adjustment applied — legs rewritten (the closed portion\'s P&L is yours to log in the journal)');
+      renderBuilder();
+    }));
   }
 
   // ======================================================================
