@@ -2399,6 +2399,80 @@ def compute_gtf_zones(df, _wdf=None, _mdf=None, sensitivity="dynamic", daily_loo
     return out
 
 
+
+def _wt_divergence(wt1, H, L, lb=5, window=50):
+    """Detect recent bullish/bearish divergence on wt1 vs price pivots."""
+    n=len(wt1)
+    if n < lb*2+10: return False, False
+    start=max(lb, n-window-lb)
+    win=2*lb+1
+
+    # Vectorized pivot detection on wt1
+    ph=[]; pl=[]
+    for i in range(start+lb, n-lb):
+        seg_w=wt1[i-lb:i+lb+1]
+        if wt1[i]==seg_w.max(): ph.append(i)
+        if wt1[i]==seg_w.min(): pl.append(i)
+
+    bear_div=False; bull_div=False
+    if len(ph)>=2:
+        i1,i2=ph[-2],ph[-1]
+        if H[i2]>H[i1] and wt1[i2]<wt1[i1]: bear_div=True   # regular bearish
+        if H[i2]<H[i1] and wt1[i2]>wt1[i1]: bear_div=True   # hidden bearish
+    if len(pl)>=2:
+        i1,i2=pl[-2],pl[-1]
+        if L[i2]<L[i1] and wt1[i2]>wt1[i1]: bull_div=True   # regular bullish
+        if L[i2]>L[i1] and wt1[i2]<wt1[i1]: bull_div=True   # hidden bullish
+
+    return bull_div, bear_div
+
+def _compute_wt_tf(df, n1=10, n2=21, ob1=60, ob2=53, os1=-60, os2=-53):
+    """WaveTrend for one timeframe."""
+    n=len(df)
+    if n<n1+n2+10: return {}
+    H=df['High'].values.astype(float); L=df['Low'].values.astype(float); C=df['Close'].values.astype(float)
+    ap=(H+L+C)/3.0
+    esa=_ema_series(ap,n1)
+    d=_ema_series(np.abs(ap-esa),n1)
+    with np.errstate(divide='ignore',invalid='ignore'):
+        ci=np.where(d!=0,(ap-esa)/(0.015*d),0.0)
+    wt1=_ema_series(ci,n2)
+    wt2=np.array(pd.Series(wt1).rolling(4,min_periods=1).mean())
+
+    w1=float(wt1[-1]); w2=float(wt2[-1])
+    p1=float(wt1[-2]); p2=float(wt2[-2])
+
+    cross_bull=bool(w1>w2 and p1<=p2)
+    cross_bear=bool(w1<w2 and p1>=p2)
+    in_os=bool(w2<=os1); in_ob=bool(w2>=ob1)
+    near_os=bool(os1<w2<=os2); near_ob=bool(ob2<=w2<ob1)
+    zero_bull=bool(w1>0 and p1<=0)
+    zero_bear=bool(w1<0 and p1>=0)
+
+    bull_div,bear_div=_wt_divergence(wt1,H,L)
+
+    return dict(
+        wt1=r2(w1), wt2=r2(w2),
+        in_os=in_os, in_ob=in_ob, near_os=near_os, near_ob=near_ob,
+        bull=bool(w1>0), bear=bool(w1<0),
+        cross_bull=cross_bull, cross_bear=cross_bear,
+        buy_zone=bool(cross_bull and in_os),
+        sell_zone=bool(cross_bear and in_ob),
+        zero_bull=zero_bull, zero_bear=zero_bear,
+        bull_div=bull_div, bear_div=bear_div,
+        buy_div=bool(cross_bull and bull_div),
+        sell_div=bool(cross_bear and bear_div),
+    )
+
+def compute_wavetrend(df, _wdf=None, _mdf=None, n1=10, n2=21):
+    """WaveTrend oscillator (LazyBear) — D/W/M."""
+    out={'d':_compute_wt_tf(df,n1,n2)}
+    if _wdf is not None and len(_wdf)>=n1+n2+5:
+        out['w']=_compute_wt_tf(_wdf,n1,n2)
+    if _mdf is not None and len(_mdf)>=n1+n2+5:
+        out['m']=_compute_wt_tf(_mdf,n1,n2)
+    return out
+
 def compute_vsa(df):
     """Volume Spread Analysis: interplay of Volume, Spread (H−L), and Close position.
     The 'Big Volume Candle' strategy is the centrepiece."""
@@ -3039,6 +3113,8 @@ def precompute(fp, idx_map, nifty_df=None):
         cp   = compute_chart_patterns(df),
         dbl  = compute_double_patterns(df,_wdf=_wdf,_mdf=_mdf),
     )
+    # 🌊 WaveTrend Oscillator — Daily / Weekly / Monthly
+    wt = compute_wavetrend(df, _wdf=_wdf, _mdf=_mdf)
     # 📦 Supply & Demand Zones — Daily / Weekly / Monthly
     zones = compute_supply_demand(df,_wdf=_wdf,_mdf=_mdf)
     # 🔷 GTF-Style Zones — swing-pivot + ATR-sized + BOS-invalidated + scored
@@ -3112,7 +3188,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,ti_w=ti_w,ti_m=ti_m,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,gtf=gtf,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,ti_w=ti_w,ti_m=ti_m,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,gtf=gtf,wt=wt,**st,rs=0)
 
 
 def assign_smart_ranks(stocks):
@@ -3466,6 +3542,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .tab-btn.t-toppicks.active{color:#34d399;border-bottom-color:#34d399}
 .tab-btn.t-swing.active{color:#fb923c;border-bottom-color:#fb923c}
 .tab-btn.t-zones.active{color:#a78bfa;border-bottom-color:#a78bfa}
+.tab-btn.t-wt.active{color:#7c3aed;border-bottom-color:#7c3aed}
 .tab-btn.t-pro.active{color:#22d3ee;border-bottom-color:#22d3ee}
 /* ⑥ sector grouping */
 .gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
@@ -3520,6 +3597,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-toppicks" data-tab="toppicks" onclick="switchTab('toppicks')">🏆 Top Picks</button>
   <button class="tab-btn t-swing" data-tab="swing" onclick="switchTab('swing')">🎯 Swing Setup</button>
   <button class="tab-btn t-zones" data-tab="zones" onclick="switchTab('zones')">📦 Supply/Demand</button>
+  <button class="tab-btn t-wt" data-tab="wt" onclick="switchTab('wt')">🌊 WaveTrend</button>
   <button class="tab-btn t-pro" data-tab="pro" onclick="switchTab('pro')">💎 Pro Scanners</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
@@ -4595,6 +4673,54 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 </div>
 
 
+<!-- ═══ WAVETREND SCANNER ════════════════════════════════════════════════ -->
+<div id="ctrl-wt" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="wt-strat" style="min-width:380px" onchange="updateWTInfo()">
+      <optgroup label="── 📊 Overbought / Oversold Levels ──">
+        <option value="wt_ob1">Overbought Level 1 — wt2 ≥ 60 (Daily)</option>
+        <option value="wt_ob2">Approaching OB Level 2 — wt2 ≥ 53 (Daily)</option>
+        <option value="wt_ob1_w">Overbought Level 1 — Weekly wt2 ≥ 60</option>
+        <option value="wt_os1">Oversold Level 1 — wt2 ≤ -60 (Daily)</option>
+        <option value="wt_os2">Approaching OS Level 2 — wt2 ≤ -53 (Daily)</option>
+        <option value="wt_os1_w">Oversold Level 1 — Weekly wt2 ≤ -60</option>
+      </optgroup>
+      <optgroup label="── 🔀 WT1 × WT2 Crossovers ──">
+        <option value="wt_cross_bull">Fresh Bullish Cross — wt1 crossed above wt2 (Daily)</option>
+        <option value="wt_cross_bear">Fresh Bearish Cross — wt1 crossed below wt2 (Daily)</option>
+        <option value="wt_buy_zone">★ Bull Cross in OS Zone — wt1 × wt2 inside OversoldLevel1</option>
+        <option value="wt_sell_zone">★ Bear Cross in OB Zone — wt1 × wt2 inside OverboughtLevel1</option>
+      </optgroup>
+      <optgroup label="── ➿ Zero-Line Crosses ──">
+        <option value="wt_zero_bull">Zero-Line Cross Up — wt1 crossed above 0 (Daily)</option>
+        <option value="wt_zero_bear">Zero-Line Cross Down — wt1 crossed below 0 (Daily)</option>
+      </optgroup>
+      <optgroup label="── 📉 Divergences ──">
+        <option value="wt_bull_div">Bullish Divergence — wt1 vs price (Regular + Hidden)</option>
+        <option value="wt_bear_div">Bearish Divergence — wt1 vs price (Regular + Hidden)</option>
+        <option value="wt_buy_div">★ Bullish Div + Fresh Bull Cross (high-confluence)</option>
+        <option value="wt_sell_div">★ Bearish Div + Fresh Bear Cross (high-confluence)</option>
+      </optgroup>
+      <optgroup label="── 🌐 HTF Agreement ──">
+        <option value="wt_htf_bull">HTF Aligned Bull — Daily cross up + Weekly wt1 > 0</option>
+        <option value="wt_htf_bear">HTF Aligned Bear — Daily cross down + Weekly wt1 < 0</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('wt',document.getElementById('wt-strat').value)" title="Strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Timeframe (WT)</label>
+    <select id="wt-tf" onchange="scanWT()">
+      <option value="d" selected>📅 Daily</option>
+      <option value="w">📅 Weekly</option>
+      <option value="m">📅 Monthly</option>
+    </select>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="wt-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="wt-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="wt-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#7c3aed;color:#fff" onclick="scanWT()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
 <!-- ═══ GAP SCANNER ════════════════════════════════════════════════════ -->
 <div id="ctrl-gap" class="ctrl" style="display:none">
   <div class="cg"><label>Gap Type</label>
@@ -4732,7 +4858,7 @@ function switchTab(tab){
   const _isCustomPage=['home','lookup','iview','toppicks','help'].includes(tab);
   const _gb=document.getElementById('global-bar'); if(_gb) _gb.style.display=_isCustomPage?'none':'flex';
   const _sr=document.getElementById('search-row'); if(_sr) _sr.style.display=_isCustomPage?'none':'flex';
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones','pro'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones','pro','wt'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -4785,6 +4911,7 @@ function switchTab(tab){
   else if(tab==='swing'){ updateSwingInfo(); scanSwing(); }
   else if(tab==='zones'){ updateZonesInfo(); scanZones(); }
   else if(tab==='pro'){ updateProInfo(); scanPro(); }
+  else if(tab==='wt'){ updateWTInfo(); scanWT(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -5664,6 +5791,15 @@ const HOME_CARDS=[
   {tab:'zones',strat:'gtf_triple_demand',emoji:'🔷',badge:'zones',label:'GTF Triple Demand Confluence', desc:'Swing-pivot+ATR demand zone live on Daily, Weekly AND Monthly simultaneously - the top-down multi-timeframe confluence GTF 2.0 Extended is built around', stars:'★★★★★',section:9},
   {tab:'zones',strat:'gtf_demand_w',     emoji:'🔷',badge:'zones',label:'Strong Weekly Demand (Score≥6)', desc:'Swing-pivot+ATR-sized demand zone, BOS-validated, scoring 6+/10 on freshness/tightness/volume - a high-conviction multi-month support level', stars:'★★★★★',section:9},
   {tab:'zones',strat:'gtf_demand_fresh', emoji:'🔷',badge:'zones',label:'Fresh Untested Demand Zone',    desc:'Nearest live demand zone has never been retested since formation - the original unfilled buy orders are still believed resting there', stars:'★★★★', section:9},
+  // 🌊 WaveTrend
+  {tab:'wt',strat:'wt_os1',    emoji:'🟢',badge:'wt',label:'Daily Oversold Level 1',    desc:'wt2 ≤ -60 on daily chart - the classic WaveTrend buy zone where a crossover becomes a high-probability signal',stars:'★★★★', section:11},
+  {tab:'wt',strat:'wt_buy_zone',emoji:'⭐',badge:'wt',label:'Bull Cross in OS Zone (★)',    desc:'wt1 crossed above wt2 while BOTH are in the oversold zone (≤-60) - Phase 1 filtered signal, highest-probability WaveTrend buy',stars:'★★★★★',section:11},
+  {tab:'wt',strat:'wt_sell_zone',emoji:'⭐',badge:'wt',label:'Bear Cross in OB Zone (★)',   desc:'wt1 crossed below wt2 while both are in the overbought zone (≥60) - highest-probability WaveTrend sell',stars:'★★★★★',section:11},
+  {tab:'wt',strat:'wt_buy_div',  emoji:'⭐',badge:'wt',label:'Bullish Div + Bull Cross',     desc:'Bullish divergence on wt1 vs price PLUS fresh cross-up today - two-condition confluence matching Phase 3 of the Pine Script filter',stars:'★★★★★',section:11},
+  {tab:'wt',strat:'wt_htf_bull', emoji:'🌐',badge:'wt',label:'HTF Aligned Bull (D+W)',       desc:'Daily bull cross + Weekly wt1 > 0 simultaneously - Phase 4 filtered, only taking daily signals that agree with the weekly trend',stars:'★★★★', section:11},
+  {tab:'wt',strat:'wt_ob1',      emoji:'🔴',badge:'wt',label:'Daily Overbought Level 1',     desc:'wt2 ≥ 60 on daily - the classic WaveTrend sell zone, watch for a crossunder as the potential sell trigger',stars:'★★★',  section:11},
+  {tab:'wt',strat:'wt_os1_w',    emoji:'🟢',badge:'wt',label:'Weekly Oversold Level 1',      desc:'wt2 ≤ -60 on the weekly chart - a more significant oversold reading representing multi-week weakness',stars:'★★★★', section:11},
+  {tab:'wt',strat:'wt_zero_bull',emoji:'➿',badge:'wt',label:'Zero-Line Cross Up',            desc:'wt1 crossed above zero - momentum shifted from net bearish to bullish, the Phase 2 trend gate signal',stars:'★★★★', section:11},
 
 ];
 
@@ -5679,9 +5815,10 @@ const SECTIONS=[
   '🎯 SWING SETUP — EMA SQUEEZE · MACD 5/35 · TRADE PLANS',
   '📦 SUPPLY & DEMAND ZONES — DAILY · WEEKLY · MONTHLY',
   '💎 PRO SCANNERS — RARE TECHNIQUES NOT ON FREE SCREENERS',
+  '🌊 WAVETREND — LAZYBEARLUSTRATED OSCILLATOR · OB/OS · DIVERGENCE',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend'};
 
 function renderHome(){
   const sortMode=(window._homeSort)||'section';
@@ -5917,6 +6054,11 @@ const STRAT_HELP_KEY={
     wyckoff_spring:6,wyckoff_upthrust:6,
     climax_buying:7,climax_selling:7,rvol_high:7,rvol_extreme:7,
     rs_new_leader:8,rs_fading_leader:8,sector_leader:8,sector_laggard:8},
+  wt:{wt_ob1:0,wt_ob2:0,wt_ob1_w:0,wt_os1:0,wt_os2:0,wt_os1_w:0,
+    wt_cross_bull:1,wt_cross_bear:1,wt_buy_zone:1,wt_sell_zone:1,
+    wt_zero_bull:1,wt_zero_bear:1,
+    wt_bull_div:2,wt_bear_div:2,wt_buy_div:2,wt_sell_div:2,
+    wt_htf_bull:1,wt_htf_bear:1}
 };
 // Map tab → section index in Help H array
 const TAB_SEC={
@@ -5926,7 +6068,7 @@ const TAB_SEC={
   xp:11,  // Experimental / VSA
   patt:12,// Patterns
   br:13,  // Market Breadth
-  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9, pro:10,
+  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9, pro:10, wt:11,
 };
 
 function showHelp(tab,stratVal){
@@ -6578,6 +6720,26 @@ function renderHelp(){
         ai:'How is the price/index ratio (RS line) used by professional fund managers to time entries independent of absolute price trends? In a sector rotation, how long does it typically take for buying to broaden from leaders to laggards, and what risks come with buying laggards versus leaders?'
       },
     ]},
+    {icon:'🌊', title:'WaveTrend Oscillator (LazyBear) — OB/OS · Crossovers · Divergence', items:[
+      { n:'WaveTrend Calculation — wt1, wt2, OB/OS Levels',
+        f:`ap = (H+L+C)/3. esa = EMA(ap, 10). d = EMA(|ap-esa|, 10). CI = (ap-esa)/(0.015*d). wt1 = EMA(CI, 21). wt2 = SMA(wt1, 4). OB1=60, OB2=53, OS1=-60, OS2=-53. in_oversold = wt2<=OS1. in_overbought = wt2>=OB1.`,
+        d:`The WaveTrend oscillator, popularized by LazyBear on TradingView, measures the deviation of price from its short-term average in units of its own volatility (the 0.015*d divisor is a normalization constant that keeps the oscillator scaled consistently across instruments with different price ranges). The result is a fast signal line (wt1, EMA of the channel index) and a slower trigger line (wt2, 4-bar SMA of wt1). The two key thresholds are ±60 (Level 1, extreme overbought/oversold) and ±53 (Level 2, approaching extremes). These thresholds are calibrated so that readings above +60 are genuinely rare, occurring only when price has made a sustained move far above its EMA relative to its own recent volatility - true trend extremes rather than noise. In the overbought zone, the highest-probability setup is a CROSSUNDER of wt1 below wt2 while both are still above +60 (a crossover from OB/OS). Between ±53 and ±60 is the "warning zone" where signals are approaching high-probability territory but not quite there yet. The zero line divides bullish momentum (wt1 > 0) from bearish momentum (wt1 < 0) and acts as an intermediate trend gate.`,
+        links:[['LazyBear WaveTrend','https://www.tradingview.com/script/2KE8wTuF-WaveTrend-Oscillator/']],
+        ai:'How does the WaveTrend oscillator differ from standard RSI in detecting overbought/oversold conditions? What are typical holding periods for positions entered on a WaveTrend OS1 crossover signal? How often does price reach the OS1 threshold on NSE large-cap stocks in a given year?'
+      },
+      { n:'WT1 × WT2 Crossovers — Filtered Signals (4 phases from Pine Script)',
+        f:`Raw cross: wt1[-1]<=wt2[-1] AND wt1[0]>wt2[0] (bull) or reverse (bear). Phase 1 (zone filter): cross valid only if wt2<=OS1 for bull / wt2>=OB1 for bear. Phase 2 (zero gate): additionally require wt1<0 for bull entry / wt1>0 for bear entry. Phase 3 (divergence): also require recentBullDiv/BearDiv detected within divWindow=40 bars. Phase 4 (HTF): also require weekly wt1>0 for bull / weekly wt1<0 for bear.`,
+        d:`The Pine Script implements a 4-phase progressive filter system where each phase can be enabled or disabled. The RAW crossover (Phase 0 - no filter) catches every wt1/wt2 crossover, but most occur mid-range and have a poor signal-to-noise ratio. PHASE 1 (zone filter) is the most impactful single filter: requiring the cross to happen inside the OB/OS zone (wt2 at or beyond ±60) immediately eliminates a large proportion of false signals because the cross is happening from a genuinely extreme reading rather than a routine fluctuation. PHASE 2 (zero line gate) additionally ensures you're buying only when the oscillator is below zero (the stock is still in a bearish regime according to wt1, which is where the maximum recovery potential exists) rather than trying to buy at a crossover that happens above zero in an already-bullish context. PHASE 3 (divergence confluence) is the most powerful additional filter: a divergence between wt1 pivots and price pivots is an independent signal that the current trend is losing momentum, and when it coincides with a crossover it confirms the signal from two different analytical methods. PHASE 4 (HTF agreement) simply checks that the weekly WaveTrend agrees directionally, avoiding counter-trend trades where the weekly trend opposes the daily signal.`,
+        links:[['WaveTrend Filters','https://www.tradingview.com/script/2KE8wTuF-WaveTrend-Oscillator/']],
+        ai:'When using all 4 filters simultaneously, what percentage of WaveTrend crossovers on NSE stocks would typically qualify, and how does that affect win rate versus signal frequency? How should stop-loss placement differ between a raw crossover entry and a Phase 1+3 filtered entry?'
+      },
+      { n:'WaveTrend Divergences — Regular and Hidden',
+        f:`Pivot detection: wt1 pivot high at i if wt1[i]==max(wt1[i-lb:i+lb+1]), lb=5. Regular bullish div: price lower low + wt1 higher low (selling exhaustion). Hidden bullish div: price higher low + wt1 lower low (uptrend continuation). Regular bearish: price higher high + wt1 lower high. Hidden bearish: price lower high + wt1 higher high. Window: last 40-50 bars.`,
+        d:`WaveTrend divergences work on the same principle as RSI divergences, but because wt1 is a momentum oscillator that has already been smoothed through two EMA passes, its pivot highs and lows tend to be less noisy than raw RSI divergences. Regular bullish divergence (price falls to a new low, but wt1 makes a higher low than its prior comparable low) shows that despite the price reaching a new low, the momentum BEHIND the selling is weaker than it was at the previous low - the downside pressure is exhausting. Regular bearish divergence is the mirror: price at a new high but wt1 lower than its prior high shows buying pressure is weakening even as price continues up. Hidden divergences work differently - they indicate TREND CONTINUATION: a hidden bullish divergence (price higher low, wt1 lower low) means the oscillator is pulling back further than price, suggesting the underlying uptrend is stronger than the oscillator's temporary weakness suggests. The most actionable WaveTrend divergence setups are those that coincide with a fresh crossover (the "buy_div" and "sell_div" signals in this scanner), as the divergence provides directional conviction and the crossover provides an exact entry bar.`,
+        links:[['Divergence Guide','https://www.investopedia.com/terms/d/divergence.asp']],
+        ai:'How does a WaveTrend bullish divergence in the oversold zone compare in reliability to an RSI divergence for NSE stocks? What follow-through (in % or ATR) is typically seen after a confirmed WaveTrend regular bullish divergence combined with a crossover?'
+      },
+    ]},
   ];
 
   let html=`<div class="help-wrap">
@@ -6656,6 +6818,7 @@ function triggerAutoScan(){
     else if(t==='swing'){ scanSwing(); }
     else if(t==='zones'){ scanZones(); }
     else if(t==='pro'){ scanPro(); }
+    else if(t==='wt'){ scanWT(); }
   },350);
 }
 function initAutoScan(){
@@ -7833,7 +7996,7 @@ function scanTopPicks(){
 const TAB_NAMES={piv:'Pivot Points',smc:'Price Action/SMC',vol:'Volume',mi:'Multi-Indicator',
   adv:'Advanced',t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',ti:'India Pro',nl:'Noiseless',
   xp:'Experimental/VSA',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combiner',
-  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners'};
+  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend'};
 const SIGNAL_DEFS=[
   // ── Trend / Tier-1 ──
   {cat:'Trend',tab:'t1',label:'SuperTrend Bullish',          w:3, chk:s=>s.t1?.stt?.bull},
@@ -7992,6 +8155,17 @@ const SIGNAL_DEFS=[
   {cat:'SupplyDemand',tab:'zones',label:'GTF Strong Supply Zone (Daily)', w:-4,chk:s=>s.gtf?.d?.supply&&s.gtf.d.supply.score>=6},
   {cat:'SupplyDemand',tab:'zones',label:'GTF Strong Supply Zone (Weekly)',w:-5,chk:s=>s.gtf?.w?.supply&&s.gtf.w.supply.score>=6},
   {cat:'SupplyDemand',tab:'zones',label:'GTF Triple-TF Supply Confluence',w:-7,chk:s=>{const g=s.gtf||{};const d=g.d?.supply,w=g.w?.supply,m=g.m?.supply;return !!(d&&(d.inside||d.near)&&w&&(w.inside||w.near)&&m&&(m.inside||m.near));}},
+
+
+  // ── WaveTrend ──
+  {cat:'WaveTrend',tab:'wt',label:'WT Oversold Level 1 (Daily)',     w:3, chk:s=>s.wt?.d?.in_os},
+  {cat:'WaveTrend',tab:'wt',label:'WT Bull Cross in OS Zone (Daily)',w:6, chk:s=>s.wt?.d?.buy_zone},
+  {cat:'WaveTrend',tab:'wt',label:'WT Bullish Div + Cross (Daily)',  w:7, chk:s=>s.wt?.d?.buy_div},
+  {cat:'WaveTrend',tab:'wt',label:'WT Zero-Line Cross Up (Daily)',   w:4, chk:s=>s.wt?.d?.zero_bull},
+  {cat:'WaveTrend',tab:'wt',label:'WT HTF Aligned Bull (D+W)',       w:5, chk:s=>s.wt?.d?.cross_bull&&s.wt?.w?.bull},
+  {cat:'WaveTrend',tab:'wt',label:'WT Overbought Level 1 (Daily)',  w:-3, chk:s=>s.wt?.d?.in_ob},
+  {cat:'WaveTrend',tab:'wt',label:'WT Bear Cross in OB Zone (Daily)',w:-6,chk:s=>s.wt?.d?.sell_zone},
+  {cat:'WaveTrend',tab:'wt',label:'WT Bearish Div + Cross (Daily)', w:-7,chk:s=>s.wt?.d?.sell_div},
 
   // ── Gap ──
   {cat:'Gap',tab:'gap',label:'Gap Up Continuation',           w:2, chk:s=>s.gap?.up&&s.gap?.cont},
@@ -8414,6 +8588,79 @@ function scanPro(){
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🌊 WAVETREND SCANNER — LazyBear WaveTrend oscillator (Pine port)
+//   wt1 = EMA(CI, 21)  wt2 = SMA(wt1, 4)  CI = (ap-EMA(ap,10))/(0.015*EMA(|ap-EMA(ap,10)|,10))
+//   OB1=60  OB2=53  OS1=-60  OS2=-53
+// ════════════════════════════════════════════════════════════════════════════
+const WT_INFO={
+  wt_ob1:'<b>Overbought Level 1 (wt2 ≥ 60)</b> · The WaveTrend trigger line (4-bar SMA of wt1) is at or above 60 on the daily chart · In LazyBear\'s original indicator this is the first overbought threshold — price has reached an extreme momentum level, a crossdown from here is a high-probability sell signal',
+  wt_ob2:'<b>Approaching OB Level 2 (wt2 ≥ 53)</b> · wt2 is entering the pre-overbought zone (53-60) · Watch for a signal-line crossunder in the next 1-3 bars as the oscillator may be setting up a sell signal',
+  wt_ob1_w:'<b>Weekly Overbought Level 1 (wt2 ≥ 60)</b> · The WaveTrend trigger line on the WEEKLY chart is overbought · A weekly-level overbought reading is a more significant caution signal than daily — the stock has run far above equilibrium on a multi-week timeframe',
+  wt_os1:'<b>Oversold Level 1 (wt2 ≤ -60)</b> · The WaveTrend trigger line is at or below -60 on the daily chart · The classic WaveTrend buy zone — a crossover from here (wt1 crossing above wt2 while both are below -60) is the highest-probability WaveTrend buy signal',
+  wt_os2:'<b>Approaching OS Level 2 (wt2 ≤ -53)</b> · wt2 is entering the pre-oversold zone (-53 to -60) · The oscillator is approaching extreme levels where buy signals become high-conviction',
+  wt_os1_w:'<b>Weekly Oversold Level 1 (wt2 ≤ -60)</b> · WaveTrend trigger line on the weekly chart is oversold · A weekly OS1 reading means the stock has been in sustained multi-week weakness and is due for a relief rally or reversal',
+  wt_cross_bull:'<b>Fresh Bullish Cross (wt1 × wt2)</b> · wt1 (the signal line) crossed above wt2 (the trigger line) in the most recent bar on the daily chart · This is the raw WaveTrend buy signal without any zone or HTF filter — higher volume of matches, higher false-signal rate',
+  wt_cross_bear:'<b>Fresh Bearish Cross (wt1 × wt2)</b> · wt1 crossed below wt2 on the daily chart · The raw sell signal — watch the zone and divergence filters for higher-quality setups',
+  wt_buy_zone:'<b>Bull Cross in OS Zone (★ highest-probability)</b> · wt1 crossed above wt2 WHILE wt2 is at or below -60 (inside the oversold zone) · This is Phase 1 of the filtered signal in the Pine Script — the cross happens from an extreme oversold reading, dramatically reducing false signals vs a raw cross',
+  wt_sell_zone:'<b>Bear Cross in OB Zone (★ highest-probability)</b> · wt1 crossed below wt2 while wt2 is at or above +60 · The mirror setup — a crossdown from an extreme overbought reading is the highest-probability WaveTrend sell signal',
+  wt_zero_bull:'<b>Zero-Line Cross Up</b> · wt1 crossed above the zero line on the daily chart · The zero line acts as a trend divider — crossing above it means momentum has shifted from net bearish to net bullish (Phase 2 in the Pine Script filter)',
+  wt_zero_bear:'<b>Zero-Line Cross Down</b> · wt1 crossed below zero — momentum shifting from bullish to bearish',
+  wt_bull_div:'<b>Bullish Divergence (Regular + Hidden)</b> · Regular bullish: price made a LOWER low but wt1 made a HIGHER low (selling pressure weakening) · Hidden bullish: price made a HIGHER low but wt1 made a LOWER low (continuation of existing uptrend) · Divergence between wt1 and price is Phase 3 in the Pine Script filter',
+  wt_bear_div:'<b>Bearish Divergence (Regular + Hidden)</b> · Regular bearish: price made a HIGHER high but wt1 made a LOWER high (buying pressure weakening) · Hidden bearish: price lower high, wt1 higher high (continuation of existing downtrend)',
+  wt_buy_div:'<b>★ Bullish Divergence + Fresh Bull Cross</b> · A bullish divergence (regular or hidden) has been detected AND wt1 just crossed above wt2 today · This two-condition confluence matches Phase 3 of the Pine Script — divergence gives directional bias, crossover gives entry timing',
+  wt_sell_div:'<b>★ Bearish Divergence + Fresh Bear Cross</b> · Bearish divergence confirmed AND wt1 just crossed below wt2 — the highest-quality WaveTrend sell signal available',
+  wt_htf_bull:'<b>HTF Aligned Bull (Daily Cross Up + Weekly wt1 > 0)</b> · wt1 crossed above wt2 on the daily AND the weekly wt1 is above zero (the HTF trend is bullish) · Phase 4 in the Pine Script: only taking daily buy signals that agree with the higher-timeframe trend direction dramatically reduces counter-trend whipsaws',
+  wt_htf_bear:'<b>HTF Aligned Bear (Daily Cross Down + Weekly wt1 < 0)</b> · Daily bear cross with weekly wt1 below zero — trend-following sell signal, avoids shorting stocks that are in a weekly uptrend',
+};
+function updateWTInfo(){const s=document.getElementById('wt-strat').value;setFbar('🌊 <b>WaveTrend</b> · '+(WT_INFO[s]||s));}
+
+function scanWT(){
+  const strat=document.getElementById('wt-strat').value;
+  const tf=document.getElementById('wt-tf').value;
+  const rsMin=parseInt(document.getElementById('wt-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('wt-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('wt-pmax').value)||Infinity;
+  updateWTInfo(); rows=[];
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const wt=s.wt||{}; const d=wt.d||{}, w=wt.w||{}, m=wt.m||{};
+    // pick timeframe (tf dropdown overrides strategy-specific defaults where relevant)
+    const cur=(tf==='w'?w:tf==='m'?m:d)||{};
+    let matched=false,sig='',extra={};
+
+    const tfTag=tf==='w'?' (W)':tf==='m'?' (M)':'';
+
+    if(strat==='wt_ob1')       {matched=!!d.in_ob;        sig='🔴 OB1'+tfTag;    extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_ob2')       {matched=!!d.near_ob;      sig='🟡 Near OB'+tfTag;extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_ob1_w')     {matched=!!w.in_ob;        sig='🔴 W-OB1';         extra={wt1:w.wt1,wt2:w.wt2};}
+    if(strat==='wt_os1')       {matched=!!d.in_os;        sig='🟢 OS1'+tfTag;    extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_os2')       {matched=!!d.near_os;      sig='🟡 Near OS'+tfTag;extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_os1_w')     {matched=!!w.in_os;        sig='🟢 W-OS1';         extra={wt1:w.wt1,wt2:w.wt2};}
+    if(strat==='wt_cross_bull') {matched=!!cur.cross_bull; sig='🔀🟢 Bull×'+tfTag; extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_cross_bear') {matched=!!cur.cross_bear; sig='🔀🔴 Bear×'+tfTag; extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_buy_zone')  {matched=!!d.buy_zone;     sig='⭐ OS Buy';         extra={wt1:d.wt1,wt2:d.wt2};}
+    if(strat==='wt_sell_zone') {matched=!!d.sell_zone;    sig='⭐ OB Sell';        extra={wt1:d.wt1,wt2:d.wt2};}
+    if(strat==='wt_zero_bull') {matched=!!cur.zero_bull;  sig='➿🟢 Zero↑'+tfTag; extra={wt1:cur.wt1};}
+    if(strat==='wt_zero_bear') {matched=!!cur.zero_bear;  sig='➿🔴 Zero↓'+tfTag; extra={wt1:cur.wt1};}
+    if(strat==='wt_bull_div')  {matched=!!cur.bull_div;   sig='📉🟢 Bull Div'+tfTag;extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_bear_div')  {matched=!!cur.bear_div;   sig='📉🔴 Bear Div'+tfTag;extra={wt1:cur.wt1,wt2:cur.wt2};}
+    if(strat==='wt_buy_div')   {matched=!!d.buy_div;      sig='⭐ BullDiv+×';      extra={wt1:d.wt1,wt2:d.wt2};}
+    if(strat==='wt_sell_div')  {matched=!!d.sell_div;     sig='⭐ BearDiv+×';      extra={wt1:d.wt1,wt2:d.wt2};}
+    if(strat==='wt_htf_bull')  {matched=!!d.cross_bull&&!!w.bull; sig='🌐🟢 HTF Bull'; extra={d_wt1:d.wt1,w_wt1:w.wt1};}
+    if(strat==='wt_htf_bear')  {matched=!!d.cross_bear&&!!w.bear; sig='🌐🔴 HTF Bear'; extra={d_wt1:d.wt1,w_wt1:w.wt1};}
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'wt',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
 function lookupStock(){
   const q=(document.getElementById('lookup-input').value||'').trim().toUpperCase();
   const sugEl=document.getElementById('lookup-suggest');
@@ -8449,7 +8696,7 @@ function renderLookupResult(s){
   const catOrder=['Trend','Momentum','Volatility','SMC','MultiIndicator','BreakoutPro','SmartRank','Patterns','Gap'];
   const catLabels={Trend:'📈 Trend',Momentum:'⚡ Momentum',Volatility:'🗜 Volatility/Breakout',
     SMC:'🎯 Smart Money Concepts',MultiIndicator:'🏆 Minervini/Weinstein',
-    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand',ProScanners:'💎 Pro Scanners'};
+    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand',ProScanners:'💎 Pro Scanners',WaveTrend:'🌊 WaveTrend'};
 
   let catsHtml='';
   for(const cat of catOrder){
@@ -8833,7 +9080,7 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'||tab==='pro'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'||tab==='pro'||tab==='wt'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -8913,6 +9160,7 @@ function exportCSV(){
     swing:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     zones:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     pro:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
+    wt:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
