@@ -1828,6 +1828,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             </div>
           </div>
 
+          <!-- ── Market Pulse: VIX · PCR · direction bias ───────────── -->
+          <div class="level-panel" id="pulsePanel">
+            <div class="level-panel-head">
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span class="skew-chart-title">🧭 Market Pulse<i class="hi" data-h="market-pulse">i</i></span>
+                <span class="level-source" id="pulseStamp"></span>
+              </div>
+            </div>
+            <div id="pulseBody" style="padding:6px 8px;">
+              <div class="movers-loading">Load the option chain to compute the pulse.</div>
+            </div>
+          </div>
+
           <!-- ── Pivot Levels ──────────────────────────────────────── -->
           <div class="level-panel" id="pivotPanel">
             <div class="level-panel-head">
@@ -2993,6 +3006,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div id="caRules" style="margin-top:4px;"></div>
         <div id="caFired" style="margin-top:4px;"></div>
       </div>
+
+      <div class="skew-chart-wrap" style="margin-top:10px;">
+        <div class="skew-chart-head"><span class="skew-chart-title">🗣 Fresh Flow Voice — call/put buying vs writing<i class="hi" data-h="fresh-flow">i</i></span></div>
+        <div class="dtpl-row" style="align-items:center;">
+          <label style="font-size:10px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="flowOn"> Announce fresh flow</label>
+          <label style="font-size:9px;color:var(--muted);">OI Δ ≥ % <input type="number" id="flowOiPct" class="ohlc-inp" style="width:58px;" step="1"></label>
+          <label style="font-size:9px;color:var(--muted);">premium Δ ≥ % <input type="number" id="flowPremPct" class="ohlc-inp" style="width:58px;" step="1"></label>
+          <label style="font-size:9px;color:var(--muted);">window sec <input type="number" id="flowWin" class="ohlc-inp" style="width:64px;" step="30"></label>
+          <label style="font-size:9px;color:var(--muted);">strikes within ±% <input type="number" id="flowNear" class="ohlc-inp" style="width:54px;" step="1"></label>
+          <label style="font-size:9px;color:var(--muted);">min OI Δ (contracts) <input type="number" id="flowMinLots" class="ohlc-inp" style="width:78px;" step="1000"></label>
+          <label style="font-size:9px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="flowUnwind"> also unwinding/covering</label>
+        </div>
+        <div class="oc-sub" style="font-size:9px;padding:0 4px 3px;">Requires the 🗣 voice toggle ON. OI↑ &amp; premium↑ = fresh BUYING · OI↑ &amp; premium↓ = fresh WRITING. Max 2 spoken per tick, 5-min cooldown per strike/side.</div>
+        <div id="flowLog" style="margin-top:4px;"></div>
+      </div>
 </section>
 
 
@@ -3586,11 +3614,28 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <section id="tab-flow" class="tab-panel">
 
       <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
+
+      <div class="level-panel" id="flowRangePanel" style="margin-bottom:12px;">
+        <div class="level-panel-head">
+          <span class="skew-chart-title">🎯 Projected price range<i class="hi" data-h="flow-range">i</i></span>
+          <span class="level-source" id="flowRangeStamp"></span>
+        </div>
+        <div id="flowRangeBody" style="padding:6px 8px;">
+          <div class="movers-loading">Load the option chain to project the range.</div>
+        </div>
+      </div>
+
       <div class="flow-table-wrap">
         <table>
-          <thead><tr><th>Strike</th><th>Side</th><th>ΔOI</th><th>Read</th></tr></thead>
+          <thead><tr>
+            <th class="flag-sort" data-sk="time" style="cursor:pointer;" title="Sort by first-detected time (default: newest first)">Time <span class="fs-ind"></span></th>
+            <th class="flag-sort" data-sk="strike" style="cursor:pointer;" title="Sort by strike">Strike <span class="fs-ind"></span></th>
+            <th class="flag-sort" data-sk="side" style="cursor:pointer;" title="Sort by CE/PE">Side <span class="fs-ind"></span></th>
+            <th class="flag-sort" data-sk="oi" style="cursor:pointer;" title="Sort by OI change (biggest absolute change first)">ΔOI <span class="fs-ind"></span></th>
+            <th class="flag-sort" data-sk="label" style="cursor:pointer;" title="Sort by read">Read <span class="fs-ind"></span></th>
+          </tr></thead>
           <tbody id="flagsBody">
-            <tr><td colspan="4" class="empty-state">No data yet.</td></tr>
+            <tr><td colspan="5" class="empty-state">No data yet.</td></tr>
           </tbody>
         </table>
       </div>
@@ -11434,6 +11479,340 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       '<div class="oc-sub" style="margin-top:4px;">Ingress = a planet crossing into the next sidereal sign — the lore\'s biggest claimed dates (their blog\'s "Rahu Transit 2026" pages are exactly this). Dates ±1 day (mean node, noon sampling, Lahiri ayanamsa). The Historical Astro Lab on the Validate tab tests what ingresses actually did to forward returns.</div>';
   }
 
+  // ══ FRESH FLOW VOICE ALERTS: fresh CE/PE buying vs writing ══
+  // Classification uses the option's OWN premium against its OI change —
+  // the standard read, and cleaner than using spot direction:
+  //   OI↑ + premium↑ = fresh BUYING (longs opening)
+  //   OI↑ + premium↓ = fresh SELLING/WRITING (shorts opening)
+  //   OI↓ + premium↓ = long unwinding      OI↓ + premium↑ = short covering
+  // Bias: fresh CE buying / PE writing = bullish; fresh PE buying / CE writing = bearish.
+  const _FLOW_KEY = 'freshFlowCfg';
+  function _flowCfg() {
+    try { return Object.assign({ on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false }, JSON.parse(localStorage.getItem(_FLOW_KEY) || '{}')); }
+    catch (_) { return { on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false }; }
+  }
+  function _flowSave(c) { try { localStorage.setItem(_FLOW_KEY, JSON.stringify(c)); } catch (_) {} }
+  function _flowSpeak(text) {
+    if (typeof _voiceQ !== 'undefined' && typeof _voicePump === 'function' && _voiceEnabled()) {
+      _voiceQ.push(text);
+      while (_voiceQ.length > 3) _voiceQ.shift();
+      _voicePump();
+    }
+  }
+  function _flowLog(entry) {
+    try {
+      const a = JSON.parse(localStorage.getItem('freshFlowLog') || '[]');
+      a.push(entry); localStorage.setItem('freshFlowLog', JSON.stringify(a.slice(-60)));
+    } catch (_) {}
+  }
+  function _freshFlowCheck(data) {
+    const cfg = _flowCfg();
+    if (!cfg.on || !data?.strikes?.length || !data.underlying_value) return;
+    const spot = data.underlying_value, now = Date.now();
+    const prev = state._flowPrev;
+    const snap = { ts: now, m: {} };
+    for (const s of data.strikes) snap.m[s.strike] = { co: s.ce_oi || 0, po: s.pe_oi || 0, cl: s.ce_ltp || 0, pl: s.pe_ltp || 0 };
+    if (!prev) { state._flowPrev = snap; return; }
+    const dtSec = (now - prev.ts) / 1000;
+    if (dtSec < cfg.winSec) return;                 // enforce the comparison window
+    state._flowPrev = snap;
+    state._flowFired = state._flowFired || {};
+    const events = [];
+    for (const s of data.strikes) {
+      const k = s.strike;
+      if (Math.abs(k - spot) / spot * 100 > cfg.near) continue;   // near-the-money only
+      const p = prev.m[k];
+      if (!p) continue;
+      for (const side of ['CE', 'PE']) {
+        const oiNow = side === 'CE' ? (s.ce_oi || 0) : (s.pe_oi || 0);
+        const oiOld = side === 'CE' ? p.co : p.po;
+        const lNow  = side === 'CE' ? (s.ce_ltp || 0) : (s.pe_ltp || 0);
+        const lOld  = side === 'CE' ? p.cl : p.pl;
+        if (!oiOld || !lOld || !lNow) continue;
+        const oiPct = (oiNow - oiOld) / oiOld * 100;
+        const prPct = (lNow - lOld) / lOld * 100;
+        if (Math.abs(oiPct) < cfg.oiPct) continue;
+        if (Math.abs(oiNow - oiOld) < cfg.minLots) continue;
+        if (Math.abs(prPct) < cfg.premPct) continue;
+        const oiUp = oiPct > 0, prUp = prPct > 0;
+        let kind, bias;
+        if (oiUp && prUp)       { kind = 'fresh ' + (side === 'CE' ? 'call buying'  : 'put buying');  bias = side === 'CE' ? 'bullish' : 'bearish'; }
+        else if (oiUp && !prUp) { kind = 'fresh ' + (side === 'CE' ? 'call writing' : 'put writing'); bias = side === 'CE' ? 'bearish' : 'bullish'; }
+        else if (!oiUp && !prUp){ kind = (side === 'CE' ? 'call' : 'put') + ' long unwinding'; bias = side === 'CE' ? 'bearish' : 'bullish'; }
+        else                    { kind = (side === 'CE' ? 'call' : 'put') + ' short covering'; bias = side === 'CE' ? 'bullish' : 'bearish'; }
+        const isFresh = oiUp;
+        if (!isFresh && !cfg.speakUnwind) continue;
+        const fk = k + side;
+        if (state._flowFired[fk] && now - state._flowFired[fk] < 5 * 60 * 1000) continue;   // 5-min per strike/side
+        state._flowFired[fk] = now;
+        events.push({ k, side, kind, bias, oiPct, prPct, oiAbs: oiNow - oiOld, isFresh });
+      }
+    }
+    if (!events.length) return;
+    // loudest first (biggest OI move), speak at most 2 per tick
+    events.sort((a, b) => Math.abs(b.oiPct) - Math.abs(a.oiPct));
+    for (const e of events.slice(0, 2)) {
+      const txt = `${e.kind} at ${Math.round(e.k)}, open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
+      _flowSpeak(txt);
+      if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias}`);
+      _flowLog({ ts: Date.now(), k: e.k, side: e.side, kind: e.kind, bias: e.bias, oiPct: +e.oiPct.toFixed(1), prPct: +e.prPct.toFixed(1) });
+    }
+    _flowRenderLog();
+  }
+  function _flowRenderLog() {
+    const box = document.getElementById('flowLog');
+    if (!box) return;
+    let a = [];
+    try { a = JSON.parse(localStorage.getItem('freshFlowLog') || '[]'); } catch (_) {}
+    if (!a.length) { box.innerHTML = '<span class="oc-sub">Nothing detected yet. Detections need the chain auto-refreshing and two snapshots at least one window apart.</span>'; return; }
+    box.innerHTML = a.slice(-8).reverse().map(f =>
+      `<div style="display:flex;gap:8px;align-items:baseline;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:9.5px;">
+        <span style="color:var(--muted);min-width:52px;">${new Date(f.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+        <b style="min-width:52px;">${fmtInt(f.k)}</b>
+        <span style="min-width:132px;">${escapeHtml(f.kind)}</span>
+        <span style="color:var(--muted);">OI ${f.oiPct > 0 ? '+' : ''}${f.oiPct}% · prem ${f.prPct > 0 ? '+' : ''}${f.prPct}%</span>
+        <span style="margin-left:auto;font-weight:700;color:${f.bias === 'bullish' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${f.bias}</span>
+      </div>`).join('');
+  }
+  function _flowWire() {
+    const cfg = _flowCfg();
+    const ids = { flowOn: 'on', flowOiPct: 'oiPct', flowPremPct: 'premPct', flowWin: 'winSec', flowNear: 'near', flowMinLots: 'minLots', flowUnwind: 'speakUnwind' };
+    for (const [id, key] of Object.entries(ids)) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (el.type === 'checkbox') el.checked = !!cfg[key]; else el.value = cfg[key];
+      el.addEventListener('change', () => {
+        const c = _flowCfg();
+        c[key] = el.type === 'checkbox' ? el.checked : (parseFloat(el.value) || 0);
+        _flowSave(c);
+        if (key === 'on' && c.on) {
+          state._flowPrev = null;   // restart baseline on enable
+          if (typeof showToast === 'function') showToast('Fresh-flow voice armed — first detection after one full window');
+        }
+      });
+    }
+    _flowRenderLog();
+  }
+  _flowWire();
+
+  // ══ Market Pulse: VIX · PCR · composite direction score ══
+  // The "AI" here is an explainable weighted ensemble of the measured
+  // signals this dashboard already computes — every contributor and its
+  // weight is shown, so a reading can always be argued with. No black box,
+  // no training data, no claim of prediction beyond the inputs' own worth.
+  function _pulseVixRead(v) {
+    if (v == null) return null;
+    if (v < 11) return ['Very low', 'complacency — cheap hedges, thin premiums; regimes like this end abruptly', 'var(--muted,#789)'];
+    if (v < 14) return ['Low', 'calm trend regime — premium selling favoured, breakouts travel', 'var(--pos,#26a69a)'];
+    if (v < 18) return ['Normal', 'balanced — no volatility edge either way', '#9aa'];
+    if (v < 24) return ['Elevated', 'nervous market — wider ranges, gap risk, size down', 'var(--gold,#d4af37)'];
+    return ['High', 'stress regime — premiums rich but tails fat; defined-risk only', 'var(--neg,#ef5350)'];
+  }
+  function _pulsePcrRead(p) {
+    if (p == null) return null;
+    if (p < 0.7) return ['Bearish tilt', 'call writers dominant — resistance heavy; at extremes a contrarian bounce setup', 'var(--neg,#ef5350)'];
+    if (p < 0.9) return ['Mildly bearish', 'more call than put writing', '#c9a'];
+    if (p <= 1.2) return ['Balanced', 'two-sided writing — rangebound lean', '#9aa'];
+    if (p <= 1.5) return ['Mildly bullish', 'put writers building support', '#9c9'];
+    return ['Bullish tilt', 'heavy put writing — support strong; at extremes a contrarian top warning', 'var(--pos,#26a69a)'];
+  }
+  function _pulseDirection(d) {
+    // Each contributor returns a score in [-1, +1] (+ = bullish) with a weight.
+    const c = [], spot = d.underlying_value;
+    const add = (name, w, score, why) => { if (score !== null && isFinite(score)) c.push({ name, w, score: Math.max(-1, Math.min(1, score)), why }); };
+    // 1. PCR positioning (mid-range mapped linearly; extremes damped as contrarian)
+    if (d.pcr != null) {
+      const p = d.pcr;
+      let s = (p - 1) / 0.5;                       // 0.5→-1, 1.0→0, 1.5→+1
+      let why = `PCR ${p.toFixed(2)}`;
+      if (p > 1.8 || p < 0.55) { s = -Math.sign(s) * 0.35; why += ' (extreme → damped as contrarian)'; }
+      add('OI positioning (PCR)', 2, s, why);
+    }
+    // 2. Max-pain magnet, weighted by how little time is left
+    if (d.max_pain && spot && d.dte != null) {
+      const gapPct = (d.max_pain - spot) / spot * 100;
+      const urgency = d.dte <= 0 ? 1 : d.dte <= 1 ? 0.8 : d.dte <= 3 ? 0.5 : 0.25;
+      add('Max-pain pull', 2, Math.max(-1, Math.min(1, gapPct / 1.2)) * urgency,
+        `max pain ${fmtInt(d.max_pain)} is ${gapPct >= 0 ? 'above' : 'below'} spot (${gapPct.toFixed(2)}%), ${d.dte}d left`);
+    }
+    // 3. GEX flip: above flip = dealers dampen moves (mild trend support), below = amplify
+    try {
+      const g = _computeGex(d);
+      if (g?.flip && spot) {
+        const rel = (spot - g.flip) / spot * 100;
+        add('Gamma regime (GEX flip)', 2, Math.max(-1, Math.min(1, rel / 0.8)),
+          `spot ${rel >= 0 ? 'above' : 'below'} flip ${fmtInt(Math.round(g.flip))} (${rel.toFixed(2)}%) — ${rel >= 0 ? 'dealer hedging dampens dips' : 'dealer hedging amplifies moves'}`);
+      }
+    } catch (_) {}
+    // 4. Δ-neutral level (same idea, delta-weighted)
+    try {
+      const dn = _computeDeltaNeutral(d);
+      if (dn && spot) {
+        const rel = (spot - dn) / spot * 100;
+        add('Δ-neutral position', 1, Math.max(-1, Math.min(1, rel / 0.8)), `spot ${rel >= 0 ? 'above' : 'below'} Δ-neutral ${fmtInt(Math.round(dn))}`);
+      }
+    } catch (_) {}
+    // 5. OI buildup flags (the server's own classification)
+    if (Array.isArray(d.flags) && d.flags.length) {
+      let s = 0, n = 0;
+      for (const f of d.flags.slice(0, 6)) {
+        const bull = (f.side === 'PE' && f.oi_chg > 0) || (f.side === 'CE' && f.oi_chg < 0);
+        s += bull ? 1 : -1; n++;
+      }
+      if (n) add('Fresh OI buildup', 2, s / n, `${n} flagged strikes, net ${s >= 0 ? 'bullish' : 'bearish'} writing`);
+    }
+    // 6. CPR position (crowd level, real intraday frame)
+    if (state._cpr && spot) {
+      const { TC, BC } = state._cpr;
+      const s = spot > TC ? 0.7 : spot < BC ? -0.7 : 0;
+      add('CPR position', 1, s, spot > TC ? 'above CPR (bullish frame)' : spot < BC ? 'below CPR (bearish frame)' : 'inside CPR (undecided)');
+    }
+    // 7. Spot vs prev close
+    if (d.prev_close && spot) {
+      const chg = (spot - d.prev_close) / d.prev_close * 100;
+      add('Day change', 1, Math.max(-1, Math.min(1, chg / 0.8)), `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% on the day`);
+    }
+    // 8. VIX direction (rising vol usually accompanies weakness)
+    if (d.india_vix != null && state._pulsePrevVix != null && Math.abs(d.india_vix - state._pulsePrevVix) > 0.05) {
+      const dv = d.india_vix - state._pulsePrevVix;
+      add('VIX trend', 1, Math.max(-1, Math.min(1, -dv / 0.8)), `VIX ${dv >= 0 ? 'rising' : 'falling'} (${dv >= 0 ? '+' : ''}${dv.toFixed(2)})`);
+    }
+    // 9. Put-call-parity synthetic spot vs actual — futures/spot pressure leak
+    try {
+      const il = computeImaginaryLine(d);
+      if (il && isFinite(il.gapPct)) add('Synthetic spot (parity)', 2, Math.max(-1, Math.min(1, il.gapPct / 0.3)),
+        `option-implied spot ${il.gap > 0 ? 'above' : 'below'} cash by ${Math.abs(il.gapPct).toFixed(2)}% — ${il.gap > 0 ? 'call-side pressure' : 'put-side pressure'}`);
+    } catch (_) {}
+    // 10. IV skew: compare equidistant OTM put vs call IV (put IV >> call IV = fear bid)
+    try {
+      const st = (d.strikes || []).filter(s => s.strike && s.ce_iv && s.pe_iv);
+      if (st.length > 6 && spot) {
+        const off = spot * 0.02;
+        const near = (target, pick) => {
+          let best = null, bd = 1e9;
+          for (const s of st) { const dd = Math.abs(s.strike - target); if (dd < bd) { bd = dd; best = s; } }
+          return best ? pick(best) : null;
+        };
+        const otmCallIv = near(spot + off, s => s.ce_iv), otmPutIv = near(spot - off, s => s.pe_iv);
+        if (otmCallIv && otmPutIv) {
+          const sk = otmPutIv - otmCallIv;   // positive = puts bid = fear
+          add('IV skew (2% wings)', 2, Math.max(-1, Math.min(1, -sk / 3)),
+            `${Math.abs(sk).toFixed(1)} IV pts ${sk > 0 ? 'put-side premium (downside protection bid = caution)' : 'call-side premium (upside chase)'}`);
+        }
+      }
+    } catch (_) {}
+    // 11. IV rank regime — high IV rank favours mean reversion, not direction:
+    //     used only as a CONFIDENCE damper, so it enters with score 0 weight 0
+    //     (kept visible in the table for context).
+    if (d.iv_rank != null) c.push({ name: 'IV rank (context)', w: 0, score: 0,
+      why: `${d.iv_rank}${d.iv_rank >= 70 ? ' — rich premium, mean-reversion regime; fade extremes' : d.iv_rank <= 25 ? ' — cheap premium, trends can extend' : ' — mid regime'} (context only, no directional vote)` });
+    // 12. ATM IV vs India VIX — term/venue disagreement
+    if (d.atm_iv && (d.india_vix != null)) {
+      const gap = d.atm_iv - d.india_vix;
+      if (Math.abs(gap) > 0.8) add('ATM IV vs VIX', 1, Math.max(-1, Math.min(1, -gap / 3)),
+        `weekly ATM IV ${gap > 0 ? 'above' : 'below'} VIX by ${Math.abs(gap).toFixed(1)} pts — ${gap > 0 ? 'near-term event premium (caution)' : 'near-term calm vs 30d'}`);
+    }
+    if (d.india_vix != null) state._pulsePrevVix = d.india_vix;
+    if (!c.length) return null;
+    const wsum = c.reduce((s, x) => s + x.w, 0);
+    const raw = c.reduce((s, x) => s + x.w * x.score, 0) / wsum;    // -1..+1
+    // agreement: how aligned are the signed contributors?
+    const signed = c.filter(x => Math.abs(x.score) > 0.08);
+    const agree = signed.length ? Math.abs(signed.reduce((s, x) => s + Math.sign(x.score), 0)) / signed.length : 0;
+    return { score: raw, pct: Math.round(raw * 100), agree, contributors: c.sort((a, b) => Math.abs(b.w * b.score) - Math.abs(a.w * a.score)) };
+  }
+  // ── Expected high/low with probabilities, straight from option IV ──
+  // Lognormal σ from the market's own ATM IV over the remaining horizon.
+  // These are the option market's implied odds, not a forecast of mine.
+  function _pulseCone(d) {
+    const spot = d.underlying_value, iv = (d.atm_iv || d.india_vix || 0) / 100;
+    if (!spot || !iv) return null;
+    // horizon: rest of TODAY if intraday, else the DTE of the near expiry
+    const now = new Date();
+    const mins = now.getHours() * 60 + now.getMinutes();
+    const openM = 555, closeM = 930;
+    const intraday = mins > openM && mins < closeM;
+    const fracDay = intraday ? (closeM - mins) / (closeM - openM) : 1;
+    const dte = Math.max(0, d.dte ?? 1);
+    const horizonDays = intraday ? Math.max(0.02, fracDay) : Math.max(0.5, dte);
+    const T = horizonDays / 365;
+    const sigma = spot * iv * Math.sqrt(T);
+    const cnd = x => { const t = 1 / (1 + 0.2316419 * Math.abs(x));
+      const p = 1 - (Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI)) * (0.319381530 * t - 0.356563782 * t * t + 1.781477937 * t ** 3 - 1.821255978 * t ** 4 + 1.330274429 * t ** 5);
+      return x >= 0 ? p : 1 - p; };
+    const band = z => ({ z, up: spot + z * sigma, dn: spot - z * sigma, inside: Math.round((2 * cnd(z) - 1) * 100) });
+    return { spot, sigma, horizonDays, intraday, iv: iv * 100,
+      bands: [band(1), band(1.65), band(2)],
+      // probability of TOUCHING a level ≈ 2 × probability of closing beyond (reflection principle)
+      touch: lvl => Math.min(99, Math.round(2 * (1 - cnd(Math.abs(lvl - spot) / sigma)) * 100)) };
+  }
+  function _pulseConeHtml(d) {
+    const cone = _pulseCone(d);
+    if (!cone) return '';
+    const rows = cone.bands.map(b => `
+      <div style="display:flex;gap:8px;align-items:baseline;padding:2px 3px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:10px;">
+        <b style="min-width:34px;">${b.z === 1.65 ? '90%' : b.inside + '%'}</b>
+        <span style="color:var(--neg,#ef5350);min-width:70px;">${fmtInt(Math.round(b.dn))}</span>
+        <span style="color:var(--muted);">to</span>
+        <span style="color:var(--pos,#26a69a);min-width:70px;">${fmtInt(Math.round(b.up))}</span>
+        <span style="color:#9ab;font-size:9px;">±${Math.round(b.z * cone.sigma)} pts (${b.z}σ)</span>
+      </div>`).join('');
+    const mp = d.max_pain ? `<div style="font-size:9px;color:#9ab;padding:2px 3px;">Chance of TOUCHING max pain ${fmtInt(d.max_pain)} in this horizon: <b>${cone.touch(d.max_pain)}%</b></div>` : '';
+    return `<details open style="margin-top:6px;"><summary style="font-size:9.5px;color:var(--muted);cursor:pointer;">Likely high / low — option-implied probability${cone.intraday ? ' (rest of today)' : ` (${cone.horizonDays.toFixed(1)}d to expiry)`}</summary>
+      <div style="margin-top:3px;">${rows}${mp}
+      <div style="font-size:8.5px;color:var(--muted);padding:3px;">From the market's own ATM IV (${cone.iv.toFixed(1)}%) over ${cone.intraday ? 'the remaining ' + (cone.horizonDays * 6.25).toFixed(1) + ' trading hours' : cone.horizonDays.toFixed(1) + ' days'}: 1σ = ${Math.round(cone.sigma)} pts. Read as "the option market prices an X% chance of closing inside this band" — these are IMPLIED ODDS, not a forecast, and they assume lognormal moves with no gap or event risk (reality has fatter tails, so treat the outer band as optimistic). Touch probability uses the reflection principle ≈ 2× the close-beyond probability.</div></div></details>`;
+  }
+
+  function renderMarketPulse(data) {
+    const box = document.getElementById('pulseBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    if (!d?.underlying_value) { box.innerHTML = '<div class="movers-loading">Load the option chain to compute the pulse.</div>'; return; }
+    const vix = d.india_vix ?? d.vix ?? null, pcr = d.pcr ?? null;
+    const vr = _pulseVixRead(vix), pr = _pulsePcrRead(pcr);
+    const dir = _pulseDirection(d);
+    const tile = (label, val, sub, col, hint) =>
+      `<div style="flex:1 1 130px;min-width:130px;padding:6px 8px;border:1px solid rgba(255,255,255,0.08);border-radius:7px;background:rgba(255,255,255,0.02);" title="${escapeHtml(hint || '')}">
+        <div style="font-size:8.5px;letter-spacing:0.5px;color:var(--muted,#789);font-weight:700;">${label}</div>
+        <div style="font-size:17px;font-weight:800;color:${col};line-height:1.25;">${val}</div>
+        <div style="font-size:9px;color:#9ab;">${sub}</div>
+      </div>`;
+    let html = '<div style="display:flex;gap:7px;flex-wrap:wrap;">';
+    html += tile('INDIA VIX', vix != null ? vix.toFixed(2) : '—', vr ? `${vr[0]} — ${vr[1]}` : 'unavailable', vr ? vr[2] : '#9aa',
+      'India VIX = the market\'s own 30-day implied volatility. Regime context, not direction.');
+    html += tile('PCR (OI)', pcr != null ? pcr.toFixed(2) : '—', pr ? `${pr[0]} — ${pr[1]}` : 'unavailable', pr ? pr[2] : '#9aa',
+      'Put/Call OI ratio: >1 = more put writing (support), <1 = more call writing (resistance). Extremes flip contrarian.');
+    if (dir) {
+      const s = dir.pct;
+      const lab = s > 35 ? 'BULLISH' : s > 12 ? 'MILDLY BULLISH' : s < -35 ? 'BEARISH' : s < -12 ? 'MILDLY BEARISH' : 'NEUTRAL';
+      const col = s > 12 ? 'var(--pos,#26a69a)' : s < -12 ? 'var(--neg,#ef5350)' : '#9aa';
+      const conf = dir.agree > 0.75 && Math.abs(s) > 25 ? 'high agreement' : dir.agree > 0.5 ? 'moderate agreement' : 'signals conflict';
+      html += tile('DIRECTION BIAS', `${s >= 0 ? '+' : ''}${s}`, `${lab} · ${conf} (${dir.contributors.length} inputs)`, col,
+        'Weighted ensemble of the measured signals below. Range -100..+100.');
+      html += '</div>';
+      // gauge
+      const pos = (s + 100) / 2;
+      html += `<div style="margin-top:7px;height:8px;border-radius:5px;background:linear-gradient(90deg,var(--neg,#ef5350),#4a5568 45%,#4a5568 55%,var(--pos,#26a69a));position:relative;">
+          <div style="position:absolute;left:${pos.toFixed(1)}%;top:-3px;width:3px;height:14px;background:#fff;border-radius:2px;box-shadow:0 0 5px rgba(0,0,0,0.6);"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-top:2px;"><span>−100 bearish</span><span>0</span><span>+100 bullish</span></div>`;
+      // contributors
+      html += '<details open style="margin-top:6px;"><summary style="font-size:9.5px;color:var(--muted);cursor:pointer;">Why this reading — all ' + dir.contributors.length + ' inputs and weights</summary><div style="margin-top:3px;">' +
+        dir.contributors.map(x => {
+          const c2 = x.score > 0.08 ? 'var(--pos,#26a69a)' : x.score < -0.08 ? 'var(--neg,#ef5350)' : '#9aa';
+          return `<div style="display:flex;gap:8px;align-items:baseline;padding:2px 3px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:9.5px;">
+            <b style="min-width:132px;">${x.name}</b>
+            <span style="color:${c2};font-weight:700;min-width:42px;">${x.score >= 0 ? '+' : ''}${(x.score * 100).toFixed(0)}</span>
+            <span style="color:var(--muted);min-width:26px;">×${x.w}</span>
+            <span style="color:#9ab;flex:1;">${x.why}</span></div>`;
+        }).join('') +
+        '<div style="font-size:8.5px;color:var(--muted);padding:3px;">Weighted mean of the scores, normalised to −100..+100. "Agreement" = how many signed inputs point the same way — a big number with low agreement is a coin flip wearing a suit.</div></div></details>';
+    } else { html += '</div>'; }
+    html += _pulseConeHtml(d);
+    html += `<div class="oc-sub" style="margin-top:5px;">This is an explainable ensemble of THIS dashboard's measured option-market signals — no machine learning, no historical training, no forecast. It compresses positioning into one number so you can spot when the inputs agree; when they conflict, the honest answer is "no read". Never a trade trigger on its own: confirm on price. ${vix != null ? '' : 'India VIX unavailable from the server right now. '}Scoring is transparent — open the panel above and argue with it.</div>`;
+    box.innerHTML = html;
+  }
+
   // ── OI migration loader (Today card): which strikes are absorbing fresh
   //    writing vs unwinding, from today's 1/min replay snapshots ──
   async function _todayOiMigration() {
@@ -13259,6 +13638,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (ec) ec.style.display = ((data?.dte ?? 99) <= 0) ? 'inline-block' : 'none';
     } catch (_) {}
     try { _alertsCheck(data); } catch (_) {}
+    try { _freshFlowCheck(data); } catch (_) {}
+    try { renderFlowRange(data); } catch (_) {}
+    try {
+      renderMarketPulse(data);
+      const ps = document.getElementById('pulseStamp');
+      if (ps) ps.textContent = '· as of ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    } catch (_) {}
     // ─── Save scroll position BEFORE any DOM mutations ───────────────────
     // This is the primary guard against refresh-caused scroll jumps.
     // We save both window scroll (for the page-level scroll) and each
@@ -14920,19 +15306,152 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }).join('');
   }
 
+  // ══ Projected price range (OI Flow tab) ══
+  // Two independent views, shown side by side because they answer different
+  // questions: the IV cone gives the market's PROBABILITY distribution, the
+  // OI walls give where WRITERS have committed capital to defend. When they
+  // agree, that's the strongest range read this dashboard can produce.
+  function _flowWalls(d) {
+    const spot = d.underlying_value, st = d.strikes || [];
+    if (!spot || !st.length) return null;
+    let callWall = null, putWall = null, cMax = 0, pMax = 0;
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) / spot > 0.06) continue;
+      if (s.strike >= spot && (s.ce_oi || 0) > cMax) { cMax = s.ce_oi; callWall = s.strike; }
+      if (s.strike <= spot && (s.pe_oi || 0) > pMax) { pMax = s.pe_oi; putWall = s.strike; }
+    }
+    // second line of defence: next-biggest wall beyond the first
+    let callWall2 = null, putWall2 = null, c2 = 0, p2 = 0;
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) / spot > 0.06) continue;
+      if (callWall && s.strike > callWall && (s.ce_oi || 0) > c2) { c2 = s.ce_oi; callWall2 = s.strike; }
+      if (putWall && s.strike < putWall && (s.pe_oi || 0) > p2) { p2 = s.pe_oi; putWall2 = s.strike; }
+    }
+    return { callWall, putWall, cMax, pMax, callWall2, putWall2 };
+  }
+  function renderFlowRange(data) {
+    const box = document.getElementById('flowRangeBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    if (!d?.underlying_value) { box.innerHTML = '<div class="movers-loading">Load the option chain to project the range.</div>'; return; }
+    const spot = d.underlying_value;
+    const cone = (typeof _pulseCone === 'function') ? _pulseCone(d) : null;
+    const w = _flowWalls(d);
+    const fmtK = v => (Math.abs(v) >= 100000 ? (v / 100000).toFixed(1) + 'L' : Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : String(v));
+    const tile = (label, lo, hi, sub, col) =>
+      `<div style="flex:1 1 210px;min-width:210px;padding:6px 9px;border:1px solid rgba(255,255,255,0.08);border-radius:7px;background:rgba(255,255,255,0.02);">
+        <div style="font-size:8.5px;letter-spacing:0.5px;color:var(--muted,#789);font-weight:700;">${label}</div>
+        <div style="font-size:15px;font-weight:800;line-height:1.3;">
+          <span style="color:var(--neg,#ef5350);">${fmtInt(Math.round(lo))}</span>
+          <span style="color:var(--muted);font-size:11px;"> — </span>
+          <span style="color:var(--pos,#26a69a);">${fmtInt(Math.round(hi))}</span>
+        </div>
+        <div style="font-size:9px;color:#9ab;">${sub}</div>
+      </div>`;
+    let html = '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+    if (cone) {
+      const b68 = cone.bands[0], b90 = cone.bands[1];
+      html += tile('IV-IMPLIED · 68% (1σ)', b68.dn, b68.up,
+        `±${Math.round(cone.sigma)} pts from ${fmtInt(Math.round(spot))} · ${cone.intraday ? 'rest of today' : cone.horizonDays.toFixed(1) + 'd to expiry'} @ ${cone.iv.toFixed(1)}% IV`);
+      html += tile('IV-IMPLIED · 90%', b90.dn, b90.up, `the wider band the option market prices as likely`);
+    }
+    if (w?.callWall && w?.putWall) {
+      html += tile('OI WALLS (writers defending)', w.putWall, w.callWall,
+        `put wall ${fmtK(w.pMax)} @ ${fmtInt(w.putWall)} · call wall ${fmtK(w.cMax)} @ ${fmtInt(w.callWall)}`);
+    }
+    html += '</div>';
+    // consensus read: where the two views overlap
+    if (cone && w?.callWall && w?.putWall) {
+      const b68 = cone.bands[0];
+      const lo = Math.max(b68.dn, w.putWall), hi = Math.min(b68.up, w.callWall);
+      const agree = hi > lo;
+      const wallInside = w.callWall < b68.up && w.putWall > b68.dn;
+      html += `<div style="margin-top:7px;padding:6px 8px;border-radius:6px;background:rgba(212,175,55,0.08);border:1px solid rgba(212,175,55,0.25);">
+        <div style="font-size:10px;font-weight:700;color:var(--gold,#d4af37);">CONSENSUS: ${agree ? fmtInt(Math.round(lo)) + ' — ' + fmtInt(Math.round(hi)) : 'views disagree'}</div>
+        <div style="font-size:9.5px;color:#9ab;margin-top:2px;">${agree
+          ? (wallInside
+              ? `Writers are defending INSIDE the statistical band — they expect a tighter day than IV prices. Rangebound lean; the walls are the levels that matter${d.max_pain ? `, with max pain at ${fmtInt(d.max_pain)} pulling toward the middle` : ''}.`
+              : `The walls sit at or outside the 1σ band — writers are giving room. Breakouts have space to run before hitting committed defence.`)
+          : `The 1σ band and the walls do not overlap — positioning and pricing disagree, which usually resolves violently. Treat neither edge as reliable support/resistance today.`}</div>
+        ${w.callWall2 || w.putWall2 ? `<div style="font-size:9px;color:var(--muted);margin-top:3px;">Second line of defence: ${w.putWall2 ? 'put ' + fmtInt(w.putWall2) : '—'} below · ${w.callWall2 ? 'call ' + fmtInt(w.callWall2) : '—'} above (where price goes if the first wall breaks)</div>` : ''}
+      </div>`;
+    }
+    html += `<div class="oc-sub" style="margin-top:5px;">Two independent views. <b>IV-implied</b> = the option market's own probability distribution from ATM IV (lognormal, no gap/event risk — real tails are fatter, so the band is optimistic). <b>OI walls</b> = the strikes where writers have the most capital committed within ±6% of spot; these act as support/resistance because defending them is profitable, not because of any prediction. Neither is a forecast; when they agree the range is worth trading around, when they conflict the honest answer is to stand back.</div>`;
+    box.innerHTML = html;
+    const st2 = document.getElementById('flowRangeStamp');
+    if (st2) st2.textContent = '· as of ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+
+  // ── OI Flow first-seen persistence (survives page reloads, resets daily) ──
+  const _FLAGSEEN_KEY = 'oiFlowFirstSeen';
+  function _flagSeenLoad() {
+    const dayKey = new Date().toDateString();
+    try {
+      const o = JSON.parse(localStorage.getItem(_FLAGSEEN_KEY) || '{}');
+      if (o.day === dayKey && o.m && typeof o.m === 'object') return o.m;
+    } catch (_) {}
+    return {};
+  }
+  function _flagSeenSave(m) {
+    try { localStorage.setItem(_FLAGSEEN_KEY, JSON.stringify({ day: new Date().toDateString(), m })); } catch (_) {}
+  }
+  // sort state: default = biggest absolute OI change first (what matters most)
+  const _flagSort = { key: 'time', dir: 'desc' };   // default: newest detections first
   function renderFlags(data) {
     if (!data.flags.length) {
-      els.flagsBody.innerHTML = '<tr><td colspan="4" class="empty-state">No strikes crossed the build-up threshold today.</td></tr>';
+      els.flagsBody.innerHTML = '<tr><td colspan="5" class="empty-state">No strikes crossed the build-up threshold today.</td></tr>';
       return;
     }
-    els.flagsBody.innerHTML = data.flags.map(f => `
+    // Time column = when this strike/side buildup was FIRST seen today. Stored
+    // in localStorage keyed to today's date, so a page reload keeps the real
+    // chronology instead of re-stamping every row with the current refresh.
+    const chainTs = (() => { const t = new Date(data.timestamp); return isNaN(t) ? new Date() : t; })();
+    const seenMap = _flagSeenLoad();
+    let dirty = false;
+    for (const f of data.flags) {
+      const key = `${f.strike}|${f.side}`;
+      if (!seenMap[key]) { seenMap[key] = chainTs.getTime(); dirty = true; }
+    }
+    if (dirty) _flagSeenSave(seenMap);
+    const fmt12 = d => d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    // apply sort
+    const rows = data.flags.map(f => ({ f, ts: seenMap[`${f.strike}|${f.side}`] || chainTs.getTime() }));
+    const sgn = _flagSort.dir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      switch (_flagSort.key) {
+        case 'time':   return sgn * (a.ts - b.ts);
+        case 'strike': return sgn * (a.f.strike - b.f.strike);
+        case 'side':   return sgn * String(a.f.side).localeCompare(String(b.f.side)) || (a.f.strike - b.f.strike);
+        case 'label':  return sgn * String(a.f.label).localeCompare(String(b.f.label));
+        case 'oi':
+        default:       return sgn * (Math.abs(a.f.oi_chg) - Math.abs(b.f.oi_chg));
+      }
+    });
+    els.flagsBody.innerHTML = rows.map(({ f, ts }) => {
+      const seen = new Date(ts);
+      const isNew = Date.now() - ts < 5 * 60 * 1000;
+      return `
       <tr>
+        <td style="white-space:nowrap;" title="First detected at this time today — persists across page reloads (chain timestamp ${escapeHtml(String(data.timestamp || '—'))})">${fmt12(seen)}${isNew ? ' <span style="color:var(--gold,#d4af37);font-size:8px;font-weight:700;">NEW</span>' : ''}</td>
         <td>${fmtInt(f.strike)}</td>
         <td><span class="side-tag ${f.side}">${f.side}</span></td>
         <td class="${f.oi_chg > 0 ? 'pos-txt' : 'neg-txt'}">${fmtSigned(f.oi_chg)}</td>
         <td>${escapeHtml(f.label)}</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
+    // header indicators
+    document.querySelectorAll('.flag-sort').forEach(th => {
+      const ind = th.querySelector('.fs-ind');
+      if (ind) ind.textContent = th.dataset.sk === _flagSort.key ? (_flagSort.dir === 'asc' ? '▲' : '▼') : '';
+    });
   }
+  // header click → toggle direction / switch column, then re-render
+  document.querySelectorAll('.flag-sort').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.sk;
+    if (_flagSort.key === k) _flagSort.dir = _flagSort.dir === 'asc' ? 'desc' : 'asc';
+    else { _flagSort.key = k; _flagSort.dir = (k === 'strike' || k === 'side' || k === 'label') ? 'asc' : 'desc'; }
+    if (state.lastData?.flags) renderFlags(state.lastData);
+  }));
 
   // ====================================================================
   // STRATEGY BUILDER — client-side Black-Scholes engine + interactive UI.
@@ -20327,6 +20846,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'voice-alert':    '<strong>Voice Alerts</strong>Speaks the level name and price aloud using your browser\'s Web Speech API. Works best in Chrome. If voice is silent, check that your system has TTS voices installed and that the browser has audio permission.',
     'alert-sound':    '<strong>Alert Sound</strong><b>Tone</b> — single sine wave, sharp attack.<br><b>Chime</b> — three sine oscillators at bell-like partial ratios (sounds like a chime).<br><b>Ping</b> — triangle wave with downward pitch sweep.<br>Higher pitch = resistance touched. Lower pitch = support touched.',
     'alert-volume':   '<strong>Volume / Duration</strong>Volume slider controls amplitude of the generated sound. Duration input (seconds) controls how long the note sustains before fading out.',
+    'flow-range':        '<strong>Projected price range</strong>Two independent answers to "where can price go today". <b>IV-implied bands</b> come from the option market\'s own ATM IV over the remaining horizon (rest of today intraday, else days to expiry): the 68%% and 90%% bands are where the market prices price closing, assuming lognormal moves with no gap or event risk — real tails are fatter, so treat them as optimistic. <b>OI walls</b> are the strikes with the heaviest call OI above and put OI below within ±6%% of spot: they act as support and resistance because writers who sold them profit from defending them, which is a capital-commitment argument, not a prediction. The CONSENSUS line shows the overlap and interprets it: walls INSIDE the statistical band mean writers expect a tighter day than IV prices (rangebound lean); walls outside mean breakouts have room; no overlap means positioning and pricing disagree, which usually resolves violently. The second line of defence shows where price travels if the first wall breaks.',
+    'market-pulse':      '<strong>Market Pulse</strong>Three regime reads in one place. <b>India VIX</b> — the market\'s own 30-day implied volatility, with regime bands (below 11 complacency, 11-14 calm trend, 14-18 balanced, 18-24 nervous, above 24 stress); it sizes your risk, it does not point direction. <b>PCR (OI)</b> — put/call open-interest ratio: above 1 means put writers are building support, below 1 means call writers are capping; at extremes (roughly above 1.8 or below 0.55) the read flips contrarian, which is why the score damps it there. <b>Direction Bias</b> — a −100..+100 weighted ensemble of the measured option-market signals this dashboard already computes: PCR positioning, max-pain pull (weighted by time left), GEX gamma regime, Δ-neutral position, fresh OI buildup flags, CPR position, day change, and VIX trend. Expand "Why this reading" to see every input, its score and its weight. It is an explainable ensemble, NOT machine learning and NOT a forecast — there is no training data and no backtest behind it; it compresses positioning so you can see when inputs agree. The agreement figure matters more than the number: a big score with conflicting inputs is a coin flip wearing a suit. Confirm on price before acting, and log outcomes in the trade journal if you want to know whether it is worth anything.',
+    'fresh-flow':        '<strong>Fresh Flow Voice</strong>Speaks fresh option positioning as it happens, classified from each strike\'s OWN premium against its OI change — the standard read: <b>OI up + premium up = fresh BUYING</b> (longs opening), <b>OI up + premium down = fresh WRITING</b> (shorts opening); OI down + premium down is long unwinding, OI down + premium up is short covering (both off by default, tick the box to hear them). Bias mapping: fresh call buying or put writing = bullish; fresh put buying or call writing = bearish. Only strikes within ±N%% of spot are watched, and a detection needs BOTH the OI and premium thresholds crossed over a full comparison window (default 120s) — that filter is what separates real positioning from quote noise. At most 2 spoken per tick, 5-minute cooldown per strike/side, everything logged below and included in 💾 backups. Requires the 🗣 voice toggle to be on. Honest note: this reports what has ALREADY been written — it is fast information, not prediction, and OI on the near expiry gets noisy on expiry day.',
     'custom-alerts':  '<strong>Custom Price Levels</strong>Add your own price targets or stop levels. They join the same touch-detection loop as pivot levels and fire the same sound + voice alert when crossed. Re-armed on symbol change.',
     'iv-spike':       '<strong>IV Spike Alert</strong>Fires when ATM implied volatility changes by more than the configured % in a single poll cycle. An IV spike often signals upcoming fast directional moves, news, or large hedges being placed. Re-arms when IV settles.',
     'vol-spike':      '<strong>Volume Spike Alert</strong>Maintains a rolling 18-poll (~90s) volume history per strike. Fires when a strike\'s volume exceeds its rolling average by the multiplier. Unusual OTM volume often precedes institutional directional moves.',
