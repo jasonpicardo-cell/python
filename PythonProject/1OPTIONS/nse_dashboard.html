@@ -1828,6 +1828,30 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             </div>
           </div>
 
+          <!-- ── Live chart with option-derived levels ──────────────── -->
+          <div class="level-panel" id="chartPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
+              <span class="skew-chart-title">📈 Live Chart &amp; Levels<i class="hi" data-h="price-chart">i</i></span>
+              <span style="display:flex;gap:3px;">
+                <button class="btn chart-iv active" data-iv="1" style="font-size:9px;padding:2px 8px;">1m</button>
+                <button class="btn chart-iv" data-iv="3" style="font-size:9px;padding:2px 8px;">3m</button>
+                <button class="btn chart-iv" data-iv="5" style="font-size:9px;padding:2px 8px;">5m</button>
+                <button class="btn chart-iv" data-iv="15" style="font-size:9px;padding:2px 8px;">15m</button>
+              </span>
+              <span style="display:flex;gap:7px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);">
+                <label><input type="checkbox" id="chk_m920"> 9:20 lines</label>
+                <label><input type="checkbox" id="chk_walls"> OI walls</label>
+                <label><input type="checkbox" id="chk_cpr"> CPR</label>
+                <label><input type="checkbox" id="chk_maxpain"> Max pain</label>
+                <label><input type="checkbox" id="chk_cone"> ±1σ</label>
+                <label><input type="checkbox" id="chk_pivots"> Pivots</label>
+              </span>
+            </div>
+            <div id="chartBody" style="padding:4px 6px;">
+              <div class="movers-loading">Loading candles…</div>
+            </div>
+          </div>
+
           <!-- ── Market Pulse: VIX · PCR · direction bias ───────────── -->
           <div class="level-panel" id="pulsePanel">
             <div class="level-panel-head">
@@ -3614,6 +3638,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <section id="tab-flow" class="tab-panel">
 
       <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
+
+      <div class="level-panel" id="regimePanel" style="margin-bottom:12px;">
+        <div class="level-panel-head">
+          <span class="skew-chart-title">🚨 Regime Signals — Bull Run / Bloodbath / WTT / WTB<i class="hi" data-h="regime-signals">i</i></span>
+        </div>
+        <div id="regimeBody" style="padding:6px 8px;">
+          <div class="movers-loading">Load the option chain for regime signals.</div>
+        </div>
+      </div>
 
       <div class="level-panel" id="flowRangePanel" style="margin-bottom:12px;">
         <div class="level-panel-head">
@@ -13640,6 +13673,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
+    try { renderRegimeSignals(data); } catch (_) {}
+    try { if (_chart.candles.length) renderPriceChart(); } catch (_) {}
+    try { _m920TouchCheck(data); } catch (_) {}
     try {
       renderMarketPulse(data);
       const ps = document.getElementById('pulseStamp');
@@ -15304,6 +15340,365 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>
       </div>`;
     }).join('');
+  }
+
+  // ══ Live candle chart with option-derived levels ══
+  const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null };
+  const _CHART_CFG = 'chartCfg';
+  function _chartCfgLoad() {
+    try { return Object.assign({ interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false } }; }
+  }
+  function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, show: _chart.show })); } catch (_) {} }
+
+  // ── 9:20 lines: frozen once per day from the 9:20 chain snapshot ──
+  // Transparent formula (NOT a clone of any vendor's proprietary levels):
+  //   sigma_day = spot × ATM_IV × sqrt(1/365)   (one full session of vol)
+  //   EOS/EOR   = spot920 ∓/± innerMult × sigma   (default 0.5)
+  //   EOS-1/EOR+1 = spot920 ∓/± outerMult × sigma (default 1.0)
+  // Frozen at first computation after 09:20 IST and kept for the session.
+  const _M920_KEY = 'm920Levels';
+  function _m920Load() {
+    try { const o = JSON.parse(localStorage.getItem(_M920_KEY) || '{}');
+      if (o.day === new Date().toDateString() && o.sym === (state.symbol || 'NIFTY')) return o; } catch (_) {}
+    return null;
+  }
+  function _m920Compute(d) {
+    const existing = _m920Load();
+    if (existing) return existing;
+    const now = new Date();
+    const mins = now.getHours() * 60 + now.getMinutes();
+    if (mins < 560) return null;                       // not 9:20 yet
+    const spot = d?.underlying_value, iv = (d?.atm_iv || 0) / 100;
+    if (!spot || !iv) return null;
+    const sigma = spot * iv * Math.sqrt(1 / 365);
+    const inner = 0.5, outer = 1.0;
+    const o = { day: now.toDateString(), sym: state.symbol || 'NIFTY', spot920: spot, sigma,
+      frozenAt: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      EOR: spot + inner * sigma, EORp1: spot + outer * sigma,
+      EOS: spot - inner * sigma, EOSm1: spot - outer * sigma, inner, outer, iv: iv * 100 };
+    try { localStorage.setItem(_M920_KEY, JSON.stringify(o)); } catch (_) {}
+    return o;
+  }
+  function _chartLevels(d) {
+    const L = [];
+    if (!d) return L;
+    const spot = d.underlying_value;
+    if (_chart.show.cpr && state._cpr) {
+      L.push({ v: state._cpr.TC, lab: 'CPR TC', col: '#7aa2f7', dash: '4,3' });
+      L.push({ v: state._cpr.P,  lab: 'Pivot',  col: '#7aa2f7', dash: '' });
+      L.push({ v: state._cpr.BC, lab: 'CPR BC', col: '#7aa2f7', dash: '4,3' });
+    }
+    if (_chart.show.walls) {
+      try { const w = _flowWalls(d);
+        if (w?.callWall) L.push({ v: w.callWall, lab: 'Call wall', col: 'var(--neg,#ef5350)', dash: '6,3', wide: true });
+        if (w?.putWall)  L.push({ v: w.putWall,  lab: 'Put wall',  col: 'var(--pos,#26a69a)', dash: '6,3', wide: true });
+      } catch (_) {}
+    }
+    if (_chart.show.maxpain && d.max_pain) L.push({ v: d.max_pain, lab: 'Max pain', col: '#d4af37', dash: '2,4' });
+    if (_chart.show.cone) {
+      try { const c = _pulseCone(d);
+        if (c) { L.push({ v: c.bands[0].up, lab: '+1σ', col: '#8a8fa3', dash: '1,4' });
+                 L.push({ v: c.bands[0].dn, lab: '−1σ', col: '#8a8fa3', dash: '1,4' }); }
+      } catch (_) {}
+    }
+    if (_chart.show.m920) {
+      const m = _m920Compute(d);
+      if (m) {
+        L.push({ v: m.EORp1, lab: 'EOR+1', col: '#ff8fa3', dash: '', wide: true });
+        L.push({ v: m.EOR,   lab: 'EOR',   col: '#ff8fa3', dash: '3,3' });
+        L.push({ v: m.EOS,   lab: 'EOS',   col: '#6ee7b7', dash: '3,3' });
+        L.push({ v: m.EOSm1, lab: 'EOS-1', col: '#6ee7b7', dash: '', wide: true });
+      }
+    }
+    if (_chart.show.pivots && typeof PIVOT_TYPES === 'function') { /* pivots handled below */ }
+    if (_chart.show.pivots) {
+      try {
+        const fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
+        if (fr) {
+          const type = document.getElementById('pivotTypeSelect')?.value || 'fibonacci';
+          const pv = (PIVOT_TYPES[type] || PIVOT_TYPES.fibonacci)(fr.H, fr.L, fr.C, fr.O);
+          for (const k of ['R2', 'R1', 'S1', 'S2']) if (pv[k]) L.push({ v: pv[k], lab: k, col: '#9d7cd8', dash: '5,4' });
+        }
+      } catch (_) {}
+    }
+    return L.filter(x => x.v && isFinite(x.v));
+  }
+  async function fetchCandles(silent) {
+    const box = document.getElementById('chartBody');
+    if (!box) return;
+    if (!silent && !_chart.candles.length) box.innerHTML = '<div class="movers-loading">Loading candles…</div>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/intraday-candles?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&interval=${_chart.interval}`);
+      const j = await r.json();
+      if (j.error) { box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error)}</div>`; _chart.candles = []; return; }
+      _chart.candles = j.candles || []; _chart.src = j.source;
+      renderPriceChart();
+    } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
+  }
+  function renderPriceChart() {
+    const box = document.getElementById('chartBody');
+    if (!box) return;
+    const cs = _chart.candles;
+    if (!cs.length) { box.innerHTML = '<div class="movers-loading">No candles yet.</div>'; return; }
+    const d = state.lastData;
+    const levels = _chartLevels(d);
+    const spot = d?.underlying_value;
+    const W = 900, H = 680, padL = 8, padR = 72, padT = 12, padB = 34;
+    let lo = Math.min(...cs.map(c => c.l)), hi = Math.max(...cs.map(c => c.h));
+    for (const L of levels) { if (L.v < lo * 0.985 || L.v > hi * 1.015) continue; lo = Math.min(lo, L.v); hi = Math.max(hi, L.v); }
+    if (spot) { lo = Math.min(lo, spot); hi = Math.max(hi, spot); }
+    const pad = (hi - lo) * 0.06 || 10; lo -= pad; hi += pad;
+    const x = i => padL + (i + 0.5) / cs.length * (W - padL - padR);
+    const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+    const cw = Math.max(1.5, Math.min(11, (W - padL - padR) / cs.length * 0.62));
+    // candles
+    let svg = '';
+    cs.forEach((c, i) => {
+      // colour by body; for a flat body fall back to change vs the previous close
+      const prevC = i > 0 ? cs[i - 1].c : c.o;
+      const up = c.c > c.o ? true : c.c < c.o ? false : (c.c >= prevC);
+      const col = up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+      const yo = y(c.o), yc = y(c.c);
+      const yh = y(c.h), yl = y(c.l);
+      svg += `<line x1="${x(i).toFixed(1)}" y1="${yh.toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${(Math.max(yl, yh + 1)).toFixed(1)}" stroke="${col}" stroke-width="1.1"/>`;
+      svg += `<rect x="${(x(i) - cw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1.5, Math.abs(yc - yo)).toFixed(1)}" fill="${col}"/>`;
+    });
+    // level lines + right-edge labels (stagger to avoid overlap)
+    const used = [];
+    const lvlSvg = levels.map(L => {
+      if (L.v < lo || L.v > hi) return '';
+      let ly = y(L.v);
+      while (used.some(u => Math.abs(u - ly) < 9)) ly += 9;
+      used.push(ly);
+      return `<line x1="${padL}" y1="${y(L.v).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y(L.v).toFixed(1)}" stroke="${L.col}" stroke-width="${L.wide ? 1.4 : 1}" stroke-dasharray="${L.dash}" opacity="0.85"/>
+        <text x="${(W - padR + 3).toFixed(1)}" y="${(ly + 3).toFixed(1)}" style="font-size:9px;fill:${L.col};font-weight:600;">${L.lab} ${fmtInt(Math.round(L.v))}</text>`;
+    }).join('');
+    // live price line
+    let spotSvg = '';
+    if (spot && spot >= lo && spot <= hi) {
+      spotSvg = `<line x1="${padL}" y1="${y(spot).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y(spot).toFixed(1)}" stroke="#fff" stroke-width="1" opacity="0.55"/>
+        <rect x="${(W - padR + 1).toFixed(1)}" y="${(y(spot) - 7).toFixed(1)}" width="56" height="14" rx="3" fill="#fff"/>
+        <text x="${(W - padR + 4).toFixed(1)}" y="${(y(spot) + 3.5).toFixed(1)}" style="font-size:9.5px;fill:#111;font-weight:800;">${fmtInt(Math.round(spot))}</text>`;
+    }
+    // time axis
+    const tick = Math.max(1, Math.floor(cs.length / 7));
+    let axis = '';
+    cs.forEach((c, i) => { if (i % tick) return;
+      axis += `<text x="${x(i).toFixed(1)}" y="${(H - 6).toFixed(1)}" text-anchor="middle" style="font-size:8.5px;fill:var(--muted,#789);">${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+    const last = cs[cs.length - 1];
+    const m = _m920Load();
+    // regime badges (same engine as the OI Flow tab) shown on the chart
+    let regBar = '';
+    try {
+      const rg = _regimeCompute(d);
+      if (rg) {
+        const bdg = (t, tone) => `<span style="font-size:10px;font-weight:800;letter-spacing:0.4px;padding:2px 8px;border-radius:4px;background:${tone === 'good' ? 'rgba(38,166,154,0.16);color:var(--pos,#26a69a)' : tone === 'bad' ? 'rgba(239,83,80,0.16);color:var(--neg,#ef5350)' : 'rgba(120,136,153,0.14);color:#9ab'};">${t}</span>`;
+        regBar = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:3px 4px 5px;">
+          ${rg.regime ? bdg(rg.regime.name, rg.regime.tone) : ''}
+          ${bdg('SHIFTING: ' + rg.shift.status, rg.shift.tone)}
+          <span style="font-size:9px;color:var(--muted,#789);">call wall ${fmtInt(rg.walls.callWall)} · put wall ${fmtInt(rg.walls.putWall)}</span>
+        </div>`;
+      }
+    } catch (_) {}
+    box.innerHTML = regBar + `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;">${lvlSvg}${svg}${spotSvg}${axis}
+      <g id="chartCross" style="display:none;">
+        <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
+        <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
+        <rect id="ccPB" width="58" height="15" rx="3" fill="#1a1d23" stroke="#fff" stroke-width="0.5"/>
+        <text id="ccP" style="font-size:9.5px;fill:#fff;font-weight:700;"></text>
+        <rect id="ccTB" width="52" height="15" rx="3" fill="#1a1d23" stroke="#fff" stroke-width="0.5"/>
+        <text id="ccT" style="font-size:9.5px;fill:#fff;font-weight:700;" text-anchor="middle"></text>
+      </g></svg>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);padding:3px 4px;">
+        <span>${cs.length} × ${_chart.interval}m candles</span>
+        <span>src: <b>${_chart.src === 'nse_chart' ? 'NSE intraday feed' : 'replay archive (1/min)'}</b></span>
+        <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
+        ${m ? `<span>9:20 lines frozen at ${escapeHtml(m.frozenAt)} (spot ${fmtInt(Math.round(m.spot920))}, σ ${Math.round(m.sigma)} pts @ ${m.iv.toFixed(1)}% IV)</span>` : '<span>9:20 lines: waiting for 09:20</span>'}
+      </div>
+      <div id="chartHover" style="font-size:10px;color:#cdd;padding:2px 4px;min-height:14px;"></div>`;
+    // crosshair: follows the pointer, prints timestamp below and price at right
+    const svgEl = document.getElementById('chartSvg');
+    if (svgEl) {
+      const g = document.getElementById('chartCross');
+      const hv = document.getElementById('chartHover');
+      svgEl.addEventListener('mousemove', ev => {
+        const r = svgEl.getBoundingClientRect();
+        const px = (ev.clientX - r.left) / r.width * W;
+        const py = (ev.clientY - r.top) / r.height * H;
+        if (px < padL || px > W - padR || py < padT || py > H - padB) { g.style.display = 'none'; hv.textContent = ''; return; }
+        const i = Math.max(0, Math.min(cs.length - 1, Math.round((px - padL) / (W - padL - padR) * cs.length - 0.5)));
+        const c2 = cs[i];
+        const val = hi - (py - padT) / (H - padT - padB) * (hi - lo);
+        g.style.display = '';
+        document.getElementById('ccV').setAttribute('x1', x(i)); document.getElementById('ccV').setAttribute('x2', x(i));
+        document.getElementById('ccH').setAttribute('y1', py); document.getElementById('ccH').setAttribute('y2', py);
+        const pb = document.getElementById('ccPB'), pt = document.getElementById('ccP');
+        pb.setAttribute('x', W - padR + 2); pb.setAttribute('y', py - 7.5);
+        pt.setAttribute('x', W - padR + 6); pt.setAttribute('y', py + 3.5); pt.textContent = fmtInt(Math.round(val));
+        const tb = document.getElementById('ccTB'), tt = document.getElementById('ccT');
+        const tx = Math.max(padL + 26, Math.min(W - padR - 26, x(i)));
+        tb.setAttribute('x', tx - 26); tb.setAttribute('y', H - padB + 4);
+        tt.setAttribute('x', tx); tt.setAttribute('y', H - padB + 15);
+        tt.textContent = new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const up2 = c2.c >= c2.o;
+        hv.innerHTML = `<b>${new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</b> &nbsp; O <b>${fmtInt(Math.round(c2.o))}</b> H <b>${fmtInt(Math.round(c2.h))}</b> L <b>${fmtInt(Math.round(c2.l))}</b> C <b style="color:${up2 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(c2.c))}</b> &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(val))}</span>`;
+      });
+      svgEl.addEventListener('mouseleave', () => { g.style.display = 'none'; hv.textContent = ''; });
+    }
+  }
+
+  // ── Voice alert when price touches a 9:20 line (EOR/EOR+1/EOS/EOS-1) ──
+  function _m920TouchCheck(d) {
+    const m = _m920Load();
+    const spot = d?.underlying_value;
+    if (!m || !spot) return;
+    const tol = Math.max(4, spot * 0.0006);        // ~15 pts on Nifty
+    state._m920Fired = state._m920Fired || {};
+    const lines = [['EOR+1', m.EORp1, 'resistance extension'], ['EOR', m.EOR, 'resistance'],
+                   ['EOS', m.EOS, 'support'], ['EOS-1', m.EOSm1, 'support extension']];
+    for (const [lab, v, kind] of lines) {
+      if (Math.abs(spot - v) > tol) continue;
+      const key = lab;
+      if (state._m920Fired[key] && Date.now() - state._m920Fired[key] < 10 * 60 * 1000) continue;
+      state._m920Fired[key] = Date.now();
+      const msg = `Price touching ${lab.replace('+1', ' plus one').replace('-1', ' minus one')} at ${Math.round(v)}, the nine twenty ${kind} line`;
+      try { if (typeof _flowSpeak === 'function') _flowSpeak(msg); } catch (_) {}
+      if (typeof showToast === 'function') showToast(`🎯 ${lab} touched — spot ${fmtInt(Math.round(spot))} vs ${fmtInt(Math.round(v))}`);
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('9:20 level touched', { body: `${lab} @ ${Math.round(v)}` }); } catch (_) {}
+    }
+  }
+
+  function _chartWire() {
+    const cfg = _chartCfgLoad();
+    _chart.interval = cfg.interval; _chart.show = cfg.show;
+    document.querySelectorAll('.chart-iv').forEach(b => {
+      b.classList.toggle('active', +b.dataset.iv === _chart.interval);
+      b.addEventListener('click', () => {
+        _chart.interval = +b.dataset.iv; _chartCfgSave();
+        document.querySelectorAll('.chart-iv').forEach(o => o.classList.toggle('active', o === b));
+        fetchCandles();
+      });
+    });
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots']) {
+      const el = document.getElementById('chk_' + k);
+      if (!el) continue;
+      el.checked = !!_chart.show[k];
+      el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
+    }
+    fetchCandles();
+    if (_chart.timer) clearInterval(_chart.timer);
+    _chart.timer = setInterval(() => fetchCandles(true), 60000);   // candles refresh 1/min
+  }
+  _chartWire();   // safe here: _chart (const) is initialized above this point
+
+  // ══ Regime Signals: Bull Run / Bloodbath + WTT/WTB shifting status ══
+  // Vocabulary borrowed from Indian option-chain practice (LTP-calculator
+  // school); the DETECTION RULES here are mine and fully transparent:
+  //   WTT (Weak Towards Top)    = the call-side peak-OI wall is weakening or
+  //                               moving up -> ceiling softening -> bullish
+  //   WTB (Weak Towards Bottom) = the put-side peak-OI wall is weakening or
+  //                               moving down -> floor softening -> bearish
+  //   STRONG                    = both walls holding position and OI
+  //   BULL RUN / BLOODBATH      = broad one-sided flow across near strikes
+  //                               confirmed by price and (if present) VIX
+  const _REG_KEY = 'regimeHistory';
+  function _regLoad() {
+    try { const o = JSON.parse(localStorage.getItem(_REG_KEY) || '{}');
+      if (o.day === new Date().toDateString() && Array.isArray(o.h)) return o.h; } catch (_) {}
+    return [];
+  }
+  function _regSave(h) {
+    try { localStorage.setItem(_REG_KEY, JSON.stringify({ day: new Date().toDateString(), h: h.slice(-60) })); } catch (_) {}
+  }
+  function _regimeCompute(d) {
+    if (!d?.strikes?.length || !d.underlying_value) return null;
+    const spot = d.underlying_value, now = Date.now();
+    const w = _flowWalls(d);
+    if (!w?.callWall || !w?.putWall) return null;
+    const hist = _regLoad();
+    const last = hist[hist.length - 1];
+    // record a sample at most every 3 minutes
+    if (!last || now - last.ts > 180000) {
+      hist.push({ ts: now, cw: w.callWall, pw: w.putWall, cOi: w.cMax, pOi: w.pMax, spot });
+      _regSave(hist);
+    }
+    // reference = oldest sample within the last 45 min (or first of day)
+    const ref = hist.find(x => now - x.ts <= 45 * 60000) || hist[0];
+    let shift = { status: 'STRONG', why: 'both peak-OI walls holding position and size', tone: 'na' };
+    if (ref && ref !== last) {
+      const cwMoved = w.callWall - ref.cw;                      // + = ceiling moving up
+      const pwMoved = w.putWall - ref.pw;                       // - = floor moving down
+      const cOiPct = ref.cOi ? (w.cMax - ref.cOi) / ref.cOi * 100 : 0;
+      const pOiPct = ref.pOi ? (w.pMax - ref.pOi) / ref.pOi * 100 : 0;
+      const wtt = cwMoved > 0 || cOiPct < -12;                  // ceiling weakening
+      const wtb = pwMoved < 0 || pOiPct < -12;                  // floor weakening
+      if (wtt && !wtb) shift = { status: 'WTT', tone: 'good',
+        why: `Weak Towards Top — call wall ${cwMoved > 0 ? `shifted up ${fmtInt(ref.cw)}→${fmtInt(w.callWall)}` : `OI decayed ${cOiPct.toFixed(0)}%`}: the ceiling is softening, which favours upside` };
+      else if (wtb && !wtt) shift = { status: 'WTB', tone: 'bad',
+        why: `Weak Towards Bottom — put wall ${pwMoved < 0 ? `shifted down ${fmtInt(ref.pw)}→${fmtInt(w.putWall)}` : `OI decayed ${pOiPct.toFixed(0)}%`}: the floor is softening, which favours downside` };
+      else if (wtt && wtb) shift = { status: 'BOTH WEAK', tone: 'na',
+        why: 'both walls softening — writers stepping back on each side; expansion (range break) more likely than a clean direction' };
+      else shift = { status: 'STRONG', tone: 'na',
+        why: `both walls holding (call ${fmtInt(w.callWall)}, put ${fmtInt(w.putWall)}) — rangebound while that stays true` };
+    }
+    // ── breadth of fresh flow across near strikes vs the previous chain tick ──
+    const prev = state._regPrevSnap;
+    const snap = { ts: now, m: {} };
+    for (const s of d.strikes) snap.m[s.strike] = { co: s.ce_oi || 0, po: s.pe_oi || 0, cl: s.ce_ltp || 0, pl: s.pe_ltp || 0 };
+    let bull = 0, bear = 0, n = 0, putBuying = 0;
+    if (prev && now - prev.ts > 45000) {
+      for (const s of d.strikes) {
+        if (Math.abs(s.strike - spot) / spot > 0.03) continue;
+        const p = prev.m[s.strike];
+        if (!p) continue;
+        const chk = (oiNow, oiOld, lNow, lOld, side) => {
+          if (!oiOld || !lOld || !lNow) return;
+          const dOi = (oiNow - oiOld) / oiOld * 100, dP = (lNow - lOld) / lOld * 100;
+          if (Math.abs(dOi) < 3 || Math.abs(dP) < 2) return;
+          n++;
+          const freshBuy = dOi > 0 && dP > 0, freshWrite = dOi > 0 && dP < 0;
+          if (side === 'CE') { if (freshBuy) bull++; else if (freshWrite) bear++; }
+          else { if (freshBuy) { bear++; putBuying++; } else if (freshWrite) bull++; }
+        };
+        chk(s.ce_oi || 0, p.co, s.ce_ltp || 0, p.cl, 'CE');
+        chk(s.pe_oi || 0, p.po, s.pe_ltp || 0, p.pl, 'PE');
+      }
+      state._regPrevSnap = snap;
+    } else if (!prev) state._regPrevSnap = snap;
+    const dayChg = d.prev_close ? (spot - d.prev_close) / d.prev_close * 100 : 0;
+    const breadth = n >= 4 ? (bull - bear) / n : null;          // -1..+1
+    let regime = null;
+    if (breadth !== null) {
+      if (breadth >= 0.5 && dayChg > 0.25) regime = { name: 'BULL RUN', tone: 'good',
+        why: `${Math.round((bull / n) * 100)}% of active near strikes show bullish flow (put writing / call buying) with price +${dayChg.toFixed(2)}% — writers are chasing the move up` };
+      else if (breadth <= -0.5 && dayChg < -0.25) regime = { name: 'BLOODBATH', tone: 'bad',
+        why: `${Math.round((bear / n) * 100)}% of active near strikes show bearish flow (${putBuying > 0 ? 'put buying + ' : ''}call writing) with price ${dayChg.toFixed(2)}% — protection is being bought into weakness` };
+      else if (Math.abs(breadth) < 0.2) regime = { name: 'TWO-SIDED', tone: 'na',
+        why: `flow is balanced across near strikes (${bull} bullish vs ${bear} bearish signals) — no dominant side; rangebound until one gives way` };
+      else regime = { name: breadth > 0 ? 'MILD BULLISH TILT' : 'MILD BEARISH TILT', tone: breadth > 0 ? 'good' : 'bad',
+        why: `${bull} bullish vs ${bear} bearish flow signals across ${n} active strikes, price ${dayChg >= 0 ? '+' : ''}${dayChg.toFixed(2)}% — a lean, not a stampede` };
+    }
+    return { shift, regime, walls: w, n, samples: hist.length, dayChg };
+  }
+  function renderRegimeSignals(data) {
+    const box = document.getElementById('regimeBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    if (!d?.underlying_value) { box.innerHTML = '<div class="movers-loading">Load the option chain for regime signals.</div>'; return; }
+    const r = _regimeCompute(d);
+    if (!r) { box.innerHTML = '<div class="movers-loading">Not enough chain data yet.</div>'; return; }
+    const badge = (txt, tone) => `<span style="font-size:12px;font-weight:800;letter-spacing:0.6px;padding:3px 10px;border-radius:5px;background:${tone === 'good' ? 'rgba(38,166,154,0.16);color:var(--pos,#26a69a)' : tone === 'bad' ? 'rgba(239,83,80,0.16);color:var(--neg,#ef5350)' : 'rgba(120,136,153,0.14);color:#9ab'};">${txt}</span>`;
+    let html = '<div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;padding:2px 4px;">';
+    if (r.regime) html += badge(r.regime.name, r.regime.tone);
+    html += badge('SHIFTING: ' + r.shift.status, r.shift.tone);
+    html += '</div>';
+    if (r.regime) html += `<div style="font-size:9.5px;color:#9ab;padding:3px 4px;">${r.regime.why}.</div>`;
+    html += `<div style="font-size:9.5px;color:#9ab;padding:1px 4px;">${r.shift.why}.</div>`;
+    html += `<div style="font-size:9px;color:var(--muted,#789);padding:3px 4px;">Call wall ${fmtInt(r.walls.callWall)} · put wall ${fmtInt(r.walls.putWall)} · ${r.n} active near strikes this tick · ${r.samples} wall samples today.</div>`;
+    html += `<div class="oc-sub" style="margin-top:4px;">Vocabulary from Indian option-chain practice; the rules here are mine and stated plainly. <b>WTT</b> = call-side peak-OI wall moving up or losing &gt;12% OI over the last ~45 min (ceiling softening, bullish lean). <b>WTB</b> = put-side wall moving down or losing &gt;12% (floor softening, bearish). <b>STRONG</b> = both holding. <b>BULL RUN / BLOODBATH</b> need breadth — at least half the active near-the-money strikes flowing one way — <i>plus</i> price confirming by more than 0.25%, so a quiet drift never gets labelled a stampede. These describe what has ALREADY been positioned, not what happens next.</div>`;
+    box.innerHTML = html;
   }
 
   // ══ Projected price range (OI Flow tab) ══
@@ -20846,6 +21241,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'voice-alert':    '<strong>Voice Alerts</strong>Speaks the level name and price aloud using your browser\'s Web Speech API. Works best in Chrome. If voice is silent, check that your system has TTS voices installed and that the browser has audio permission.',
     'alert-sound':    '<strong>Alert Sound</strong><b>Tone</b> — single sine wave, sharp attack.<br><b>Chime</b> — three sine oscillators at bell-like partial ratios (sounds like a chime).<br><b>Ping</b> — triangle wave with downward pitch sweep.<br>Higher pitch = resistance touched. Lower pitch = support touched.',
     'alert-volume':   '<strong>Volume / Duration</strong>Volume slider controls amplitude of the generated sound. Duration input (seconds) controls how long the note sustains before fading out.',
+    'price-chart':       '<strong>Live Chart &amp; Levels</strong>Intraday candles for the loaded index with every option-derived level drawn on top. Candles come from NSE\'s intraday feed when the session is warm, otherwise they are rebuilt from your replay archive (1 spot sample per minute) — the footer names the source. Interval 1/3/5/15m, refreshed once a minute; levels redraw on every chain update. Toggles: <b>9:20 lines</b> (see below), <b>OI walls</b> (heaviest call/put OI), <b>CPR</b>, <b>max pain</b>, <b>±1σ</b> IV cone, and <b>pivots</b> (from the Pivot Levels panel\'s active type). <br><br><b>About the 9:20 lines:</b> these are MY transparent formula, not a reverse-engineered copy of any vendor\'s proprietary levels. At 09:20 the 9:20 spot and ATM IV are frozen for the day, one session of volatility is computed as sigma = spot × IV × sqrt(1/365), and four fixed lines are drawn: EOR/EOS at ±0.5 sigma (inner, aggressive) and EOR+1/EOS-1 at ±1.0 sigma (outer, conservative). They do not move for the rest of the session, which is the whole point — a fixed frame beats a moving one for discipline. Whether they hold is an open question: log trades against them in the journal and let the data answer.',
+    'regime-signals':    '<strong>Regime Signals</strong>Familiar Indian option-chain vocabulary, computed with transparent rules. <b>Shifting status</b> tracks the peak-OI wall on each side over the last ~45 minutes: <b>WTT (Weak Towards Top)</b> means the call wall moved up or lost more than 12 percent of its OI, so the ceiling is softening (bullish lean); <b>WTB (Weak Towards Bottom)</b> means the put wall moved down or shed OI, so the floor is softening (bearish); <b>STRONG</b> means both walls are holding position and size, which is the rangebound case; <b>BOTH WEAK</b> means writers are stepping back on each side, favouring a range expansion rather than a direction. <b>BULL RUN</b> and <b>BLOODBATH</b> require breadth plus confirmation: at least half of the active near-the-money strikes must be flowing one way AND price must have moved more than 0.25 percent in that direction, which stops a quiet drift being labelled a stampede. Everything here describes positioning that has ALREADY happened, so treat it as fast information rather than prediction, and remember the labels are dramatic by tradition, not by evidence.',
     'flow-range':        '<strong>Projected price range</strong>Two independent answers to "where can price go today". <b>IV-implied bands</b> come from the option market\'s own ATM IV over the remaining horizon (rest of today intraday, else days to expiry): the 68%% and 90%% bands are where the market prices price closing, assuming lognormal moves with no gap or event risk — real tails are fatter, so treat them as optimistic. <b>OI walls</b> are the strikes with the heaviest call OI above and put OI below within ±6%% of spot: they act as support and resistance because writers who sold them profit from defending them, which is a capital-commitment argument, not a prediction. The CONSENSUS line shows the overlap and interprets it: walls INSIDE the statistical band mean writers expect a tighter day than IV prices (rangebound lean); walls outside mean breakouts have room; no overlap means positioning and pricing disagree, which usually resolves violently. The second line of defence shows where price travels if the first wall breaks.',
     'market-pulse':      '<strong>Market Pulse</strong>Three regime reads in one place. <b>India VIX</b> — the market\'s own 30-day implied volatility, with regime bands (below 11 complacency, 11-14 calm trend, 14-18 balanced, 18-24 nervous, above 24 stress); it sizes your risk, it does not point direction. <b>PCR (OI)</b> — put/call open-interest ratio: above 1 means put writers are building support, below 1 means call writers are capping; at extremes (roughly above 1.8 or below 0.55) the read flips contrarian, which is why the score damps it there. <b>Direction Bias</b> — a −100..+100 weighted ensemble of the measured option-market signals this dashboard already computes: PCR positioning, max-pain pull (weighted by time left), GEX gamma regime, Δ-neutral position, fresh OI buildup flags, CPR position, day change, and VIX trend. Expand "Why this reading" to see every input, its score and its weight. It is an explainable ensemble, NOT machine learning and NOT a forecast — there is no training data and no backtest behind it; it compresses positioning so you can see when inputs agree. The agreement figure matters more than the number: a big score with conflicting inputs is a coin flip wearing a suit. Confirm on price before acting, and log outcomes in the trade journal if you want to know whether it is worth anything.',
     'fresh-flow':        '<strong>Fresh Flow Voice</strong>Speaks fresh option positioning as it happens, classified from each strike\'s OWN premium against its OI change — the standard read: <b>OI up + premium up = fresh BUYING</b> (longs opening), <b>OI up + premium down = fresh WRITING</b> (shorts opening); OI down + premium down is long unwinding, OI down + premium up is short covering (both off by default, tick the box to hear them). Bias mapping: fresh call buying or put writing = bullish; fresh put buying or call writing = bearish. Only strikes within ±N%% of spot are watched, and a detection needs BOTH the OI and premium thresholds crossed over a full comparison window (default 120s) — that filter is what separates real positioning from quote noise. At most 2 spoken per tick, 5-minute cooldown per strike/side, everything logged below and included in 💾 backups. Requires the 🗣 voice toggle to be on. Honest note: this reports what has ALREADY been written — it is fast information, not prediction, and OI on the near expiry gets noisy on expiry day.',

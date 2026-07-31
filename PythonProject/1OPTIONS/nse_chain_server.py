@@ -2590,6 +2590,99 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)})
             return
 
+        if parsed.path == "/api/intraday-candles":
+            # Intraday OHLC candles for the chart widget.
+            # Source 1: NSE chart-databyindex (live intraday data for indices);
+            #           rows are [ts_ms, price] or [ts_ms,O,H,L,C] and get
+            #           aggregated into N-minute candles here.
+            # Source 2: today's replay archive (1 spot sample/min) — works with
+            #           no extra network call once the recorder has run.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            try:
+                interval = max(1, min(60, int(qs.get("interval", ["5"])[0])))
+            except Exception:
+                interval = 5
+            idx_names = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                         "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
+
+            def _bucket(ticks, mins):
+                out, cur = [], None
+                for ts, px in sorted(ticks):
+                    b = int(ts // (mins * 60)) * (mins * 60)
+                    if cur is None or cur["t"] != b:
+                        if cur:
+                            out.append(cur)
+                        cur = {"t": b, "o": px, "h": px, "l": px, "c": px}
+                    else:
+                        cur["h"] = max(cur["h"], px)
+                        cur["l"] = min(cur["l"], px)
+                        cur["c"] = px
+                if cur:
+                    out.append(cur)
+                # Chain opens: with one spot sample per minute a 1m bucket holds
+                # a single tick, giving O==H==L==C — an invisible, colourless
+                # candle. Setting each open to the previous close produces a
+                # continuous, properly coloured series (standard practice when
+                # building candles from a sparse tick stream).
+                for i in range(1, len(out)):
+                    po = out[i - 1]["c"]
+                    out[i]["o"] = po
+                    out[i]["h"] = max(out[i]["h"], po)
+                    out[i]["l"] = min(out[i]["l"], po)
+                return out
+
+            ticks, src = [], None
+            if symbol in idx_names and _shared_fetcher and getattr(_shared_fetcher, "_warmed", False):
+                try:
+                    from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+                    from urllib.parse import quote as _q
+                    h = dict(API_HEADERS)
+                    h["Referer"] = NSE_OC_PAGE
+                    url = "https://www.nseindia.com/api/chart-databyindex?index=" + _q(idx_names[symbol]) + "&indices=true"
+                    r = _shared_fetcher.session.get(url, headers=h, timeout=12)
+                    if r.status_code == 200:
+                        pl = r.json() if isinstance(r.json(), dict) else {}
+                        rows = pl.get("grapthData") or pl.get("graphData") or []
+                        today0 = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
+                        for row in rows:
+                            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                                continue
+                            ts = float(row[0]) / 1000.0
+                            if ts < today0:
+                                continue
+                            ticks.append((ts, float(row[4]) if len(row) >= 5 else float(row[1])))
+                        if ticks:
+                            src = "nse_chart"
+                except Exception as e:  # noqa: BLE001
+                    print("[!] intraday chart feed failed: " + str(e))
+            if not ticks:
+                day = time.strftime("%Y-%m-%d")
+                path = _os.path.join(_REPLAY_DIR, symbol + "_" + day + ".jsonl")
+                if _os.path.exists(path):
+                    try:
+                        with open(path) as f:
+                            for line in f:
+                                try:
+                                    s = json.loads(line)
+                                    v, t = s.get("underlying_value"), s.get("_replay_ts")
+                                    if v and t:
+                                        ticks.append((float(t), float(v)))
+                                except Exception:
+                                    continue
+                        if ticks:
+                            src = "replay"
+                    except Exception:
+                        pass
+            if not ticks:
+                self._send_json({"error": "no intraday data yet - warm the session by loading a chain, or let the replay recorder run a few minutes",
+                                 "candles": [], "symbol": symbol, "interval": interval})
+                return
+            candles = _bucket(ticks, interval)
+            self._send_json({"symbol": symbol, "interval": interval, "source": src,
+                             "candles": candles, "count": len(candles),
+                             "asOf": time.strftime("%H:%M:%S")})
+            return
+
         if parsed.path == "/api/today-open":
             # Official TODAY open for an index (allIndices feed) — needed for
             # TradingView-parity Woodie pivots. The polled session open can be
