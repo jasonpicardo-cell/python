@@ -1846,6 +1846,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
               </span>
+              <span style="display:flex;gap:7px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;">
+                <label><input type="checkbox" id="chk_ema5"> EMA5</label>
+                <label><input type="checkbox" id="chk_ema10"> EMA10</label>
+                <label><input type="checkbox" id="chk_ema15"> EMA15</label>
+                <label><input type="checkbox" id="chk_ema20"> EMA20</label>
+                <label><input type="checkbox" id="chk_ema50"> EMA50</label>
+                <label><input type="checkbox" id="chk_ema100"> EMA100</label>
+                <label><input type="checkbox" id="chk_ema200"> EMA200</label>
+                <label><input type="checkbox" id="chk_vwap"> VWAP</label>
+              </span>
             </div>
             <div id="chartBody" style="padding:4px 6px;">
               <div class="movers-loading">Loading candles…</div>
@@ -15346,8 +15356,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false } }; }
+    try { return Object.assign({ interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, show: _chart.show })); } catch (_) {} }
 
@@ -15380,6 +15390,50 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { localStorage.setItem(_M920_KEY, JSON.stringify(o)); } catch (_) {}
     return o;
   }
+  // ── overlay series: EMAs and a session VWAP ──
+  const _EMA_DEFS = [
+    { k: 'ema5',   p: 5,   col: '#f7b731' },
+    { k: 'ema10',  p: 10,  col: '#26de81' },
+    { k: 'ema15',  p: 15,  col: '#45aaf2' },
+    { k: 'ema20',  p: 20,  col: '#a55eea' },
+    { k: 'ema50',  p: 50,  col: '#fd9644' },
+    { k: 'ema100', p: 100, col: '#4b7bec' },
+    { k: 'ema200', p: 200, col: '#eb3b5a' },
+  ];
+  function _emaSeries(closes, period) {
+    if (closes.length < 2) return [];
+    const k = 2 / (period + 1);
+    // seed with an SMA of the first `period` bars when available, else first close
+    const seedN = Math.min(period, closes.length);
+    let prev = closes.slice(0, seedN).reduce((s, v) => s + v, 0) / seedN;
+    const out = new Array(closes.length).fill(null);
+    out[seedN - 1] = prev;
+    for (let i = seedN; i < closes.length; i++) { prev = closes[i] * k + prev * (1 - k); out[i] = prev; }
+    return out;
+  }
+  function _vwapSeries(cs) {
+    // Index feeds publish no traded volume, so this is weighted by TICK COUNT
+    // per bar (the only activity measure available). With a steady 1-sample/min
+    // feed that reduces to a typical-price running average — honest label below.
+    let pv = 0, vol = 0;
+    return cs.map(c => {
+      const tp = (c.h + c.l + c.c) / 3, w = c.n || 1;
+      pv += tp * w; vol += w;
+      return vol ? pv / vol : null;
+    });
+  }
+  function _chartSeries(cs) {
+    const closes = cs.map(c => c.c);
+    const out = [];
+    for (const e of _EMA_DEFS) {
+      if (!_chart.show[e.k]) continue;
+      if (cs.length < 2) continue;
+      out.push({ lab: 'EMA' + e.p, col: e.col, vals: _emaSeries(closes, e.p), period: e.p, short: cs.length < e.p });
+    }
+    if (_chart.show.vwap) out.push({ lab: 'VWAP', col: '#00d2d3', vals: _vwapSeries(cs), vwap: true });
+    return out;
+  }
+
   function _chartLevels(d) {
     const L = [];
     if (!d) return L;
@@ -15449,6 +15503,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let lo = Math.min(...cs.map(c => c.l)), hi = Math.max(...cs.map(c => c.h));
     for (const L of levels) { if (L.v < lo * 0.985 || L.v > hi * 1.015) continue; lo = Math.min(lo, L.v); hi = Math.max(hi, L.v); }
     if (spot) { lo = Math.min(lo, spot); hi = Math.max(hi, spot); }
+    const series = _chartSeries(cs);
+    for (const s of series) for (const v of s.vals) { if (v == null) continue; lo = Math.min(lo, v); hi = Math.max(hi, v); }
     const pad = (hi - lo) * 0.06 || 10; lo -= pad; hi += pad;
     const x = i => padL + (i + 0.5) / cs.length * (W - padL - padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
@@ -15465,6 +15521,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       svg += `<line x1="${x(i).toFixed(1)}" y1="${yh.toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${(Math.max(yl, yh + 1)).toFixed(1)}" stroke="${col}" stroke-width="1.1"/>`;
       svg += `<rect x="${(x(i) - cw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1.5, Math.abs(yc - yo)).toFixed(1)}" fill="${col}"/>`;
     });
+    // EMA / VWAP polylines
+    let serSvg = '';
+    for (const s of series) {
+      const pts = [];
+      s.vals.forEach((v, i) => { if (v != null && v >= lo && v <= hi) pts.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); });
+      if (pts.length > 1)
+        serSvg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${s.col}" stroke-width="${s.vwap ? 1.8 : 1.3}" stroke-dasharray="${s.vwap ? '5,3' : ''}" opacity="0.95"/>`;
+    }
+
     // level lines + right-edge labels (stagger to avoid overlap)
     const used = [];
     const lvlSvg = levels.map(L => {
@@ -15502,7 +15567,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>`;
       }
     } catch (_) {}
-    box.innerHTML = regBar + `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;">${lvlSvg}${svg}${spotSvg}${axis}
+    box.innerHTML = regBar + `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
         <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
@@ -15511,10 +15576,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <rect id="ccTB" width="52" height="15" rx="3" fill="#1a1d23" stroke="#fff" stroke-width="0.5"/>
         <text id="ccT" style="font-size:9.5px;fill:#fff;font-weight:700;" text-anchor="middle"></text>
       </g></svg>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:4px 4px 2px;border-top:1px solid rgba(255,255,255,0.06);">
+        ${series.map(s => {
+          const last = [...s.vals].reverse().find(v => v != null);
+          const rel = (last != null && spot) ? (spot >= last ? 'above' : 'below') : null;
+          return `<span style="display:flex;align-items:center;gap:4px;font-size:10px;" title="${s.vwap ? 'Tick-weighted session VWAP' : 'Exponential moving average over ' + s.period + ' candles of the current interval'}">
+            <span style="width:16px;height:0;border-top:${s.vwap ? '2px dashed' : '2px solid'} ${s.col};display:inline-block;"></span>
+            <b style="color:${s.col};">${s.lab}</b>
+            <span style="color:#cdd;">${last != null ? fmtInt(Math.round(last)) : '—'}</span>
+            ${rel ? `<span style="font-size:8.5px;color:${rel === 'above' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${rel}</span>` : ''}
+            ${s.short ? '<span style="font-size:8px;color:var(--gold,#d4af37);" title="fewer candles loaded than the EMA period — the line is seeded from what exists and will settle as the session fills">short</span>' : ''}
+          </span>`;
+        }).join('') || '<span style="font-size:9px;color:var(--muted);">No overlays selected.</span>'}
+      </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);padding:3px 4px;">
         <span>${cs.length} × ${_chart.interval}m candles</span>
         <span>src: <b>${_chart.src === 'nse_chart' ? 'NSE intraday feed' : 'replay archive (1/min)'}</b></span>
         <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
+        ${_chart.show.vwap ? '<span title="Index feeds carry no traded volume">VWAP = tick-weighted (no index volume published)</span>' : ''}
         ${m ? `<span>9:20 lines frozen at ${escapeHtml(m.frozenAt)} (spot ${fmtInt(Math.round(m.spot920))}, σ ${Math.round(m.sigma)} pts @ ${m.iv.toFixed(1)}% IV)</span>` : '<span>9:20 lines: waiting for 09:20</span>'}
       </div>
       <div id="chartHover" style="font-size:10px;color:#cdd;padding:2px 4px;min-height:14px;"></div>`;
@@ -15581,7 +15660,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       el.checked = !!_chart.show[k];

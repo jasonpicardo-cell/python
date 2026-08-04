@@ -2612,11 +2612,16 @@ class Handler(BaseHTTPRequestHandler):
                     if cur is None or cur["t"] != b:
                         if cur:
                             out.append(cur)
-                        cur = {"t": b, "o": px, "h": px, "l": px, "c": px}
+                        # "n" = tick count in the bucket. Index feeds carry no
+                        # traded volume, so this is the only activity weight
+                        # available; the client uses it for a tick-weighted
+                        # VWAP and labels it honestly as such.
+                        cur = {"t": b, "o": px, "h": px, "l": px, "c": px, "n": 1}
                     else:
                         cur["h"] = max(cur["h"], px)
                         cur["l"] = min(cur["l"], px)
                         cur["c"] = px
+                        cur["n"] = cur.get("n", 1) + 1
                 if cur:
                     out.append(cur)
                 # Chain opens: with one spot sample per minute a 1m bucket holds
