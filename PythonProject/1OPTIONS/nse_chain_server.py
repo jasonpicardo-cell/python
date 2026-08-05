@@ -212,6 +212,121 @@ def _get_15m_oi_delta(symbol: str, strikes: list) -> dict:
 # Writes one full chain snapshot per minute to ./replay/SYMBOL_YYYY-MM-DD.jsonl
 # so the dashboard can scrub back through the day after close. ~20-60KB/min.
 import os as _os
+# ══════════════════════════════════════════════════════════════════════
+# RUN SETTINGS — edit these if you start the server by pressing ▶ Run in an
+# IDE (PyCharm/VS Code) instead of typing a command line.
+#
+# Command-line flags, when given, always WIN over these values, so the two
+# ways of starting the server never fight each other. Environment variables
+# (NSE_LAN, NSE_POLL, NSE_PORT, NSE_POLL_INTERVAL, NSE_CHAIN_TTL) sit in
+# between: they override these defaults but yield to explicit flags.
+# ══════════════════════════════════════════════════════════════════════
+RUN_LAN = True            # True  -> reachable from other computers (binds 0.0.0.0)
+                          # False -> this machine only (127.0.0.1)
+RUN_PORT = 8765
+RUN_POLL = "NIFTY,BANKNIFTY"   # symbols kept warm in the background; "" to disable.
+                               # With polling on, NSE sees one request per symbol
+                               # per cycle no matter how many browsers are open.
+RUN_POLL_INTERVAL = 5.0   # seconds between background polls per symbol
+RUN_TTL = 8.0             # seconds a cached chain counts as fresh
+
+# ══════════════════════════════════════════════════════════════════════
+# SHARED CHAIN CACHE — one NSE request serves every connected browser.
+#
+# Without this, five open tabs meant five identical NSE fetches every
+# refresh: wasteful, slower, and a fast route to NSE rate-limiting or an
+# IP block. Now the server owns the data:
+#   * every /api/chain response is cached per (symbol, expiry, band)
+#   * a request inside the freshness window is served from memory, with
+#     no network call at all
+#   * when the cache IS stale, ONE request does the fetch while the others
+#     wait on the same lock and then read the result (request coalescing),
+#     so a simultaneous refresh by ten clients still makes one NSE call
+#   * an optional background poller keeps hot symbols warm on its own, so
+#     clients almost always hit a warm cache
+# ══════════════════════════════════════════════════════════════════════
+_CHAIN_TTL = float(_os.environ.get("NSE_CHAIN_TTL", RUN_TTL))     # seconds a snapshot counts as fresh
+_chain_cache: dict = {}          # key -> {"data":..., "ts": epoch, "hits": n}
+_chain_locks: dict = {}          # key -> threading.Lock (one fetcher per key)
+_chain_meta_lock = threading.Lock()
+_cache_stats = {"served": 0, "from_cache": 0, "fetches": 0, "coalesced": 0, "clients": {}}
+
+def _cache_key(symbol: str, expiry, band: int) -> str:
+    return f"{symbol}|{expiry or 'near'}|{band}"
+
+def _cached_chain(symbol: str, expiry, band: int, client: str = "?"):
+    """Return a chain response, fetching from NSE only when genuinely needed.
+
+    Returns (data, meta) where meta describes how the request was served so
+    the UI can show whether it hit cache and how old the data is.
+    """
+    key = _cache_key(symbol, expiry, band)
+    now = time.time()
+    with _chain_meta_lock:
+        _cache_stats["served"] += 1
+        _cache_stats["clients"][client] = now
+        ent = _chain_cache.get(key)
+        fresh = ent and (now - ent["ts"]) < _CHAIN_TTL
+        if fresh:
+            ent["hits"] += 1
+            _cache_stats["from_cache"] += 1
+            return ent["data"], {"cache": "hit", "age": round(now - ent["ts"], 2),
+                                 "ttl": _CHAIN_TTL, "shared_hits": ent["hits"]}
+        lock = _chain_locks.get(key)
+        if lock is None:
+            lock = _chain_locks[key] = threading.Lock()
+        already_fetching = lock.locked()
+    if already_fetching:
+        with _chain_meta_lock:
+            _cache_stats["coalesced"] += 1
+    # Only one thread per key gets through here; the rest queue and then find
+    # the freshly-stored snapshot waiting for them.
+    with lock:
+        now = time.time()
+        with _chain_meta_lock:
+            ent = _chain_cache.get(key)
+        if ent and (now - ent["ts"]) < _CHAIN_TTL:
+            with _chain_meta_lock:
+                ent["hits"] += 1
+                _cache_stats["from_cache"] += 1
+            return ent["data"], {"cache": "coalesced", "age": round(now - ent["ts"], 2),
+                                 "ttl": _CHAIN_TTL, "shared_hits": ent["hits"]}
+        data = _build_response(symbol, expiry, band)
+        with _chain_meta_lock:
+            _chain_cache[key] = {"data": data, "ts": time.time(), "hits": 0}
+            _cache_stats["fetches"] += 1
+        try:
+            _write_replay_snapshot(symbol, data)
+        except Exception:
+            pass
+        return data, {"cache": "miss", "age": 0.0, "ttl": _CHAIN_TTL, "shared_hits": 0}
+
+_poller_stop = threading.Event()
+_poller_symbols: list = []
+
+def _poller_loop(interval: float):
+    """Keep hot symbols warm so browsers essentially always hit cache."""
+    while not _poller_stop.is_set():
+        for sym in list(_poller_symbols):
+            if _poller_stop.is_set():
+                break
+            try:
+                _cached_chain(sym, None, 12, client="poller")
+            except Exception as e:  # noqa: BLE001
+                print(f"[poller] {sym}: {e}")
+        _poller_stop.wait(interval)
+
+def _start_poller(symbols, interval: float):
+    global _poller_symbols
+    _poller_symbols = [s.upper() for s in symbols if s]
+    if not _poller_symbols:
+        return
+    t = threading.Thread(target=_poller_loop, args=(interval,), daemon=True)
+    t.start()
+    print(f"[i] Background poller: {', '.join(_poller_symbols)} every {interval}s "
+          f"(browsers read the shared cache; NSE sees one request per symbol per cycle)")
+
+_TICK_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "ticks")
 _REPLAY_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "replay")
 _REPLAY_INTERVAL = 60
 _replay_due: dict = {}    # sym -> bool (set by chain fetch, consumed after response build)
@@ -2379,10 +2494,19 @@ class Handler(BaseHTTPRequestHandler):
                 }, status=400)
                 return
 
-            print(f"[i] {self.command} /api/chain symbol={symbol} expiry={expiry} band={band}")
+            client = self.client_address[0] if self.client_address else "?"
             try:
-                data = _build_response(symbol, expiry, band)
-                _write_replay_snapshot(symbol, data)   # session recorder (1/min)
+                data, meta = _cached_chain(symbol, expiry, band, client=client)
+                # tell the UI how this was served (cache hit vs live fetch)
+                try:
+                    data = dict(data)
+                    data["_cache"] = meta
+                except Exception:
+                    pass
+                if meta["cache"] != "miss":
+                    print(f"[cache {meta['cache']}] /api/chain {symbol} age={meta['age']}s -> {client}")
+                else:
+                    print(f"[FETCH] /api/chain {symbol} exp={expiry} band={band} -> {client}")
                 self._send_json(data)
             except NSEFetchError as e:
                 print(f"[!] Fetch error: {e}")
@@ -2636,56 +2760,154 @@ class Handler(BaseHTTPRequestHandler):
                     out[i]["l"] = min(out[i]["l"], po)
                 return out
 
-            ticks, src = [], None
-            if symbol in idx_names and _shared_fetcher and getattr(_shared_fetcher, "_warmed", False):
+            # ── Gather ticks from EVERY available source and merge them ──
+            # A server started at 09:30 must still show 09:15 onward, so we:
+            #   1. pull NSE's own intraday series (full day from the open),
+            #      warming the session ourselves if nothing has warmed it yet
+            #   2. add today's replay samples (covers any NSE gap)
+            #   3. add the on-disk tick archive (survives server restarts)
+            # then de-duplicate to one price per minute.
+            ticks, srcs = [], []
+
+            def _warm_fetcher():
+                """Return a warmed session, warming one on demand if needed."""
+                global _shared_fetcher
+                f = _shared_fetcher
+                if f is not None and getattr(f, "_warmed", False):
+                    return f
                 try:
-                    from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
-                    from urllib.parse import quote as _q
-                    h = dict(API_HEADERS)
-                    h["Referer"] = NSE_OC_PAGE
-                    url = "https://www.nseindia.com/api/chart-databyindex?index=" + _q(idx_names[symbol]) + "&indices=true"
-                    r = _shared_fetcher.session.get(url, headers=h, timeout=12)
-                    if r.status_code == 200:
-                        pl = r.json() if isinstance(r.json(), dict) else {}
-                        rows = pl.get("grapthData") or pl.get("graphData") or []
-                        today0 = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
-                        for row in rows:
-                            if not isinstance(row, (list, tuple)) or len(row) < 2:
-                                continue
-                            ts = float(row[0]) / 1000.0
-                            if ts < today0:
-                                continue
-                            ticks.append((ts, float(row[4]) if len(row) >= 5 else float(row[1])))
-                        if ticks:
-                            src = "nse_chart"
-                except Exception as e:  # noqa: BLE001
-                    print("[!] intraday chart feed failed: " + str(e))
-            if not ticks:
-                day = time.strftime("%Y-%m-%d")
-                path = _os.path.join(_REPLAY_DIR, symbol + "_" + day + ".jsonl")
-                if _os.path.exists(path):
+                    f = NSESession()
+                    f._warm_up()
                     try:
-                        with open(path) as f:
-                            for line in f:
-                                try:
-                                    s = json.loads(line)
-                                    v, t = s.get("underlying_value"), s.get("_replay_ts")
-                                    if v and t:
-                                        ticks.append((float(t), float(v)))
-                                except Exception:
-                                    continue
-                        if ticks:
-                            src = "replay"
+                        f._warmed = True
                     except Exception:
                         pass
+                    if _shared_fetcher is None:
+                        _shared_fetcher = f
+                    return f
+                except Exception as e:  # noqa: BLE001
+                    print(f"[candles] could not warm a session: {e}")
+                    return None
+
+            # 1 ── NSE intraday series (authoritative back-history for today)
+            if symbol in idx_names:
+                ftch = _warm_fetcher()
+                if ftch is not None:
+                    try:
+                        from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+                        from urllib.parse import quote as _q
+                        h = dict(API_HEADERS)
+                        h["Referer"] = NSE_OC_PAGE
+                        url = "https://www.nseindia.com/api/chart-databyindex?index=" + _q(idx_names[symbol]) + "&indices=true"
+                        r = ftch.session.get(url, headers=h, timeout=12)
+                        if r.status_code == 200:
+                            pl = r.json() if isinstance(r.json(), dict) else {}
+                            rows = pl.get("grapthData") or pl.get("graphData") or []
+                            today0 = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
+                            got = 0
+                            for row in rows:
+                                if not isinstance(row, (list, tuple)) or len(row) < 2:
+                                    continue
+                                ts = float(row[0]) / 1000.0
+                                if ts < today0:
+                                    continue
+                                ticks.append((ts, float(row[4]) if len(row) >= 5 else float(row[1])))
+                                got += 1
+                            if got:
+                                srcs.append(f"nse_chart({got})")
+                        else:
+                            print(f"[candles] chart feed HTTP {r.status_code}")
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[candles] chart feed failed: {e}")
+
+            # 2 ── today's replay snapshots
+            day = time.strftime("%Y-%m-%d")
+            rpath = _os.path.join(_REPLAY_DIR, symbol + "_" + day + ".jsonl")
+            if _os.path.exists(rpath):
+                got = 0
+                try:
+                    with open(rpath) as f:
+                        for line in f:
+                            try:
+                                s = json.loads(line)
+                                v, t = s.get("underlying_value"), s.get("_replay_ts")
+                                if v and t:
+                                    ticks.append((float(t), float(v)))
+                                    got += 1
+                            except Exception:
+                                continue
+                except Exception:
+                    pass
+                if got:
+                    srcs.append(f"replay({got})")
+
+            # 3 ── persistent tick archive (so a restart never loses back-history)
+            apath = _os.path.join(_TICK_DIR, symbol + "_" + day + ".csv")
+            if _os.path.exists(apath):
+                got = 0
+                try:
+                    with open(apath) as f:
+                        for line in f:
+                            p = line.strip().split(",")
+                            if len(p) >= 2:
+                                try:
+                                    ticks.append((float(p[0]), float(p[1])))
+                                    got += 1
+                                except Exception:
+                                    continue
+                except Exception:
+                    pass
+                if got:
+                    srcs.append(f"archive({got})")
+
+            # ── de-duplicate to one sample per minute (first writer wins) ──
+            if ticks:
+                by_min = {}
+                for ts, px in sorted(ticks):
+                    by_min.setdefault(int(ts // 60), (ts, px))
+                ticks = sorted(by_min.values())
+                # persist the merged series so tomorrow's restart-at-noon works too
+                try:
+                    _os.makedirs(_TICK_DIR, exist_ok=True)
+                    with open(apath, "w") as f:
+                        for ts, px in ticks:
+                            f.write(f"{int(ts)},{px}\n")
+                except Exception as e:  # noqa: BLE001
+                    print(f"[candles] archive write failed: {e}")
+
             if not ticks:
-                self._send_json({"error": "no intraday data yet - warm the session by loading a chain, or let the replay recorder run a few minutes",
+                self._send_json({"error": "no intraday data yet - the NSE chart feed is unreachable and nothing has been recorded today",
                                  "candles": [], "symbol": symbol, "interval": interval})
                 return
             candles = _bucket(ticks, interval)
-            self._send_json({"symbol": symbol, "interval": interval, "source": src,
+            first = time.strftime("%H:%M", time.localtime(ticks[0][0]))
+            last = time.strftime("%H:%M", time.localtime(ticks[-1][0]))
+            self._send_json({"symbol": symbol, "interval": interval,
+                             "source": "+".join(srcs) or "none",
+                             "coverage": f"{first}-{last}",
                              "candles": candles, "count": len(candles),
                              "asOf": time.strftime("%H:%M:%S")})
+            return
+
+        if parsed.path == "/api/cache-stats":
+            now = time.time()
+            with _chain_meta_lock:
+                entries = [{"key": k, "age": round(now - v["ts"], 1), "shared_hits": v["hits"]}
+                           for k, v in _chain_cache.items()]
+                clients = {ip: round(now - t, 1) for ip, t in _cache_stats["clients"].items()
+                           if now - t < 300}
+                s = dict(_cache_stats)
+            served, cached = s["served"], s["from_cache"]
+            self._send_json({
+                "ttl": _CHAIN_TTL,
+                "served": served, "from_cache": cached, "fetches": s["fetches"],
+                "coalesced": s["coalesced"],
+                "hit_rate": round(cached / served * 100, 1) if served else 0.0,
+                "nse_calls_saved": max(0, served - s["fetches"]),
+                "entries": sorted(entries, key=lambda x: x["age"]),
+                "active_clients": clients,
+                "poller": _poller_symbols,
+            })
             return
 
         if parsed.path == "/api/today-open":
@@ -3517,6 +3739,28 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Straddle history failed: {e}"}, status=500)
             return
 
+        # ── static files: lets other computers load the dashboard itself from
+        #    this server (http://<host>:<port>/nse_dashboard.html) instead of
+        #    needing a copy of the HTML on every machine.
+        if parsed.path in ("/", "/index.html", "/nse_dashboard.html"):
+            fname = "nse_dashboard.html"
+            fpath = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), fname)
+            if _os.path.exists(fpath):
+                try:
+                    with open(fpath, "rb") as f:
+                        body = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    self.wfile.write(body)
+                except Exception as e:  # noqa: BLE001
+                    self._send_json({"error": f"Could not read {fname}: {e}"}, status=500)
+            else:
+                self._send_json({"error": f"{fname} not found next to the server script"}, status=404)
+            return
+
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)
 
     def do_POST(self):
@@ -3753,9 +3997,36 @@ def _start_session_rewarm_thread() -> None:
 
 def main():
     ap = argparse.ArgumentParser(description="Local API server for the NSE options dashboard")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--host", default="127.0.0.1")
+    env = _os.environ.get
+    def _envbool(name, dflt):
+        v = env(name)
+        return dflt if v is None else v.strip().lower() in ("1", "true", "yes", "on")
+
+    dflt_lan  = _envbool("NSE_LAN", RUN_LAN)
+    dflt_host = "0.0.0.0" if dflt_lan else "127.0.0.1"
+    ap.add_argument("--port", type=int, default=int(env("NSE_PORT", RUN_PORT)))
+    ap.add_argument("--host", default=dflt_host,
+                    help="0.0.0.0 to serve every machine on your LAN")
+    ap.add_argument("--lan", action="store_true",
+                    help="shorthand for --host 0.0.0.0 (multi-computer access)")
+    ap.add_argument("--no-lan", action="store_true",
+                    help="force this machine only, overriding RUN_LAN in the file")
+    ap.add_argument("--poll", default=env("NSE_POLL", RUN_POLL),
+                    help="comma-separated symbols to keep warm in the background, "
+                         "e.g. --poll NIFTY,BANKNIFTY. Browsers then read the shared "
+                         "cache and NSE sees one request per symbol per cycle.")
+    ap.add_argument("--poll-interval", type=float,
+                    default=float(env("NSE_POLL_INTERVAL", RUN_POLL_INTERVAL)),
+                    help="seconds between background polls per symbol")
+    ap.add_argument("--ttl", type=float, default=None,
+                    help="seconds a cached chain counts as fresh")
     args = ap.parse_args()
+    if args.lan:
+        args.host = "0.0.0.0"
+    if args.no_lan:
+        args.host = "127.0.0.1"
+    if args.ttl is not None:
+        globals()["_CHAIN_TTL"] = args.ttl
 
     nse_alerts.ensure_config_file_exists()
     alert_cfg = nse_alerts.load_config()
@@ -3772,8 +4043,27 @@ def main():
     # Start session re-warm thread — prevents silent cookie expiry mid-session
     _start_session_rewarm_thread()
 
+    # Background poller: keeps hot symbols warm so every browser hits cache.
+    if args.poll:
+        _start_poller([s.strip() for s in args.poll.split(",")], args.poll_interval)
+
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[i] NSE chain server running at http://{args.host}:{args.port}")
+    if args.host == "0.0.0.0":
+        try:
+            import socket as _sock
+            s = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
+        except Exception:
+            lan_ip = "<this-machine-ip>"
+        print(f"[i] LAN mode: other computers open  http://{lan_ip}:{args.port}/nse_dashboard.html")
+        print(f"[i] They must set the same address in the dashboard's Server URL box.")
+    print(f"[i] Shared chain cache: TTL {_CHAIN_TTL}s — simultaneous browsers are coalesced "
+          f"into ONE NSE request; check /api/cache-stats")
+    if len(sys.argv) == 1:
+        print(f"[i] Started with no arguments (IDE Run) — using the RUN_* settings near the "
+              f"top of this file: LAN={'on' if args.host == '0.0.0.0' else 'off'}, "
+              f"port={args.port}, poll={args.poll or 'off'}. Edit those lines to change.")
     print(f"[i] Try it: http://{args.host}:{args.port}/api/chain?symbol=NIFTY")
     print(f"[i] Telegram alerts: {alert_status}")
     print(f"[i] .jsonl history writes disabled — prev-day OHLC always fetched live from NSE")

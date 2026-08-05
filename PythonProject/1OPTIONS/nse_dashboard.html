@@ -1845,6 +1845,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <button class="btn" id="zoomInBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom in (or press +)">+</button>
                 <span id="zoomVal" style="font-size:9px;color:var(--gold,#d4af37);min-width:30px;">1.0&times;</span>
                 <button class="btn" id="zoomFitBtn" style="font-size:9px;padding:1px 7px;" title="Reset to auto-fit (or double-click the chart)">Fit</button>
+                <label style="font-size:9px;color:var(--muted,#789);margin-left:4px;" title="How often the chart pulls candles from the server. Thanks to the shared cache this costs NO extra NSE requests — several browsers polling fast still collapse into one server fetch.">poll
+                  <select id="chartPoll" class="ohlc-inp" style="font-size:9px;padding:1px 3px;">
+                    <option value="2">2s</option><option value="5">5s</option>
+                    <option value="10">10s</option><option value="30">30s</option><option value="60">60s</option>
+                  </select></label>
                 <button class="btn" id="chartMaxBtn" style="font-size:11px;padding:0 7px;line-height:16px;margin-left:4px;" title="Maximise chart to full page (Esc to exit)">&#9974;</button>
                 <button class="btn" id="panUpBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view up">&#9650;</button>
                 <button class="btn" id="panDnBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view down">&#9660;</button>
@@ -10903,8 +10908,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const age = state._lastFetchTs ? Math.round((Date.now() - state._lastFetchTs) / 1000) : null;
     const lat = state._lastLatency, err = state._errCount || 0;
     const stale = age !== null && age > 30;
+    const cm = state._cacheMeta;
+    const cacheTxt = cm
+      ? ` · <span style="color:${cm.cache === 'miss' ? 'var(--gold,#d4af37)' : 'var(--pos,#26a69a)'};" title="${cm.cache === 'miss' ? 'this request went to NSE' : 'served from the server\'s shared cache — no NSE call'}">${cm.cache === 'miss' ? '🌐 live' : '📦 cached ' + cm.age + 's'}</span>`
+      : '';
     el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` +
-      (lat ? ` · ⚡${lat}ms` : '') +
+      (lat ? ` · ⚡${lat}ms` : '') + cacheTxt +
       (err ? ` · <span style="color:var(--neg,#ef5350);">⚠${err}</span>` : '') ;
     el.style.color = stale ? 'var(--neg,#ef5350)' : 'var(--muted,#789)';
     el.title = 'Data freshness: chain age · last fetch latency · error count this session' + (stale ? ' — STALE: check auto-refresh/server' : '');
@@ -13639,6 +13648,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const data = await resp.json();
       state._lastLatency = Math.round(performance.now() - _ft0);
       state._lastFetchTs = Date.now();
+      state._cacheMeta = data && data._cache ? data._cache : null;
 
       if (!resp.ok || data.error) {
         throw new Error(data.error || `HTTP ${resp.status}`);
@@ -13709,7 +13719,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _freshFlowCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
     try { renderRegimeSignals(data); } catch (_) {}
-    try { if (_chart.candles.length) renderPriceChart(); } catch (_) {}
+    try {
+      if (_chart.candles.length) {
+        _chartLiveExtend(data?.underlying_value);
+        renderPriceChart();
+      }
+    } catch (_) {}
     try { _m920TouchCheck(data); } catch (_) {}
     try {
       renderMarketPulse(data);
@@ -15381,10 +15396,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }; }
   }
-  function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, show: _chart.show })); } catch (_) {} }
+  function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
   // ── 9:20 lines: frozen once per day from the 9:20 chain snapshot ──
   // Transparent formula (NOT a clone of any vendor's proprietary levels):
@@ -15508,14 +15523,43 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             const rk = 'R' + i, sk = 'S' + i;
             // fade the outer levels so the near ones stay readable
             const op = i <= 2 ? '' : '3,4';
-            if (pv[rk]) L.push({ v: pv[rk], lab: `${tag} ${rk}`, col: '#e8a2a2', dash: op || '5,4' });
-            if (pv[sk]) L.push({ v: pv[sk], lab: `${tag} ${sk}`, col: '#9dd6c4', dash: op || '5,4' });
+            // solid lines: near levels full strength, outer levels thinner/fainter
+            if (pv[rk]) L.push({ v: pv[rk], lab: `${tag} ${rk}`, col: '#e8a2a2', dash: '', minor: i > 2 });
+            if (pv[sk]) L.push({ v: pv[sk], lab: `${tag} ${sk}`, col: '#9dd6c4', dash: '', minor: i > 2 });
           }
         }
       } catch (_) {}
     }
     return L.filter(x => x.v && isFinite(x.v));
   }
+  // ── keep the newest candle growing between server polls ──
+  // The server owns completed bars; between fetches we extend the forming bar
+  // with the live spot the chain already gives us, so the chart moves with the
+  // market instead of freezing until the next poll. Nothing here invents data:
+  // it only stretches high/low and moves close to a price we actually received.
+  function _chartLiveExtend(spot) {
+    const cs = _chart.candles;
+    if (!cs.length || !spot || !isFinite(spot)) return false;
+    const bucket = _chart.interval * 60;
+    const nowSec = Date.now() / 1000;
+    const curT = Math.floor(nowSec / bucket) * bucket;
+    const last = cs[cs.length - 1];
+    if (curT > last.t) {
+      // a new bar has started since the last server fetch — open it at the
+      // previous close so the series stays continuous
+      cs.push({ t: curT, o: last.c, h: Math.max(last.c, spot), l: Math.min(last.c, spot), c: spot, n: 1, _live: true });
+      if (cs.length > 600) cs.shift();
+    } else if (curT === last.t) {
+      last.h = Math.max(last.h, spot);
+      last.l = Math.min(last.l, spot);
+      last.c = spot;
+      last.n = (last.n || 1) + 1;
+      last._live = true;
+    } else return false;
+    _chart.liveBar = true;
+    return true;
+  }
+
   async function fetchCandles(silent) {
     const box = document.getElementById('chartBody');
     if (!box) return;
@@ -15525,7 +15569,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const r = await fetch(`${base}/api/intraday-candles?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&interval=${_chart.interval}`);
       const j = await r.json();
       if (j.error) { box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error)}</div>`; _chart.candles = []; return; }
-      _chart.candles = j.candles || []; _chart.src = j.source;
+      _chart.candles = j.candles || []; _chart.src = j.source; _chart.coverage = j.coverage || null;
       renderPriceChart();
     } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
   }
@@ -15592,18 +15636,31 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { if (typeof _zoomSync === 'function') _zoomSync(); } catch (_) {}
     const x = i => padL + (i + 0.5) / cs.length * (W - padL - padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
-    const cw = Math.max(1.5, Math.min(11, (W - padL - padR) / cs.length * 0.62));
-    // candles
+    // TradingView candle geometry: body width ~80% of slot with a 1px gap,
+    // wick centred and scaled to the body width (never wider than 25% of it,
+    // min 1px), body outlined in its own colour so doji bars stay visible.
+    const slot = (W - padL - padR) / cs.length;
+    const cw = Math.max(1, Math.min(24, Math.floor(slot * 0.8)));
+    const wickW = Math.max(1, Math.min(3, Math.round(cw * 0.25)));
     let svg = '';
     cs.forEach((c, i) => {
       // colour by body; for a flat body fall back to change vs the previous close
       const prevC = i > 0 ? cs[i - 1].c : c.o;
       const up = c.c > c.o ? true : c.c < c.o ? false : (c.c >= prevC);
       const col = up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
-      const yo = y(c.o), yc = y(c.c);
-      const yh = y(c.h), yl = y(c.l);
-      svg += `<line x1="${x(i).toFixed(1)}" y1="${yh.toFixed(1)}" x2="${x(i).toFixed(1)}" y2="${(Math.max(yl, yh + 1)).toFixed(1)}" stroke="${col}" stroke-width="1.1"/>`;
-      svg += `<rect x="${(x(i) - cw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1.5, Math.abs(yc - yo)).toFixed(1)}" fill="${col}"/>`;
+      const cx = x(i);
+      const yo = y(c.o), yc = y(c.c), yh = y(c.h), yl = y(c.l);
+      const bodyTop = Math.min(yo, yc), bodyBot = Math.max(yo, yc);
+      // upper wick: high -> top of body; lower wick: bottom of body -> low
+      if (yh < bodyTop - 0.2)
+        svg += `<rect x="${(cx - wickW / 2).toFixed(2)}" y="${yh.toFixed(2)}" width="${wickW}" height="${(bodyTop - yh).toFixed(2)}" fill="${col}"/>`;
+      if (yl > bodyBot + 0.2)
+        svg += `<rect x="${(cx - wickW / 2).toFixed(2)}" y="${bodyBot.toFixed(2)}" width="${wickW}" height="${(yl - bodyBot).toFixed(2)}" fill="${col}"/>`;
+      const bodyH = Math.max(1, bodyBot - bodyTop);
+      svg += `<rect x="${(cx - cw / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${cw}" height="${bodyH.toFixed(2)}" fill="${col}" stroke="${col}" stroke-width="0.6" shape-rendering="crispEdges"/>`;
+      // live bar: outline it so the forming candle is obvious
+      if (i === cs.length - 1 && _chart.liveBar)
+        svg += `<rect x="${(cx - cw / 2 - 1).toFixed(2)}" y="${(bodyTop - 1).toFixed(2)}" width="${cw + 2}" height="${(bodyH + 2).toFixed(2)}" fill="none" stroke="#fff" stroke-width="0.7" opacity="0.55"/>`;
     });
     // EMA / VWAP polylines
     let serSvg = '';
@@ -15616,13 +15673,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // level lines + right-edge labels (stagger to avoid overlap)
     const used = [];
+    // levels: plain horizontal lines. Pivots are solid; outer pivot levels
+    // (R3+/S3+) are thinner and fainter so the near ones stay dominant.
     const lvlSvg = levels.map(L => {
       if (L.v < lo || L.v > hi) return '';
-      let ly = y(L.v);
+      const yv = y(L.v);
+      let ly = yv;
       while (used.some(u => Math.abs(u - ly) < 9)) ly += 9;
       used.push(ly);
-      return `<line x1="${padL}" y1="${y(L.v).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y(L.v).toFixed(1)}" stroke="${L.col}" stroke-width="${L.wide ? 1.4 : 1}" stroke-dasharray="${L.dash}" opacity="0.85"/>
-        <text x="${(W - padR + 3).toFixed(1)}" y="${(ly + 3).toFixed(1)}" style="font-size:9px;fill:${L.col};font-weight:600;">${L.lab} ${fmtInt(Math.round(L.v))}</text>`;
+      const line = `<line x1="${padL}" y1="${yv.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yv.toFixed(1)}" stroke="${L.col}" stroke-width="${L.wide ? 1.4 : L.minor ? 0.8 : 1}" stroke-dasharray="${L.dash}" opacity="${L.minor ? 0.55 : 0.85}"/>`;
+      return line + `<text x="${(W - padR + 3).toFixed(1)}" y="${(ly + 3).toFixed(1)}" style="font-size:9px;fill:${L.col};font-weight:600;">${L.lab} ${fmtInt(Math.round(L.v))}</text>`;
     }).join('');
     // live price line
     let spotSvg = '';
@@ -15659,6 +15719,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <text id="ccP" style="font-size:9.5px;fill:#fff;font-weight:700;"></text>
         <rect id="ccTB" width="52" height="15" rx="3" fill="#1a1d23" stroke="#fff" stroke-width="0.5"/>
         <text id="ccT" style="font-size:9.5px;fill:#fff;font-weight:700;" text-anchor="middle"></text>
+      </g>
+      <g id="lvlTip" style="display:none;pointer-events:none;">
+        <rect id="ltBg" rx="3" fill="#11141a" stroke="#fff" stroke-width="0.6" opacity="0.96"/>
+        <text id="ltTx" style="font-size:10px;font-weight:700;"></text>
       </g></svg>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:4px 4px 2px;border-top:1px solid rgba(255,255,255,0.06);">
         ${series.map(s => {
@@ -15676,7 +15740,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);padding:3px 4px;">
         <span>${cs.length} × ${_chart.interval}m candles</span>
         <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
-        <span>src: <b>${_chart.src === 'nse_chart' ? 'NSE intraday feed' : 'replay archive (1/min)'}</b></span>
+        <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
+        ${_chart.coverage ? `<span title="Time span covered by the merged data">covers <b>${escapeHtml(_chart.coverage)}</b></span>` : ''}
         <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
         ${_chart.show.vwap ? '<span title="Index feeds carry no traded volume">VWAP = tick-weighted (no index volume published)</span>' : ''}
         ${m ? `<span>9:20 lines frozen at ${escapeHtml(m.frozenAt)} (spot ${fmtInt(Math.round(m.spot920))}, σ ${Math.round(m.sigma)} pts @ ${m.iv.toFixed(1)}% IV)</span>` : '<span>9:20 lines: waiting for 09:20</span>'}
@@ -15721,7 +15786,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       svgEl.addEventListener('touchend', _dragEnd);
 
       svgEl.addEventListener('mousemove', ev => {
-        if (_chart.drag) { g.style.display = 'none'; hv.textContent = ''; return; }   // no crosshair while panning
+        if (_chart.drag) { g.style.display = 'none'; hv.textContent = ''; const t0 = document.getElementById('lvlTip'); if (t0) t0.style.display = 'none'; return; }   // no crosshair while panning
         const r = svgEl.getBoundingClientRect();
         const px = (ev.clientX - r.left) / r.width * W;
         const py = (ev.clientY - r.top) / r.height * H;
@@ -15740,10 +15805,35 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         tb.setAttribute('x', tx - 26); tb.setAttribute('y', H - padB + 4);
         tt.setAttribute('x', tx); tt.setAttribute('y', H - padB + 15);
         tt.textContent = new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        // nearest level line under the pointer -> floating label with its value
+        const tip = document.getElementById('lvlTip'), tBg = document.getElementById('ltBg'), tTx = document.getElementById('ltTx');
+        if (tip && tBg && tTx) {
+          let best = null, bestDy = 7;               // within ~7 svg units
+          for (const L of levels) {
+            if (L.v < lo || L.v > hi) continue;
+            const dy = Math.abs(y(L.v) - py);
+            if (dy < bestDy) { bestDy = dy; best = L; }
+          }
+          if (best) {
+            const label = `${best.lab}  ${fmtInt(Math.round(best.v))}`;
+            const dist = spot ? `  (${spot >= best.v ? '+' : ''}${Math.round(spot - best.v)} from spot)` : '';
+            const txt = label + dist;
+            tTx.textContent = txt;
+            const wpx = txt.length * 5.4 + 12;
+            const tx = Math.min(W - padR - wpx - 4, Math.max(padL + 4, px + 12));
+            const ty = y(best.v) - 9;
+            tBg.setAttribute('x', tx); tBg.setAttribute('y', ty);
+            tBg.setAttribute('width', wpx); tBg.setAttribute('height', 17);
+            tBg.setAttribute('stroke', best.col);
+            tTx.setAttribute('x', tx + 6); tTx.setAttribute('y', ty + 12);
+            tTx.setAttribute('fill', best.col);
+            tip.style.display = '';
+          } else tip.style.display = 'none';
+        }
         const up2 = c2.c >= c2.o;
         hv.innerHTML = `<b>${new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</b> &nbsp; O <b>${fmtInt(Math.round(c2.o))}</b> H <b>${fmtInt(Math.round(c2.h))}</b> L <b>${fmtInt(Math.round(c2.l))}</b> C <b style="color:${up2 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(c2.c))}</b> &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(val))}</span>`;
       });
-      svgEl.addEventListener('mouseleave', () => { g.style.display = 'none'; hv.textContent = ''; });
+      svgEl.addEventListener('mouseleave', () => { g.style.display = 'none'; hv.textContent = ''; const t1 = document.getElementById('lvlTip'); if (t1) t1.style.display = 'none'; });
       // wheel = vertical zoom anchored at the cursor price (like TradingView's
       // price axis). Shift+wheel or wheel over the right axis zooms faster.
       svgEl.addEventListener('wheel', ev => {
@@ -15791,9 +15881,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
   }
 
+  // When the dashboard is served BY the server (LAN mode), default the API
+  // address to wherever the page came from — so other computers work with
+  // zero configuration instead of pointing at their own localhost.
+  (() => {
+    try {
+      if (!/^https?:/.test(location.protocol)) return;         // opened as file:// -> keep saved value
+      const origin = location.origin;
+      const saved = localStorage.getItem('serverUrl');
+      if (els.serverUrl && (!saved || /127\.0\.0\.1|localhost/.test(saved)) && !/127\.0\.0\.1|localhost/.test(origin)) {
+        els.serverUrl.value = origin;
+        localStorage.setItem('serverUrl', origin);
+      }
+    } catch (_) {}
+  })();
+
   function _chartWire() {
     const cfg = _chartCfgLoad();
-    _chart.interval = cfg.interval; _chart.show = cfg.show;
+    _chart.interval = cfg.interval; _chart.show = cfg.show; _chart.pollSec = cfg.pollSec || 5;
+    const pollSel = document.getElementById('chartPoll');
+    if (pollSel) {
+      pollSel.value = String(_chart.pollSec);
+      pollSel.addEventListener('change', () => {
+        _chart.pollSec = +pollSel.value; _chartCfgSave();
+        if (_chart.timer) clearInterval(_chart.timer);
+        _chart.timer = setInterval(() => fetchCandles(true), _chart.pollSec * 1000);
+        fetchCandles(true);
+      });
+    }
     document.querySelectorAll('.chart-iv').forEach(b => {
       b.classList.toggle('active', +b.dataset.iv === _chart.interval);
       b.addEventListener('click', () => {
@@ -15872,7 +15987,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     fetchCandles();
     if (_chart.timer) clearInterval(_chart.timer);
-    _chart.timer = setInterval(() => fetchCandles(true), 60000);   // candles refresh 1/min
+    const secs = Math.max(2, Math.min(120, _chart.pollSec || 5));
+    _chart.timer = setInterval(() => fetchCandles(true), secs * 1000);
   }
   _chartWire();   // safe here: _chart (const) is initialized above this point
 
