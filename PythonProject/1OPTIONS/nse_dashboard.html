@@ -626,6 +626,12 @@
   .pmgr-box label { display:flex; gap:7px; align-items:center; font-size:11px; padding:3px 0; cursor:pointer; }
   /* ── Delta templates ── */
   .dtpl-row { display:flex; gap:5px; flex-wrap:wrap; padding:4px 0; }
+  #chartPanel.chart-maxed { position:fixed; inset:0; z-index:2500; margin:0; border-radius:0;
+    background:var(--bg,#0f1115); display:flex; flex-direction:column; overflow:auto; padding:6px 10px 10px; }
+  #chartPanel.chart-maxed .level-panel-head { position:sticky; top:0; background:var(--bg,#0f1115); z-index:2; padding-bottom:6px; }
+  #chartPanel.chart-maxed #chartBody { flex:1; display:flex; flex-direction:column; }
+  #chartPanel.chart-maxed #chartBody svg { flex:1; min-height:0; }
+  body.chart-maxed-lock { overflow:hidden; }
   .layman-note { margin-top:5px; border-top:1px dashed rgba(255,255,255,0.08); padding-top:3px; }
   .layman-note summary { font-size:9px; color:var(--muted,#789); cursor:pointer; user-select:none; opacity:0.75; }
   .layman-note summary:hover { opacity:1; color:var(--gold,#d4af37); }
@@ -1832,6 +1838,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div class="level-panel" id="chartPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
               <span class="skew-chart-title">📈 Live Chart &amp; Levels<i class="hi" data-h="price-chart">i</i></span>
+              <span style="display:flex;gap:4px;align-items:center;">
+                <span style="font-size:9px;color:var(--muted,#789);">Zoom</span>
+                <button class="btn" id="zoomOutBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom out (or press -)">&minus;</button>
+                <input type="range" id="zoomSlider" min="0" max="100" value="20" step="1" style="width:110px;accent-color:var(--gold,#d4af37);cursor:pointer;" title="Drag to zoom the price axis">
+                <button class="btn" id="zoomInBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom in (or press +)">+</button>
+                <span id="zoomVal" style="font-size:9px;color:var(--gold,#d4af37);min-width:30px;">1.0&times;</span>
+                <button class="btn" id="zoomFitBtn" style="font-size:9px;padding:1px 7px;" title="Reset to auto-fit (or double-click the chart)">Fit</button>
+                <button class="btn" id="chartMaxBtn" style="font-size:11px;padding:0 7px;line-height:16px;margin-left:4px;" title="Maximise chart to full page (Esc to exit)">&#9974;</button>
+                <button class="btn" id="panUpBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view up">&#9650;</button>
+                <button class="btn" id="panDnBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view down">&#9660;</button>
+              </span>
               <span style="display:flex;gap:3px;">
                 <button class="btn chart-iv active" data-iv="1" style="font-size:9px;padding:2px 8px;">1m</button>
                 <button class="btn chart-iv" data-iv="3" style="font-size:9px;padding:2px 8px;">3m</button>
@@ -1845,6 +1862,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_maxpain"> Max pain</label>
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
+                <select id="chartPivotType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Pivot formula drawn on the chart (independent of the Pivot Levels panel)">
+                  <option value="classic">Classic</option>
+                  <option value="fibonacci">Fibonacci</option>
+                  <option value="traditional">Traditional</option>
+                  <option value="camarilla">Camarilla</option>
+                  <option value="woodie">Woodie</option>
+                  <option value="demark">DeMark</option>
+                </select>
               </span>
               <span style="display:flex;gap:7px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;">
                 <label><input type="checkbox" id="chk_ema5"> EMA5</label>
@@ -15353,11 +15378,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   // ══ Live candle chart with option-derived levels ══
-  const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null };
+  const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, show: _chart.show })); } catch (_) {} }
 
@@ -15465,14 +15490,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         L.push({ v: m.EOSm1, lab: 'EOS-1', col: '#6ee7b7', dash: '', wide: true });
       }
     }
-    if (_chart.show.pivots && typeof PIVOT_TYPES === 'function') { /* pivots handled below */ }
     if (_chart.show.pivots) {
       try {
-        const fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
-        if (fr) {
-          const type = document.getElementById('pivotTypeSelect')?.value || 'fibonacci';
-          const pv = (PIVOT_TYPES[type] || PIVOT_TYPES.fibonacci)(fr.H, fr.L, fr.C, fr.O);
-          for (const k of ['R2', 'R1', 'S1', 'S2']) if (pv[k]) L.push({ v: pv[k], lab: k, col: '#9d7cd8', dash: '5,4' });
+        // Prev-day OHLC: prefer the frozen set the Pivot Levels panel uses,
+        // else fall back to the chain's own prev-day fields.
+        let fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
+        if (!fr && d.prev_high && d.prev_low && d.prev_close)
+          fr = { H: d.prev_high, L: d.prev_low, C: d.prev_close, O: d.prev_open || d.prev_close };
+        if (fr && typeof PIVOT_TYPES !== 'undefined') {
+          const type = _chart.show.pivotType || 'classic';
+          const pv = (PIVOT_TYPES[type] || PIVOT_TYPES.classic)(fr.H, fr.L, fr.C, fr.O);
+          // per-type level counts (TradingView parity — see the Pivot panel)
+          const maxL = { traditional: 5, camarilla: 5, fibonacci: 5, classic: 4, woodie: 4, demark: 1 }[type] ?? 4;
+          const tag = type.slice(0, 3).toUpperCase();
+          if (pv.P) L.push({ v: pv.P, lab: `${tag} Pivot`, col: '#c39bd3', dash: '', wide: true });
+          for (let i = 1; i <= maxL; i++) {
+            const rk = 'R' + i, sk = 'S' + i;
+            // fade the outer levels so the near ones stay readable
+            const op = i <= 2 ? '' : '3,4';
+            if (pv[rk]) L.push({ v: pv[rk], lab: `${tag} ${rk}`, col: '#e8a2a2', dash: op || '5,4' });
+            if (pv[sk]) L.push({ v: pv[sk], lab: `${tag} ${sk}`, col: '#9dd6c4', dash: op || '5,4' });
+          }
         }
       } catch (_) {}
     }
@@ -15491,6 +15529,36 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       renderPriceChart();
     } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
   }
+  // ── drag panning: state + globally-bound handlers (bound exactly once) ──
+  let _dragRaf = 0, _dragPendY = null;
+  function _dragApply(clientY) {
+    const dg = _chart.drag;
+    if (!dg) return;
+    _dragPendY = clientY;
+    if (_dragRaf) return;                         // coalesce to one redraw per frame
+    _dragRaf = requestAnimationFrame(() => {
+      _dragRaf = 0;
+      const d2 = _chart.drag;
+      if (!d2 || _dragPendY == null) return;
+      const dyPx = _dragPendY - d2.y0;
+      if (Math.abs(dyPx) > 2) d2.moved = true;
+      // drag down => view shows higher prices (content follows the hand)
+      _chart.yCenter = d2.center0 + (dyPx / d2.plotPx) * d2.span;
+      renderPriceChart();
+    });
+  }
+  function _dragEnd() {
+    if (!_chart.drag) return;
+    _chart.drag = null;
+    if (_dragRaf) { cancelAnimationFrame(_dragRaf); _dragRaf = 0; }
+    _dragPendY = null;
+    const s = document.getElementById('chartSvg');
+    if (s) s.style.cursor = 'crosshair';
+  }
+  window.addEventListener('mousemove', ev => { if (_chart.drag) _dragApply(ev.clientY); });
+  window.addEventListener('mouseup', _dragEnd);
+  window.addEventListener('blur', _dragEnd);
+
   function renderPriceChart() {
     const box = document.getElementById('chartBody');
     if (!box) return;
@@ -15499,13 +15567,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const d = state.lastData;
     const levels = _chartLevels(d);
     const spot = d?.underlying_value;
-    const W = 900, H = 680, padL = 8, padR = 72, padT = 12, padB = 34;
+    // viewBox grows when maximised so the extra screen height is real detail,
+    // not a stretched 680px canvas
+    const maxed = document.getElementById('chartPanel')?.classList.contains('chart-maxed');
+    const W = maxed ? 1600 : 900, H = maxed ? 1000 : 680;
+    const padL = 8, padR = maxed ? 84 : 72, padT = 12, padB = 34;
     let lo = Math.min(...cs.map(c => c.l)), hi = Math.max(...cs.map(c => c.h));
     for (const L of levels) { if (L.v < lo * 0.985 || L.v > hi * 1.015) continue; lo = Math.min(lo, L.v); hi = Math.max(hi, L.v); }
     if (spot) { lo = Math.min(lo, spot); hi = Math.max(hi, spot); }
     const series = _chartSeries(cs);
     for (const s of series) for (const v of s.vals) { if (v == null) continue; lo = Math.min(lo, v); hi = Math.max(hi, v); }
     const pad = (hi - lo) * 0.06 || 10; lo -= pad; hi += pad;
+    // ── vertical zoom (TradingView-style): scroll over the chart scales the
+    // price axis around the cursor; the auto-fit range above is the 1x base.
+    const autoLo = lo, autoHi = hi;
+    if (_chart.yZoom === 1 && _chart.yCenter == null) { _chart._lastMid = (lo + hi) / 2; _chart._lastSpan = hi - lo; }
+    if (_chart.yZoom !== 1 || _chart.yCenter != null) {
+      const baseMid = (autoLo + autoHi) / 2;
+      const mid = _chart.yCenter != null ? _chart.yCenter : baseMid;
+      const half = (autoHi - autoLo) / 2 / _chart.yZoom;
+      lo = mid - half; hi = mid + half;
+    }
+    _chart._lastMid = (lo + hi) / 2; _chart._lastSpan = hi - lo;
+    try { if (typeof _zoomSync === 'function') _zoomSync(); } catch (_) {}
     const x = i => padL + (i + 0.5) / cs.length * (W - padL - padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
     const cw = Math.max(1.5, Math.min(11, (W - padL - padR) / cs.length * 0.62));
@@ -15567,7 +15651,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>`;
       }
     } catch (_) {}
-    box.innerHTML = regBar + `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}
+    box.innerHTML = regBar + `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
         <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
@@ -15591,18 +15675,53 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);padding:3px 4px;">
         <span>${cs.length} × ${_chart.interval}m candles</span>
+        <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
         <span>src: <b>${_chart.src === 'nse_chart' ? 'NSE intraday feed' : 'replay archive (1/min)'}</b></span>
         <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
         ${_chart.show.vwap ? '<span title="Index feeds carry no traded volume">VWAP = tick-weighted (no index volume published)</span>' : ''}
         ${m ? `<span>9:20 lines frozen at ${escapeHtml(m.frozenAt)} (spot ${fmtInt(Math.round(m.spot920))}, σ ${Math.round(m.sigma)} pts @ ${m.iv.toFixed(1)}% IV)</span>` : '<span>9:20 lines: waiting for 09:20</span>'}
       </div>
       <div id="chartHover" style="font-size:10px;color:#cdd;padding:2px 4px;min-height:14px;"></div>`;
+    document.getElementById('zoomReset')?.addEventListener('click', ev => {
+      ev.preventDefault(); _chart.yZoom = 1; _chart.yCenter = null; renderPriceChart();
+    });
     // crosshair: follows the pointer, prints timestamp below and price at right
     const svgEl = document.getElementById('chartSvg');
     if (svgEl) {
       const g = document.getElementById('chartCross');
       const hv = document.getElementById('chartHover');
+      // ── left-click drag pans the price axis (TradingView-style) ──
+      // Window listeners are bound ONCE globally (see _dragBindGlobal below):
+      // renderPriceChart runs on every drag frame, so binding them here would
+      // stack a new pair of handlers per frame and lock the browser.
+      svgEl.addEventListener('mousedown', ev => {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        const r = svgEl.getBoundingClientRect();
+        _chart.drag = {
+          y0: ev.clientY,
+          center0: _chart.yCenter != null ? _chart.yCenter : (lo + hi) / 2,
+          span: hi - lo,
+          plotPx: r.height * (H - padT - padB) / H,   // plot height in screen px
+          moved: false,
+        };
+        svgEl.style.cursor = 'grabbing';
+      });
+      svgEl.addEventListener('touchstart', ev => {
+        if (ev.touches.length !== 1) return;
+        const r = svgEl.getBoundingClientRect();
+        _chart.drag = { y0: ev.touches[0].clientY, center0: _chart.yCenter != null ? _chart.yCenter : (lo + hi) / 2,
+          span: hi - lo, plotPx: r.height * (H - padT - padB) / H, moved: false };
+      }, { passive: true });
+      svgEl.addEventListener('touchmove', ev => {
+        if (!_chart.drag || ev.touches.length !== 1) return;
+        ev.preventDefault();
+        _dragApply(ev.touches[0].clientY);
+      }, { passive: false });
+      svgEl.addEventListener('touchend', _dragEnd);
+
       svgEl.addEventListener('mousemove', ev => {
+        if (_chart.drag) { g.style.display = 'none'; hv.textContent = ''; return; }   // no crosshair while panning
         const r = svgEl.getBoundingClientRect();
         const px = (ev.clientX - r.left) / r.width * W;
         const py = (ev.clientY - r.top) / r.height * H;
@@ -15625,6 +15744,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         hv.innerHTML = `<b>${new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</b> &nbsp; O <b>${fmtInt(Math.round(c2.o))}</b> H <b>${fmtInt(Math.round(c2.h))}</b> L <b>${fmtInt(Math.round(c2.l))}</b> C <b style="color:${up2 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(c2.c))}</b> &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(val))}</span>`;
       });
       svgEl.addEventListener('mouseleave', () => { g.style.display = 'none'; hv.textContent = ''; });
+      // wheel = vertical zoom anchored at the cursor price (like TradingView's
+      // price axis). Shift+wheel or wheel over the right axis zooms faster.
+      svgEl.addEventListener('wheel', ev => {
+        ev.preventDefault();
+        const r = svgEl.getBoundingClientRect();
+        const px = (ev.clientX - r.left) / r.width * W;
+        const py = (ev.clientY - r.top) / r.height * H;
+        const cursorVal = hi - (Math.max(padT, Math.min(H - padB, py)) - padT) / (H - padT - padB) * (hi - lo);
+        const overAxis = px > W - padR;
+        // gentle by default; Shift or the price axis gives a coarser step
+        const step = (ev.shiftKey || overAxis) ? 1.08 : 1.03;
+        const dir = ev.deltaY < 0 ? 1 : -1;                      // scroll up = zoom in
+        const next = Math.max(0.4, Math.min(40, _chart.yZoom * (dir > 0 ? step : 1 / step)));
+        if (next === _chart.yZoom) return;
+        // keep the price under the cursor pinned while scaling
+        const frac = (hi - cursorVal) / (hi - lo);
+        const newSpan = (autoHi - autoLo) / next;
+        _chart.yCenter = cursorVal + (frac - 0.5) * newSpan;
+        _chart.yZoom = next;
+        renderPriceChart();
+      }, { passive: false });
+      // double-click anywhere = reset to auto-fit
+      svgEl.addEventListener('dblclick', () => { _chart.drag = null; _chart.yZoom = 1; _chart.yCenter = null; _zoomSync?.(); renderPriceChart(); });
     }
   }
 
@@ -15665,6 +15807,68 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (!el) continue;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
+    }
+    // ── zoom controls: slider (log 0.4x..40x), +/- buttons, pan, fit ──
+    const Z_MIN = 0.4, Z_MAX = 40;
+    const zoomToPct = z => Math.round((Math.log(z / Z_MIN) / Math.log(Z_MAX / Z_MIN)) * 100);
+    const pctToZoom = p => Z_MIN * Math.pow(Z_MAX / Z_MIN, p / 100);
+    const zSl = document.getElementById('zoomSlider'), zVal = document.getElementById('zoomVal');
+    window._zoomSync = () => {
+      if (zSl && document.activeElement !== zSl) zSl.value = zoomToPct(_chart.yZoom);
+      if (zVal) zVal.textContent = _chart.yZoom.toFixed(1) + '\u00d7';
+    };
+    const applyZoom = z => {
+      if (_chart.yCenter == null) _chart.yCenter = _chart._lastMid ?? null;
+      _chart.yZoom = Math.max(Z_MIN, Math.min(Z_MAX, z));
+      _zoomSync(); renderPriceChart();
+    };
+    zSl?.addEventListener('input', () => applyZoom(pctToZoom(+zSl.value)));
+    document.getElementById('zoomInBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom * 1.25));
+    document.getElementById('zoomOutBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom / 1.25));
+    document.getElementById('zoomFitBtn')?.addEventListener('click', () => {
+      _chart.yZoom = 1; _chart.yCenter = null; _zoomSync(); renderPriceChart();
+    });
+    const panView = dir => {
+      if (_chart.yCenter == null) _chart.yCenter = _chart._lastMid ?? null;
+      if (_chart.yCenter == null) return;
+      _chart.yCenter += dir * (_chart._lastSpan || 0) * 0.12;
+      renderPriceChart();
+    };
+    document.getElementById('panUpBtn')?.addEventListener('click', () => panView(1));
+    document.getElementById('panDnBtn')?.addEventListener('click', () => panView(-1));
+    document.addEventListener('keydown', ev => {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) return;
+      const panel = document.getElementById('chartPanel');
+      if (!panel) return;
+      const r = panel.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;    // chart off-screen
+      if (ev.key === '+' || ev.key === '=') { ev.preventDefault(); applyZoom(_chart.yZoom * 1.25); }
+      else if (ev.key === '-' || ev.key === '_') { ev.preventDefault(); applyZoom(_chart.yZoom / 1.25); }
+      else if (ev.key === '0') { _chart.yZoom = 1; _chart.yCenter = null; _zoomSync(); renderPriceChart(); }
+    });
+    _zoomSync();
+
+    // ── maximise / restore ──
+    const _chartSetMax = on => {
+      const p = document.getElementById('chartPanel');
+      if (!p) return;
+      p.classList.toggle('chart-maxed', on);
+      document.body.classList.toggle('chart-maxed-lock', on);
+      const b = document.getElementById('chartMaxBtn');
+      if (b) { b.innerHTML = on ? '&#10005;' : '&#9974;'; b.title = on ? 'Restore chart (Esc)' : 'Maximise chart to full page (Esc to exit)'; }
+      _chart.maxed = on;
+      renderPriceChart();
+      if (on) p.scrollIntoView({ block: 'start' });
+    };
+    document.getElementById('chartMaxBtn')?.addEventListener('click', () => _chartSetMax(!_chart.maxed));
+    document.addEventListener('keydown', ev => {
+      if (ev.key === 'Escape' && _chart.maxed) { ev.preventDefault(); _chartSetMax(false); }
+    });
+
+    const pt = document.getElementById('chartPivotType');
+    if (pt) {
+      pt.value = _chart.show.pivotType || 'classic';
+      pt.addEventListener('change', () => { _chart.show.pivotType = pt.value; _chartCfgSave(); renderPriceChart(); });
     }
     fetchCandles();
     if (_chart.timer) clearInterval(_chart.timer);
