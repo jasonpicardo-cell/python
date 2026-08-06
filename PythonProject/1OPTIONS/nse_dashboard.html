@@ -1676,6 +1676,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <button class="btn" id="zoomInBtn" style="padding:2px 7px;font-size:12px;line-height:1;" title="Zoom in (Ctrl +)">+</button>
         <button class="btn" id="zoomResetBtn" style="padding:2px 6px;font-size:9px;line-height:1;" title="Reset zoom">⟲</button>
       </span>
+      <label style="font-size:9px;color:var(--muted,#789);margin-right:6px;" title="Who speaks when several browsers/computers are open on the same server.">🔊
+        <select id="voiceMode" class="ohlc-inp" style="font-size:9px;padding:1px 3px;">
+          <option value="always">every tab speaks</option>
+          <option value="focus" selected>follow me · 1 per PC</option>
+          <option value="one">1 across all PCs</option>
+        </select></label>
       <span id="opsStrip" style="font-size:9px;color:var(--muted,#789);margin:0 4px;" title="Data freshness"></span>
       <button class="btn" id="backupBtn" style="font-size:9px;padding:2px 7px;" title="Download ALL app data (watchlist, journal, scorecard, alerts, settings) as JSON — do this weekly; it auto-reminds">💾</button>
       <button class="btn" id="restoreBtn" style="font-size:9px;padding:2px 7px;" title="Restore from a backup JSON">📥</button>
@@ -10912,7 +10918,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const cacheTxt = cm
       ? ` · <span style="color:${cm.cache === 'miss' ? 'var(--gold,#d4af37)' : 'var(--pos,#26a69a)'};" title="${cm.cache === 'miss' ? 'this request went to NSE' : 'served from the server\'s shared cache — no NSE call'}">${cm.cache === 'miss' ? '🌐 live' : '📦 cached ' + cm.age + 's'}</span>`
       : '';
-    el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` +
+    const tabTxt = (_tabInfo && _tabInfo.tabs_here > 1)
+      ? ` · <span title="This computer has ${_tabInfo.tabs_here} dashboard tabs open (${_tabInfo.total_tabs} across all computers). Only one tab per PC speaks each alert.">🗂 ${_tabInfo.tabs_here} tabs</span>`
+      : (_tabInfo && _tabInfo.total_tabs > 1 ? ` · <span title="${_tabInfo.total_tabs} dashboard tabs open across all computers">🗂 ${_tabInfo.total_tabs} total</span>` : '');
+    el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` + tabTxt +
       (lat ? ` · ⚡${lat}ms` : '') + cacheTxt +
       (err ? ` · <span style="color:var(--neg,#ef5350);">⚠${err}</span>` : '') ;
     el.style.color = stale ? 'var(--neg,#ef5350)' : 'var(--muted,#789)';
@@ -11092,10 +11101,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _caNotify(msg) {
     if (typeof showToast === 'function') showToast('🔔 ' + msg);
     try { if ('Notification' in window && Notification.permission === 'granted') new Notification('1OPTIONS alert', { body: msg }); } catch (_) {}
-    try {
-      if (typeof _voiceEnabled === 'function' && _voiceEnabled() && 'speechSynthesis' in window)
-        speechSynthesis.speak(new SpeechSynthesisUtterance(msg));
-    } catch (_) {}
+    try { _speakOnce('alert|' + msg.slice(0, 60), msg, 300); } catch (_) {}
     const log = JSON.parse(localStorage.getItem('customAlertsFired') || '[]');
     log.push({ ts: Date.now(), msg });
     localStorage.setItem('customAlertsFired', JSON.stringify(log.slice(-30)));
@@ -11569,6 +11575,65 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     catch (_) { return { on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false }; }
   }
   function _flowSave(c) { try { localStorage.setItem(_FLOW_KEY, JSON.stringify(c)); } catch (_) {} }
+  // ── multi-browser voice arbitration ──
+  // Several tabs/computers watching the same server would each speak the same
+  // alert. Before speaking, a client asks the server to claim the event key;
+  // exactly one wins inside the TTL window and speaks. Everyone still gets the
+  // toast, so nobody misses the information - only the audio is de-duplicated.
+  const _VOICE_ID = (() => {
+    try {
+      let v = sessionStorage.getItem('voiceClientId');
+      if (!v) { v = 'tab-' + Math.random().toString(36).slice(2, 8); sessionStorage.setItem('voiceClientId', v); }
+      return v;
+    } catch (_) { return 'tab-' + Math.random().toString(36).slice(2, 8); }
+  })();
+  // ── tab heartbeat: lets the server count tabs per computer ──
+  let _tabInfo = { tabs_here: 1, total_tabs: 1, is_first_tab: true };
+  async function _tabPing() {
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/tab-ping?tab=${encodeURIComponent(_VOICE_ID)}`,
+        { signal: AbortSignal.timeout(4000) });
+      _tabInfo = await r.json();
+    } catch (_) { /* standalone / server down: assume we are alone */ }
+  }
+  _tabPing();
+  setInterval(_tabPing, 20000);
+
+  function _voiceModeGet() {
+    try { return localStorage.getItem('voiceMode') || 'focus'; } catch (_) { return 'focus'; }
+  }
+  async function _voiceClaim(key, ttlSec) {
+    const mode = _voiceModeGet();
+    // "always": every open browser speaks. Simple and predictable — use it when
+    // only one machine has speakers, or when you WANT every screen to announce.
+    if (mode === 'always') return true;
+    // "focus" (default): the window you are actually looking at speaks. If no
+    // window anywhere is focused (you stepped away), the server grants it to
+    // one browser so the alert is never silently lost.
+    if (mode === 'focus') {
+      if (document.hasFocus && document.hasFocus()) return true;
+      // Unfocused: fall through to the per-machine claim below, so this PC
+      // still announces exactly once even if you are looking elsewhere.
+    }
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      // scope=machine -> one speaker per COMPUTER (tabs on the same PC never
+      // overlap, but a second PC still gets its own announcement).
+      // scope=global  -> one speaker across the entire network.
+      const scope = mode === 'one' ? 'global' : 'machine';
+      const r = await fetch(`${base}/api/alert-claim?key=${encodeURIComponent(key)}&ttl=${ttlSec || 300}&who=${encodeURIComponent(_VOICE_ID)}&scope=${scope}`,
+        { signal: AbortSignal.timeout(4000) });
+      const j = await r.json();
+      return !!j.granted;
+    } catch (_) {
+      return true;   // server unreachable -> behave as a standalone browser
+    }
+  }
+  async function _speakOnce(key, text, ttlSec) {
+    if (await _voiceClaim(key, ttlSec)) _flowSpeak(text);
+  }
+
   function _flowSpeak(text) {
     if (typeof _voiceQ !== 'undefined' && typeof _voicePump === 'function' && _voiceEnabled()) {
       _voiceQ.push(text);
@@ -11630,7 +11695,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     events.sort((a, b) => Math.abs(b.oiPct) - Math.abs(a.oiPct));
     for (const e of events.slice(0, 2)) {
       const txt = `${e.kind} at ${Math.round(e.k)}, open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
-      _flowSpeak(txt);
+      _speakOnce(`flow|${state.symbol || 'NIFTY'}|${e.k}|${e.side}|${e.kind}`, txt, 300);
       if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias}`);
       _flowLog({ ts: Date.now(), k: e.k, side: e.side, kind: e.kind, bias: e.bias, oiPct: +e.oiPct.toFixed(1), prPct: +e.prPct.toFixed(1) });
     }
@@ -15634,14 +15699,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     _chart._lastMid = (lo + hi) / 2; _chart._lastSpan = hi - lo;
     try { if (typeof _zoomSync === 'function') _zoomSync(); } catch (_) {}
-    const x = i => padL + (i + 0.5) / cs.length * (W - padL - padR);
+    // Fixed session grid: the x-axis always spans the full trading day
+    // (09:15-15:30 = 375 minutes), so a candle occupies the same width at
+    // 09:20 as at 15:20 and the chart stops re-scaling every new bar.
+    const SESSION_MIN = 375;
+    const slots = Math.max(1, Math.ceil(SESSION_MIN / _chart.interval));
+    // slot index of a candle from its own timestamp (IST minutes since 09:15)
+    const slotOf = t => {
+      const g = new Date((t + 5.5 * 3600) * 1000);           // shift to IST wall clock
+      const mins = g.getUTCHours() * 60 + g.getUTCMinutes() - (9 * 60 + 15);
+      return Math.max(0, Math.min(slots - 1, Math.floor(mins / _chart.interval)));
+    };
+    const x = i => padL + (slotOf(cs[i].t) + 0.5) / slots * (W - padL - padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
     // TradingView candle geometry: body width ~80% of slot with a 1px gap,
     // wick centred and scaled to the body width (never wider than 25% of it,
     // min 1px), body outlined in its own colour so doji bars stay visible.
-    const slot = (W - padL - padR) / cs.length;
-    const cw = Math.max(1, Math.min(24, Math.floor(slot * 0.8)));
-    const wickW = Math.max(1, Math.min(3, Math.round(cw * 0.25)));
+    const slotPx = (W - padL - padR) / slots;
+    const cw = Math.max(1, Math.min(24, Math.floor(slotPx * 0.8)));
+    const wickW = Math.max(1, Math.min(3, Math.round(cw * 0.3)));
     let svg = '';
     cs.forEach((c, i) => {
       // colour by body; for a flat body fall back to change vs the previous close
@@ -15692,10 +15768,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <text x="${(W - padR + 4).toFixed(1)}" y="${(y(spot) + 3.5).toFixed(1)}" style="font-size:9.5px;fill:#111;font-weight:800;">${fmtInt(Math.round(spot))}</text>`;
     }
     // time axis
-    const tick = Math.max(1, Math.floor(cs.length / 7));
+    // hourly gridlines across the whole session, independent of how many
+    // candles have printed so far
     let axis = '';
-    cs.forEach((c, i) => { if (i % tick) return;
-      axis += `<text x="${x(i).toFixed(1)}" y="${(H - 6).toFixed(1)}" text-anchor="middle" style="font-size:8.5px;fill:var(--muted,#789);">${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+    const dayStart = cs.length ? (() => { const g = new Date((cs[0].t + 5.5 * 3600) * 1000);
+      const m = g.getUTCHours() * 60 + g.getUTCMinutes();
+      return cs[0].t - (m - (9 * 60 + 15)) * 60; })() : 0;
+    for (let m = 0; m <= SESSION_MIN; m += 30) {
+      const sx = padL + (m / _chart.interval + 0.5) / slots * (W - padL - padR);
+      if (sx > W - padR) break;
+      const hh = Math.floor((9 * 60 + 15 + m) / 60), mm = (9 * 60 + 15 + m) % 60;
+      axis += `<line x1="${sx.toFixed(1)}" y1="${padT}" x2="${sx.toFixed(1)}" y2="${(H - padB).toFixed(1)}" stroke="rgba(255,255,255,0.045)" stroke-width="1"/>`;
+      axis += `<text x="${sx.toFixed(1)}" y="${(H - 6).toFixed(1)}" text-anchor="middle" style="font-size:8.5px;fill:var(--muted,#789);">${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}</text>`;
+    }
     const last = cs[cs.length - 1];
     const m = _m920Load();
     // regime badges (same engine as the OI Flow tab) shown on the chart
@@ -15791,7 +15876,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const px = (ev.clientX - r.left) / r.width * W;
         const py = (ev.clientY - r.top) / r.height * H;
         if (px < padL || px > W - padR || py < padT || py > H - padB) { g.style.display = 'none'; hv.textContent = ''; return; }
-        const i = Math.max(0, Math.min(cs.length - 1, Math.round((px - padL) / (W - padL - padR) * cs.length - 0.5)));
+        // map pointer x -> slot -> nearest printed candle
+        const wantSlot = (px - padL) / (W - padL - padR) * slots - 0.5;
+        let i = 0, bestD = Infinity;
+        for (let k = 0; k < cs.length; k++) { const d = Math.abs(slotOf(cs[k].t) - wantSlot); if (d < bestD) { bestD = d; i = k; } }
         const c2 = cs[i];
         const val = hi - (py - padT) / (H - padT - padB) * (hi - lo);
         g.style.display = '';
@@ -15875,7 +15963,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (state._m920Fired[key] && Date.now() - state._m920Fired[key] < 10 * 60 * 1000) continue;
       state._m920Fired[key] = Date.now();
       const msg = `Price touching ${lab.replace('+1', ' plus one').replace('-1', ' minus one')} at ${Math.round(v)}, the nine twenty ${kind} line`;
-      try { if (typeof _flowSpeak === 'function') _flowSpeak(msg); } catch (_) {}
+      try { _speakOnce(`m920|${state.symbol || 'NIFTY'}|${lab}|${Math.round(v)}`, msg, 600); } catch (_) {}
       if (typeof showToast === 'function') showToast(`🎯 ${lab} touched — spot ${fmtInt(Math.round(spot))} vs ${fmtInt(Math.round(v))}`);
       try { if ('Notification' in window && Notification.permission === 'granted') new Notification('9:20 level touched', { body: `${lab} @ ${Math.round(v)}` }); } catch (_) {}
     }
@@ -15894,6 +15982,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         localStorage.setItem('serverUrl', origin);
       }
     } catch (_) {}
+  })();
+
+  (() => {
+    const sel = document.getElementById('voiceMode');
+    if (!sel) return;
+    try { sel.value = _voiceModeGet(); } catch (_) {}
+    sel.addEventListener('change', () => {
+      try { localStorage.setItem('voiceMode', sel.value); } catch (_) {}
+      if (typeof showToast === 'function')
+        showToast(sel.value === 'always' ? '🔊 This browser will speak every alert'
+                : sel.value === 'focus' ? '🔊 Alerts follow the window you are using'
+                : '🔊 Only one browser will speak each alert');
+    });
   })();
 
   function _chartWire() {
@@ -15933,9 +16034,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (zVal) zVal.textContent = _chart.yZoom.toFixed(1) + '\u00d7';
     };
     const applyZoom = z => {
-      if (_chart.yCenter == null) _chart.yCenter = _chart._lastMid ?? null;
-      _chart.yZoom = Math.max(Z_MIN, Math.min(Z_MAX, z));
-      _zoomSync(); renderPriceChart();
+      const next = Math.max(Z_MIN, Math.min(Z_MAX, +z || 1));
+      // anchor on the current view centre; fall back to the live spot or the
+      // last rendered mid so the very first click can never be a no-op
+      if (_chart.yCenter == null)
+        _chart.yCenter = _chart._lastMid ?? state.lastData?.underlying_value ?? null;
+      _chart.yZoom = next;
+      _zoomSync();
+      renderPriceChart();
     };
     zSl?.addEventListener('input', () => applyZoom(pctToZoom(+zSl.value)));
     document.getElementById('zoomInBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom * 1.25));

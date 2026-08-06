@@ -2860,6 +2860,24 @@ class Handler(BaseHTTPRequestHandler):
                 if got:
                     srcs.append(f"archive({got})")
 
+            # ── keep only REGULAR SESSION ticks (09:15:00-15:30:00 IST) ──
+            # NSE's intraday feed also carries the pre-open call auction
+            # (09:00-09:15), whose indicative prices are not tradable and
+            # distort the first candle plus every level derived from it.
+            # This filter is on wall-clock IST, so a server started late still
+            # keeps the full 09:15-onward back-history it fetched.
+            def _ist_parts(ts):
+                # IST = UTC+5:30, computed without relying on the host timezone
+                ist = time.gmtime(ts + 5 * 3600 + 1800)
+                return ist.tm_hour * 60 + ist.tm_min, ist.tm_sec, ist.tm_wday
+            MKT_OPEN, MKT_CLOSE = 9 * 60 + 15, 15 * 60 + 30
+            before = len(ticks)
+            ticks = [(ts, px) for (ts, px) in ticks
+                     if MKT_OPEN <= _ist_parts(ts)[0] < MKT_CLOSE]
+            dropped = before - len(ticks)
+            if dropped:
+                srcs.append(f"-preopen({dropped})")
+
             # ── de-duplicate to one sample per minute (first writer wins) ──
             if ticks:
                 by_min = {}
@@ -2880,13 +2898,85 @@ class Handler(BaseHTTPRequestHandler):
                                  "candles": [], "symbol": symbol, "interval": interval})
                 return
             candles = _bucket(ticks, interval)
-            first = time.strftime("%H:%M", time.localtime(ticks[0][0]))
-            last = time.strftime("%H:%M", time.localtime(ticks[-1][0]))
+            # report coverage in IST regardless of the server's own timezone
+            def _ist_hm(ts):
+                g = time.gmtime(ts + 5 * 3600 + 1800)
+                return f"{g.tm_hour:02d}:{g.tm_min:02d}"
+            first, last = _ist_hm(ticks[0][0]), _ist_hm(ticks[-1][0])
             self._send_json({"symbol": symbol, "interval": interval,
                              "source": "+".join(srcs) or "none",
                              "coverage": f"{first}-{last}",
                              "candles": candles, "count": len(candles),
                              "asOf": time.strftime("%H:%M:%S")})
+            return
+
+        if parsed.path == "/api/tab-ping":
+            # Browsers heartbeat here so the server knows how many tabs each
+            # computer has open. Used for the "tabs on this PC" readout and to
+            # let clients see whether they are alone or one of several.
+            tab = qs.get("tab", [""])[0]
+            ip = self.client_address[0] if self.client_address else "?"
+            now = time.time()
+            with _chain_meta_lock:
+                global _tab_registry
+                try:
+                    _tab_registry
+                except NameError:
+                    _tab_registry = {}
+                if tab:
+                    _tab_registry[(ip, tab)] = now
+                # forget tabs silent for 45s (closed or asleep)
+                for k, ts in list(_tab_registry.items()):
+                    if now - ts > 45:
+                        _tab_registry.pop(k, None)
+                mine = sorted(t for (i, t) in _tab_registry if i == ip)
+                machines = {}
+                for (i, t) in _tab_registry:
+                    machines[i] = machines.get(i, 0) + 1
+            self._send_json({"ip": ip, "tabs_here": len(mine), "tab_ids": mine,
+                             "machines": machines, "total_tabs": sum(machines.values()),
+                             "is_first_tab": bool(mine) and mine[0] == tab})
+            return
+
+        if parsed.path == "/api/alert-claim":
+            # Multi-browser voice de-duplication.
+            # With several tabs/computers open, every one of them would
+            # otherwise speak the same alert at once. Each client asks to
+            # "claim" an event key; exactly ONE gets granted inside the TTL
+            # window and speaks, the rest stay silent but still show toasts.
+            key = qs.get("key", [""])[0]
+            try:
+                ttl = float(qs.get("ttl", ["300"])[0])
+            except Exception:
+                ttl = 300.0
+            who = qs.get("who", ["?"])[0]
+            # scope=machine (default): one speaker PER COMPUTER, so several tabs
+            #   on the same PC never overlap while a second PC still announces.
+            # scope=global: exactly one speaker across the whole network.
+            scope = qs.get("scope", ["machine"])[0]
+            ip = self.client_address[0] if self.client_address else "?"
+            if scope == "machine":
+                key = f"{ip}::{key}"
+            if not key:
+                self._send_json({"granted": False, "error": "key required"})
+                return
+            now = time.time()
+            with _chain_meta_lock:
+                global _alert_claims
+                try:
+                    _alert_claims
+                except NameError:
+                    _alert_claims = {}
+                for k, v in list(_alert_claims.items()):
+                    if now - v["ts"] > max(v["ttl"], 60) * 2:
+                        _alert_claims.pop(k, None)
+                cur = _alert_claims.get(key)
+                if cur and now - cur["ts"] < cur["ttl"]:
+                    self._send_json({"granted": False, "owner": cur["who"],
+                                     "age": round(now - cur["ts"], 1)})
+                    return
+                _alert_claims[key] = {"ts": now, "ttl": ttl, "who": who}
+            self._send_json({"granted": True, "key": key, "ttl": ttl})
             return
 
         if parsed.path == "/api/cache-stats":
@@ -2907,6 +2997,11 @@ class Handler(BaseHTTPRequestHandler):
                 "entries": sorted(entries, key=lambda x: x["age"]),
                 "active_clients": clients,
                 "poller": _poller_symbols,
+                "tabs": (lambda: (lambda reg: {"total": len(reg),
+                                               "by_machine": {i: sum(1 for (x, _) in reg if x == i)
+                                                              for (i, _) in reg}})(
+                    {k: v for k, v in (globals().get("_tab_registry") or {}).items()
+                     if time.time() - v < 45}))(),
             })
             return
 
