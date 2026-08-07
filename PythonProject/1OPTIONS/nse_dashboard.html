@@ -1682,6 +1682,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <option value="focus" selected>follow me · 1 per PC</option>
           <option value="one">1 across all PCs</option>
         </select></label>
+      <button class="btn" id="audioUnlockBtn" style="font-size:9px;padding:1px 7px;margin-right:4px;" title="Chrome blocks speech until the page is clicked. Press this once on EVERY computer to enable audio there.">🔈 enable audio</button>
+      <button class="btn" id="audioReportBtn" style="font-size:9px;padding:1px 7px;margin-right:4px;" title="Show the audio readiness of every connected system">🩺 systems</button>
+      <button class="btn" id="voiceTestBtn" style="font-size:9px;padding:1px 7px;margin-right:6px;" title="Speak a test alert through the full path (claim + speech) and show exactly what happened on this machine">🔊 test</button>
       <span id="opsStrip" style="font-size:9px;color:var(--muted,#789);margin:0 4px;" title="Data freshness"></span>
       <button class="btn" id="backupBtn" style="font-size:9px;padding:2px 7px;" title="Download ALL app data (watchlist, journal, scorecard, alerts, settings) as JSON — do this weekly; it auto-reminds">💾</button>
       <button class="btn" id="restoreBtn" style="font-size:9px;padding:2px 7px;" title="Restore from a backup JSON">📥</button>
@@ -3087,9 +3090,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <label style="font-size:9px;color:var(--muted);">strikes within ±% <input type="number" id="flowNear" class="ohlc-inp" style="width:54px;" step="1"></label>
           <label style="font-size:9px;color:var(--muted);">min OI Δ (contracts) <input type="number" id="flowMinLots" class="ohlc-inp" style="width:78px;" step="1000"></label>
           <label style="font-size:9px;display:flex;align-items:center;gap:4px;"><input type="checkbox" id="flowUnwind"> also unwinding/covering</label>
+          <span style="display:flex;gap:7px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;">announce:
+            <label><input type="checkbox" id="cat_ceBuy"> call buying</label>
+            <label><input type="checkbox" id="cat_peBuy"> put buying</label>
+            <label><input type="checkbox" id="cat_ceSell"> call selling</label>
+            <label><input type="checkbox" id="cat_peSell"> put selling</label>
+          </span>
+          <label style="font-size:9px;color:var(--muted,#789);">max/tick <input type="number" id="flowMaxTick" class="ohlc-inp" style="width:48px;" step="1" min="1" max="6"></label>
         </div>
         <div class="oc-sub" style="font-size:9px;padding:0 4px 3px;">Requires the 🗣 voice toggle ON. OI↑ &amp; premium↑ = fresh BUYING · OI↑ &amp; premium↓ = fresh WRITING. Max 2 spoken per tick, 5-min cooldown per strike/side.</div>
         <div id="flowLog" style="margin-top:4px;"></div>
+        <div style="margin-top:6px;border-top:1px solid rgba(255,255,255,0.06);padding-top:4px;">
+          <label style="font-size:9px;color:var(--muted,#789);cursor:pointer;"><input type="checkbox" id="voiceDiagOn"> show voice diagnostics (who spoke what, and why not)</label>
+          <div id="voiceDiagBox" style="display:none;margin-top:3px;max-height:140px;overflow:auto;"></div>
+          <div id="audioReportBox" style="margin-top:5px;"></div>
+        </div>
       </div>
 </section>
 
@@ -10918,10 +10933,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const cacheTxt = cm
       ? ` · <span style="color:${cm.cache === 'miss' ? 'var(--gold,#d4af37)' : 'var(--pos,#26a69a)'};" title="${cm.cache === 'miss' ? 'this request went to NSE' : 'served from the server\'s shared cache — no NSE call'}">${cm.cache === 'miss' ? '🌐 live' : '📦 cached ' + cm.age + 's'}</span>`
       : '';
+    const si = _sseInfo || {};
+    const sseTxt = si.id
+      ? ` · <span title="Live alert stream: ${si.tabs_here} tab(s) on this computer, ${si.total_tabs} across all systems. ${si.speaker ? 'THIS tab is this computer\'s speaker.' : 'Another tab on this computer is the speaker.'}">${si.speaker ? '🔊' : '🔇'} ${si.tabs_here}/${si.total_tabs}</span>`
+      : ' · <span style="color:var(--neg,#ef5350);" title="Not connected to the alert stream">⚠ no stream</span>';
     const tabTxt = (_tabInfo && _tabInfo.tabs_here > 1)
       ? ` · <span title="This computer has ${_tabInfo.tabs_here} dashboard tabs open (${_tabInfo.total_tabs} across all computers). Only one tab per PC speaks each alert.">🗂 ${_tabInfo.tabs_here} tabs</span>`
       : (_tabInfo && _tabInfo.total_tabs > 1 ? ` · <span title="${_tabInfo.total_tabs} dashboard tabs open across all computers">🗂 ${_tabInfo.total_tabs} total</span>` : '');
-    el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` + tabTxt +
+    el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` + sseTxt + tabTxt +
       (lat ? ` · ⚡${lat}ms` : '') + cacheTxt +
       (err ? ` · <span style="color:var(--neg,#ef5350);">⚠${err}</span>` : '') ;
     el.style.color = stale ? 'var(--neg,#ef5350)' : 'var(--muted,#789)';
@@ -11101,7 +11120,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _caNotify(msg) {
     if (typeof showToast === 'function') showToast('🔔 ' + msg);
     try { if ('Notification' in window && Notification.permission === 'granted') new Notification('1OPTIONS alert', { body: msg }); } catch (_) {}
-    try { _speakOnce('alert|' + msg.slice(0, 60), msg, 300); } catch (_) {}
+    try {
+      // stream-first: one announcement across all systems; _speakOnce is the
+      // standalone fallback when no server stream is connected
+      if (_streamLive) _relayAlert('custom|' + msg.slice(0, 70), msg, 'alert', 300);
+      else _speakOnce('alert|' + msg.slice(0, 60), msg, 300);
+    } catch (_) {}
     const log = JSON.parse(localStorage.getItem('customAlertsFired') || '[]');
     log.push({ ts: Date.now(), msg });
     localStorage.setItem('customAlertsFired', JSON.stringify(log.slice(-30)));
@@ -11571,8 +11595,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Bias: fresh CE buying / PE writing = bullish; fresh PE buying / CE writing = bearish.
   const _FLOW_KEY = 'freshFlowCfg';
   function _flowCfg() {
-    try { return Object.assign({ on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false }, JSON.parse(localStorage.getItem(_FLOW_KEY) || '{}')); }
-    catch (_) { return { on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false }; }
+    try { return Object.assign({ on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false, maxPerTick: 6, cats: { ceBuy: true, peBuy: true, ceSell: true, peSell: true, unwind: false, cover: false } }, JSON.parse(localStorage.getItem(_FLOW_KEY) || '{}')); }
+    catch (_) { return { on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false, maxPerTick: 6, cats: { ceBuy: true, peBuy: true, ceSell: true, peSell: true, unwind: false, cover: false } }; }
   }
   function _flowSave(c) { try { localStorage.setItem(_FLOW_KEY, JSON.stringify(c)); } catch (_) {} }
   // ── multi-browser voice arbitration ──
@@ -11599,6 +11623,122 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   _tabPing();
   setInterval(_tabPing, 20000);
+
+  // ══ ALERT STREAM: the server detects alerts and tells us whether to speak ══
+  // One open EventSource per tab. The server uses these connections as its
+  // registry of connected systems, and marks exactly one tab per machine as
+  // that machine's speaker — so audio never overlaps on a PC while every
+  // separate computer still announces. No client-side arbitration at all.
+  let _sse = null, _sseInfo = { tabs_here: 1, total_tabs: 1, id: null, speaker: false };
+  // When the server stream is live it OWNS alert detection and the fired
+  // history. Local detectors then stand down: their per-browser cooldown maps
+  // were exactly why one system stayed silent while another announced.
+  let _streamLive = false;
+  function _sseConnect() {
+    try {
+      if (_sse) { try { _sse.close(); } catch (_) {} }
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      _sse = new EventSource(`${base}/api/alert-stream`);
+      _sse.onmessage = ev => {
+        let d; try { d = JSON.parse(ev.data); } catch (_) { return; }
+        if (d.type === 'hello') {
+          _sseInfo = { tabs_here: d.tabs_here, total_tabs: d.total_tabs, id: d.client_id, speaker: false };
+          _streamLive = true;
+          _voiceDiag('stream', `connected as ${d.client_id} · ${d.tabs_here} tab(s) here, ${d.total_tabs} total`);
+          return;
+        }
+        _sseInfo.speaker = !!d.speak;
+        const line = d.text || d.kind || 'alert';
+        // everyone sees it; only the elected tab speaks
+        if (typeof showToast === 'function')
+          showToast(`${d.speak ? '🔊' : '🔇'} ${escapeHtml(line.slice(0, 90))}`);
+        if (d.speak && _canSpeak()) {
+          _flowSpeak(line);
+          _spokeCount++; _audioReport('spoke');
+          _voiceDiag(d.type + '|' + (d.strike || ''), 'SPOKE (server elected this tab)');
+        } else {
+          _voiceDiag(d.type + '|' + (d.strike || ''),
+            d.speak ? 'elected but voice toggle is OFF here' : 'another tab on this PC is speaking');
+        }
+        if (d.type === 'flow') {
+          try {
+            const a2 = JSON.parse(localStorage.getItem('freshFlowLog') || '[]');
+            a2.push({ ts: Date.now(), k: d.strike, side: d.side, kind: d.kind, bias: d.bias,
+                      oiPct: d.oi_pct, prPct: d.pr_pct });
+            localStorage.setItem('freshFlowLog', JSON.stringify(a2.slice(-60)));
+            _flowRenderLog();
+          } catch (_) {}
+        }
+      };
+      _sse.onerror = () => {
+        _streamLive = false;
+        _voiceDiag('stream', 'disconnected — local detection resumes until it is back');
+        try { _sse.close(); } catch (_) {}
+        _sse = null;
+        setTimeout(_sseConnect, 5000);
+      };
+    } catch (e) { _voiceDiag('stream', 'failed: ' + e.message); }
+  }
+  setTimeout(_sseConnect, 1200);
+  window.addEventListener('beforeunload', () => { try { _sse?.close(); } catch (_) {} });
+
+  // ══ AUDIO READINESS ══
+  // Chrome (and Safari) refuse speechSynthesis until the page has received a
+  // real user gesture. A dashboard opened on a second computer and never
+  // clicked will therefore stay SILENT with no error anywhere — the single
+  // most likely reason alerts "work here but not there". We prime the engine
+  // on the first interaction and report the true state to the server.
+  let _audioUnlocked = false;
+  function _audioUnlock(explicit) {
+    try {
+      if (!('speechSynthesis' in window)) return false;
+      const u = new SpeechSynthesisUtterance(explicit ? 'Audio enabled on this system.' : ' ');
+      u.volume = explicit ? 1 : 0.01;
+      window.speechSynthesis.speak(u);
+      _audioUnlocked = true;
+      _audioReport('unlock');
+      return true;
+    } catch (_) { return false; }
+  }
+  ['click', 'keydown', 'touchstart'].forEach(ev =>
+    window.addEventListener(ev, () => { if (!_audioUnlocked) _audioUnlock(false); }, { once: true, capture: true }));
+
+  async function _audioReport(tag) {
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const voices = (window.speechSynthesis?.getVoices?.() || []).length;
+      const q = new URLSearchParams({
+        id: _sseInfo?.id || _VOICE_ID,
+        toggle: _voiceEnabled() ? '1' : '0',
+        synth: ('speechSynthesis' in window) ? '1' : '0',
+        voices: String(voices),
+        unlocked: _audioUnlocked ? '1' : '0',
+        spoke: String(_spokeCount || 0),
+      });
+      await fetch(`${base}/api/audio-status?${q}`, { signal: AbortSignal.timeout(4000) });
+    } catch (_) {}
+  }
+  let _spokeCount = 0;
+  setInterval(() => _audioReport('tick'), 20000);
+
+  // ── relay a locally-detected alert to the server ──
+  // The server keeps ONE fired-history and broadcasts to every system, so a
+  // level touch is announced once network-wide instead of depending on each
+  // browser's private cooldown map.
+  async function _relayAlert(key, text, kind, cooldownSec) {
+    if (!_streamLive) return false;          // offline: caller speaks locally
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const q = new URLSearchParams({ key, text, kind: kind || 'level',
+                                      cooldown: String(cooldownSec || 300) });
+      const j = await (await fetch(`${base}/api/alert-emit?${q}`, { signal: AbortSignal.timeout(5000) })).json();
+      _voiceDiag(key, j.broadcast ? 'relayed to all systems' : 'already announced elsewhere');
+      return true;                            // handled by the stream either way
+    } catch (e) {
+      _voiceDiag(key, 'relay failed, speaking locally: ' + e.message);
+      return false;
+    }
+  }
 
   function _voiceModeGet() {
     try { return localStorage.getItem('voiceMode') || 'focus'; } catch (_) { return 'focus'; }
@@ -11630,8 +11770,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return true;   // server unreachable -> behave as a standalone browser
     }
   }
+  function _canSpeak() {
+    // must have the voice toggle on AND a usable speech engine
+    if (!_voiceEnabled()) return false;
+    if (!('speechSynthesis' in window)) return false;
+    return true;
+  }
   async function _speakOnce(key, text, ttlSec) {
-    if (await _voiceClaim(key, ttlSec)) _flowSpeak(text);
+    // Never take a claim we cannot honour: a browser with voice OFF used to
+    // win the claim and drop the message, silencing every other machine.
+    if (!_canSpeak()) {
+      _voiceDiag(key, 'skipped: voice off on this browser');
+      return false;
+    }
+    const granted = await _voiceClaim(key, ttlSec);
+    if (!granted) { _voiceDiag(key, 'another browser/tab is announcing this'); return false; }
+    _flowSpeak(text);
+    _voiceDiag(key, 'SPOKE: ' + text.slice(0, 70));
+    return true;
+  }
+  // rolling diagnostic log so multi-machine behaviour can be inspected
+  const _voiceLog = [];
+  function _voiceDiag(key, what) {
+    _voiceLog.push({ t: new Date().toLocaleTimeString('en-IN', { hour12: false }), key, what });
+    while (_voiceLog.length > 40) _voiceLog.shift();
+    const box = document.getElementById('voiceDiagBox');
+    if (box && box.style.display !== 'none')
+      box.innerHTML = _voiceLog.slice(-12).reverse().map(l =>
+        `<div style="font-size:9px;color:${/SPOKE/.test(l.what) ? 'var(--pos,#26a69a)' : 'var(--muted,#789)'};">${l.t} · ${escapeHtml(l.key.slice(0, 28))} → ${escapeHtml(l.what)}</div>`).join('');
   }
 
   function _flowSpeak(text) {
@@ -11648,6 +11814,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
   }
   function _freshFlowCheck(data) {
+    if (_streamLive) return;          // server is detecting and broadcasting
     const cfg = _flowCfg();
     if (!cfg.on || !data?.strikes?.length || !data.underlying_value) return;
     const spot = data.underlying_value, now = Date.now();
@@ -11679,21 +11846,37 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const oiUp = oiPct > 0, prUp = prPct > 0;
         let kind, bias;
         if (oiUp && prUp)       { kind = 'fresh ' + (side === 'CE' ? 'call buying'  : 'put buying');  bias = side === 'CE' ? 'bullish' : 'bearish'; }
-        else if (oiUp && !prUp) { kind = 'fresh ' + (side === 'CE' ? 'call writing' : 'put writing'); bias = side === 'CE' ? 'bearish' : 'bullish'; }
+        else if (oiUp && !prUp) { kind = 'fresh ' + (side === 'CE' ? 'call selling' : 'put selling');  bias = side === 'CE' ? 'bearish' : 'bullish'; }
         else if (!oiUp && !prUp){ kind = (side === 'CE' ? 'call' : 'put') + ' long unwinding'; bias = side === 'CE' ? 'bearish' : 'bullish'; }
         else                    { kind = (side === 'CE' ? 'call' : 'put') + ' short covering'; bias = side === 'CE' ? 'bullish' : 'bearish'; }
         const isFresh = oiUp;
         if (!isFresh && !cfg.speakUnwind) continue;
+        // category key so each flow type can be toggled and fairly scheduled
+        const cat = !oiUp ? (prUp ? 'cover' : 'unwind')
+                  : (side === 'CE' ? (prUp ? 'ceBuy' : 'ceSell') : (prUp ? 'peBuy' : 'peSell'));
+        if (cfg.cats && cfg.cats[cat] === false) continue;
         const fk = k + side;
         if (state._flowFired[fk] && now - state._flowFired[fk] < 5 * 60 * 1000) continue;   // 5-min per strike/side
-        state._flowFired[fk] = now;
-        events.push({ k, side, kind, bias, oiPct, prPct, oiAbs: oiNow - oiOld, isFresh });
+        // NOTE: the cooldown is stamped only when an event is actually SPOKEN
+        // (below). Stamping here muted events that were dropped by the
+        // per-tick cap — which is why one category could go unheard for ages.
+        events.push({ k, side, kind, bias, oiPct, prPct, oiAbs: oiNow - oiOld, isFresh, fk, cat });
       }
     }
     if (!events.length) return;
     // loudest first (biggest OI move), speak at most 2 per tick
     events.sort((a, b) => Math.abs(b.oiPct) - Math.abs(a.oiPct));
-    for (const e of events.slice(0, 2)) {
+    // Round-robin across categories so call flow is never permanently
+    // crowded out by louder put flow (or vice versa): take the biggest event
+    // from each distinct category first, then fill remaining slots by size.
+    const seenCat = new Set(), ordered = [];
+    for (const e of events) if (!seenCat.has(e.cat)) { seenCat.add(e.cat); ordered.push(e); }
+    for (const e of events) if (!ordered.includes(e)) ordered.push(e);
+    // distinct categories always pass; the cap only limits EXTRA same-category
+    // events, so call flow can never be crowded out by louder put flow
+    const perTick = Math.max(seenCat.size, Math.min(8, cfg.maxPerTick || 6));
+    for (const e of ordered.slice(0, perTick)) {
+      state._flowFired[e.fk] = now;                 // stamp ONLY what we speak
       const txt = `${e.kind} at ${Math.round(e.k)}, open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
       _speakOnce(`flow|${state.symbol || 'NIFTY'}|${e.k}|${e.side}|${e.kind}`, txt, 300);
       if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias}`);
@@ -11718,7 +11901,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _flowWire() {
     const cfg = _flowCfg();
-    const ids = { flowOn: 'on', flowOiPct: 'oiPct', flowPremPct: 'premPct', flowWin: 'winSec', flowNear: 'near', flowMinLots: 'minLots', flowUnwind: 'speakUnwind' };
+    const ids = { flowOn: 'on', flowOiPct: 'oiPct', flowPremPct: 'premPct', flowWin: 'winSec', flowNear: 'near', flowMinLots: 'minLots', flowUnwind: 'speakUnwind', flowMaxTick: 'maxPerTick' };
+    for (const cat of ['ceBuy', 'peBuy', 'ceSell', 'peSell']) {
+      const el = document.getElementById('cat_' + cat);
+      if (!el) continue;
+      el.checked = cfg.cats ? cfg.cats[cat] !== false : true;
+      el.addEventListener('change', () => {
+        const c2 = _flowCfg();
+        c2.cats = c2.cats || {};
+        c2.cats[cat] = el.checked;
+        _flowSave(c2);
+      });
+    }
     for (const [id, key] of Object.entries(ids)) {
       const el = document.getElementById(id);
       if (!el) continue;
@@ -14247,6 +14441,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function _speakLevel(label, price) {
+    // Route through the server when the stream is live so every system hears
+    // it exactly once (the local path below is the standalone fallback).
+    if (_streamLive) {
+      let t = label;
+      if (/^R(\d+)$/.test(label)) t = `Resistance ${label.slice(1)} touched at ${Math.round(price)}`;
+      else if (/^S(\d+)$/.test(label)) t = `Support ${label.slice(1)} touched at ${Math.round(price)}`;
+      else t = `${label} touched at ${Math.round(price)}`;
+      _relayAlert(`level|${state.symbol || 'NIFTY'}|${label}|${Math.round(price)}`, t, 'level', 600);
+      return;
+    }
     if (!_voiceEnabled()) {
       console.log('[voice] skipped — voiceToggle checkbox is unchecked');
       return;
@@ -15478,7 +15682,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (o.day === new Date().toDateString() && o.sym === (state.symbol || 'NIFTY')) return o; } catch (_) {}
     return null;
   }
+  // Ask the server for the authoritative frozen levels once per day; fall back
+  // to computing locally only when the server has none (offline use).
+  let _m920Srv = null, _m920SrvTried = '';
+  function _m920FetchServer() {
+    const key = (state.symbol || 'NIFTY') + new Date().toDateString();
+    if (_m920SrvTried === key) return;
+    _m920SrvTried = key;
+    (async () => {
+      try {
+        const base = els.serverUrl.value.replace(/\/+$/, '');
+        const j = await (await fetch(`${base}/api/m920?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`)).json();
+        if (j && !j.error && j.EOR) {
+          _m920Srv = { day: new Date().toDateString(), sym: state.symbol || 'NIFTY',
+            spot920: j.spot920, sigma: j.sigma, iv: j.iv, frozenAt: 'server',
+            EOR: j['EOR'], EORp1: j['EOR+1'], EOS: j['EOS'], EOSm1: j['EOS-1'] };
+          renderPriceChart();
+        }
+      } catch (_) {}
+    })();
+  }
   function _m920Compute(d) {
+    if (_m920Srv && _m920Srv.day === new Date().toDateString()) return _m920Srv;
+    _m920FetchServer();
     const existing = _m920Load();
     if (existing) return existing;
     const now = new Date();
@@ -15950,6 +16176,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   // ── Voice alert when price touches a 9:20 line (EOR/EOR+1/EOS/EOS-1) ──
   function _m920TouchCheck(d) {
+    if (_streamLive) return;          // server raises 9:20 touches for everyone
     const m = _m920Load();
     const spot = d?.underlying_value;
     if (!m || !spot) return;
@@ -15996,6 +16223,67 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 : '🔊 Only one browser will speak each alert');
     });
   })();
+
+  document.getElementById('voiceTestBtn')?.addEventListener('click', async () => {
+    // fire through the SERVER so every connected system is exercised at once
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/alert-test`);
+      const j = await r.json();
+      if (typeof showToast === 'function')
+        showToast(`🔊 Test broadcast to ${j.sent_to} connected tab(s) — one per computer will speak`);
+      return;
+    } catch (_) { /* fall back to the local path below */ }
+    const key = 'voicetest|' + Date.now();          // unique so the claim always resolves
+    const mode = _voiceModeGet();
+    const focused = !!(document.hasFocus && document.hasFocus());
+    const ok = await _speakOnce(key, 'Voice test. This browser is announcing alerts.', 30);
+    const why = ok ? 'SPOKE on this machine'
+      : !_canSpeak() ? 'silent: the 🗣 voice toggle is OFF on this browser'
+      : 'silent: another tab/PC holds the claim';
+    if (typeof showToast === 'function')
+      showToast(`🔊 ${why} · mode=${mode} · focused=${focused} · tabs on this PC=${_tabInfo?.tabs_here ?? '?'}`);
+  });
+  document.getElementById('voiceDiagOn')?.addEventListener('change', e => {
+    const box = document.getElementById('voiceDiagBox');
+    if (box) { box.style.display = e.target.checked ? '' : 'none'; _voiceDiag('diagnostics', e.target.checked ? 'enabled' : 'disabled'); }
+  });
+
+  document.getElementById('audioUnlockBtn')?.addEventListener('click', () => {
+    const ok = _audioUnlock(true);
+    if (typeof showToast === 'function')
+      showToast(ok ? '🔈 Audio enabled on THIS system — you should hear a confirmation'
+                   : '⚠ This browser has no speech engine available');
+  });
+  document.getElementById('audioReportBtn')?.addEventListener('click', async () => {
+    const box = document.getElementById('audioReportBox');
+    if (!box) return;
+    box.innerHTML = '<span class="oc-sub">Checking every connected system…</span>';
+    try {
+      await _audioReport('manual');
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/audio-report`)).json();
+      if (!j.clients?.length) { box.innerHTML = '<span class="oc-sub">No systems have reported yet. Open the dashboard on each computer and press 🔈 enable audio there.</span>'; return; }
+      box.innerHTML = `<div style="font-size:9.5px;color:var(--muted,#789);padding:2px 0;">${j.systems} computer(s) connected · one tab per computer is elected speaker</div>` +
+        j.clients.map(cl => {
+          const bad = [];
+          if (cl.toggle !== '1') bad.push('voice toggle OFF');
+          if (cl.synth !== '1') bad.push('no speech engine');
+          if (+cl.voices === 0) bad.push('no voices installed');
+          if (cl.unlocked !== '1') bad.push('NOT unlocked — press 🔈 enable audio on that machine');
+          const okAll = bad.length === 0;
+          return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:9.5px;flex-wrap:wrap;">
+            <b style="min-width:104px;">${escapeHtml(cl.ip)}</b>
+            <span style="color:${cl.is_speaker ? 'var(--gold,#d4af37)' : 'var(--muted)'};min-width:64px;">${cl.is_speaker ? '🔊 speaker' : '🔇 listener'}</span>
+            <span style="color:${okAll ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-weight:700;">${okAll ? 'READY' : 'NOT READY'}</span>
+            <span style="color:var(--muted);">voices ${cl.voices} · spoke ${cl.spoke_ok} · ${cl.age}s ago</span>
+            ${bad.length ? `<span style="flex-basis:100%;color:var(--neg,#ef5350);padding-left:4px;">→ ${bad.join(' · ')}</span>` : ''}
+          </div>`;
+        }).join('');
+      const dg = document.getElementById('voiceDiagOn');
+      if (dg && !dg.checked) { dg.checked = true; const b2 = document.getElementById('voiceDiagBox'); if (b2) b2.style.display = ''; }
+    } catch (e) { box.innerHTML = `<span class="oc-sub">Report failed: ${escapeHtml(e.message)}</span>`; }
+  });
 
   function _chartWire() {
     const cfg = _chartCfgLoad();

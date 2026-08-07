@@ -94,6 +94,7 @@ import csv as _csv_mod
 import io as _io_mod
 import json
 import sys
+import itertools
 import threading
 import time
 import concurrent.futures
@@ -230,6 +231,208 @@ RUN_POLL = "NIFTY,BANKNIFTY"   # symbols kept warm in the background; "" to disa
 RUN_POLL_INTERVAL = 5.0   # seconds between background polls per symbol
 RUN_TTL = 8.0             # seconds a cached chain counts as fresh
 
+# ── Alert engine (server-side detection, streamed to every browser) ──
+RUN_ALERT_OI_PCT = 8.0     # min |open-interest change| % to raise an alert
+RUN_ALERT_PREM_PCT = 3.0   # min |premium change| % (both must be crossed)
+RUN_ALERT_NEAR_PCT = 3.0   # only strikes within this % of spot
+RUN_ALERT_WINDOW = 120.0   # seconds between the two compared snapshots
+RUN_ALERT_COOLDOWN = 300.0 # per strike+side, seconds before it can fire again
+RUN_ALERT_MAX = 6          # extra same-category events per cycle (all 4
+                           # categories always get through regardless)
+
+# ══════════════════════════════════════════════════════════════════════
+# ALERT STREAM — the server detects alerts and PUSHES them to browsers.
+#
+# Previously each browser watched the chain itself and then argued over who
+# should speak. That had too many moving parts: different refresh timings,
+# per-machine toggles, claims taken by muted tabs. Now:
+#   * the server compares consecutive chain snapshots and raises the events
+#   * every connected browser holds an open SSE connection (so the server
+#     knows exactly which systems are live, and how many tabs each has)
+#   * for each alert the server elects ONE tab per machine as the speaker and
+#     marks the payload accordingly, so audio never overlaps on a PC while
+#     every separate computer still announces once
+# ══════════════════════════════════════════════════════════════════════
+_sse_clients: list = []          # [{"id","ip","q","ts"}]
+_sse_lock = threading.Lock()
+_flow_prev: dict = {}            # symbol -> {"ts":, "m": {strike: (ce_oi, pe_oi, ce_ltp, pe_ltp)}}
+_flow_fired: dict = {}           # dedupe key -> ts
+ALERT_CFG = {
+    "oi_pct": float(_os.environ.get("NSE_ALERT_OI_PCT", RUN_ALERT_OI_PCT)),
+    "prem_pct": float(_os.environ.get("NSE_ALERT_PREM_PCT", RUN_ALERT_PREM_PCT)),
+    "near_pct": float(_os.environ.get("NSE_ALERT_NEAR_PCT", RUN_ALERT_NEAR_PCT)),
+    "window": float(_os.environ.get("NSE_ALERT_WINDOW", RUN_ALERT_WINDOW)),
+    "cooldown": float(_os.environ.get("NSE_ALERT_COOLDOWN", RUN_ALERT_COOLDOWN)),
+    # ceiling on EXTRA same-category events; distinct categories always pass
+    "max_per_cycle": int(_os.environ.get("NSE_ALERT_MAX", RUN_ALERT_MAX)),
+}
+
+_sse_seq = itertools.count(1)
+
+def _sse_register(ip: str):
+    import queue as _q
+    # monotonic counter, not a timestamp: two tabs connecting in the same
+    # millisecond used to collide and both be elected speaker.
+    cl = {"id": f"{ip}#{next(_sse_seq)}", "ip": ip, "q": _q.Queue(maxsize=50),
+          "ts": time.time(), "seq": next(_sse_seq)}
+    with _sse_lock:
+        _sse_clients.append(cl)
+    return cl
+
+def _sse_unregister(cl):
+    with _sse_lock:
+        try:
+            _sse_clients.remove(cl)
+        except ValueError:
+            pass
+
+def _sse_broadcast(event: dict):
+    """Send an event to every client, electing one speaker per machine."""
+    with _sse_lock:
+        by_ip = {}
+        for cl in _sse_clients:
+            by_ip.setdefault(cl["ip"], []).append(cl)
+        # the oldest connection on each machine is that machine's speaker
+        speakers = {ip: sorted(cls, key=lambda x: x["seq"])[0]["id"] for ip, cls in by_ip.items()}
+        targets = list(_sse_clients)
+    for cl in targets:
+        payload = dict(event)
+        payload["speak"] = (speakers.get(cl["ip"]) == cl["id"])
+        payload["client_id"] = cl["id"]
+        try:
+            cl["q"].put_nowait(payload)
+        except Exception:
+            pass          # slow client: drop rather than block the detector
+
+_m920: dict = {}          # symbol -> frozen levels for the day
+_m920_fired: dict = {}    # "symbol|label" -> ts
+
+def _ist_minutes(ts=None):
+    g = time.gmtime((ts or time.time()) + 5 * 3600 + 1800)
+    return g.tm_hour * 60 + g.tm_min, time.strftime("%Y-%m-%d", g)
+
+def _m920_levels(symbol: str, data: dict):
+    """Freeze the 09:20 reference lines once per day, per symbol."""
+    mins, day = _ist_minutes()
+    cur = _m920.get(symbol)
+    if cur and cur["day"] == day:
+        return cur
+    if mins < 560:                     # before 09:20 IST
+        return None
+    spot, iv = data.get("underlying_value"), data.get("atm_iv")
+    if not spot or not iv:
+        return None
+    sigma = spot * (iv / 100.0) * (1.0 / 365.0) ** 0.5
+    lv = {"day": day, "spot920": spot, "sigma": sigma, "iv": iv,
+          "EOR+1": spot + sigma, "EOR": spot + 0.5 * sigma,
+          "EOS": spot - 0.5 * sigma, "EOS-1": spot - sigma}
+    _m920[symbol] = lv
+    print(f"[9:20] {symbol} frozen: spot {spot:.1f} sigma {sigma:.1f} "
+          f"EOR {lv['EOR']:.0f} EOS {lv['EOS']:.0f}")
+    return lv
+
+def _m920_detect(symbol: str, data: dict):
+    """Raise a touch alert when spot reaches a frozen 09:20 line.
+
+    The fired-history lives HERE, not in each browser: previously every system
+    kept its own cooldown map, so a machine that had already seen a touch
+    stayed silent while another announced it — alerts appeared to work on some
+    systems and not others.
+    """
+    lv = _m920_levels(symbol, data)
+    spot = data.get("underlying_value")
+    if not lv or not spot:
+        return
+    tol = max(4.0, spot * 0.0006)
+    now = time.time()
+    for lab in ("EOR+1", "EOR", "EOS", "EOS-1"):
+        v = lv[lab]
+        if abs(spot - v) > tol:
+            continue
+        key = f"{symbol}|{lab}"
+        if now - _m920_fired.get(key, 0) < 600:
+            continue
+        _m920_fired[key] = now
+        kind = "resistance extension" if lab == "EOR+1" else "resistance" if lab == "EOR" \
+            else "support" if lab == "EOS" else "support extension"
+        spoken = lab.replace("+1", " plus one").replace("-1", " minus one")
+        _sse_broadcast({
+            "type": "m920", "symbol": symbol, "ts": now, "label": lab,
+            "level": round(v, 1), "spot": round(spot, 1), "kind": kind,
+            "text": f"Price touching {spoken} at {int(round(v))}, the nine twenty {kind} line",
+        })
+
+def _flow_detect(symbol: str, data: dict):
+    """Compare this snapshot with the last one and raise flow alerts."""
+    try:
+        strikes = data.get("strikes") or []
+        spot = data.get("underlying_value")
+        if not strikes or not spot:
+            return
+        now = time.time()
+        snap = {"ts": now, "m": {s.get("strike"): (s.get("ce_oi") or 0, s.get("pe_oi") or 0,
+                                                   s.get("ce_ltp") or 0, s.get("pe_ltp") or 0)
+                                 for s in strikes if s.get("strike")}}
+        prev = _flow_prev.get(symbol)
+        if not prev:
+            _flow_prev[symbol] = snap
+            return
+        if now - prev["ts"] < ALERT_CFG["window"]:
+            return
+        _flow_prev[symbol] = snap
+        events = []
+        for k, (ce, pe, cl_, pl) in snap["m"].items():
+            if abs(k - spot) / spot * 100 > ALERT_CFG["near_pct"]:
+                continue
+            p = prev["m"].get(k)
+            if not p:
+                continue
+            for side, oi_now, oi_old, l_now, l_old in (
+                ("CE", ce, p[0], cl_, p[2]), ("PE", pe, p[1], pl, p[3])):
+                if not oi_old or not l_old or not l_now:
+                    continue
+                oi_pct = (oi_now - oi_old) / oi_old * 100
+                pr_pct = (l_now - l_old) / l_old * 100
+                if abs(oi_pct) < ALERT_CFG["oi_pct"] or abs(pr_pct) < ALERT_CFG["prem_pct"]:
+                    continue
+                if oi_pct <= 0:
+                    continue                      # fresh positions only
+                buying = pr_pct > 0
+                kind = f"fresh {'call' if side == 'CE' else 'put'} {'buying' if buying else 'selling'}"
+                bias = ("bullish" if buying else "bearish") if side == "CE" else ("bearish" if buying else "bullish")
+                cat = ("ce" if side == "CE" else "pe") + ("Buy" if buying else "Sell")
+                fk = f"{symbol}|{k}|{side}"
+                if now - _flow_fired.get(fk, 0) < ALERT_CFG["cooldown"]:
+                    continue
+                events.append({"fk": fk, "cat": cat, "strike": k, "side": side, "kind": kind,
+                               "bias": bias, "oi_pct": round(oi_pct, 1), "pr_pct": round(pr_pct, 1)})
+        if not events:
+            return
+        # round-robin by category so calls are never crowded out by puts
+        events.sort(key=lambda e: -abs(e["oi_pct"]))
+        seen, ordered = set(), []
+        for e in events:
+            if e["cat"] not in seen:
+                seen.add(e["cat"]); ordered.append(e)
+        ordered += [e for e in events if e not in ordered]
+        # Never drop a whole category: everything in the round-robin head (one
+        # event per distinct category) is always emitted, and max_per_cycle
+        # only limits the EXTRA same-category events after that. Previously a
+        # cap of 3 silently killed the 4th category every cycle, which is why
+        # one of call/put buying/selling could go permanently unheard.
+        head = len(seen)
+        limit = max(head, ALERT_CFG["max_per_cycle"])
+        for e in ordered[:limit]:
+            _flow_fired[e["fk"]] = now
+            _sse_broadcast({
+                "type": "flow", "symbol": symbol, "ts": now,
+                "text": (f"{e['kind']} at {int(e['strike'])}, open interest up "
+                         f"{abs(e['oi_pct']):.0f} percent, premium "
+                         f"{'up' if e['pr_pct'] > 0 else 'down'} {abs(e['pr_pct']):.0f} percent. {e['bias']}"),
+                **e})
+    except Exception as ex:  # noqa: BLE001
+        print(f"[alerts] detect failed: {ex}")
+
 # ══════════════════════════════════════════════════════════════════════
 # SHARED CHAIN CACHE — one NSE request serves every connected browser.
 #
@@ -297,6 +500,14 @@ def _cached_chain(symbol: str, expiry, band: int, client: str = "?"):
             _cache_stats["fetches"] += 1
         try:
             _write_replay_snapshot(symbol, data)
+        except Exception:
+            pass
+        try:
+            _flow_detect(symbol, data)      # server-side alert engine
+        except Exception:
+            pass
+        try:
+            _m920_detect(symbol, data)      # 09:20 line touches
         except Exception:
             pass
         return data, {"cache": "miss", "age": 0.0, "ttl": _CHAIN_TTL, "shared_hits": 0}
@@ -2437,15 +2648,49 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_json(self, payload: dict, status: int = 200):
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        # A browser that navigated away, refreshed, or closed a tab leaves a
+        # dead socket behind. Writing to it raises BrokenPipeError, which is
+        # normal client behaviour rather than a server fault - swallow it (and
+        # remember it, so the caller's error handler does not try to reply on
+        # the same dead socket and produce a second traceback).
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self._client_gone = True
+        except Exception as e:  # noqa: BLE001
+            self._client_gone = True
+            print(f"[!] response write failed: {e}")
+
+    # ── connection-loss handling ──────────────────────────────────────
+    # ThreadingHTTPServer prints a full traceback for every client that hangs
+    # up mid-response. With a dashboard that opens SSE streams and polls on a
+    # timer, that is routine (tab closed, page refreshed, laptop slept) and
+    # floods the console. These overrides turn it into a one-line debug note.
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+
+    def handle(self):
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
+
+    def log_error(self, fmt, *args):
+        msg = fmt % args if args else fmt
+        if any(s in str(msg) for s in ("Broken pipe", "Connection reset", "Errno 32", "Errno 54")):
+            return
+        print(f"[http] {msg}")
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -2511,9 +2756,12 @@ class Handler(BaseHTTPRequestHandler):
             except NSEFetchError as e:
                 print(f"[!] Fetch error: {e}")
                 self._send_json({"error": str(e)}, status=502)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass          # client disconnected mid-response; nothing to report
             except Exception as e:  # noqa: BLE001 - surface anything unexpected to the UI rather than hanging it
                 print(f"[!] Unexpected error: {e}")
-                self._send_json({"error": f"Unexpected server error: {e}"}, status=500)
+                if not getattr(self, "_client_gone", False):
+                    self._send_json({"error": f"Unexpected server error: {e}"}, status=500)
             return
 
         if parsed.path == "/api/history":
@@ -2908,6 +3156,171 @@ class Handler(BaseHTTPRequestHandler):
                              "coverage": f"{first}-{last}",
                              "candles": candles, "count": len(candles),
                              "asOf": time.strftime("%H:%M:%S")})
+            return
+
+        if parsed.path == "/api/alert-stream":
+            # Server-Sent Events: one long-lived connection per browser tab.
+            # This IS the connected-systems registry — if the socket is open
+            # the tab is live, and when it closes the tab disappears with no
+            # heartbeat guesswork.
+            ip = self.client_address[0] if self.client_address else "?"
+            cl = _sse_register(ip)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                with _sse_lock:
+                    same = sum(1 for x in _sse_clients if x["ip"] == ip)
+                    total = len(_sse_clients)
+                hello = {"type": "hello", "client_id": cl["id"], "ip": ip,
+                         "tabs_here": same, "total_tabs": total}
+                self.wfile.write(f"data: {json.dumps(hello)}\n\n".encode())
+                self.wfile.flush()
+                print(f"[sse] connected {cl['id']} ({same} tab(s) on {ip}, {total} total)")
+                while True:
+                    try:
+                        ev = cl["q"].get(timeout=15)
+                        self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
+                    except Exception:
+                        self.wfile.write(b": keepalive\n\n")   # keeps proxies from closing
+                    self.wfile.flush()
+            except Exception:
+                pass
+            finally:
+                _sse_unregister(cl)
+                with _sse_lock:
+                    print(f"[sse] disconnected {cl['id']} ({len(_sse_clients)} remain)")
+            return
+
+        if parsed.path == "/api/audio-status":
+            # Browsers POST/GET their real audio capability here so failures on
+            # a remote machine are visible instead of invisible: is the voice
+            # toggle on, does the browser expose speechSynthesis, have voices
+            # loaded, and has the page received the user gesture Chrome
+            # requires before it will speak at all.
+            ip = self.client_address[0] if self.client_address else "?"
+            cid = qs.get("id", [""])[0]
+            st = {
+                "ip": ip, "id": cid,
+                "toggle": qs.get("toggle", ["?"])[0],
+                "synth": qs.get("synth", ["?"])[0],
+                "voices": qs.get("voices", ["0"])[0],
+                "unlocked": qs.get("unlocked", ["?"])[0],
+                "spoke_ok": qs.get("spoke", ["?"])[0],
+                "ua": (self.headers.get("User-Agent") or "")[:60],
+                "ts": time.time(),
+            }
+            with _sse_lock:
+                global _audio_status
+                try:
+                    _audio_status
+                except NameError:
+                    _audio_status = {}
+                if cid:
+                    _audio_status[cid] = st
+                for k, v in list(_audio_status.items()):
+                    if time.time() - v["ts"] > 120:
+                        _audio_status.pop(k, None)
+            self._send_json({"ok": True})
+            return
+
+        if parsed.path == "/api/audio-report":
+            now = time.time()
+            with _sse_lock:
+                reg = dict(globals().get("_audio_status") or {})
+                live = {x["id"]: x for x in _sse_clients}
+                by_ip = {}
+                for x in _sse_clients:
+                    by_ip.setdefault(x["ip"], []).append(x)
+                speakers = {ip: sorted(v, key=lambda z: z["seq"])[0]["id"] for ip, v in by_ip.items()}
+            rows = []
+            for cid, st in sorted(reg.items(), key=lambda kv: kv[1]["ip"]):
+                ready = (st["toggle"] == "1" and st["synth"] == "1"
+                         and int(st["voices"] or 0) > 0 and st["unlocked"] == "1")
+                rows.append({**st, "age": round(now - st["ts"], 1),
+                             "connected": cid in live,
+                             "is_speaker": speakers.get(st["ip"]) == cid,
+                             "ready": ready})
+            self._send_json({"clients": rows, "systems": len(by_ip),
+                             "speaker_per_machine": speakers})
+            return
+
+        if parsed.path == "/api/alert-emit":
+            # Generic relay: a browser that detects something locally (a pivot
+            # or level touch, a user-defined alert) hands it to the server,
+            # which de-duplicates against ONE shared history and broadcasts it
+            # to every system. Without this each browser kept its own fired-map
+            # and systems drifted out of sync — some announcing, some silent.
+            key = qs.get("key", [""])[0]
+            text = qs.get("text", [""])[0]
+            kind = qs.get("kind", ["level"])[0]
+            try:
+                cool = float(qs.get("cooldown", ["300"])[0])
+            except Exception:
+                cool = 300.0
+            if not key or not text:
+                self._send_json({"ok": False, "error": "key and text required"})
+                return
+            now = time.time()
+            with _sse_lock:
+                global _relay_fired
+                try:
+                    _relay_fired
+                except NameError:
+                    _relay_fired = {}
+                for k, t in list(_relay_fired.items()):
+                    if now - t > 3600:
+                        _relay_fired.pop(k, None)
+                last = _relay_fired.get(key, 0)
+                fresh = now - last >= cool
+                if fresh:
+                    _relay_fired[key] = now
+            if not fresh:
+                self._send_json({"ok": True, "broadcast": False,
+                                 "reason": "already announced", "age": round(now - last, 1)})
+                return
+            _sse_broadcast({"type": kind, "ts": now, "key": key, "text": text})
+            with _sse_lock:
+                n = len(_sse_clients)
+            print(f"[relay] {kind}: {text[:60]} -> {n} tab(s)")
+            self._send_json({"ok": True, "broadcast": True, "sent_to": n})
+            return
+
+        if parsed.path == "/api/m920":
+            # One source of truth for the 09:20 lines so every system draws
+            # and alerts on exactly the same values.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            lv = _m920.get(symbol)
+            self._send_json(lv or {"error": "not frozen yet (before 09:20 IST or no chain data)"})
+            return
+
+        if parsed.path == "/api/connected":
+            now = time.time()
+            with _sse_lock:
+                by_ip = {}
+                for x in _sse_clients:
+                    by_ip.setdefault(x["ip"], []).append(
+                        {"id": x["id"], "seq": x["seq"], "up_sec": round(now - x["ts"])})
+                speakers = {ip: sorted(v, key=lambda z: z["seq"])[0]["id"]
+                            for ip, v in by_ip.items()}
+                total = len(_sse_clients)
+            self._send_json({"systems": len(by_ip), "total_tabs": total,
+                             "by_machine": by_ip, "speaker_per_machine": speakers})
+            return
+
+        if parsed.path == "/api/alert-test":
+            # fire a synthetic alert down the stream so multi-machine audio can
+            # be verified without waiting for real market flow
+            _sse_broadcast({"type": "test", "ts": time.time(),
+                            "text": "Alert stream test. This system is announcing alerts.",
+                            "kind": "test alert", "bias": "neutral"})
+            with _sse_lock:
+                n = len(_sse_clients)
+            self._send_json({"sent_to": n})
             return
 
         if parsed.path == "/api/tab-ping":
@@ -4142,7 +4555,16 @@ def main():
     if args.poll:
         _start_poller([s.strip() for s in args.poll.split(",")], args.poll_interval)
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    class _QuietThreadingHTTPServer(ThreadingHTTPServer):
+        daemon_threads = True
+        def handle_error(self, request, client_address):
+            import sys as _s
+            exc = _s.exc_info()[1]
+            if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+                return                      # routine client disconnect
+            super().handle_error(request, client_address)
+
+    server = _QuietThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[i] NSE chain server running at http://{args.host}:{args.port}")
     if args.host == "0.0.0.0":
         try:
