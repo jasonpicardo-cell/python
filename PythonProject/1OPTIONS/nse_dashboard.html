@@ -5730,12 +5730,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   // NEW FEATURE: Straddle premium sparkline (last 30 min)
   // ======================================================================
+  // ══ symbol-scoped rolling histories ═══════════════════════════════
+  // Every sparkline below records a rolling series. They were symbol-agnostic,
+  // so switching NIFTY -> BANKNIFTY kept appending to the SAME array and the
+  // chart drew one line made of two different instruments (Nifty straddles
+  // near 250, BankNifty near 700) - which looks exactly like "the widget does
+  // not follow the top tab". Each series is now cleared when the instrument
+  // changes, and the render is tagged with the symbol it belongs to.
+  let _histSymbol = null;
+  function _resetHistoriesIfSymbolChanged(sym) {
+    if (!sym || sym === _histSymbol) return false;
+    const prev = _histSymbol;
+    _histSymbol = sym;
+    for (const arr of [_straddleHistory, _pcrTrendHistory, _ivHistory, _spotHistory, _flowHistory])
+      if (Array.isArray(arr)) arr.length = 0;
+    try { if (state.straddleHistory) state.straddleHistory.length = 0; } catch (_) {}
+    try { if (state.sessionHistory) state.sessionHistory.length = 0; } catch (_) {}
+    if (prev) console.log(`[history] instrument ${prev} -> ${sym}: rolling series reset`);
+    return true;
+  }
+
   const _straddleHistory = [];   // [{ts, val}]
   const MAX_STRADDLE_HIST = 4600; // full session at 5s poll (mini-sparkline slices last 360)
 
-  function _recordStraddle(premium) {
+  function _recordStraddle(premium, sym) {
     if (!premium || premium <= 0) return;
-    _straddleHistory.push({ ts: Date.now(), val: premium });
+    // ignore a value that belongs to a different instrument than the series
+    if (sym && _histSymbol && sym !== _histSymbol) return;
+    _straddleHistory.push({ ts: Date.now(), val: premium, sym: sym || _histSymbol });
     if (_straddleHistory.length > MAX_STRADDLE_HIST) _straddleHistory.shift();
   }
 
@@ -5756,7 +5778,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const col  = last >= first ? 'var(--pos)' : 'var(--neg)';
     svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round"/>
       <circle cx="${xs[n-1].toFixed(1)}" cy="${ys[n-1].toFixed(1)}" r="2" fill="${col}"/>`;
-    if (rng) rng.textContent = `${lo.toFixed(0)}–${hi.toFixed(0)}`;
+    if (rng) rng.textContent = `${_histSymbol || ''} ${lo.toFixed(0)}–${hi.toFixed(0)}`.trim();
   }
 
   // ======================================================================
@@ -13987,6 +14009,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     [...els.pills.children].forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     state.symbol = btn.dataset.symbol;
+    // wipe rolling series immediately so nothing from the old instrument can
+    // survive into the new one's chart, even for a single frame
+    try { _resetHistoriesIfSymbolChanged(state.symbol); } catch (_) {}
     state.expiry = null;
     state.shouldScrollToAtm = true;
     state.sessionHistory = [];
@@ -14109,6 +14134,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const data = await resp.json();
       state._lastLatency = Math.round(performance.now() - _ft0);
       state._lastFetchTs = Date.now();
+      if (data && data.symbol && state.symbol && data.symbol !== state.symbol) {
+        console.log(`[fetch] ignoring late ${data.symbol} reply; ${state.symbol} now selected`);
+        return;                       // never let it reach state.lastData
+      }
       state._cacheMeta = data && data._cache ? data._cache : null;
       if (data && data._tokens) _tokMap = data._tokens;     // for live tick routing
 
@@ -14173,10 +14202,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function render(data) {
+    // ── stale-response guard ─────────────────────────────────────────
+    // Switching instruments sets state.symbol immediately, but a request for
+    // the PREVIOUS symbol may still be in flight. Rendering it stamps every
+    // rolling series and label with the wrong instrument - which is why the
+    // straddle sparkline could read NIFTY while BANKNIFTY was selected.
+    // A response that no longer matches the selection is simply discarded.
+    if (data && data.symbol && state.symbol && data.symbol !== state.symbol) {
+      console.log(`[render] discarded stale ${data.symbol} response (${state.symbol} is selected)`);
+      return;
+    }
     try {
       const ec = document.getElementById('expiryChip');
       if (ec) ec.style.display = ((data?.dte ?? 99) <= 0) ? 'inline-block' : 'none';
     } catch (_) {}
+    try { _resetHistoriesIfSymbolChanged(state.symbol || data?.symbol); } catch (_) {}
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
@@ -14260,7 +14300,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => _updateMiniHud(), '_updateMiniHud');
     _safe(() => _saveSettings(), '_saveSettings');
     // Batch 3 new features
-    _safe(() => _recordStraddle(data.straddle_premium), '_recordStraddle');
+    _safe(() => _recordStraddle(data.straddle_premium, data.symbol || state.symbol), '_recordStraddle');
     _safe(() => _renderStraddleSparkline(), '_renderStraddleSparkline');
     _safe(() => _updateIvp(data.atm_iv), '_updateIvp');
     _checkIvMove(data.atm_iv);                 // IV spike/crush alert
@@ -15350,6 +15390,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // Use a dedicated straddle history — don't piggyback on sessionHistory
     // which deduplicates when spot/pcr are unchanged (common on flat days)
     if (!state.straddleHistory) state.straddleHistory = [];
+    // drop anything recorded under a previous instrument
+    if (state._straddleChartSym && state._straddleChartSym !== (data.symbol || state.symbol))
+      state.straddleHistory.length = 0;
+    state._straddleChartSym = data.symbol || state.symbol;
     state.straddleHistory.push({ t: Date.now(), v: straddle });
     if (state.straddleHistory.length > 300) state.straddleHistory.shift();
     if (els.straddleCurrentVal) els.straddleCurrentVal.textContent = `₹${straddle.toFixed(1)}`;
