@@ -1741,6 +1741,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <button class="tab" data-tab="numerology">Numerology</button>
     <button class="tab" data-tab="astro">Astrology</button>
     <button class="tab" data-tab="vedic">Vedic</button>
+    <button class="tab" data-tab="alerts">🔔 Alerts</button>
     <button class="tab" data-tab="validate">Validation</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
@@ -1849,9 +1850,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <span class="skew-chart-title">📈 Live Chart &amp; Levels<i class="hi" data-h="price-chart">i</i></span>
               <span style="display:flex;gap:4px;align-items:center;">
                 <span style="font-size:9px;color:var(--muted,#789);">Zoom</span>
-                <button class="btn" id="zoomOutBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom out (or press -)">&minus;</button>
+                <button class="btn" id="chartZoomOutBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom out (or press -)">&minus;</button>
                 <input type="range" id="zoomSlider" min="0" max="100" value="20" step="1" style="width:110px;accent-color:var(--gold,#d4af37);cursor:pointer;" title="Drag to zoom the price axis">
-                <button class="btn" id="zoomInBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom in (or press +)">+</button>
+                <button class="btn" id="chartZoomInBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom in (or press +)">+</button>
                 <span id="zoomVal" style="font-size:9px;color:var(--gold,#d4af37);min-width:30px;">1.0&times;</span>
                 <button class="btn" id="zoomFitBtn" style="font-size:9px;padding:1px 7px;" title="Reset to auto-fit (or double-click the chart)">Fit</button>
                 <label style="font-size:9px;color:var(--muted,#789);margin-left:4px;" title="How often the chart pulls candles from the server. Thanks to the shared cache this costs NO extra NSE requests — several browsers polling fast still collapse into one server fetch.">poll
@@ -3219,7 +3220,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div id="oiTimelineOut"><span style="font-size:10px;color:var(--muted-2);">Requires server support — click Load to try. (See server patch notes.)</span></div>
       </div>
 
-      <div class="skew-chart-wrap" id="volSurfaceWrap">
+      <div class="skew-chart-wrap" id="volSurfaceTermWrap">
         <div class="skew-chart-head">
           <span class="skew-chart-title">Volatility Surface <span style="font-size:10px;color:var(--muted-2);font-weight:400;">(IV across strikes × expiries)</span></span>
           <span class="chart-legend"><span style="font-size:10px;color:var(--muted-2);">Low IV → High IV (blue → red)</span></span>
@@ -3699,6 +3700,45 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <section id="tab-flow" class="tab-panel">
 
       <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
+
+      <div class="level-panel" id="gexHeatPanel" style="margin-bottom:12px;">
+        <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
+          <span class="skew-chart-title">🔥 GEX Heatmap &amp; King Node — recorded intraday<i class="hi" data-h="gex-heat">i</i></span>
+          <select id="gexStep" class="ohlc-inp" style="font-size:9px;padding:1px 4px;">
+            <option value="1">1m</option><option value="5" selected>5m</option>
+            <option value="15">15m</option><option value="30">30m</option>
+          </select>
+          <button class="btn" id="gexHeatBtn" style="font-size:9px;padding:2px 10px;">↻ Load</button>
+        </div>
+        <div id="gexHeat" style="padding:4px 6px;"><div class="movers-loading">Press Load to read today's recorded gamma structure.</div></div>
+        <div class="level-panel-head" style="margin-top:6px;"><span class="skew-chart-title">📉 Gamma flip vs spot — session path</span></div>
+        <div id="flipHist" style="padding:4px 6px;"></div>
+      </div>
+
+      <div class="level-panel" id="surfacePanel" style="margin-bottom:12px;">
+        <div class="level-panel-head">
+          <span class="skew-chart-title">🌐 Volatility Surface — skew &amp; term structure<i class="hi" data-h="vol-surface">i</i></span>
+        </div>
+        <div id="volSurface" style="padding:4px 6px;"></div>
+      </div>
+
+      <div class="level-panel" id="volPanel" style="margin-bottom:12px;">
+        <div class="level-panel-head">
+          <span class="skew-chart-title">📐 Volatility &amp; Higher-Order Greeks<i class="hi" data-h="vol-analytics">i</i></span>
+        </div>
+        <div id="volAnalytics" style="padding:4px 6px;">
+          <div class="movers-loading">Load the option chain.</div>
+        </div>
+      </div>
+
+      <div class="level-panel" id="chainAnalyticsPanel" style="margin-bottom:12px;">
+        <div class="level-panel-head">
+          <span class="skew-chart-title">🔬 Chain Analytics — time value · net change · reversals<i class="hi" data-h="chain-analytics">i</i></span>
+        </div>
+        <div id="chainAnalytics" style="padding:4px 6px;">
+          <div class="movers-loading">Load the option chain.</div>
+        </div>
+      </div>
 
       <div class="level-panel" id="regimePanel" style="margin-bottom:12px;">
         <div class="level-panel-head">
@@ -4335,6 +4375,73 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       </div>
     </section>
 
+    <section id="tab-alerts" class="tab-panel">
+      <div class="builder-panel-head"><h3>Alerts — every audio and notification control in one place<i class="hi" data-h="alerts-tab">i</i></h3></div>
+
+      <div class="level-panel" style="margin-bottom:12px;border:1px solid rgba(212,175,55,0.35);">
+        <div class="level-panel-head"><span class="skew-chart-title">🎛 Master control</span></div>
+        <div style="padding:8px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+          <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="masterMute"> 🔇 Mute everything on this browser
+          </label>
+          <span id="alertStatusLine" style="font-size:10px;color:var(--muted,#789);"></span>
+        </div>
+        <div id="alertMasterSlot" style="padding:4px 8px 8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;"></div>
+        <div style="padding:0 8px 8px;font-size:9.5px;color:#9ab;">Everything below is grouped by what it does. Controls were moved here from the topbar, Home and Today — they are the same controls, so nothing is duplicated and no setting can drift out of sync.</div>
+      </div>
+
+      <div class="gann-grid">
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">🗣 Voice &amp; multi-system routing<i class="hi" data-h="voice-alert">i</i></span></div>
+          <div id="alertVoiceSlot" style="padding:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;"></div>
+          <div class="oc-sub" style="padding:0 6px 6px;">Press <b>🔈 enable audio</b> once on every computer — browsers block speech until a page is clicked, and they do it silently. Then <b>🔊 test</b> broadcasts through the server so all systems are exercised at once, and <b>🩺 systems</b> shows each machine's readiness.</div>
+        </div>
+
+        <div class="skew-chart-wrap">
+          <div class="skew-chart-head"><span class="skew-chart-title">🌊 Fresh option flow<i class="hi" data-h="fresh-flow">i</i></span></div>
+          <div id="alertFlowSlot" style="padding:6px;"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🔔 Custom price &amp; condition alerts<i class="hi" data-h="custom-alerts">i</i></span></div>
+          <div id="alertCustomSlot" style="padding:6px;"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">📈 Live-chart level alerts — which lines announce<i class="hi" data-h="chart-alerts">i</i></span></div>
+          <div style="padding:6px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:10px;">
+            <label><input type="checkbox" id="csrc_m920"> 9:20 lines (EOR / EOS)</label>
+            <label><input type="checkbox" id="csrc_walls"> OI walls</label>
+            <label><input type="checkbox" id="csrc_cpr"> CPR</label>
+            <label><input type="checkbox" id="csrc_maxpain"> Max pain</label>
+            <label><input type="checkbox" id="csrc_cone"> ±1σ bands</label>
+            <label><input type="checkbox" id="csrc_pivots"> Pivots (R/S)</label>
+            <label style="color:var(--muted,#789);">tolerance
+              <input type="number" id="csrc_tol" class="ohlc-inp" style="width:52px;" step="1" min="1" max="100" title="How close price must come to a line before it announces, in points">
+            </label>
+          </div>
+          <div class="oc-sub" style="padding:0 6px 6px;">These are the lines drawn on the Live Chart. Drawing a line and announcing it are separate choices — the chart's own checkboxes control what you SEE, these control what you HEAR, so you can watch six levels while only being told about the two that matter. Unticking a source here silences it on this browser without affecting other machines.</div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">📐 Level &amp; pivot touch alerts<i class="hi" data-h="bell-alert">i</i></span></div>
+          <div id="alertLevelSlot" style="padding:6px;"></div>
+          <div class="oc-sub" style="padding:0 6px 6px;">Fires when price reaches a pivot, CPR, OI wall, 9:20 line or one of your own levels — the same detection the chart uses, so what you hear matches what you see drawn.</div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">📊 Condition alerts — IV, PCR, velocity, ORB, risk</span></div>
+          <div id="alertCondSlot" style="padding:6px;"></div>
+          <div class="oc-sub" style="padding:0 6px 6px;">Market-condition triggers rather than price levels: IV spikes and thresholds, PCR extremes, price velocity, opening-range breaks, and the paper-trading loss and trailing-drawdown limits.</div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🩺 Diagnostics &amp; recent alerts</span></div>
+          <div id="alertDiagSlot" style="padding:6px;"></div>
+        </div>
+      </div>
+    </section>
+
     <section id="tab-validate" class="tab-panel">
       <div class="builder-panel-head"><h3>Validation — does the confluence actually work?<i class="hi" data-h="validate-tab">i</i></h3></div>
 
@@ -4403,6 +4510,26 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 <script>
 (function () {
   'use strict';
+
+  // ── background throttling ────────────────────────────────────────
+  // A hidden tab still ran every poller. With several tabs open across a few
+  // machines that is a lot of CPU spent refreshing pixels nobody is watching.
+  // Timers registered here idle while the tab is hidden and fire once
+  // immediately when it becomes visible again, so nothing shows stale data.
+  const _bgTimers = [];
+  function _visInterval(fn, ms, name) {
+    const h = setInterval(() => {
+      if (document.hidden) return;          // skip the tick, keep the timer
+      try { fn(); } catch (e) { console.warn('[timer]', name || '', e.message); }
+    }, ms);
+    _bgTimers.push({ h, fn, ms, name });
+    return h;
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    // catch up once on return rather than waiting out the full period
+    for (const t of _bgTimers) { try { t.fn(); } catch (_) {} }
+  });
 
   const state = {
     symbol: 'NIFTY',
@@ -5266,7 +5393,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       el.innerHTML = `GIFT <b>${fmtInt(d.price)}</b> <span class="${cls}">${sign}${d.pChange?.toFixed(2)||''}%</span>`;
     } catch { el.textContent = ''; }
   }
-  setInterval(_fetchGiftNifty, 60000);
+  _visInterval(_fetchGiftNifty, 60000, '_fetchGiftNifty');
   _fetchGiftNifty();
 
   // ======================================================================
@@ -8229,7 +8356,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   // FEATURE: Volatility surface (expiries × strikes IV heatmap)
   // ======================================================================
-  function renderVolSurface(d) {
+  function renderVolSurfaceSkew(d) {
     const out = document.getElementById('volSurfaceOut');
     if (!out) return;
     const exps = Object.entries(d.expiries_data || {}).filter(([, i]) => i.strikes?.length).sort((a, b) => (a[1].dte ?? 0) - (b[1].dte ?? 0));
@@ -10934,13 +11061,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       ? ` · <span style="color:${cm.cache === 'miss' ? 'var(--gold,#d4af37)' : 'var(--pos,#26a69a)'};" title="${cm.cache === 'miss' ? 'this request went to NSE' : 'served from the server\'s shared cache — no NSE call'}">${cm.cache === 'miss' ? '🌐 live' : '📦 cached ' + cm.age + 's'}</span>`
       : '';
     const si = _sseInfo || {};
+    const tickTxt = (_tickStats.n && Date.now() - _tickStats.last < 5000)
+      ? ` · <span style="color:var(--pos,#26a69a);" title="Live ticks streaming from the broker feed via the server">⚡ live ${_tickStats.n}</span>` : '';
     const sseTxt = si.id
       ? ` · <span title="Live alert stream: ${si.tabs_here} tab(s) on this computer, ${si.total_tabs} across all systems. ${si.speaker ? 'THIS tab is this computer\'s speaker.' : 'Another tab on this computer is the speaker.'}">${si.speaker ? '🔊' : '🔇'} ${si.tabs_here}/${si.total_tabs}</span>`
       : ' · <span style="color:var(--neg,#ef5350);" title="Not connected to the alert stream">⚠ no stream</span>';
     const tabTxt = (_tabInfo && _tabInfo.tabs_here > 1)
       ? ` · <span title="This computer has ${_tabInfo.tabs_here} dashboard tabs open (${_tabInfo.total_tabs} across all computers). Only one tab per PC speaks each alert.">🗂 ${_tabInfo.tabs_here} tabs</span>`
       : (_tabInfo && _tabInfo.total_tabs > 1 ? ` · <span title="${_tabInfo.total_tabs} dashboard tabs open across all computers">🗂 ${_tabInfo.total_tabs} total</span>` : '');
-    el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` + sseTxt + tabTxt +
+    el.innerHTML = `⛓ ${age === null ? 'no data' : age + 's ago'}` + tickTxt + sseTxt + tabTxt +
       (lat ? ` · ⚡${lat}ms` : '') + cacheTxt +
       (err ? ` · <span style="color:var(--neg,#ef5350);">⚠${err}</span>` : '') ;
     el.style.color = stale ? 'var(--neg,#ef5350)' : 'var(--muted,#789)';
@@ -11622,7 +11751,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) { /* standalone / server down: assume we are alone */ }
   }
   _tabPing();
-  setInterval(_tabPing, 20000);
+  _visInterval(_tabPing, 20000, '_tabPing');
 
   // ══ ALERT STREAM: the server detects alerts and tells us whether to speak ══
   // One open EventSource per tab. The server uses these connections as its
@@ -11634,6 +11763,48 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // history. Local detectors then stand down: their per-browser cooldown maps
   // were exactly why one system stayed silent while another announced.
   let _streamLive = false;
+  // token -> {sym, strike, side} map, refreshed with each chain response
+  let _lastLevels = [];
+  let _tokMap = {}, _tickRaf = 0, _tickStats = { n: 0, last: 0 };
+  function _applyTicks(batch) {
+    if (!batch) return;
+    const data = state.lastData;
+    let touchedChain = false, spot = null;
+    for (const [tok, v] of Object.entries(batch)) {
+      _tickStats.n++;
+      const meta = _tokMap[tok];
+      if (!meta) continue;
+      if (meta.spot) { spot = v.ltp ?? spot; continue; }
+      if (!data?.strikes) continue;
+      const row = data.strikes.find(s => s.strike === meta.k);
+      if (!row) continue;
+      const p = meta.side === 'CE' ? 'ce' : 'pe';
+      if (v.ltp !== undefined) { row[p + '_ltp'] = v.ltp; touchedChain = true; }
+      if (v.oi !== undefined) { row[p + '_oi'] = v.oi; touchedChain = true; }
+      if (v.volume !== undefined) row[p + '_volume'] = v.volume;
+    }
+    if (spot != null && data) {
+      data.underlying_value = spot;
+      _chartLiveExtend(spot);          // grow the forming candle from the tick
+    }
+    _tickStats.last = Date.now();
+    if (_tickRaf) return;
+    _tickRaf = requestAnimationFrame(() => {
+      _tickRaf = 0;
+      try {
+        if (spot != null) {
+          renderPriceChart();                       // chart + all level lines
+          _safe(() => renderMarketPulse(data), 'pulse');
+          _safe(() => checkLevelTouches(_lastLevels || [], data.underlying_value), 'levelTouch');
+        }
+        if (touchedChain) {
+          _safe(() => renderChainTable(data, true), 'chainTick');
+          _safe(() => renderFlowRange(data), 'flowRange');
+        }
+      } catch (_) {}
+    });
+  }
+
   function _sseConnect() {
     try {
       if (_sse) { try { _sse.close(); } catch (_) {} }
@@ -11647,11 +11818,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           _voiceDiag('stream', `connected as ${d.client_id} · ${d.tabs_here} tab(s) here, ${d.total_tabs} total`);
           return;
         }
+        // ── live price ticks (Arrow adapter) ──────────────────────
+        // These arrive many times a second. They are applied to the in-memory
+        // chain and the forming candle, then a single repaint is scheduled on
+        // the next animation frame — the UI cannot usefully redraw faster,
+        // and repainting per tick would lock the browser.
+        if (d.type === 'ticks') { _applyTicks(d.t); return; }
         _sseInfo.speaker = !!d.speak;
         const line = d.text || d.kind || 'alert';
         // everyone sees it; only the elected tab speaks
         if (typeof showToast === 'function')
           showToast(`${d.speak ? '🔊' : '🔇'} ${escapeHtml(line.slice(0, 90))}`);
+        if (d.type === 'm920' && !_csrcCfg().m920) {
+          _voiceDiag('m920', 'silenced: 9:20 source unticked on this browser');
+          return;
+        }
         if (d.speak && _canSpeak()) {
           _flowSpeak(line);
           _spokeCount++; _audioReport('spoke');
@@ -11719,7 +11900,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
   }
   let _spokeCount = 0;
-  setInterval(() => _audioReport('tick'), 20000);
+  _visInterval(() => _audioReport('tick'), 20000, 'audioReport');
 
   // ── relay a locally-detected alert to the server ──
   // The server keeps ONE fired-history and broadcasts to every system, so a
@@ -11771,6 +11952,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
   }
   function _canSpeak() {
+    // master mute wins over everything, without clearing any setting
+    if (_masterMuted()) return false;
     // must have the voice toggle on AND a usable speech engine
     if (!_voiceEnabled()) return false;
     if (!('speechSynthesis' in window)) return false;
@@ -12013,6 +12196,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const dv = d.india_vix - state._pulsePrevVix;
       add('VIX trend', 1, Math.max(-1, Math.min(1, -dv / 0.8)), `VIX ${dv >= 0 ? 'rising' : 'falling'} (${dv >= 0 ? '+' : ''}${dv.toFixed(2)})`);
     }
+    // 8b. Net premium change across near strikes (money flow, not OI)
+    try {
+      const nc2 = state._ncLast;
+      if (nc2 && isFinite(nc2.diff))
+        add('Net premium change', 2, Math.max(-1, Math.min(1, nc2.diff / 4)),
+          `calls ${nc2.ceAvg >= 0 ? '+' : ''}${nc2.ceAvg.toFixed(1)}% vs puts ${nc2.peAvg >= 0 ? '+' : ''}${nc2.peAvg.toFixed(1)}% — ${nc2.read[0].toLowerCase()}`);
+    } catch (_) {}
     // 9. Put-call-parity synthetic spot vs actual — futures/spot pressure leak
     try {
       const il = computeImaginaryLine(d);
@@ -12040,6 +12230,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // 11. IV rank regime — high IV rank favours mean reversion, not direction:
     //     used only as a CONFIDENCE damper, so it enters with score 0 weight 0
     //     (kept visible in the table for context).
+    try {
+      const vr2 = _volRegime(d);
+      if (vr2 && vr2.rv != null)
+        c.push({ name: 'IV vs realized (context)', w: 0, score: 0,
+          why: `IV ${vr2.iv.toFixed(1)}% vs realized ${vr2.rv.toFixed(1)}% — ${vr2.read[0]} (volatility regime, not direction)` });
+    } catch (_) {}
     if (d.iv_rank != null) c.push({ name: 'IV rank (context)', w: 0, score: 0,
       why: `${d.iv_rank}${d.iv_rank >= 70 ? ' — rich premium, mean-reversion regime; fade extremes' : d.iv_rank <= 25 ? ' — cheap premium, trends can extend' : ' — mid regime'} (context only, no directional vote)` });
     // 12. ATM IV vs India VIX — term/venue disagreement
@@ -13028,6 +13224,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (state._oiWalls?.putStrike)  src.push({ v: state._oiWalls.putStrike,  s: 'Put OI wall',  w: 3 });
       const dnl = (typeof _computeDeltaNeutral === 'function' && d) ? _computeDeltaNeutral(d) : null;
       if (dnl) src.push({ v: dnl, s: 'Δ-neutral', w: 3 });
+      // time-value S/R: rupees at risk rather than contract count
+      try {
+        const tvl = _timeValueLevels(d);
+        if (tvl?.res) src.push({ v: tvl.res.strike, s: 'TV resistance', w: 3 });
+        if (tvl?.sup) src.push({ v: tvl.sup.strike, s: 'TV support', w: 3 });
+      } catch (_) {}
     }
     // crowd-watched (w2) — price-derived, works for stocks too
     // Camarilla: recompute from stock OHLC when in stock mode
@@ -13908,6 +14110,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       state._lastLatency = Math.round(performance.now() - _ft0);
       state._lastFetchTs = Date.now();
       state._cacheMeta = data && data._cache ? data._cache : null;
+      if (data && data._tokens) _tokMap = data._tokens;     // for live tick routing
 
       if (!resp.ok || data.error) {
         throw new Error(data.error || `HTTP ${resp.status}`);
@@ -13978,6 +14181,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _freshFlowCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
     try { renderRegimeSignals(data); } catch (_) {}
+    try { renderChainAnalytics(data); } catch (_) {}
+    try { renderVolPanel(data); } catch (_) {}
+    try { renderVolSurfaceTerm(data); } catch (_) {}
     try {
       if (_chart.candles.length) {
         _chartLiveExtend(data?.underlying_value);
@@ -14173,6 +14379,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => _trackMultiStraddle(data), '_trackMultiStraddle');
     _safe(() => renderMultiStraddle(), 'renderMultiStraddle');
     _safe(() => renderVolSurface(data), 'renderVolSurface');
+    _safe(() => renderVolSurfaceSkew(data), 'renderVolSurfaceSkew');
     _safe(() => _renderFuturesBasis(data), '_renderFuturesBasis');
     _safe(() => _renderIvRank(data), '_renderIvRank');
     _safe(() => renderVolSurface(data), 'renderVolSurface');
@@ -14441,6 +14648,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function _speakLevel(label, price) {
+    if (!_csrcAllows(label)) return;          // this source is muted on this browser
     // Route through the server when the stream is live so every system hears
     // it exactly once (the local path below is the standalone fallback).
     if (_streamLive) {
@@ -14765,6 +14973,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       ['S4', pv.S4, 's'], ['S5', pv.S5, 's'],
     ].filter(([n, p]) => p != null && isFinite(p) && (n === 'Pivot' || +n.slice(1) <= _maxLvl));
 
+    _lastLevels = levels;
     checkLevelTouches(levels, spot);
 
     // Append straddle breakeven markers if available
@@ -16180,7 +16389,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const m = _m920Load();
     const spot = d?.underlying_value;
     if (!m || !spot) return;
-    const tol = Math.max(4, spot * 0.0006);        // ~15 pts on Nifty
+    const tol = Math.max(4, _csrcCfg().tol || 15);   // points, set on the Alerts tab
     state._m920Fired = state._m920Fired || {};
     const lines = [['EOR+1', m.EORp1, 'resistance extension'], ['EOR', m.EOR, 'resistance'],
                    ['EOS', m.EOS, 'support'], ['EOS-1', m.EOSm1, 'support extension']];
@@ -16285,6 +16494,183 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (e) { box.innerHTML = `<span class="oc-sub">Report failed: ${escapeHtml(e.message)}</span>`; }
   });
 
+  document.getElementById('gexHeatBtn')?.addEventListener('click',
+    () => loadGexHistory(+(document.getElementById('gexStep')?.value || 5)));
+  document.getElementById('gexStep')?.addEventListener('change',
+    () => loadGexHistory(+(document.getElementById('gexStep')?.value || 5)));
+
+  // ══ Alerts tab: gather the scattered controls into one place ══════
+  // The elements are MOVED, not copied. Every listener, id and piece of state
+  // travels with the node, so there is exactly one control per setting and
+  // nothing can drift out of sync — the failure mode a duplicated UI invites.
+  function _buildAlertsTab() {
+    const slot = id => document.getElementById(id);
+    const move = (el, target, wrapLabel) => {
+      if (!el || !target) return;
+      // take the surrounding <label> when there is one, so the caption follows
+      const node = (el.closest && el.closest('label')) || el;
+      target.appendChild(node);
+      if (wrapLabel && node === el) {
+        const tag = document.createElement('span');
+        tag.style.cssText = 'font-size:9px;color:var(--muted,#789);margin-right:2px;';
+        tag.textContent = wrapLabel;
+        target.insertBefore(tag, node);
+      }
+    };
+    // master: voice on/off + volume
+    move(document.getElementById('voiceToggle'), slot('alertMasterSlot'));
+    move(document.getElementById('alertVolumeSlider'), slot('alertMasterSlot'), 'volume');
+    move(document.getElementById('alertDurationInput'), slot('alertMasterSlot'), 'duration s');
+    move(document.getElementById('alertSoundSelect'), slot('alertMasterSlot'), 'sound');
+    move(document.getElementById('alertTestBtn'), slot('alertMasterSlot'));
+    // voice routing + audio readiness
+    for (const id of ['voiceMode', 'audioUnlockBtn', 'voiceTestBtn', 'audioReportBtn'])
+      move(document.getElementById(id), slot('alertVoiceSlot'));
+    // fresh-flow block: move its whole control row and log
+    const flowOn = document.getElementById('flowOn');
+    if (flowOn) {
+      const card = flowOn.closest('.skew-chart-wrap');
+      const dest = slot('alertFlowSlot');
+      if (card && dest) {
+        card.querySelectorAll('.dtpl-row, .oc-sub, #flowLog').forEach(n => dest.appendChild(n));
+        card.remove();
+      }
+    }
+    // custom alerts block
+    const caAdd = document.getElementById('caAddBtn');
+    if (caAdd) {
+      const card = caAdd.closest('.skew-chart-wrap');
+      const dest = slot('alertCustomSlot');
+      if (card && dest) {
+        card.querySelectorAll('.dtpl-row, .oc-sub, #caRules, #caFired').forEach(n => dest.appendChild(n));
+        card.remove();
+      }
+    }
+    // level / pivot touch alerts — the whole .alert-controls row from Home
+    const pat = document.getElementById('pivotAlertToggle');
+    if (pat) {
+      const row = pat.closest('.alert-controls');
+      if (row && slot('alertLevelSlot')) slot('alertLevelSlot').appendChild(row);
+    }
+    for (const id of ['clearAlertHistoryBtn', 'alertHistoryList', 'alertHistory'])
+      move(document.getElementById(id), slot('alertLevelSlot'));
+    // custom price levels defined on Home
+    for (const id of ['customAlertPrice', 'customAlertLabel', 'addCustomAlertBtn', 'customAlertList'])
+      move(document.getElementById(id), slot('alertCustomSlot'));
+    // condition alerts scattered across Home and the Chain tab
+    for (const id of ['ivSpikeEnabled', 'ivSpikeThreshold', 'ivAlertEnabled', 'veloAlertEnabled',
+                      'orbEnabled', 'pcrAlertEnabled', 'pcrBullThreshold', 'pcrBearThreshold',
+                      'lossLimitInput', 'trailDdInput'])
+      move(document.getElementById(id), slot('alertCondSlot'));
+
+    // diagnostics
+    const diag = document.getElementById('voiceDiagOn');
+    if (diag) {
+      const wrap = diag.closest('div');
+      if (wrap && slot('alertDiagSlot')) slot('alertDiagSlot').appendChild(wrap);
+    }
+    const rep = document.getElementById('audioReportBox');
+    if (rep && slot('alertDiagSlot')) slot('alertDiagSlot').appendChild(rep);
+
+    // master mute: one switch that silences this browser without losing any
+    // of the individual settings, so unmuting restores exactly what you had
+    const mm = document.getElementById('masterMute');
+    if (mm) {
+      try { mm.checked = localStorage.getItem('masterMute') === '1'; } catch (_) {}
+      mm.addEventListener('change', () => {
+        try { localStorage.setItem('masterMute', mm.checked ? '1' : '0'); } catch (_) {}
+        if (typeof showToast === 'function')
+          showToast(mm.checked ? '🔇 All audio muted on this browser (settings kept)' : '🔊 Audio unmuted');
+        _alertStatus();
+      });
+    }
+    // breadcrumb where the pivot controls used to sit, so the move is obvious
+    try {
+      const head = document.querySelector('#pivotPanel .level-panel-head');
+      if (head && !document.getElementById('alertsMoved')) {
+        const s = document.createElement('span');
+        s.id = 'alertsMoved';
+        s.style.cssText = 'font-size:9px;color:var(--muted,#789);margin-left:auto;cursor:pointer;';
+        s.innerHTML = '🔔 alert settings → Alerts tab';
+        s.title = 'Touch-alert controls now live on the Alerts tab';
+        s.addEventListener('click', () => document.querySelector('[data-tab="alerts"]')?.click());
+        head.appendChild(s);
+      }
+    } catch (_) {}
+    _alertStatus();
+    _csrcWire();
+    _visInterval(_alertStatus, 5000, '_alertStatus');
+  }
+
+  // ── which chart lines are allowed to announce ────────────────────
+  // Drawing and announcing were the same decision before: any line the chart
+  // drew could speak, which meant turning a level on visually also turned on
+  // its voice. These are separate switches now.
+  const _CSRC_KEY = 'chartAlertSources';
+  function _csrcCfg() {
+    try {
+      return Object.assign({ m920: true, walls: true, cpr: true, maxpain: false,
+                             cone: false, pivots: true, tol: 15 },
+                           JSON.parse(localStorage.getItem(_CSRC_KEY) || '{}'));
+    } catch (_) { return { m920: true, walls: true, cpr: true, maxpain: false, cone: false, pivots: true, tol: 15 }; }
+  }
+  function _csrcSave(o) { try { localStorage.setItem(_CSRC_KEY, JSON.stringify(o)); } catch (_) {} }
+  // map a level label to its source key
+  function _csrcKeyFor(label) {
+    const L = String(label || '');
+    if (/^EOR|^EOS/.test(L)) return 'm920';
+    if (/wall/i.test(L)) return 'walls';
+    if (/CPR|Pivot$/i.test(L) && /CPR/i.test(L)) return 'cpr';
+    if (/max ?pain/i.test(L)) return 'maxpain';
+    if (/σ|sigma/i.test(L)) return 'cone';
+    if (/^(CLA|FIB|TRA|CAM|WOO|DEM)\s|^[RS]\d|Pivot/i.test(L)) return 'pivots';
+    return null;                     // unknown source: allow, do not silently drop
+  }
+  function _csrcAllows(label) {
+    const k = _csrcKeyFor(label);
+    if (!k) return true;
+    return _csrcCfg()[k] !== false;
+  }
+  function _csrcWire() {
+    const cfg = _csrcCfg();
+    for (const k of ['m920', 'walls', 'cpr', 'maxpain', 'cone', 'pivots']) {
+      const el = document.getElementById('csrc_' + k);
+      if (!el) continue;
+      el.checked = cfg[k] !== false;
+      el.addEventListener('change', () => { const o = _csrcCfg(); o[k] = el.checked; _csrcSave(o); _alertStatus(); });
+    }
+    const t = document.getElementById('csrc_tol');
+    if (t) {
+      t.value = cfg.tol ?? 15;
+      t.addEventListener('change', () => { const o = _csrcCfg(); o.tol = Math.max(1, +t.value || 15); _csrcSave(o); });
+    }
+  }
+
+  function _masterMuted() {
+    try { return localStorage.getItem('masterMute') === '1'; } catch (_) { return false; }
+  }
+
+  function _alertStatus() {
+    const el = document.getElementById('alertStatusLine');
+    if (!el) return;
+    const bits = [];
+    bits.push(_masterMuted() ? '🔇 MUTED' : (_voiceEnabled() ? '🗣 voice on' : '🗣 voice off'));
+    bits.push(_audioUnlocked ? '🔈 audio unlocked' : '⚠ audio NOT unlocked — press 🔈 enable audio');
+    const si = _sseInfo || {};
+    bits.push(si.id ? `📡 stream connected · ${si.tabs_here} tab(s) here, ${si.total_tabs} total · this tab ${si.speaker ? 'SPEAKS' : 'listens'}`
+                    : '⚠ no server stream — local detection only');
+    try {
+      const cfg = _flowCfg();
+      bits.push(cfg.on ? '🌊 flow alerts armed' : '🌊 flow alerts off');
+      const n = _caLoad().filter(r => r.armed).length;
+      bits.push(`🔔 ${n} custom rule${n === 1 ? '' : 's'} armed`);
+      const cs = _csrcCfg();
+      const on = ['m920', 'walls', 'cpr', 'maxpain', 'cone', 'pivots'].filter(k => cs[k] !== false);
+      bits.push(`📈 ${on.length}/6 chart sources announcing`);
+    } catch (_) {}
+    el.innerHTML = bits.join(' &nbsp;·&nbsp; ');
+  }
+
   function _chartWire() {
     const cfg = _chartCfgLoad();
     _chart.interval = cfg.interval; _chart.show = cfg.show; _chart.pollSec = cfg.pollSec || 5;
@@ -16332,8 +16718,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       renderPriceChart();
     };
     zSl?.addEventListener('input', () => applyZoom(pctToZoom(+zSl.value)));
-    document.getElementById('zoomInBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom * 1.25));
-    document.getElementById('zoomOutBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom / 1.25));
+    document.getElementById('chartZoomInBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom * 1.25));
+    document.getElementById('chartZoomOutBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom / 1.25));
     document.getElementById('zoomFitBtn')?.addEventListener('click', () => {
       _chart.yZoom = 1; _chart.yCenter = null; _zoomSync(); renderPriceChart();
     });
@@ -16384,6 +16770,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const secs = Math.max(2, Math.min(120, _chart.pollSec || 5));
     _chart.timer = setInterval(() => fetchCandles(true), secs * 1000);
   }
+  _buildAlertsTab();
   _chartWire();   // safe here: _chart (const) is initialized above this point
 
   // ══ Regime Signals: Bull Run / Bloodbath + WTT/WTB shifting status ══
@@ -16491,6 +16878,567 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     html += `<div style="font-size:9.5px;color:#9ab;padding:1px 4px;">${r.shift.why}.</div>`;
     html += `<div style="font-size:9px;color:var(--muted,#789);padding:3px 4px;">Call wall ${fmtInt(r.walls.callWall)} · put wall ${fmtInt(r.walls.putWall)} · ${r.n} active near strikes this tick · ${r.samples} wall samples today.</div>`;
     html += `<div class="oc-sub" style="margin-top:4px;">Vocabulary from Indian option-chain practice; the rules here are mine and stated plainly. <b>WTT</b> = call-side peak-OI wall moving up or losing &gt;12% OI over the last ~45 min (ceiling softening, bullish lean). <b>WTB</b> = put-side wall moving down or losing &gt;12% (floor softening, bearish). <b>STRONG</b> = both holding. <b>BULL RUN / BLOODBATH</b> need breadth — at least half the active near-the-money strikes flowing one way — <i>plus</i> price confirming by more than 0.25%, so a quiet drift never gets labelled a stampede. These describe what has ALREADY been positioned, not what happens next.</div>`;
+    box.innerHTML = html;
+  }
+
+  // ══ Exposure suite (DEX/VEX) · GEX heatmap · flip history · vol surface ══
+
+  // ── 1. DEX & VEX: complete the professional exposure set ──────────
+  // GEX tells you where hedging DAMPENS or AMPLIFIES movement. DEX tells you
+  // the directional load dealers already carry, and VEX how much the book
+  // reprices per IV point. Same naive dealer convention as the GEX panel
+  // (long calls, short puts) - an assumption about who holds what.
+  function _exposureSuite(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value, lot = d?.lot_size || 75;
+    const T = Math.max(0.25, d?.dte ?? 1) / 365;
+    if (!st.length || !spot) return null;
+    let dex = 0, vex = 0, gex = 0;
+    const rows = [];
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) / spot > 0.06) continue;
+      let dS = 0, vS = 0, gS = 0;
+      for (const side of ['ce', 'pe']) {
+        const iv = (side === 'ce' ? s.ce_iv : s.pe_iv) / 100;
+        const oi = (side === 'ce' ? s.ce_oi : s.pe_oi) || 0;
+        if (!(iv > 0.01) || !oi) continue;
+        const g = bsGreeks(spot, s.strike, T, iv, 0.07, side.toUpperCase());
+        const sign = side === 'ce' ? 1 : -1;
+        dS += sign * g.delta * oi * lot;
+        vS += sign * g.vega * oi * lot;
+        gS += sign * g.gamma * oi * lot * spot * spot * 0.01;
+      }
+      dex += dS; vex += vS; gex += gS;
+      rows.push({ strike: s.strike, dex: dS, vex: vS, gex: gS });
+    }
+    return { dex, vex, gex, rows };
+  }
+
+  // ── 2/3. GEX heatmap + flip history from the replay archive ───────
+  let _gexHist = null;
+  async function loadGexHistory(step) {
+    const box = document.getElementById('gexHeat');
+    if (!box) return;
+    box.innerHTML = '<span class="oc-sub">Loading recorded gamma structure…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/gex-history?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&step=${step || 5}`);
+      const j = await r.json();
+      if (j.error || !j.cols?.length) {
+        box.innerHTML = `<span class="oc-sub">${escapeHtml(j.error || 'no recorded data')} — this reads today's replay archive, so it fills in as the session records.</span>`;
+        return;
+      }
+      _gexHist = j;
+      renderGexHeat();
+    } catch (e) { box.innerHTML = `<span class="oc-sub">Failed: ${escapeHtml(e.message)}</span>`; }
+  }
+  function renderGexHeat() {
+    const box = document.getElementById('gexHeat');
+    if (!box || !_gexHist) return;
+    const cols = _gexHist.cols;
+    // union of strikes, most active first, capped so the grid stays readable
+    const activity = {};
+    for (const c of cols) for (const [k, v] of Object.entries(c.gex)) activity[k] = (activity[k] || 0) + Math.abs(v);
+    const strikes = Object.keys(activity).map(Number).sort((a, b) => b - a)
+      .filter(k => activity[k] > 0).slice(0, 26);
+    if (!strikes.length) { box.innerHTML = '<span class="oc-sub">No strike activity recorded.</span>'; return; }
+    let maxAbs = 1;
+    for (const c of cols) for (const k of strikes) maxAbs = Math.max(maxAbs, Math.abs(c.gex[k] || 0));
+    const W = 900, rowH = 15, padL = 58, padT = 16, padB = 22;
+    const H = padT + strikes.length * rowH + padB;
+    const cw = (W - padL - 8) / cols.length;
+    let svg = '';
+    strikes.forEach((k, ri) => {
+      const y = padT + ri * rowH;
+      svg += `<text x="4" y="${y + 11}" style="font-size:9px;fill:var(--muted,#789);">${fmtInt(k)}</text>`;
+      cols.forEach((c, ci) => {
+        const v = c.gex[k] || 0;
+        if (!v) return;
+        const a = Math.min(0.9, Math.abs(v) / maxAbs);
+        const col = v > 0 ? `rgba(38,166,154,${a})` : `rgba(239,83,80,${a})`;
+        svg += `<rect x="${(padL + ci * cw).toFixed(1)}" y="${y}" width="${Math.max(1, cw - 0.5).toFixed(1)}" height="${rowH - 1}" fill="${col}"><title>${fmtInt(k)} @ ${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}: GEX ${fmtInt(Math.round(v))}</title></rect>`;
+      });
+    });
+    // king node and spot traces over the grid
+    const yOf = k => { const i = strikes.indexOf(k); return i < 0 ? null : padT + i * rowH + rowH / 2; };
+    let kingPts = '', spotPts = '';
+    cols.forEach((c, ci) => {
+      const x = padL + ci * cw + cw / 2;
+      const yk = yOf(c.king);
+      if (yk != null) kingPts += `${x.toFixed(1)},${yk.toFixed(1)} `;
+      // spot mapped onto the nearest displayed strike row
+      const near = strikes.reduce((a, b) => Math.abs(b - c.spot) < Math.abs(a - c.spot) ? b : a, strikes[0]);
+      const ys = yOf(near);
+      if (ys != null) spotPts += `${x.toFixed(1)},${ys.toFixed(1)} `;
+    });
+    if (spotPts) svg += `<polyline points="${spotPts}" fill="none" stroke="#fff" stroke-width="1.4" opacity="0.75"/>`;
+    if (kingPts) svg += `<polyline points="${kingPts}" fill="none" stroke="var(--gold,#d4af37)" stroke-width="1.6" stroke-dasharray="4,3"/>`;
+    const tick = Math.max(1, Math.floor(cols.length / 8));
+    cols.forEach((c, ci) => { if (ci % tick) return;
+      svg += `<text x="${(padL + ci * cw + cw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+    const first = cols[0], last = cols[cols.length - 1];
+    const kingMoved = first.king !== last.king;
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}</svg>
+      <div style="font-size:9.5px;color:#9ab;padding:3px 4px;">
+        Green = positive gamma at that strike (dealer hedging dampens moves), red = negative (hedging amplifies). Intensity is size. The <b style="color:var(--gold);">gold dashed line</b> is the king node — the strike carrying the most gamma each interval — and the <b>white line</b> is spot.
+        ${kingMoved ? `King node MIGRATED ${fmtInt(first.king)} → ${fmtInt(last.king)} today: hedging pressure has relocated, which usually precedes the old level losing its grip.` : `King node has held at ${fmtInt(last.king)} all session — a stable pin.`}
+      </div>
+      <div style="font-size:9px;color:var(--muted);padding:0 4px 3px;">${cols.length} intervals from your replay archive · ${strikes.length} strikes shown · recomputed from the recorded chain, so nothing extra is fetched from NSE.</div>`;
+    renderFlipHistory();
+  }
+  function renderFlipHistory() {
+    const box = document.getElementById('flipHist');
+    if (!box || !_gexHist) return;
+    const cols = _gexHist.cols.filter(c => c.flip);
+    if (cols.length < 3) { box.innerHTML = '<span class="oc-sub">Gamma flip not yet crossing within the recorded range — nothing to plot.</span>'; return; }
+    const W = 900, H = 150, padL = 8, padR = 56, padT = 10, padB = 20;
+    const all = cols.flatMap(c => [c.flip, c.spot]);
+    let lo = Math.min(...all), hi = Math.max(...all);
+    const pad = (hi - lo) * 0.1 || 10; lo -= pad; hi += pad;
+    const x = i => padL + i / Math.max(1, cols.length - 1) * (W - padL - padR);
+    const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+    const line = (key, col, dash) => `<polyline points="${cols.map((c, i) => `${x(i).toFixed(1)},${y(c[key]).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="1.5" stroke-dasharray="${dash || ''}"/>`;
+    const lastC = cols[cols.length - 1];
+    const above = lastC.spot >= lastC.flip;
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+        ${line('spot', '#fff')}${line('flip', 'var(--gold,#d4af37)', '4,3')}
+        <text x="${W - padR + 3}" y="${(y(lastC.spot) + 3).toFixed(1)}" style="font-size:9px;fill:#fff;">spot</text>
+        <text x="${W - padR + 3}" y="${(y(lastC.flip) + 3).toFixed(1)}" style="font-size:9px;fill:var(--gold,#d4af37);">flip</text>
+      </svg>
+      <div style="font-size:9.5px;color:#9ab;padding:2px 4px;">Spot (white) against the gamma flip level (gold) through the session. Spot is currently <b style="color:${above ? 'var(--pos)' : 'var(--neg)'};">${above ? 'ABOVE' : 'BELOW'}</b> the flip at ${fmtInt(Math.round(lastC.flip))} — ${above ? 'positive-gamma regime: dealer hedging leans against moves, so dips get bought and ranges hold' : 'negative-gamma regime: hedging chases price, so moves extend and volatility feeds itself'}. Watch whether price is chasing the flip or the flip is chasing price: the latter means positioning is being rebuilt around the new level.</div>`;
+  }
+
+  // ── 4. Volatility surface: IV across strikes and expiries ─────────
+  function renderVolSurfaceTerm(d) {
+    const box = document.getElementById('volSurface');
+    if (!box) return;
+    const spot = d?.underlying_value;
+    if (!spot) { box.innerHTML = '<span class="oc-sub">Load the chain.</span>'; return; }
+    const series = [{ exp: d.expiry, dte: d.dte, strikes: d.strikes || [] }];
+    for (const [exp, info] of Object.entries(d.expiries_data || {}))
+      if (exp !== d.expiry && info?.strikes?.length) series.push({ exp, dte: info.dte, strikes: info.strikes });
+    const W = 900, H = 210, padL = 34, padR = 70, padT = 12, padB = 24;
+    const pts = [];
+    for (const s of series) {
+      const row = [];
+      for (const st of s.strikes) {
+        if (Math.abs(st.strike - spot) / spot > 0.06) continue;
+        const iv = (st.strike >= spot ? st.ce_iv : st.pe_iv) || st.ce_iv || st.pe_iv;
+        if (iv > 1) row.push({ k: st.strike, iv });
+      }
+      if (row.length > 3) pts.push({ ...s, row });
+    }
+    if (!pts.length) { box.innerHTML = '<span class="oc-sub">Not enough IV data to draw a surface.</span>'; return; }
+    const ks = pts.flatMap(p => p.row.map(r => r.k));
+    const ivs = pts.flatMap(p => p.row.map(r => r.iv));
+    const kLo = Math.min(...ks), kHi = Math.max(...ks);
+    let vLo = Math.min(...ivs), vHi = Math.max(...ivs);
+    const vp = (vHi - vLo) * 0.15 || 1; vLo -= vp; vHi += vp;
+    const x = k => padL + (k - kLo) / (kHi - kLo || 1) * (W - padL - padR);
+    const y = v => padT + (vHi - v) / (vHi - vLo) * (H - padT - padB);
+    const cols2 = ['var(--gold,#d4af37)', '#7aa2f7', '#26de81', '#a55eea'];
+    let svg = `<line x1="${x(spot).toFixed(1)}" y1="${padT}" x2="${x(spot).toFixed(1)}" y2="${H - padB}" stroke="#fff" stroke-opacity="0.3" stroke-dasharray="3,3"/>
+      <text x="${x(spot).toFixed(1)}" y="${padT - 2}" text-anchor="middle" style="font-size:8px;fill:var(--muted);">spot</text>`;
+    pts.forEach((p, i) => {
+      p.row.sort((a, b) => a.k - b.k);
+      svg += `<polyline points="${p.row.map(r => `${x(r.k).toFixed(1)},${y(r.iv).toFixed(1)}`).join(' ')}" fill="none" stroke="${cols2[i % 4]}" stroke-width="1.6"/>`;
+      const last = p.row[p.row.length - 1];
+      svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(last.iv) + 3).toFixed(1)}" style="font-size:9px;fill:${cols2[i % 4]};">${escapeHtml(String(p.exp || '')).slice(0, 11)} (${p.dte ?? '?'}d)</text>`;
+    });
+    for (let g = 0; g <= 4; g++) {
+      const v = vLo + (vHi - vLo) * g / 4;
+      svg += `<text x="2" y="${(y(v) + 3).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">${v.toFixed(0)}%</text>`;
+    }
+    // term-structure read from ATM IV per expiry
+    const atmIv = pts.map(p => {
+      const near = p.row.reduce((a, b) => Math.abs(b.k - spot) < Math.abs(a.k - spot) ? b : a);
+      return { dte: p.dte, iv: near.iv, exp: p.exp };
+    }).sort((a, b) => (a.dte ?? 0) - (b.dte ?? 0));
+    let term = '';
+    if (atmIv.length > 1) {
+      const slope = atmIv[atmIv.length - 1].iv - atmIv[0].iv;
+      term = slope < -0.5 ? `<b style="color:var(--gold);">Backwardation</b> (near IV ${Math.abs(slope).toFixed(1)} pts above far) — near-term event premium; calendars and diagonals are favoured.`
+           : slope > 0.5 ? `<b>Contango</b> (far IV ${slope.toFixed(1)} pts above near) — the normal shape; near-dated premium is comparatively cheap.`
+           : `<b>Flat term structure</b> — no calendar edge either way.`;
+    }
+    const smile = pts[0].row;
+    const lowK = smile[0], highK = smile[smile.length - 1];
+    const skew = lowK && highK ? lowK.iv - highK.iv : 0;
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}</svg>
+      <div style="font-size:9.5px;color:#9ab;padding:3px 4px;">Each line is one expiry's IV across strikes. ${term}
+      Skew on the near expiry: downside IV is ${Math.abs(skew).toFixed(1)} pts ${skew > 0 ? 'ABOVE' : 'BELOW'} upside — ${skew > 1.5 ? 'the usual put-fear shape, protection is bid' : skew < -1.5 ? 'inverted: upside calls are bid, which shows up in melt-ups and squeezes' : 'unusually flat, so neither tail is being paid for'}.</div>`;
+  }
+
+  // ══ Volatility & higher-order Greeks (NSE data only) ══════════════
+  // Three reads that need no broker feed: realized-vs-implied volatility from
+  // our own recorded ticks, charm/vanna exposure from the same Black-Scholes
+  // engine the GEX panel uses, and gamma split per expiry.
+
+  // ── standard normal pdf ──
+  const _nPdf = x => Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+
+  // ── 1. REALIZED vs IMPLIED ────────────────────────────────────────
+  // Implied vol is what the market CHARGES for movement; realized vol is what
+  // actually happened. The spread between them is the cleanest read on whether
+  // option sellers are being overpaid. Positive spread (IV > RV) = premium
+  // sellers collecting more than the movement justifies, and vice versa.
+  function _realizedVol(candles, barsPerYear) {
+    if (!candles || candles.length < 12) return null;
+    const rets = [];
+    for (let i = 1; i < candles.length; i++) {
+      const a = candles[i - 1].c, b = candles[i].c;
+      if (a > 0 && b > 0) rets.push(Math.log(b / a));
+    }
+    if (rets.length < 10) return null;
+    const mean = rets.reduce((s, v) => s + v, 0) / rets.length;
+    const varr = rets.reduce((s, v) => s + (v - mean) ** 2, 0) / (rets.length - 1);
+    return { vol: Math.sqrt(varr * barsPerYear) * 100, n: rets.length };
+  }
+  function _volRegime(d) {
+    const iv = d?.atm_iv;
+    if (!iv) return null;
+    // intraday realized from the candles already loaded for the chart
+    const cs = _chart.candles || [];
+    const barsPerYear = (375 / Math.max(1, _chart.interval)) * 252;
+    const rv = _realizedVol(cs, barsPerYear);
+    // historical distribution of the spread, when a daily CSV has been loaded
+    let hist = null;
+    try {
+      const H = _labLoad();
+      if (H && H.length > 60) {
+        const closes = H.map(x => x.c);
+        const win = 20, spreads = [];
+        for (let i = win; i < closes.length; i++) {
+          const r2 = [];
+          for (let j = i - win + 1; j <= i; j++) r2.push(Math.log(closes[j] / closes[j - 1]));
+          const m = r2.reduce((s, v) => s + v, 0) / r2.length;
+          const v2 = r2.reduce((s, v) => s + (v - m) ** 2, 0) / (r2.length - 1);
+          spreads.push(Math.sqrt(v2 * 252) * 100);
+        }
+        spreads.sort((a, b) => a - b);
+        hist = {
+          n: spreads.length,
+          p10: spreads[Math.floor(spreads.length * 0.10)],
+          p50: spreads[Math.floor(spreads.length * 0.50)],
+          p90: spreads[Math.floor(spreads.length * 0.90)],
+        };
+      }
+    } catch (_) {}
+    if (!rv) return { iv, rv: null, hist };
+    const spread = iv - rv.vol;
+    const pct = rv.vol ? (iv / rv.vol) : null;
+    const read = spread > 3 ? ['IV RICH', 'var(--pos,#26a69a)', 'the market is charging well above what price is actually doing — premium selling is being overpaid, subject to gap risk']
+      : spread < -3 ? ['IV CHEAP', 'var(--neg,#ef5350)', 'price is moving more than options are priced for — buying premium is comparatively cheap, and short gamma is dangerous here']
+      : ['FAIR', '#9aa', 'implied and realized are close — no volatility edge either way today'];
+    return { iv, rv: rv.vol, n: rv.n, spread, pct, read, hist };
+  }
+
+  // ── 2. CHARM & VANNA exposure ─────────────────────────────────────
+  // Charm = dDelta/dTime: how much dealer hedges must be adjusted purely
+  // because a day passed. It is the mechanical reason for expiry-week drift —
+  // a far better explanation than "max pain magnetism".
+  // Vanna = dDelta/dVol: how hedging shifts when IV moves, which is why a
+  // volatility spike alone can push spot.
+  function _charmVanna(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value, lot = d?.lot_size || 75;
+    const dte = Math.max(0.25, d?.dte ?? 1), T = dte / 365, r = 0.07;
+    if (!st.length || !spot) return null;
+    let charmNet = 0, vannaNet = 0;
+    const rows = [];
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) / spot > 0.06) continue;
+      let cS = 0, vS = 0;
+      for (const side of ['ce', 'pe']) {
+        const iv = (side === 'ce' ? s.ce_iv : s.pe_iv) / 100;
+        const oi = (side === 'ce' ? s.ce_oi : s.pe_oi) || 0;
+        if (!(iv > 0.01) || !oi) continue;
+        const sq = iv * Math.sqrt(T);
+        const d1 = (Math.log(spot / s.strike) + (r + iv * iv / 2) * T) / sq;
+        const d2 = d1 - sq;
+        const vanna = -_nPdf(d1) * d2 / iv;                       // dDelta/dVol
+        const charm = -_nPdf(d1) * (2 * r * T - d2 * sq) / (2 * T * sq);  // dDelta/dTime
+        // same naive dealer convention as the GEX panel: long calls, short puts
+        const sign = side === 'ce' ? 1 : -1;
+        cS += sign * charm * oi * lot;
+        vS += sign * vanna * oi * lot;
+      }
+      charmNet += cS; vannaNet += vS;
+      rows.push({ strike: s.strike, charm: cS, vanna: vS });
+    }
+    rows.sort((a, b) => Math.abs(b.charm) - Math.abs(a.charm));
+    return { charmNet, vannaNet, rows: rows.slice(0, 5), dte };
+  }
+
+  // ── 3. GAMMA BY EXPIRY ────────────────────────────────────────────
+  // Aggregate gamma hides WHICH expiry is doing the pinning. On Nifty, a
+  // Tuesday weekly and a month-end series can pull in different directions.
+  function _gammaByExpiry(d) {
+    const out = [];
+    const near = _computeGex(d);
+    if (near) out.push({ expiry: d.expiry, dte: d.dte, gex: near.total ?? near.net ?? null, flip: near.flip });
+    const ed = d?.expiries_data || {};
+    for (const [exp, info] of Object.entries(ed)) {
+      if (!info?.strikes?.length || exp === d.expiry) continue;
+      try {
+        const g = _computeGex({ ...d, strikes: info.strikes, expiry: exp, dte: info.dte ?? d.dte });
+        if (g) out.push({ expiry: exp, dte: info.dte, gex: g.total ?? g.net ?? null, flip: g.flip });
+      } catch (_) {}
+    }
+    return out.length ? out : null;
+  }
+
+  function renderVolPanel(data) {
+    const box = document.getElementById('volAnalytics');
+    if (!box) return;
+    const d = data || state.lastData;
+    if (!d?.underlying_value) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
+    const vr = _volRegime(d), cv = _charmVanna(d), ge = _gammaByExpiry(d);
+    const fmtB = v => (Math.abs(v) >= 1e7 ? (v / 1e7).toFixed(2) + ' Cr' : Math.abs(v) >= 1e5 ? (v / 1e5).toFixed(1) + ' L' : Math.round(v));
+    let html = '';
+
+    if (vr) {
+      html += `<div style="padding:4px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="font-size:10px;font-weight:700;margin-bottom:3px;">📐 Realized vs Implied volatility</div>`;
+      if (vr.rv == null) {
+        html += `<div style="font-size:9.5px;color:var(--muted);">ATM IV ${vr.iv.toFixed(1)}% — realized needs more candles (the chart must have loaded at least ~12 bars).</div>`;
+      } else {
+        html += `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;">
+          <b style="font-size:12px;color:${vr.read[1]};">${vr.read[0]}</b>
+          <span style="font-size:11px;">IV <b>${vr.iv.toFixed(1)}%</b></span>
+          <span style="font-size:11px;">realized <b>${vr.rv.toFixed(1)}%</b></span>
+          <span style="font-size:11px;color:${vr.spread >= 0 ? 'var(--pos)' : 'var(--neg)'};">spread ${vr.spread >= 0 ? '+' : ''}${vr.spread.toFixed(1)} pts${vr.pct ? ` (IV is ${vr.pct.toFixed(2)}× realized)` : ''}</span>
+        </div>
+        <div style="font-size:9.5px;color:#9ab;margin-top:2px;">${vr.read[2]}. Realized from ${vr.n} × ${_chart.interval}m bars today (close-to-close, annualised).</div>`;
+        if (vr.hist)
+          html += `<div style="font-size:9.5px;color:#9ab;margin-top:2px;">Historical realized vol over ${vr.hist.n} sessions: 10th pct ${vr.hist.p10.toFixed(1)}% · median ${vr.hist.p50.toFixed(1)}% · 90th pct ${vr.hist.p90.toFixed(1)}% — today's realized ${vr.rv > vr.hist.p90 ? 'is in the top decile (unusually violent)' : vr.rv < vr.hist.p10 ? 'is in the bottom decile (unusually calm)' : 'sits inside the normal band'}.</div>`;
+        else
+          html += `<div style="font-size:9px;color:var(--muted);margin-top:2px;">Load a daily NIFTY CSV in the Historical Astro Lab to get the long-run distribution of realized vol for context.</div>`;
+      }
+      html += '</div>';
+    }
+
+    if (cv) {
+      const drift = cv.charmNet > 0 ? 'upward' : 'downward';
+      html += `<div style="padding:4px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="font-size:10px;font-weight:700;margin-bottom:3px;">⏱ Charm &amp; Vanna exposure</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;">
+          <span style="font-size:11px;">Charm <b style="color:${cv.charmNet >= 0 ? 'var(--pos)' : 'var(--neg)'};">${fmtB(cv.charmNet)}</b>/day</span>
+          <span style="font-size:11px;">Vanna <b style="color:${cv.vannaNet >= 0 ? 'var(--pos)' : 'var(--neg)'};">${fmtB(cv.vannaNet)}</b>/IV pt</span>
+          <span style="font-size:10px;color:var(--muted);">${cv.dte}d to expiry</span>
+        </div>
+        <div style="font-size:9.5px;color:#9ab;margin-top:2px;">
+          <b>Charm</b> is how much delta hedging must shift for each day that passes, with nothing else changing: dealers must buy/sell to stay neutral, which biases drift <b>${drift}</b> into expiry. It is the mechanical version of the story usually told as "max pain pull", and it grows sharply in the last two sessions.
+          <b>Vanna</b> is the hedge shift per 1 IV point: ${Math.abs(cv.vannaNet) > 1e6 ? 'large here, so an IV spike alone can move spot even without directional flow' : 'modest here, so IV moves should not push spot much by themselves'}.
+        </div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px;">Biggest charm strikes: ${cv.rows.map(r => `${fmtInt(r.strike)} (${fmtB(r.charm)})`).join(' · ')}</div>
+      </div>`;
+    }
+
+    try {
+      const ex = _exposureSuite(d);
+      if (ex) {
+        const dirRead = Math.abs(ex.dex) < 1e5 ? 'balanced' : ex.dex > 0 ? 'net long delta — dealers sell rallies to stay flat' : 'net short delta — dealers buy dips to stay flat';
+        html += `<div style="padding:4px;border-bottom:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:10px;font-weight:700;margin-bottom:3px;">🧮 Exposure suite — GEX · DEX · VEX</div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;">
+            <span style="font-size:11px;">GEX <b style="color:${ex.gex >= 0 ? 'var(--pos)' : 'var(--neg)'};">${fmtB(ex.gex)}</b></span>
+            <span style="font-size:11px;">DEX <b style="color:${ex.dex >= 0 ? 'var(--pos)' : 'var(--neg)'};">${fmtB(ex.dex)}</b></span>
+            <span style="font-size:11px;">VEX <b>${fmtB(ex.vex)}</b>/IV pt</span>
+          </div>
+          <div style="font-size:9.5px;color:#9ab;margin-top:2px;">
+            <b>GEX</b> ${ex.gex >= 0 ? 'positive: hedging dampens moves, ranges tend to hold' : 'negative: hedging chases price, moves extend'}.
+            <b>DEX</b> is the directional load already carried — ${dirRead}.
+            <b>VEX</b> is how much the book reprices per IV point, which is why a vol spike alone can force hedging.</div>
+        </div>`;
+      }
+    } catch (_) {}
+    if (ge && ge.length > 1) {
+      html += `<div style="padding:4px;">
+        <div style="font-size:10px;font-weight:700;margin-bottom:3px;">🧲 Gamma by expiry — which series is pinning</div>` +
+        ge.map(g => `<div style="display:flex;gap:10px;font-size:10px;padding:2px 0;">
+            <b style="min-width:96px;">${escapeHtml(String(g.expiry || '?'))}</b>
+            <span style="color:var(--muted);min-width:44px;">${g.dte ?? '?'}d</span>
+            <span style="color:${(g.gex || 0) >= 0 ? 'var(--pos)' : 'var(--neg)'};">GEX ${g.gex != null ? fmtB(g.gex) : '—'}</span>
+            <span style="color:var(--muted);">flip ${g.flip ? fmtInt(Math.round(g.flip)) : '—'}</span>
+          </div>`).join('') +
+        `<div style="font-size:9.5px;color:#9ab;margin-top:2px;">The series with the largest absolute gamma dominates hedging pressure. When two expiries have flips at different prices, spot tends to get caught between them — and the near expiry's influence collapses the moment it settles.</div></div>`;
+    } else if (ge) {
+      html += `<div style="padding:4px;font-size:9.5px;color:var(--muted);">🧲 Gamma by expiry: only the near series is loaded. Fetch another expiry to compare which one is pinning.</div>`;
+    }
+
+    html += `<div class="oc-sub" style="margin-top:4px;">All three run on NSE data alone — no broker feed needed. Caveats worth holding: NSE's chain is 3-5 minutes delayed, so these describe positioning as it stood a few minutes ago; realized vol from one sample per minute is honest but noisier than tick data; and charm/vanna use the same naive dealer convention as the GEX panel (long calls, short puts), which is an assumption, not an observation.</div>`;
+    box.innerHTML = html;
+  }
+
+  // ══ Time-Value S/R · Net-Change direction · Reversal-price clusters ══
+  // Three option-chain reads that answer "where is writer money actually
+  // exposed, and which way is the chain leaning" — distinct from OI walls,
+  // which count contracts rather than rupees.
+
+  // ── 1. TIME VALUE ─────────────────────────────────────────────────
+  // premium = intrinsic + time value. Intrinsic is arithmetic; TIME VALUE is
+  // what writers are actually paid to carry risk. The strike holding the most
+  // put time value below spot is where support money sits; the most call time
+  // value above spot is resistance money. A strike can have modest OI but fat
+  // time value (or vice versa) — that divergence is the interesting part.
+  function _timeValueLevels(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const lot = d.lot_size || 75;
+    const rows = st.map(s => {
+      const ceIntr = Math.max(0, spot - s.strike);
+      const peIntr = Math.max(0, s.strike - spot);
+      const ceTv = Math.max(0, (s.ce_ltp || 0) - ceIntr);
+      const peTv = Math.max(0, (s.pe_ltp || 0) - peIntr);
+      return {
+        strike: s.strike, ceTv, peTv,
+        // rupees at risk = time value × open interest × lot
+        ceTvVal: ceTv * (s.ce_oi || 0) * lot,
+        peTvVal: peTv * (s.pe_oi || 0) * lot,
+        ceOi: s.ce_oi || 0, peOi: s.pe_oi || 0,
+      };
+    });
+    const above = rows.filter(r => r.strike >= spot);
+    const below = rows.filter(r => r.strike <= spot);
+    const pick = (arr, key) => arr.length ? arr.reduce((a, b) => (b[key] > a[key] ? b : a)) : null;
+    const res = pick(above, 'ceTvVal'), sup = pick(below, 'peTvVal');
+    // where the OI walls sit, for the divergence check
+    const oiRes = pick(above, 'ceOi'), oiSup = pick(below, 'peOi');
+    const totCeTv = rows.reduce((s2, r) => s2 + r.ceTvVal, 0);
+    const totPeTv = rows.reduce((s2, r) => s2 + r.peTvVal, 0);
+    return {
+      res, sup, oiRes, oiSup, rows, totCeTv, totPeTv,
+      tvRatio: totCeTv ? totPeTv / totCeTv : null,
+    };
+  }
+
+  // ── 2. NET CHANGE ─────────────────────────────────────────────────
+  // Aggregate premium movement across the chain. If call premiums are
+  // collectively bleeding while puts firm, sellers are pressing calls and
+  // bidding puts — a directional read that is independent of OI, because it
+  // measures price paid rather than contracts held.
+  function _netChangeRead(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const prev = state._ncPrev;
+    const snap = { ts: Date.now(), m: {} };
+    for (const s of st) snap.m[s.strike] = { c: s.ce_ltp || 0, p: s.pe_ltp || 0 };
+    if (!prev) { state._ncPrev = snap; return null; }
+    if (Date.now() - prev.ts < 60000) {
+      // keep the reference until a full minute has passed, but still report
+      // the last computed value so the panel does not flicker
+      return state._ncLast || null;
+    }
+    state._ncPrev = snap;
+    let ceUp = 0, ceDn = 0, peUp = 0, peDn = 0, n = 0;
+    let ceSum = 0, peSum = 0;
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) / spot > 0.03) continue;
+      const p = prev.m[s.strike];
+      if (!p) continue;
+      const dc = (s.ce_ltp || 0) - p.c, dp = (s.pe_ltp || 0) - p.p;
+      if (p.c > 1) { ceSum += dc / p.c * 100; dc > 0 ? ceUp++ : dc < 0 ? ceDn++ : 0; }
+      if (p.p > 1) { peSum += dp / p.p * 100; dp > 0 ? peUp++ : dp < 0 ? peDn++ : 0; }
+      n++;
+    }
+    if (!n) return null;
+    const ceAvg = ceSum / n, peAvg = peSum / n;
+    const diff = ceAvg - peAvg;          // + = calls outperforming = bullish
+    const read = Math.abs(diff) < 1.5 ? ['BALANCED', '#9aa', 'call and put premiums moving together — no directional lean in the money flow']
+      : diff > 0 ? ['CALLS FIRMING', 'var(--pos,#26a69a)', 'call premiums rising faster than puts — buyers paying up for upside']
+      : ['PUTS FIRMING', 'var(--neg,#ef5350)', 'put premiums rising faster than calls — protection being bid'];
+    const out = { ceAvg, peAvg, diff, read, ceUp, ceDn, peUp, peDn, n };
+    state._ncLast = out;
+    return out;
+  }
+
+  // ── 3. REVERSAL CLUSTERS ──────────────────────────────────────────
+  // Per strike: call reversal = strike + CE LTP, put reversal = strike − PE
+  // LTP — the level where that strike's writers go underwater. One number is
+  // trivia; the CLUSTERING is the signal. Where many adjacent strikes' call
+  // reversals bunch into a narrow band, writer pain concentrates there, and
+  // that band need not coincide with the biggest OI wall.
+  function _reversalClusters(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const gap = d.strike_gap || 50;
+    const ce = [], pe = [];
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) / spot > 0.05) continue;
+      if (s.ce_ltp > 0.5) ce.push({ strike: s.strike, rev: s.strike + s.ce_ltp, oi: s.ce_oi || 0 });
+      if (s.pe_ltp > 0.5) pe.push({ strike: s.strike, rev: s.strike - s.pe_ltp, oi: s.pe_oi || 0 });
+    }
+    // bucket reversals into bands one strike-gap wide and weight by OI
+    const cluster = arr => {
+      const buckets = {};
+      for (const r of arr) {
+        const b = Math.round(r.rev / gap) * gap;
+        const e = buckets[b] || (buckets[b] = { band: b, n: 0, oi: 0, revs: [] });
+        e.n++; e.oi += r.oi; e.revs.push(r.rev);
+      }
+      return Object.values(buckets)
+        .map(e => ({ ...e, mid: e.revs.reduce((a, b) => a + b, 0) / e.revs.length }))
+        .sort((a, b) => (b.n - a.n) || (b.oi - a.oi))
+        .slice(0, 3);
+    };
+    return { ce: cluster(ce), pe: cluster(pe), gap };
+  }
+
+  function renderChainAnalytics(data) {
+    const box = document.getElementById('chainAnalytics');
+    if (!box) return;
+    const d = data || state.lastData;
+    if (!d?.underlying_value) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
+    const spot = d.underlying_value;
+    const tv = _timeValueLevels(d), nc = _netChangeRead(d), rc = _reversalClusters(d);
+    const cr = v => (Math.abs(v) >= 1e7 ? (v / 1e7).toFixed(2) + ' Cr' : Math.abs(v) >= 1e5 ? (v / 1e5).toFixed(1) + ' L' : Math.round(v));
+    let html = '';
+
+    // ── time-value S/R ──
+    if (tv?.res && tv?.sup) {
+      const diverge = [];
+      if (tv.oiRes && tv.res.strike !== tv.oiRes.strike)
+        diverge.push(`resistance differs: time-value says <b>${fmtInt(tv.res.strike)}</b>, biggest call OI is <b>${fmtInt(tv.oiRes.strike)}</b>`);
+      if (tv.oiSup && tv.sup.strike !== tv.oiSup.strike)
+        diverge.push(`support differs: time-value says <b>${fmtInt(tv.sup.strike)}</b>, biggest put OI is <b>${fmtInt(tv.oiSup.strike)}</b>`);
+      html += `<div style="padding:4px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="font-size:10px;font-weight:700;margin-bottom:3px;">⏳ Time-value S/R — where writer MONEY sits</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;">
+          <span><b style="color:var(--neg,#ef5350);">Resistance ${fmtInt(tv.res.strike)}</b> <span style="color:var(--muted);">${tv.res.ceTv.toFixed(1)} pts TV · ₹${cr(tv.res.ceTvVal)} at risk</span></span>
+          <span><b style="color:var(--pos,#26a69a);">Support ${fmtInt(tv.sup.strike)}</b> <span style="color:var(--muted);">${tv.sup.peTv.toFixed(1)} pts TV · ₹${cr(tv.sup.peTvVal)} at risk</span></span>
+        </div>
+        <div style="font-size:9.5px;color:#9ab;margin-top:3px;">Chain time value: calls ₹${cr(tv.totCeTv)} vs puts ₹${cr(tv.totPeTv)}${tv.tvRatio ? ` (ratio ${tv.tvRatio.toFixed(2)} — ${tv.tvRatio > 1.15 ? 'more money defending the downside' : tv.tvRatio < 0.87 ? 'more money defending the upside' : 'balanced'})` : ''}.
+        ${diverge.length ? '<br>⚠ ' + diverge.join(' · ') + ' — the OI wall has more <i>contracts</i>, this strike has more <i>rupees</i>.' : 'Time-value levels agree with the OI walls — stronger read.'}</div>
+      </div>`;
+    }
+
+    // ── net change ──
+    if (nc) {
+      html += `<div style="padding:4px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="font-size:10px;font-weight:700;margin-bottom:3px;">📊 Net change — premium flow direction</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline;">
+          <b style="font-size:12px;color:${nc.read[1]};">${nc.read[0]}</b>
+          <span style="font-size:10px;">calls ${nc.ceAvg >= 0 ? '+' : ''}${nc.ceAvg.toFixed(2)}%</span>
+          <span style="font-size:10px;">puts ${nc.peAvg >= 0 ? '+' : ''}${nc.peAvg.toFixed(2)}%</span>
+          <span style="font-size:10px;color:var(--muted);">spread ${nc.diff >= 0 ? '+' : ''}${nc.diff.toFixed(2)} pts across ${nc.n} strikes</span>
+        </div>
+        <div style="font-size:9.5px;color:#9ab;margin-top:2px;">${nc.read[2]}. Breadth: ${nc.ceUp} calls up / ${nc.ceDn} down · ${nc.peUp} puts up / ${nc.peDn} down.</div>
+      </div>`;
+    } else {
+      html += `<div style="padding:4px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:9.5px;color:var(--muted);">📊 Net change — collecting the first minute of premium history…</div>`;
+    }
+
+    // ── reversal clusters ──
+    if (rc && (rc.ce.length || rc.pe.length)) {
+      const band = (arr, col, lab) => arr.map(b =>
+        `<span style="font-size:10px;margin-right:10px;"><b style="color:${col};">${fmtInt(Math.round(b.mid))}</b> <span style="color:var(--muted);">${b.n} strikes · ${(b.oi / 100000).toFixed(1)}L OI</span></span>`).join('') || '<span class="oc-sub">none</span>';
+      html += `<div style="padding:4px;">
+        <div style="font-size:10px;font-weight:700;margin-bottom:3px;">🎯 Reversal clusters — where writers go underwater</div>
+        <div style="font-size:10px;margin-bottom:2px;">Call side: ${band(rc.ce, 'var(--neg,#ef5350)')}</div>
+        <div style="font-size:10px;">Put side: ${band(rc.pe, 'var(--pos,#26a69a)')}</div>
+        <div style="font-size:9.5px;color:#9ab;margin-top:3px;">Each strike's reversal = strike ± its premium: the level where that strike's writers stop profiting. Bands are ${rc.gap}-point wide buckets; the count is how many strikes' reversals land in the same band. A band holding several strikes is where writer pain concentrates — and it need not sit on the biggest OI wall.</div>
+      </div>`;
+    }
+    html += `<div class="oc-sub" style="margin-top:4px;">All three read the SAME chain three ways: time value measures rupees at risk, net change measures money flow, reversal clusters measure where writers break. When they agree with the OI walls, that level is unusually well supported; when they disagree, the OI wall may be large but cheap to defend.</div>`;
     box.innerHTML = html;
   }
 
@@ -18317,21 +19265,54 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   els.chartCrosshairLine = document.getElementById('chartCrosshairLine');
   els.chartTooltip = document.getElementById('chartTooltip');
 
+  // Effective CSS scale applied to the page. `zoom` and `transform: scale()`
+  // both change getBoundingClientRect while leaving style.left in unscaled
+  // pixels, so any px we hand back to the DOM must be divided by this.
+  function _chartZoomFactor() {
+    try {
+      const b = document.body;
+      const z = parseFloat(b.style.zoom);
+      if (z && isFinite(z) && z > 0) return z;
+      const t = b.style.transform || '';
+      const m = t.match(/scale\(([\d.]+)\)/);
+      if (m) { const s = parseFloat(m[1]); if (s > 0) return s; }
+      // browser-level zoom (Ctrl +/-) is already reflected in both, so 1 is right
+    } catch (_) {}
+    return 1;
+  }
+
   els.chartInteractiveWrap.addEventListener('mousemove', (e) => {
     const curves = builderState._chartCurves;
     const svg = els.builderPayoffChart.querySelector('svg');
     if (!curves || !svg) return;
     const rect = svg.getBoundingClientRect();
     if (rect.width === 0) return;
+    // ── zoom-safe pointer mapping ────────────────────────────────────
+    // Two things used to break the crosshair when the page was zoomed:
+    //   1. CSS `zoom` scales getBoundingClientRect but NOT the px values we
+    //      write to style.left, so the line drifted further from the cursor
+    //      the more you zoomed. Divide the client-space delta by the zoom.
+    //   2. The crosshair is positioned inside chartInteractiveWrap, but the
+    //      offset was computed from the SVG's rect. Whenever the SVG did not
+    //      start exactly at the wrapper's left edge (it does not - the Greek
+    //      overlay adds a right axis and changes padding) every reading was
+    //      shifted by that gap.
+    const zoom = _chartZoomFactor();
+    const wrapRect = els.chartInteractiveWrap.getBoundingClientRect();
+    const svgOffsetInWrap = (rect.left - wrapRect.left) / zoom;   // wrapper-space px
+    const svgWidthCss = rect.width / zoom;                        // undo zoom scaling
+    if (svgWidthCss === 0) return;
+    const cursorInSvg = (e.clientX - rect.left) / zoom;           // wrapper-space px
     const sc = computeChartScale(curves.expiryCurve, curves.sliderCurve, curves.cappedCurve, curves.hasGreekOverlay);
-    const relX = (e.clientX - rect.left) / rect.width * sc.W;
+    const relX = cursorInSvg / svgWidthCss * sc.W;                // -> viewBox units
     const price = Math.max(sc.minP, Math.min(sc.maxP, sc.priceFromX(relX)));
 
     const expiryPnl = interpolateCurve(curves.expiryCurve, price);
     const sliderPnl = interpolateCurve(curves.sliderCurve, price);
     const cappedPnl = curves.cappedCurve ? interpolateCurve(curves.cappedCurve, price) : null;
 
-    const pxX = (sc.xScale(price) / sc.W) * rect.width;
+    // back to wrapper-space pixels, including where the SVG actually starts
+    const pxX = svgOffsetInWrap + (sc.xScale(price) / sc.W) * svgWidthCss;
     els.chartCrosshairLine.style.left = pxX + 'px';
     els.chartCrosshairLine.style.display = 'block';
 
@@ -18344,9 +19325,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     els.chartTooltip.innerHTML = tooltipHtml;
     els.chartTooltip.style.display = 'block';
     // keep tooltip on-screen: flip to the left side of the cursor past the midpoint
-    const flipLeft = pxX > rect.width * 0.55;
+    const wrapW = wrapRect.width / zoom;
+    const flipLeft = pxX > wrapW * 0.55;
     els.chartTooltip.style.left = flipLeft ? '' : (pxX + 12) + 'px';
-    els.chartTooltip.style.right = flipLeft ? (rect.width - pxX + 12) + 'px' : '';
+    els.chartTooltip.style.right = flipLeft ? (wrapW - pxX + 12) + 'px' : '';
   });
 
   els.chartInteractiveWrap.addEventListener('mouseleave', () => {
@@ -22027,33 +23009,40 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 (function() {
   // ── Help text library ────────────────────────────────────────────────────
   const H = {
-    'pivot-levels':   '<strong>Pivot Levels</strong>Calculated from the previous session\'s H/L/C (and Open for Woodie/DeMark). Price approaching these levels often shows natural support or resistance. Recalculated from NSE bhavcopy archive each session.',
+    'pivot-levels':   '<strong>Pivot Levels</strong>Calculated from the previous session\'s H/L/C (and Open for Woodie/DeMark), so every level is fixed before the day starts - that is the point of them. <b>How to use:</b> the central pivot is the day\'s reference; trading above it keeps the bullish frame, below it the bearish one. R1/S1 are the levels price reaches on a normal day, R2/S2 on a trending day, R3+ only on outliers - so a move stalling exactly at R1 means something different from one that punches through to R3. <b>The real edge is confluence, not the level itself:</b> a pivot alone is a line other people also watch, but a pivot sitting on an OI wall or the CPR is a level with money behind it. Check the Master Ladder for where they stack. Type matters too - Classic and Fibonacci suit rangebound days, Camarilla is built for reversal trades at H3/L3, and Woodie weights the current open so it shifts on a gap.',
     'pivot-type':     '<strong>Pivot Type</strong><b>Fibonacci</b> — most popular in India; uses Fib ratios (0.382, 0.618, 1.0).<br><b>Traditional/Classic</b> — equal spacing around pivot.<br><b>Woodie</b> — weights the close more heavily.<br><b>Camarilla</b> — tighter intraday bands, popular for scalping.<br><b>DeMark</b> — adjusts pivot based on close vs open relationship.',
-    'pivot-period':   '<strong>Period</strong><b>Daily</b> — uses yesterday\'s OHLC from the NSE bhavcopy archive (most reliable source).<br><b>Weekly</b> — uses the full previous Mon–Fri range: O = Monday open, H = week high, L = week low, C = Friday close.',
+    'pivot-period':   '<strong>Period</strong><b>Daily</b> uses yesterday\'s OHLC from the NSE bhavcopy archive, which is the most reliable source available and what nearly every Indian trader watches. <b>Weekly</b> uses the full previous Monday-to-Friday range: Monday\'s open, the week\'s high and low, Friday\'s close. <b>When to use which:</b> daily pivots for intraday work, weekly for positional trades and for understanding why a daily level keeps failing - a weekly level sitting just beyond it is often the reason. Switching clears the day\'s frozen values and refetches, so both directions update live.',
     'bell-alert':     '<strong>Price Touch Alerts</strong>Fires when spot <i>crosses</i> a pivot level between two consecutive polls. Uses proper crossing detection — spot must actually traverse the level, not just approach it. Re-arms once price moves 0.3% away.',
-    'voice-alert':    '<strong>Voice Alerts</strong>Speaks the level name and price aloud using your browser\'s Web Speech API. Works best in Chrome. If voice is silent, check that your system has TTS voices installed and that the browser has audio permission.',
+    'voice-alert':    '<strong>Voice Alerts</strong>Speaks level touches, fresh option flow and 9:20 line hits aloud. <b>Across multiple computers,</b> the server now detects alerts and streams them, electing one tab per machine to speak - so several screens never talk over each other while every computer still announces once. The 🔊 mode selector controls this: every tab, follow-me (the focused window speaks), or one browser across all PCs. <b>If a machine is silent,</b> press 🔈 enable audio there once - browsers block speech until a page is clicked, with no error - then use 🩺 systems to see each machine\'s readiness.',
     'alert-sound':    '<strong>Alert Sound</strong><b>Tone</b> — single sine wave, sharp attack.<br><b>Chime</b> — three sine oscillators at bell-like partial ratios (sounds like a chime).<br><b>Ping</b> — triangle wave with downward pitch sweep.<br>Higher pitch = resistance touched. Lower pitch = support touched.',
-    'alert-volume':   '<strong>Volume / Duration</strong>Volume slider controls amplitude of the generated sound. Duration input (seconds) controls how long the note sustains before fading out.',
+    'alert-volume':   '<strong>Alert Volume</strong>Sets loudness for spoken alerts and touch sounds on THIS browser. <b>Worth knowing:</b> at zero the speech engine still runs but you hear nothing, which looks identical to a broken alert - so if a machine has gone quiet, check this slider before anything else. Volume is per browser and does not travel in backups, so each computer needs setting once. The 🔈 enable audio button next to it is separate and more important: browsers block speech entirely until a page receives a click, and that block is silent.',
     'price-chart':       '<strong>Live Chart &amp; Levels</strong>Intraday candles for the loaded index with every option-derived level drawn on top. Candles come from NSE\'s intraday feed when the session is warm, otherwise they are rebuilt from your replay archive (1 spot sample per minute) — the footer names the source. Interval 1/3/5/15m, refreshed once a minute; levels redraw on every chain update. Toggles: <b>9:20 lines</b> (see below), <b>OI walls</b> (heaviest call/put OI), <b>CPR</b>, <b>max pain</b>, <b>±1σ</b> IV cone, and <b>pivots</b> (from the Pivot Levels panel\'s active type). <br><br><b>About the 9:20 lines:</b> these are MY transparent formula, not a reverse-engineered copy of any vendor\'s proprietary levels. At 09:20 the 9:20 spot and ATM IV are frozen for the day, one session of volatility is computed as sigma = spot × IV × sqrt(1/365), and four fixed lines are drawn: EOR/EOS at ±0.5 sigma (inner, aggressive) and EOR+1/EOS-1 at ±1.0 sigma (outer, conservative). They do not move for the rest of the session, which is the whole point — a fixed frame beats a moving one for discipline. Whether they hold is an open question: log trades against them in the journal and let the data answer.',
     'regime-signals':    '<strong>Regime Signals</strong>Familiar Indian option-chain vocabulary, computed with transparent rules. <b>Shifting status</b> tracks the peak-OI wall on each side over the last ~45 minutes: <b>WTT (Weak Towards Top)</b> means the call wall moved up or lost more than 12 percent of its OI, so the ceiling is softening (bullish lean); <b>WTB (Weak Towards Bottom)</b> means the put wall moved down or shed OI, so the floor is softening (bearish); <b>STRONG</b> means both walls are holding position and size, which is the rangebound case; <b>BOTH WEAK</b> means writers are stepping back on each side, favouring a range expansion rather than a direction. <b>BULL RUN</b> and <b>BLOODBATH</b> require breadth plus confirmation: at least half of the active near-the-money strikes must be flowing one way AND price must have moved more than 0.25 percent in that direction, which stops a quiet drift being labelled a stampede. Everything here describes positioning that has ALREADY happened, so treat it as fast information rather than prediction, and remember the labels are dramatic by tradition, not by evidence.',
+    'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
+    'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
+    'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
+    'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
+    'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',
+    'vol-analytics':     '<strong>Volatility &amp; Higher-Order Greeks</strong>Three institutional-style reads, all computed from NSE data alone. <b>Realized vs implied</b> compares what the market CHARGES for movement (ATM IV) against what price actually did (realized volatility from today\'s candles, annualised): a positive spread means premium sellers are being overpaid relative to the movement, a negative one means buying premium is comparatively cheap and short gamma is dangerous. Load a daily CSV in the Historical Astro Lab and it also reports where today\'s realized vol sits in the long-run distribution. <b>Charm</b> is dDelta/dTime — how much dealer hedging must shift purely because a day passed. It is the mechanical explanation for expiry-week drift, far more defensible than the folk story of max-pain magnetism, and it accelerates sharply in the final two sessions. <b>Vanna</b> is dDelta/dVol: when it is large, an IV spike alone can move spot with no directional flow at all. <b>Gamma by expiry</b> splits GEX per series, because a Tuesday weekly and a month-end series can pin at different prices and the near one\'s influence vanishes the moment it settles. Caveats stated on the panel: NSE data is 3-5 minutes delayed, realized vol from one sample per minute is noisier than tick data, and charm/vanna use the same naive dealer convention (long calls, short puts) as the GEX panel — an assumption, not an observation.',
+    'chain-analytics':   '<strong>Chain Analytics</strong>Three reads of the same option chain that the OI walls cannot give you. <b>Time-value S/R</b> strips intrinsic value out of each premium, leaving what writers are actually paid to carry risk, then weights it by open interest and lot size: the strike holding the most put time value below spot is where support MONEY sits, the most call time value above is resistance money. When this disagrees with the biggest OI wall, that is the useful moment — the wall has more contracts, this strike has more rupees, and rupees are what get defended. <b>Net change</b> aggregates premium movement across near strikes each minute: if call premiums firm while puts bleed, buyers are paying up for upside regardless of what OI is doing, which makes it a money-flow read independent of positioning. It feeds Market Pulse as a weight-2 directional input. <b>Reversal clusters</b> compute every near strike\'s break level (strike plus its call premium, strike minus its put premium) and bucket them: a band where several strikes\' reversals coincide is where writer pain concentrates, and it need not sit on the largest wall. Time-value levels feed the Master Ladder at weight 3.',
     'flow-range':        '<strong>Projected price range</strong>Two independent answers to "where can price go today". <b>IV-implied bands</b> come from the option market\'s own ATM IV over the remaining horizon (rest of today intraday, else days to expiry): the 68%% and 90%% bands are where the market prices price closing, assuming lognormal moves with no gap or event risk — real tails are fatter, so treat them as optimistic. <b>OI walls</b> are the strikes with the heaviest call OI above and put OI below within ±6%% of spot: they act as support and resistance because writers who sold them profit from defending them, which is a capital-commitment argument, not a prediction. The CONSENSUS line shows the overlap and interprets it: walls INSIDE the statistical band mean writers expect a tighter day than IV prices (rangebound lean); walls outside mean breakouts have room; no overlap means positioning and pricing disagree, which usually resolves violently. The second line of defence shows where price travels if the first wall breaks.',
     'market-pulse':      '<strong>Market Pulse</strong>Three regime reads in one place. <b>India VIX</b> — the market\'s own 30-day implied volatility, with regime bands (below 11 complacency, 11-14 calm trend, 14-18 balanced, 18-24 nervous, above 24 stress); it sizes your risk, it does not point direction. <b>PCR (OI)</b> — put/call open-interest ratio: above 1 means put writers are building support, below 1 means call writers are capping; at extremes (roughly above 1.8 or below 0.55) the read flips contrarian, which is why the score damps it there. <b>Direction Bias</b> — a −100..+100 weighted ensemble of the measured option-market signals this dashboard already computes: PCR positioning, max-pain pull (weighted by time left), GEX gamma regime, Δ-neutral position, fresh OI buildup flags, CPR position, day change, and VIX trend. Expand "Why this reading" to see every input, its score and its weight. It is an explainable ensemble, NOT machine learning and NOT a forecast — there is no training data and no backtest behind it; it compresses positioning so you can see when inputs agree. The agreement figure matters more than the number: a big score with conflicting inputs is a coin flip wearing a suit. Confirm on price before acting, and log outcomes in the trade journal if you want to know whether it is worth anything.',
     'fresh-flow':        '<strong>Fresh Flow Voice</strong>Speaks fresh option positioning as it happens, classified from each strike\'s OWN premium against its OI change — the standard read: <b>OI up + premium up = fresh BUYING</b> (longs opening), <b>OI up + premium down = fresh WRITING</b> (shorts opening); OI down + premium down is long unwinding, OI down + premium up is short covering (both off by default, tick the box to hear them). Bias mapping: fresh call buying or put writing = bullish; fresh put buying or call writing = bearish. Only strikes within ±N%% of spot are watched, and a detection needs BOTH the OI and premium thresholds crossed over a full comparison window (default 120s) — that filter is what separates real positioning from quote noise. At most 2 spoken per tick, 5-minute cooldown per strike/side, everything logged below and included in 💾 backups. Requires the 🗣 voice toggle to be on. Honest note: this reports what has ALREADY been written — it is fast information, not prediction, and OI on the near expiry gets noisy on expiry day.',
-    'custom-alerts':  '<strong>Custom Price Levels</strong>Add your own price targets or stop levels. They join the same touch-detection loop as pivot levels and fire the same sound + voice alert when crossed. Re-armed on symbol change.',
+    'custom-alerts':  '<strong>Custom Price Levels</strong>Add your own targets or stops; they join the same touch-detection loop as pivots and fire the same toast, notification and voice. <b>How to use them well:</b> set them on levels the Master Ladder scores highest rather than on round numbers, so the tool watches the places where several methods already agree. Alerts survive reloads and travel in the 💾 backup. <b>Across several computers,</b> detection now happens on the server and the alert is announced once per machine, so adding a level on one screen alerts every screen without three voices talking over each other.',
     'iv-spike':       '<strong>IV Spike Alert</strong>Fires when ATM implied volatility changes by more than the configured % in a single poll cycle. An IV spike often signals upcoming fast directional moves, news, or large hedges being placed. Re-arms when IV settles.',
     'vol-spike':      '<strong>Volume Spike Alert</strong>Maintains a rolling 18-poll (~90s) volume history per strike. Fires when a strike\'s volume exceeds its rolling average by the multiplier. Unusual OTM volume often precedes institutional directional moves.',
     'session-ohlc':   '<strong>Today\'s Session O/H/L/C</strong>Live intraday Open, High, Low, Close tracked from the first chain fetch of the day. Shows today\'s range in real time. Useful for seeing where price is relative to the day\'s open and range extremes.',
-    'alert-history':  '<strong>Alert History</strong>Logs every pivot level touch with timestamp and price — newest first. Persists for the full browser session. Useful for reviewing which levels were tested and when during the session.',
-    'ohlc-override':  '<strong>OHLC Override</strong>If the auto-fetched OHLC is wrong (e.g. on a partial holiday), manually enter the correct H/L/C/O here. Click Apply. Live data will reclaim control automatically next time bhavcopy is available.',
-    'be-levels':      '<strong>Straddle Breakeven (BE↑ / BE↓)</strong>BE↑ = Spot + ATM straddle premium, BE↓ = Spot − premium. Price must stay between these for a short straddle to be profitable at expiry. Where the options market prices its "risk begin" zone.',
-    'sigma-levels':   '<strong>Expected Move Bands (1σ / 2σ)</strong>1σ = Spot × IV × √(DTE/365). Under a normal distribution: ~68% probability of staying inside 1σ, ~95% inside 2σ. These compress to zero by expiry. 1σ ≈ straddle breakeven × 1.25.',
+    'alert-history':  '<strong>Alert History</strong>Every level touch logged with timestamp and price, newest first. <b>What it is actually for:</b> reviewing after the close which levels were tested, in what order, and whether price respected or sliced through them - that is the raw material for deciding which level families deserve your attention tomorrow. A level touched three times and held is telling you something different from one touched once and broken. <b>Feed it forward:</b> tag the setups you traded in the Trade Journal with the level type, and after a few weeks the per-setup stats will show which levels you actually execute well, which is a different question from which levels work.',
+    'ohlc-override':  '<strong>Manual OHLC Override</strong>Type yesterday\'s High, Low, Close and Open to compute pivots from your own numbers instead of the fetched ones. <b>When you need it:</b> after a holiday or a special session, when the automatic source has the wrong day; when you want pivots from the futures rather than the index; or to reconcile a mismatch against a charting platform. <b>Cross-check first:</b> the pivot source line shows the exact inputs in use, so compare those four numbers against your chart before overriding - most apparent pivot errors turn out to be a futures-versus-index difference rather than a calculation fault.',
+    'be-levels':      '<strong>Straddle Breakeven (BE↑ / BE↓)</strong>BE↑ = Spot + ATM straddle premium, BE↓ = Spot − premium. <b>What it really tells you:</b> this is the move the option market has priced for the remaining life of the contract, expressed in points rather than percent - the single fastest read on whether premium is expensive today. <b>How to use:</b> if you are selling the straddle, these are the levels where you start losing at expiry; if you are buying, this is the distance price must travel before you make anything, which is why long straddles need a catalyst rather than a drift. Compare against the 1σ band: the two should be close, and a wide gap means the ATM IV and the wing IVs disagree, which the Volatility Surface panel will show as skew.',
+    'sigma-levels':   '<strong>Expected Move Bands (1σ / 2σ)</strong>1σ = Spot × IV × √(DTE/365). Under a lognormal assumption roughly 68%% of closes land inside 1σ and 95%% inside 2σ. <b>How to use:</b> these are the option market\'s own odds, priced with real money, which makes them a better range estimate than any indicator - sell premium outside the band, buy inside it, and size stops with reference to it rather than to a round number. <b>Two honest caveats:</b> the bands compress toward zero as expiry approaches, so a 1σ move on expiry day is tiny and easily exceeded; and real markets have fatter tails than the model, so treat 2σ as optimistic rather than a wall. A useful sanity check is the Volatility panel - if realized vol is running above implied, today\'s bands are too narrow.',
     'atm-greeks':     '<strong>ATM Greeks</strong>Black-Scholes Greeks computed client-side for the ATM strike.<br><b>Δ</b> — P&L per 1-point index move (CE ≈ +0.5, PE ≈ −0.5 at ATM).<br><b>Γ</b> — rate of delta change per point.<br><b>Vega</b> — ₹ P&L per 1% IV change.<br><b>Θ</b> — daily time decay in ₹.',
     'gex':            '<strong>Gamma Exposure (GEX)</strong>Sum of (Gamma × OI × LotSize) across all strikes, weighted by CE vs PE. Positive GEX (green) → market makers are net long gamma → they buy dips/sell rips → <i>dampens</i> volatility. Negative (red) → MMs amplify moves.',
     'synth-futures':  '<strong>Synthetic Futures</strong>CE_LTP − PE_LTP + Strike at ATM. Should equal Spot + cost of carry (basis). A diverging basis often indicates large institutional positioning. Useful for detecting when options are pricing a gap different from the cash market.',
     'theta-decay':    '<strong>Theta Decay Projection</strong>Uses the ATM straddle approximation (S × σ × √(2T/π)) to project how much premium decays by today\'s close and by tomorrow. Helps options sellers decide whether to hold overnight and buyers whether to roll.',
     'multi-expiry':   '<strong>Multi-Expiry ATM Comparison</strong>ATM Call, Put, combined straddle, and average IV across all available expiries. A steep curve (near IV >> far IV) signals near-term event risk. A flat curve suggests calm expectations. Useful for roll decisions.',
     'oi-chart':       '<strong>OI by Strike Chart</strong>Open interest bars for each strike near ATM. Orange = CE OI, green = PE OI. Large CE bars = heavy call writing (resistance). Large PE bars = heavy put writing (support). Bars from the chain response, updated every refresh.',
-    'premium-flow':   '<strong>Premium Flow</strong>Total ₹ value traded today per side: LTP × Volume × Lot Size, summed across all strikes. CE-heavy flow = premium being paid for upside protection. PE-heavy = premium paid for downside protection.',
+    'premium-flow':   '<strong>Premium Flow</strong>Total rupee value traded today per side: LTP × Volume × Lot Size, summed across strikes. <b>Why it differs from OI:</b> OI counts contracts held, this counts money changing hands - a strike can have huge OI and almost no flow, meaning positions are sitting rather than being fought over. <b>How to use:</b> CE-heavy flow means premium is being paid for upside, PE-heavy for protection, but read it alongside the Chain Analytics net-change panel, because paying up for calls that are simultaneously falling in price is a very different signal from paying up for calls that are rising. Flow concentrated at one strike is more informative than flow spread evenly across the chain.',
     'delta-oi':       '<strong>ΔOI Columns</strong><b>Session</b> — change in OI from yesterday\'s close (NSE\'s native changeinOpenInterest field). Shows intraday buildup and unwinding.<br><b>15m</b> — change in the last 15 minutes from periodic server-side snapshots. More actionable for scalping.',
     'snapshot':       '<strong>OI Snapshot & Compare</strong>📸 Snapshot captures OI for every strike at that instant. ⚡ Compare mode replaces the ΔOI column with delta vs the snapshot instead of the session baseline — useful for "what changed since 10 AM" analysis.',
     'pcr-alert':      '<strong>PCR Threshold Alerts</strong>Fires when the total PCR (Put/Call OI ratio) crosses configured thresholds. PCR above the bull threshold = extreme put writing, which can be a contrarian bullish signal. Below bear threshold = excessive call writing.',
@@ -22065,9 +23054,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'session-phase':  '<strong>Session Phase</strong>Current market phase based on IST. Pre-Open (9:00–9:15) = order matching only, prices are auction-based. Opening (9:15–9:30) = high volatility, gaps fill. Power Hour (14:00+) = trending activity resumes. Closing Auction (15:20+) = settlement pricing.',
     'gift-nifty':     '<strong>GIFT Nifty</strong>NSE International Exchange futures (formerly SGX Nifty). Trades before 9:15 AM IST and gives an early indication of where NIFTY is likely to open. A strongly positive GIFT Nifty suggests gap-up; negative suggests gap-down.',
     'health-dot':     '<strong>Server Health</strong>Green = server connected and session cookie fresh (< 25 min old). Amber = session approaching stale — re-warm will happen soon automatically. Red = cannot reach the server at the configured URL. Hover for details.',
-    'mini-hud':       '<strong>Mini HUD</strong>Compact floating overlay showing spot, IV, PCR, session phase, expiry countdown and the nearest 3 support/resistance levels. Designed for use on a secondary monitor. Drag to reposition. Toggle with the ` key.',
-    'heatmap':        '<strong>OI Cell Heatmap</strong>OI cell background intensity is proportional to open interest size — deeper orange = more CE OI, deeper green = more PE OI at that strike. Lets you spot key strikes at a glance without reading every number.',
-    'strike-builder': '<strong>Strike → Builder</strong>Click the strike price cell in any chain row to auto-populate the Strategy Builder as a short straddle at that strike. Switches to the Builder tab automatically.',
+    'mini-hud':       '<strong>Mini HUD</strong>A compact floating readout of spot, change and the nearest key levels that stays visible while you scroll or work in another tab of the dashboard. <b>Use it</b> when you are deep in the Builder or the Vedic tabs and still want price context without scrolling back to the top. It reads the same live data as the header, so there is no risk of the two disagreeing.',
+    'heatmap':        '<strong>OI Cell Heatmap</strong>Cell intensity is proportional to open interest, so the biggest walls announce themselves without you reading numbers. <b>How to use:</b> scan for the deepest cells above and below spot - those are the levels writers are defending, and price tends to slow near them. The pattern matters more than any single cell: OI concentrated at one strike is a wall, OI spread across several is a zone, and OI thinning near spot means writers are stepping back and a range break is more likely. <b>Watch for migration,</b> which is the real signal - use the OI Flow tab and the GEX heatmap to see whether the biggest cell is holding its strike or moving, because a wall that relocates has stopped defending the old level.',
+    'strike-builder': '<strong>Strike → Builder</strong>Click any strike price cell to load that strike into the Strategy Builder as a short straddle and jump to the Builder tab. <b>Why a straddle:</b> it is the neutral starting point - from there one click on the Δ-templates converts it into a strangle, iron condor, calendar or double calendar without retyping strikes. <b>Suggested workflow:</b> find the level you care about in the chain or the Master Ladder, click it here, pick the structure that matches your view in the Builder, then read the payoff chart and the Roll &amp; Adjust panel before deploying anything to paper. The Builder prices every leg from the live chain, so what you see is what the structure costs right now.',
     'constituents':   '<strong>Index Constituents</strong>Live prices for every stock in the selected index, fetched via option chain data. Pts ± shows each stock\'s contribution to the index move: (pct_change × normalized_weight × index_level). Sorted by default by absolute pts impact.',
     'max-pain':       '<strong>Max Pain</strong>The strike price where the total P&L loss for all option buyers (CE + PE combined) is maximised — i.e. where option sellers profit most. Computed by summing intrinsic value × OI at each strike. Price tends to gravitate toward max pain approaching expiry.',
     'morning-checklist': '<strong>Pre-Session Checklist</strong>A structured list to run through before market open each morning. Checks off GIFT direction, alerts, lot size, FII bias, straddle premium, max pain and journal. Saves to localStorage by date — fully reset each new day.',
@@ -22092,7 +23081,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'offline-cache':     '<strong>Offline Cache</strong>When the server is unreachable, the last successful chain response (saved to localStorage) is shown with this banner. Data is stale but better than a blank screen — use it for reference while troubleshooting the connection.',
     'staleness-counter': '<strong>Live Staleness Counter</strong>Shows how many seconds/minutes since the last successful chain fetch. Green <10s = fresh. Amber with ⚠ = 10–120s, data may be slightly stale. Red ⛔ = no update in >2 minutes — check server connection or Akamai block.',
     'oi-walls':          '<strong>OI Call Wall / Put Wall</strong>Strike with highest total CE OI = call wall (likely resistance). Highest PE OI = put wall (likely support). Heavy writing at a strike means sellers are defending it. These shift intraday as large writers roll — watch for the wall moving as a signal of changing sentiment.',
-    'theme-toggle':      '<strong>Dark / Light Mode</strong>Toggles between dark (default) and light colour scheme. Preference saved to localStorage. Light mode is easier on the eyes in bright environments. Keyboard shortcut: T (when not typing in an input).',
+    'theme-toggle':      '<strong>Theme</strong>Switches between the dark and light palettes. Everything drawn on canvas or SVG - the chart, heatmaps, payoff diagrams and level lines - reads its colours from the same CSS variables, so they follow the theme rather than staying dark on a light page. The choice persists per browser and travels in the 💾 backup.',
     'auto-retry':        '<strong>Auto-Retry with Backoff</strong>When the server is unreachable, automatically retries after 5s → 10s → 20s → 60s with a countdown shown here. Handles transient Akamai blocks or brief server restarts without needing a manual refresh.',
     'power-hour':        '<strong>Power Hour Auto-Accelerate</strong>Between 14:00 and 15:30 IST, the auto-refresh interval drops from 5s to 2s automatically. This covers the period of highest F&O chain volatility — OI shifts are fastest in the final 90 minutes. The ⚡ PH badge appears during this window.',
     'live-pnl':          '<strong>Live P&L per Leg</strong>Enter your actual entry price in the ₹ field. The dashboard computes your current mark-to-market P&L per leg using the live chain LTP, scaled by qty and lot size. Total Live P&L appears in the stat cards. Useful for tracking open positions without a separate spreadsheet.',
@@ -22103,7 +23092,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'spot-hl-dist':      '<strong>Distance to Session High / Low</strong>How many points current spot is below the session high and above the session low. When spot is within 10pts of the session high, a breakout or rejection is imminent. Near the low, same logic applies. Key context for directional trades.',
     'pcr-divergence':    '<strong>PCR Divergence Alert</strong>Fires when PCR by OI and PCR by volume diverge by >20%. Volume PCR rising while OI PCR is flat means fresh put buying without OI buildup — often seen before sharp moves. A 5-minute cooldown prevents repeated alerts on the same divergence.',
     'eod-summary':       '<strong>EOD Strategy Summary</strong>At 15:25 IST on weekdays, automatically computes and logs the position\'s live P&L, current spot, max pain, ATM IV and PCR to the session notes journal. Triggers only if legs are loaded in the Builder and the market is still open.',
-    'leg-reorder':       '<strong>Drag to Reorder Legs</strong>Grab the ⠿ handle on the left of any leg row and drag it up or down to change the display order. The order has no effect on calculations — it\'s purely for visual organisation of multi-leg strategies.',
+    'leg-reorder':       '<strong>Reorder Legs</strong>Drag legs to change their order in the Strategy Builder. Order is purely cosmetic - the payoff, Greeks and margin are computed from the set of legs, not their sequence - but grouping legs by expiry or by side makes multi-leg structures such as double calendars and iron condors far easier to read before you deploy them.',
     'leg-notes':         '<strong>Leg Notes</strong>Free-text field under each leg for annotations: "hedge leg", "rolled from 24000 strike", "close if premium > 150", etc. Notes are preserved when the builder re-renders. Useful for tracking intent and roll history of individual legs.',
     'greeks-pnl':        '<strong>Greeks P&L Attribution</strong>When spot or IV changes between refreshes, this row shows how much of the position\'s P&L came from each Greek: Δ Move (directional), Γ Move (convexity), Θ Decay (time), V Move (volatility change). Helps you understand what\'s actually driving your P&L.',
     'iv-shift':          '<strong>What-If IV Shift</strong>Shifts the implied volatility of all legs by the specified % before recomputing Greeks, the payoff chart and all stat cards. Simulates an IV expansion (+) or crush (−). Use with the date slider to model "what if IV drops 20% by Friday?"',
@@ -22111,7 +23100,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'strategy-name':     '<strong>Auto-Detected Strategy Name</strong>Identified from the leg structure — Short Straddle, Iron Condor, Bull Call Spread, etc. Updates live as legs change. Confirms you\'ve built the intended shape, especially useful when legs are added one at a time.',
     'iv-skew':           '<strong>IV Skew / Volatility Smile</strong>CE IV (orange) and PE IV (green) plotted across all strikes. The ATM is marked with a gold line. Steep negative skew = put IV >> call IV = market pricing downside risk. "Skew %" = PE IV minus CE IV at ATM — positive is normal, negative is unusual.',
     'oi-scenario':       '<strong>OI Scenario</strong>Interprets ΔOI + price direction together. LB = Long Buildup (price↑ OI↑). SC = Short Covering (price↑ OI↓). SB = Short Buildup (price↓ OI↑). LU = Long Unwinding (price↓ OI↓). PW = Put Writing (bullish). Only shown when |ΔOI| ≥ 1,000 contracts to filter noise.',
-    'mpain-drift':       '<strong>Max Pain Drift</strong>Sparkline of max pain over today\'s session. Rising = call writers gaining; falling = put writers gaining. Large shifts during power hour (14:00+) often indicate gamma squeezes near expiry.',
+    'mpain-drift':       '<strong>Max Pain Drift</strong>Sparkline of max pain across today\'s session. <b>How to use:</b> the level matters far less than the direction of travel - a max pain that keeps climbing means put writers are adding below and call writers are retreating above, which is a positioning shift, not a prediction. Big moves after 14:00 usually mean gamma hedging is forcing adjustments into the close. <b>Honest limits:</b> max pain assumes writers can and will defend, which holds on quiet expiries and fails completely on news days; and it is a snapshot of yesterday\'s-plus-today\'s positioning, not a magnet with any physical force. Pair it with the expiry-day banner\'s distance-to-pin and the GEX heatmap\'s king node, which measure the same idea with more precision.',
     'vwap':              '<strong>Session VWAP (approx.)</strong>Time-weighted average of spot readings since session start. True VWAP needs tick volume — this is a time-weighted approximation. Above VWAP = buyers in control. Classic intraday bias: shorts struggle when price is above VWAP, longs struggle below.',
     'gex':               '<strong>Gamma Exposure (GEX)</strong>Estimated dealer gamma per strike: Γ × OI × lot × spot² × 1%, calls (+) puts (−) by the SpotGamma convention. Net +GEX → dealers hedge against moves → pinning &amp; mean-reversion (favors premium selling). Net −GEX → dealers hedge with moves → trend acceleration (favors breakout buying). The zero-Γ flip level marks where the regime changes — spot crossing it often changes intraday character.',
     'iv-term':           '<strong>IV Term Structure</strong>ATM IV plotted per expiry. Upward slope (contango) = normal. Downward (backwardation) = event premium loaded in the near expiry — the market expects a move before near expiry. The IV differential is also the calendar-spread edge: sell rich near IV / buy cheap far IV.',
@@ -22178,8 +23167,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'numo-root':         '<strong>Digit-Root Vibration</strong>Repeatedly sums a number\'s digits until one digit remains (e.g. 24350 → 2+4+3+5+0=14 → 1+4=5). Numerologists call this the number\'s "vibration." The colour and keyword are the traditional associations — decorative, not predictive.',
     'numo-day':          '<strong>Day Numerology</strong>The digit root of the calendar day, and of the full date (day+month+year summed). In market numerology folklore, days are sometimes grouped by these roots — shown here for interest only, with no claim that price behaves differently on any root-day.',
     'numo-levels':       '<strong>Vibration Levels</strong>Nearby strikes whose digit root matches the current price\'s root — "same vibration" levels in numerological terms. Presented as a pattern over the strike ladder; there is no evidence these act as real support or resistance. If one happens to coincide with an actual OI wall, that is the OI wall doing the work, not the number.',
-    'numo-wheel':        '<strong>Digit-Root Wheel</strong>The 1–9 cycle as a wheel, with the current price\'s root highlighted. The dashed triangle marks the 3-6-9 set (Tesla\'s "key numbers" in popular lore). Purely illustrative.',
-    'numo-cal':          '<strong>Root-Day Calendar</strong>Each day of the month coloured by its full-date digit root, with days matching the current price\'s root outlined. A visual curiosity for spotting root patterns across the month — not a trading calendar.',
+    'numo-wheel':        '<strong>Digit Cycle Wheel</strong>The 1→9 digit cycle drawn as a wheel with the current price root marked. Numerology treats the cycle as phases - 1 begins, 5 pivots, 9 completes, then it resets - so a price "at 9" is read as a move finishing. <b>Reality:</b> this is the same information as the root panel above it in a rounder shape, and the root changes whenever price moves about one point, which means any signal it produces flips on noise. Decoration, honestly labelled.',
+    'numo-cal':          '<strong>Numerology Calendar</strong>Upcoming dates carrying notable digit patterns - repeats such as 8/8, palindromes, sequences - each with its universal number. <b>Reality:</b> the entire method is pattern-spotting in the decimal representation of a date, so there is nothing predictive here. The one thin mechanism worth acknowledging is attention: striking dates do attract social-media chatter, and chatter occasionally moves retail flow. Treat it as a curiosity, not a calendar to trade.',
     'gann-sq144':        '<strong>Square of 144</strong>Gann\'s Master Square: horizontal levels every 144 points (with 72-pt half-cells) counted from the swing-low anchor. Full-cell multiples (★) outrank halves. 144 = 12² was, for Gann, the master unit of both price and time — pair these levels with the 144-day cycle in the anniversary panel.',
     'gann-hex':          '<strong>Hexagon Chart</strong>Gann\'s other spiral: numbers wound on a hexagonal lattice instead of a square. Ring n has corners spaced n points apart at 60° intervals — shown here are the corner values of the ring containing the price and the next ring out, within ±6%. On Nifty-scale prices the corner spacing (~ring number) lands around 90 points, giving usefully-spaced levels.',
     'gann-planet':       '<strong>Planetary Price Lines</strong>Gann\'s longitude-to-price conversion at 1 point per degree: level = n×360 + planet longitude, plus square (90°) and opposition (180°) harmonics. Uses a built-in low-precision ephemeris (Sun ±0.01°, Moon ±0.3° — ample at 1 pt/°). Moon lines drift ~13 pts/day, Sun ~1 pt/day. This is the astro-financial corner of Gann\'s work — zero validated edge, included for completeness of the method.',
@@ -22187,7 +23176,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'numo-master':       '<strong>Master Numbers</strong>11, 22 and 33 are the numbers numerologists refuse to reduce ("master numbers"). This panel shows the full reduction chain of the price and date and flags any master number appearing at any stage. Arithmetic curiosity — a chain passing through 22 says nothing about tomorrow\'s range.',
     'numo-loshu':        '<strong>Lo Shu Grid</strong>The price\'s digits placed on the 3×3 Lo Shu magic square (every row, column and diagonal of 4-9-2 / 3-5-7 / 8-1-6 sums to 15). Filled cells show digit counts; classical "arrows" light up when a full row or column is present. A Vedic/Chinese numerology visualization applied to a price — decorative pattern analysis.',
     'numo-special':      '<strong>Special Numbers</strong>Repdigits (22222), palindromes (24542), sequences (23456) and round thousands within ±3% of price. One honest distinction: round thousands (★) genuinely matter — limit orders demonstrably cluster at round numbers, a documented microstructure effect. The rest is pattern affinity with no market mechanism.',
-    'numo-name':         '<strong>Symbol Numerology</strong>The traded symbol\'s letters valued under the two classical systems — Pythagorean (A=1…I=9 repeating) and Chaldean (sound-based, no 9) — summed and reduced. Follows whichever symbol you have loaded.',
+    'numo-name':         '<strong>Name Numerology</strong>Converts a company name to numbers using the Chaldean table (which is not simple A=1..Z=26) and reduces to a root plus a compound number, each with traditional meanings. Practitioners treat 1, 3, 5 and 6 as fortunate and 4 and 8 as karmic, and some Indian promoters genuinely rename companies on this basis. <b>Reality:</b> that the renaming happens is a real cultural fact; that it changes returns is not. Entertainment with authentic tradition behind it - and it works on whichever stock you have loaded.',
     'numo-wave':         '<strong>30-Day Root Wave</strong>The daily full-date digit root plotted as a step chart for the next 30 days. Gold-ringed dots share the price\'s root; red dashed lines mark 9-days ("completion" in numerology). Worth knowing: the perfect 1-through-9 sawtooth is a property of mod-9 arithmetic itself — every date sequence produces exactly this wave, which is a good intuition for why date numerology can\'t discriminate between days in any market-relevant way.',
     'levels-tab':        '<strong>Market Levels</strong>Level-identification methods in honest tiers. Camarilla, Murrey Math and round numbers carry real order-flow gravity in Indian markets — enough traders watch them that orders cluster there (self-fulfilling, and that\'s a legitimate mechanism). Fib clusters earn their place through confluence scoring. Square-of-12 and harmonics are geometric, same tier as the Gann tab. The measured panels at the bottom (TPO, max-pain, seasonality) are the strongest: your own recorded data answering whether levels actually behave as claimed.',
     'lvl-camarilla':     '<strong>Camarilla Pivots</strong>H4/H3/L3/L4 from previous-day OHLC via the 1.1-factor equations. The playbook: fade moves at H3/L3 on range days (reversal levels), trade WITH a break beyond H4/L4 (breakout levels). H5/L5 are extension targets. Enormously popular among Indian intraday traders — which is exactly why they work more often than the arithmetic deserves. H3/L3/H4/L4 are also pushed to the pivot bar with touch alerts.',
@@ -22203,7 +23192,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'numo-panchang':     '<strong>Panchang</strong>Real Vedic calendar math from the ephemeris: Tithi (lunar day) = Sun–Moon elongation ÷ 12°, with Paksha (waxing/waning fortnight); Nakshatra = Moon\'s longitude ÷ 13°20′. Honest precision notes: Moon accuracy ±0.3° puts tithi boundaries within ±40min of published panchangs, and the nakshatra uses tropical longitude (no Lahiri ayanamsa correction), so it runs ~1 mansion ahead of sidereal almanacs. Cultural calendar, same epistemic tier as this whole tab.',
     'astro-tab':         '<strong>Astrology</strong>A real ephemeris (Keplerian elements, Schlyter method: Sun ±0.01°, Moon ±0.3°, planets ≈±1°) rendering the seven classical planets, aspects, retrogrades and both zodiacs. The astronomy is verifiable against any almanac; the astrology — any market influence — has no empirical support and financial-astrology studies do not replicate. Calendar and context layer only.',
     'astro-wheel':       '<strong>Zodiac Wheel</strong>All seven classical planets on the ecliptic circle, 0° Aries/Mesha at the 9 o\'clock position (astrological convention, counterclockwise). Inner lines are aspects in orb: green trines/sextiles ("soft"), red squares/oppositions ("hard"), gold conjunctions. Toggle sidereal (Lahiri ayanamsa, used in Vedic/Indian practice — currently ≈24.2°) vs tropical (Western).',
-    'astro-positions':   '<strong>Planetary Positions</strong>Longitude within sign, daily motion, and retrograde flag for each planet, in the selected zodiac. Motion column: Moon ~13°/day, Sun ~1°, Jupiter ~0.08°, Saturn ~0.03°. ℞ marks apparent retrograde.',
+    'astro-positions':   '<strong>Planetary Positions</strong>Each planet\'s current zodiac degree, shown in both sidereal (Vedic, Lahiri ayanamsa) and tropical (Western) frames - the same sky, two coordinate conventions that differ by about 24 degrees. <b>How to read it:</b> slow planets define eras (Jupiter about a year per sign, Saturn about two and a half), fast ones add daily texture, and the ❓ note under the panel explains what each planet and sign traditionally signifies. <b>Status:</b> the positions are real astronomy computed from orbital elements to roughly one degree; everything read into them is tradition with no measurable market effect.',
     'astro-aspects':     '<strong>Aspects in Effect</strong>Angular separations currently within orb (6° for Moon pairs, 4° others): conjunction 0°, sextile 60°, square 90°, trine 120°, opposition 180°. Sorted tightest-orb first. In traditional framing squares/oppositions are "tension" and trines/sextiles "flow" — decorative labels, not forecasts.',
     'astro-upcoming':    '<strong>Upcoming Exact Aspects</strong>Daily scan of the next 30 days for the moment any planet pair crosses an exact aspect angle. Moon aspects dominate the list by sheer speed (it aspects everything within a fortnight); the slow-planet events (Jupiter/Saturn) are the rare ones astrologers weight most.',
     'astro-retro':       '<strong>Retrograde Stations</strong>Current direct/retrograde status per planet and the next station (direction change) within 120 days, found by scanning the sign of daily motion. Retrogrades are apparent-motion geometry — Earth overtaking or being overtaken — computed here from the actual orbits, so the dates are real even though the "Mercury retrograde ruins everything" lore is not.',
@@ -22240,9 +23229,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'suggest-view':      '<strong>View &amp; Risk Filter</strong>Override the auto regime read with your own directional view (bullish / bearish / neutral / big-move), and optionally restrict to defined-risk structures only. With Auto, the engine infers the view from OC WTT/WTB status and IV context. Each suggestion now shows a live quantified preview — actual strikes, POP, credit/debit, max loss and EV computed from the current chain before you deploy.',
     'iv-rv':             '<strong>IV − Realized Vol Spread</strong>ATM IV minus intraday realized volatility (Parkinson estimator on session high/low, day-scaled, annualized). Positive spread = options are pricing MORE movement than the market is delivering — the core premium-selling edge. Negative = market moving more than options price in — short premium is negative-edge, own gamma instead. Early session readings are noisy (small sample); trust it more after 11:00.',
     'risk-sizing':       '<strong>Risk-Based Lot Sizing</strong>Enter your max acceptable loss per trade; the builder computes max lots = risk ÷ (max loss per lot) for the current structure and warns when your quantity exceeds it. For undefined-risk structures (naked strangles, ratios) it refuses to size by max loss — those must be sized by margin and delta instead. Sizing decided before entry is the discipline that compounds.',
-    'fii-score':         '<strong>FII Activity Score</strong>Directional bias from today\'s FII net flow vs the 5-day average. Bullish when net buying exceeds the recent average. A sustained 3+ day trend is far more significant than a single day spike.',
+    'fii-score':         '<strong>FII Activity Score</strong>Directional bias from today\'s FII net flow against the 5-day average. <b>How to use:</b> a single day tells you very little - FII flow is noisy, frequently reverses, and is reported after the fact. What carries information is persistence: three or more days in the same direction has historically coincided with trend rather than noise. <b>Read it as context, never as a trigger:</b> the data reaches you after the market has already absorbed it, so its value is in framing the regime you are trading in, not in timing an entry. Cross-check against the index vs futures basis, since sustained FII buying usually shows up there first.',
     'be-distance':       '<strong>Breakeven Distance</strong>How far the underlying must move from current spot to reach each breakeven at expiry. For premium sellers: smaller distance = more at risk. For buyers: the distance tells you how much move you need just to break even before profiting.',
-    'kb-lots':           '<strong>Keyboard Lot Shortcuts</strong>In the Builder tab, press + or = to increase the last-clicked leg\'s qty. Press - or _ to decrease. Faster than reaching for the stepper buttons during fast-moving sessions.',
+    'kb-lots':           '<strong>Lot Size Reference</strong>Contract lot sizes per instrument, used everywhere the dashboard converts points into rupees - Portfolio Greeks, the stress heatmap, payoff charts and the exposure suite. <b>Why it matters:</b> get this wrong and every rupee figure on the dashboard is wrong by the same factor, which is easy to miss because the shapes still look right. SEBI has revised lot sizes several times, so verify against the exchange contract note if a P&amp;L figure ever looks off by a suspiciously round multiple.',
   };
 
   // ── Tooltip engine ───────────────────────────────────────────────────────

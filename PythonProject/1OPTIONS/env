@@ -1,0 +1,55 @@
+# ══════════════════════════════════════════════════════════════════════
+#  1OPTIONS — data source configuration
+#
+#  Copy this file next to nse_chain_server.py and edit. It is read at
+#  startup; command-line flags still override anything set here.
+#  Keep it out of version control: it holds broker credentials.
+# ══════════════════════════════════════════════════════════════════════
+
+# ── Which market-data adapter to use ─────────────────────────────────
+#   nse    = scrape NSE's public option chain (no account, ~3-5 min stale
+#            OI, needs the cookie warm-up, polled on a timer)
+#   arrow  = Arrow / iRage broker API (real-time, WebSocket streaming,
+#            OI + Greeks + volume; polling is switched OFF automatically)
+DATA_SOURCE=nse
+
+# ── Arrow (arrow.trade / iRage Broking) ──────────────────────────────
+# Create an app in Arrow's Trading API section to get these.
+ARROW_APP_ID=
+ARROW_API_SECRET=
+
+# Unattended daily login (auto_login with TOTP). Preferred for a server
+# that restarts on its own: no token pasting each morning.
+ARROW_USER_ID=
+ARROW_PASSWORD=
+ARROW_TOTP_SECRET=
+
+# Alternative: paste a token obtained manually. Used only when the
+# auto-login fields above are blank. Tokens are short-lived.
+ARROW_ACCESS_TOKEN=
+
+# Underlyings to stream, and how many strikes either side of ATM.
+ARROW_SYMBOLS=NIFTY,BANKNIFTY
+ARROW_STRIKE_COUNT=20
+
+# Seconds between option-chain refreshes when streaming is unavailable.
+# Arrow's chain endpoint is REST; the WebSocket carries the live ticks.
+ARROW_CHAIN_INTERVAL=3
+
+# ── Server ───────────────────────────────────────────────────────────
+NSE_LAN=true
+NSE_PORT=8765
+NSE_CHAIN_TTL=8
+
+# Background poller — only meaningful for DATA_SOURCE=nse.
+# It is force-disabled when an adapter streams its own data.
+NSE_POLL=NIFTY,BANKNIFTY
+NSE_POLL_INTERVAL=5
+
+# ── Alert engine thresholds ──────────────────────────────────────────
+NSE_ALERT_OI_PCT=8
+NSE_ALERT_PREM_PCT=3
+NSE_ALERT_NEAR_PCT=3
+NSE_ALERT_WINDOW=120
+NSE_ALERT_COOLDOWN=300
+NSE_ALERT_MAX=6

@@ -214,6 +214,39 @@ def _get_15m_oi_delta(symbol: str, strikes: list) -> dict:
 # so the dashboard can scrub back through the day after close. ~20-60KB/min.
 import os as _os
 # ══════════════════════════════════════════════════════════════════════
+# .env LOADER
+# Reads a .env file sitting next to this script and puts the values into
+# the environment BEFORE anything else reads them. Precedence stays sane:
+# a variable already exported in the shell wins over the file, and command
+# line flags win over both.
+# ══════════════════════════════════════════════════════════════════════
+def _load_dotenv(path: str = None) -> int:
+    path = path or _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".env")
+    if not _os.path.exists(path):
+        return 0
+    n = 0
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in _os.environ:      # shell wins over the file
+                    _os.environ[k] = v
+                    n += 1
+    except Exception as e:  # noqa: BLE001
+        print(f"[env] could not read {path}: {e}")
+        return 0
+    if n:
+        print(f"[env] loaded {n} setting(s) from {path}")
+    return n
+
+
+_load_dotenv()
+
+# ══════════════════════════════════════════════════════════════════════
 # RUN SETTINGS — edit these if you start the server by pressing ▶ Run in an
 # IDE (PyCharm/VS Code) instead of typing a command line.
 #
@@ -222,6 +255,10 @@ import os as _os
 # (NSE_LAN, NSE_POLL, NSE_PORT, NSE_POLL_INTERVAL, NSE_CHAIN_TTL) sit in
 # between: they override these defaults but yield to explicit flags.
 # ══════════════════════════════════════════════════════════════════════
+# Market-data adapter: "nse" (scrape, polled) or "arrow" (broker, streamed).
+# Set DATA_SOURCE in .env; this is only the fallback when .env is absent.
+RUN_DATA_SOURCE = _os.environ.get("DATA_SOURCE", "nse").strip().lower()
+
 RUN_LAN = True            # True  -> reachable from other computers (binds 0.0.0.0)
                           # False -> this machine only (127.0.0.1)
 RUN_PORT = 8765
@@ -362,6 +399,23 @@ def _m920_detect(symbol: str, data: dict):
             "text": f"Price touching {spoken} at {int(round(v))}, the nine twenty {kind} line",
         })
 
+def _sse_broadcast_ticks(event: dict) -> None:
+    """Fan price ticks out to every connected tab.
+
+    Deliberately different from _sse_broadcast: no speaker election (every
+    browser wants prices, only one should speak alerts) and a full queue is
+    skipped rather than waited on, so one slow laptop cannot stall the feed
+    for everyone.
+    """
+    with _sse_lock:
+        targets = list(_sse_clients)
+    for cl in targets:
+        try:
+            cl["q"].put_nowait(event)
+        except Exception:
+            pass
+
+
 def _flow_detect(symbol: str, data: dict):
     """Compare this snapshot with the last one and raise flow alerts."""
     try:
@@ -494,7 +548,7 @@ def _cached_chain(symbol: str, expiry, band: int, client: str = "?"):
                 _cache_stats["from_cache"] += 1
             return ent["data"], {"cache": "coalesced", "age": round(now - ent["ts"], 2),
                                  "ttl": _CHAIN_TTL, "shared_hits": ent["hits"]}
-        data = _build_response(symbol, expiry, band)
+        data = _fetch_via_adapter(symbol, expiry, band)
         with _chain_meta_lock:
             _chain_cache[key] = {"data": data, "ts": time.time(), "hits": 0}
             _cache_stats["fetches"] += 1
@@ -511,6 +565,86 @@ def _cached_chain(symbol: str, expiry, band: int, client: str = "?"):
         except Exception:
             pass
         return data, {"cache": "miss", "age": 0.0, "ttl": _CHAIN_TTL, "shared_hits": 0}
+
+def _prune_state() -> None:
+    """Bound the in-memory maps so a long-running server does not creep.
+
+    None of these need history beyond the current session: caches are
+    re-fetched, fired-maps only prevent immediate repeats, and per-day
+    structures are meaningless once the date rolls. Without this a server left
+    up for a week accumulates every strike it has ever seen.
+    """
+    now = time.time()
+    try:
+        with _chain_meta_lock:
+            for k, v in list(_chain_cache.items()):
+                if now - v.get("ts", 0) > 900:            # 15 min of staleness
+                    _chain_cache.pop(k, None)
+                    _chain_locks.pop(k, None)
+        for d, ttl in ((_flow_fired, 3600), (_m920_fired, 86400)):
+            for k, t in list(d.items()):
+                if now - t > ttl:
+                    d.pop(k, None)
+        today = time.strftime("%Y-%m-%d")
+        for k, v in list(_m920.items()):
+            if v.get("day") and v["day"] != time.strftime("%a %b %d %Y") and v.get("day") != today:
+                # keep only the current session's frozen levels
+                if now - v.get("_ts", now) > 86400:
+                    _m920.pop(k, None)
+        for k, v in list(_flow_prev.items()):
+            if now - v.get("ts", 0) > 1800:
+                _flow_prev.pop(k, None)
+        for name in ("_ltp_history", "_oi_timeline"):
+            d = globals().get(name)
+            if isinstance(d, dict):
+                for k, v in list(d.items()):
+                    if isinstance(v, list) and len(v) > 3000:
+                        d[k] = v[-1500:]
+                if len(d) > 400:
+                    for k in list(d)[:len(d) - 400]:
+                        d.pop(k, None)
+        fut = globals().get("_futures_cache")
+        if isinstance(fut, dict) and len(fut) > 50:
+            for k in list(fut)[:len(fut) - 50]:
+                fut.pop(k, None)
+    except Exception as e:  # noqa: BLE001
+        print(f"[janitor] {e}")
+
+
+def _start_janitor() -> None:
+    def loop():
+        while True:
+            time.sleep(300)
+            _prune_state()
+    threading.Thread(target=loop, daemon=True).start()
+    print("[i] State janitor running (prunes stale caches every 5 min)")
+
+
+def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
+    """Route the chain fetch to the configured adapter.
+
+    Any adapter failure falls back to the built-in NSE path rather than
+    taking the dashboard down: a broker outage should degrade the data,
+    not the tool.
+    """
+    src = RUN_DATA_SOURCE
+    if src == "arrow":
+        try:
+            import nse_adapter_arrow as _arrow
+            return _arrow.fetch_chain(symbol, expiry, band)
+        except Exception as e:  # noqa: BLE001
+            print(f"[adapter] arrow failed ({e}) - using NSE for this request")
+    return _build_response(symbol, expiry, band)
+
+
+def _adapter_streams() -> bool:
+    """True when the active adapter pushes its own data.
+
+    When it does, the NSE background poller is pointless (and would keep
+    scraping a source we are no longer using), so it is not started.
+    """
+    return RUN_DATA_SOURCE in ("arrow",)
+
 
 _poller_stop = threading.Event()
 _poller_symbols: list = []
@@ -3392,6 +3526,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"granted": True, "key": key, "ttl": ttl})
             return
 
+        if parsed.path == "/api/data-source":
+            info = {"source": RUN_DATA_SOURCE, "streams": _adapter_streams(),
+                    "polling": bool(_poller_symbols)}
+            if RUN_DATA_SOURCE == "arrow":
+                try:
+                    import nse_adapter_arrow as _arrow
+                    info["arrow"] = _arrow.status()
+                    info["configured"] = _arrow.is_configured()
+                except Exception as e:  # noqa: BLE001
+                    info["arrow"] = {"last_error": str(e)}
+            self._send_json(info)
+            return
+
         if parsed.path == "/api/cache-stats":
             now = time.time()
             with _chain_meta_lock:
@@ -3541,6 +3688,79 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/replay-dates":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             self._send_json({"symbol": symbol, "dates": _replay_dates(symbol)})
+            return
+
+        if parsed.path == "/api/gex-history":
+            # Per-minute gamma structure from today's replay snapshots.
+            # The archive already records the whole chain every minute, so the
+            # heatmap and the flip time-series come free - no extra NSE load.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            try:
+                step = max(1, int(qs.get("step", ["5"])[0]))       # minutes per column
+            except Exception:
+                step = 5
+            path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+            if not _os.path.exists(path):
+                self._send_json({"error": "no replay data for that day", "cols": []})
+                return
+            try:
+                import math as _m
+                def _norm_cdf(x):
+                    return 0.5 * (1.0 + _m.erf(x / _m.sqrt(2.0)))
+                def _gamma(S, K, T, iv, r=0.07):
+                    if S <= 0 or K <= 0 or T <= 0 or iv <= 0.01:
+                        return 0.0
+                    sq = iv * _m.sqrt(T)
+                    d1 = (_m.log(S / K) + (r + iv * iv / 2) * T) / sq
+                    pdf = _m.exp(-d1 * d1 / 2) / _m.sqrt(2 * _m.pi)
+                    return pdf / (S * sq)
+
+                cols, last_bucket = [], None
+                with open(path) as f:
+                    for line in f:
+                        try:
+                            s = json.loads(line)
+                        except Exception:
+                            continue
+                        ts = s.get("_replay_ts")
+                        spot = s.get("underlying_value")
+                        strikes = s.get("strikes") or []
+                        if not ts or not spot or not strikes:
+                            continue
+                        bucket = int(ts // (step * 60)) * (step * 60)
+                        if bucket == last_bucket:
+                            continue                     # one column per bucket
+                        last_bucket = bucket
+                        dte = max(0.25, s.get("dte") or 1)
+                        T = dte / 365.0
+                        lot = s.get("lot_size") or 75
+                        per_strike, cum, flip = {}, 0.0, None
+                        rows = []
+                        for st_ in strikes:
+                            k = st_.get("strike")
+                            if not k or abs(k - spot) / spot > 0.05:
+                                continue
+                            gc = _gamma(spot, k, T, (st_.get("ce_iv") or 0) / 100.0)
+                            gp = _gamma(spot, k, T, (st_.get("pe_iv") or 0) / 100.0)
+                            # same naive dealer convention as the client GEX panel
+                            gex = (gc * (st_.get("ce_oi") or 0) - gp * (st_.get("pe_oi") or 0)) * lot * spot * spot * 0.01
+                            per_strike[k] = round(gex)
+                            rows.append((k, gex))
+                        rows.sort()
+                        for k, g in rows:
+                            prev = cum
+                            cum += g
+                            if flip is None and prev < 0 <= cum and k:
+                                flip = k
+                        king = max(per_strike.items(), key=lambda kv: abs(kv[1]))[0] if per_strike else None
+                        cols.append({"t": bucket, "spot": round(spot, 2),
+                                     "gex": per_strike, "total": round(cum),
+                                     "flip": flip, "king": king})
+                self._send_json({"symbol": symbol, "day": day, "step": step,
+                                 "cols": cols, "count": len(cols)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "cols": []})
             return
 
         if parsed.path == "/api/oi-migration":
@@ -4552,7 +4772,29 @@ def main():
     _start_session_rewarm_thread()
 
     # Background poller: keeps hot symbols warm so every browser hits cache.
-    if args.poll:
+    if _adapter_streams():
+        print(f"[i] DATA_SOURCE={RUN_DATA_SOURCE}: broker stream is the source - "
+              f"NSE polling and cookie warm-up are DISABLED")
+        try:
+            import nse_adapter_arrow as _arrow
+            if _arrow.is_configured():
+                # ticks flow: broker WebSocket -> adapter -> SSE -> browsers.
+                # _sse_broadcast already elects one speaker per machine for
+                # alerts; price ticks go to every tab (no election needed).
+                _arrow.set_tick_sink(_sse_broadcast_ticks)
+                _arrow.connect()
+                for sym in [s.strip().upper() for s in
+                            _os.environ.get("ARROW_SYMBOLS", "NIFTY,BANKNIFTY").split(",") if s.strip()]:
+                    try:
+                        _arrow.fetch_chain(sym, None, 12)   # prime + subscribe
+                        print(f"[arrow] {sym} chain primed and subscribed")
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[arrow] {sym} prime failed: {e}")
+            else:
+                print("[arrow] not configured - fill ARROW_APP_ID and credentials in .env")
+        except Exception as e:  # noqa: BLE001
+            print(f"[arrow] startup failed: {e}")
+    elif args.poll:
         _start_poller([s.strip() for s in args.poll.split(",")], args.poll_interval)
 
     class _QuietThreadingHTTPServer(ThreadingHTTPServer):
@@ -4564,6 +4806,7 @@ def main():
                 return                      # routine client disconnect
             super().handle_error(request, client_address)
 
+    _start_janitor()
     server = _QuietThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[i] NSE chain server running at http://{args.host}:{args.port}")
     if args.host == "0.0.0.0":
