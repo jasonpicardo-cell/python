@@ -4387,6 +4387,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <span id="alertStatusLine" style="font-size:10px;color:var(--muted,#789);"></span>
         </div>
         <div id="alertMasterSlot" style="padding:4px 8px 8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;"></div>
+        <div style="padding:4px 8px 8px;border-top:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:10px;font-weight:700;margin-bottom:4px;">📇 Announce alerts for which index<i class="hi" data-h="index-alerts">i</i></div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;">
+            <label><input type="checkbox" id="idxal_NIFTY"> NIFTY</label>
+            <label><input type="checkbox" id="idxal_BANKNIFTY"> BANKNIFTY</label>
+            <label><input type="checkbox" id="idxal_FINNIFTY"> FINNIFTY</label>
+            <label><input type="checkbox" id="idxal_MIDCPNIFTY"> MIDCPNIFTY</label>
+            <label style="color:var(--muted,#789);"><input type="checkbox" id="idxal_activeOnly"> only the index I am viewing</label>
+          </div>
+          <div class="oc-sub" style="margin-top:3px;">The server watches every index it polls, so alerts can arrive for an index you are not looking at. Untick one to silence it here without stopping detection - other machines keep announcing it. <b>Only the index I am viewing</b> is the stricter option: it follows the top tab, so switching to BANKNIFTY automatically mutes the rest.</div>
+        </div>
         <div style="padding:0 8px 8px;font-size:9.5px;color:#9ab;">Everything below is grouped by what it does. Controls were moved here from the topbar, Home and Today — they are the same controls, so nothing is duplicated and no setting can drift out of sync.</div>
       </div>
 
@@ -4688,10 +4699,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   // ---------- alert history ------------------------------------------------
   const _alertHistory = [];   // { time, label, price, polarity }
-  function _pushAlertHistory(label, price, polarity) {
+  function _pushAlertHistory(label, price, polarity, sym) {
     const now = new Date();
     const t = now.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
-    _alertHistory.unshift({ time: t, label, price, polarity });
+    // entries were untagged, so a NIFTY touch and a BANKNIFTY touch looked
+    // identical in the list and could not be filtered afterwards
+    _alertHistory.unshift({ time: t, label, price, polarity, sym: sym || state.symbol || '' });
     if (_alertHistory.length > 30) _alertHistory.pop();
     _renderAlertHistory();
     _saveAlertLog();   // persist to localStorage
@@ -4701,23 +4714,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const list  = document.getElementById('alertHistoryList');
     if (!list || !panel) return;
     if (!_alertHistory.length) { panel.style.display = 'none'; return; }
+    // hide entries for indices this browser has muted, so the list matches
+    // what you actually asked to be told about
+    const shown = _alertHistory.filter(h => !h.sym || _idxAlAllows(h.sym));
+    const hidden = _alertHistory.length - shown.length;
+    if (!shown.length && !hidden) { panel.style.display = 'none'; return; }
     panel.style.display = '';
-    list.innerHTML = _alertHistory.map(h => {
+    list.innerHTML = shown.map(h => {
       const cls   = h.polarity === 'r' ? 'pos-txt' : 'neg-txt';
       const arrow = h.polarity === 'r' ? '↑' : '↓';
       return `<div style="display:flex;gap:8px;align-items:center;padding:2px 0;font-size:10.5px;border-bottom:1px solid var(--border);">
         <span style="color:var(--muted-2);min-width:62px;">${h.time}</span>
         <span class="${cls}" style="font-weight:700;">${arrow} ${escapeHtml(h.label)}</span>
         <span style="color:var(--muted);">${fmtPrice(h.price)}</span>
+        ${h.sym ? `<span style="margin-left:auto;font-size:8.5px;color:var(--muted-2);border:1px solid rgba(255,255,255,0.14);border-radius:3px;padding:0 4px;">${escapeHtml(h.sym)}</span>` : ''}
       </div>`;
-    }).join('');
+    }).join('') + (hidden ? `<div style="font-size:9px;color:var(--muted);padding:3px 0;">${hidden} entr${hidden === 1 ? 'y' : 'ies'} hidden by the index filter — tick the index in Master control to see them.</div>` : '');
   }
-  document.getElementById('clearAlertHistoryBtn')?.addEventListener('click', () => {
-    _alertHistory.length = 0;
-    _renderAlertHistory();
-    document.getElementById('alertHistoryPanel').style.display = 'none';
-  });
-
   document.getElementById('clearAlertHistoryBtn')?.addEventListener('click', () => {
     _alertHistory.length = 0;
     _renderAlertHistory();
@@ -5755,9 +5768,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   function _recordStraddle(premium, sym) {
     if (!premium || premium <= 0) return;
-    // ignore a value that belongs to a different instrument than the series
-    if (sym && _histSymbol && sym !== _histSymbol) return;
-    _straddleHistory.push({ ts: Date.now(), val: premium, sym: sym || _histSymbol });
+    // tag with the instrument this value actually belongs to, and refuse
+    // anything that is not the currently selected one
+    const cur = state.symbol || _histSymbol || null;
+    const tag = sym || cur;
+    if (cur && tag && tag !== cur) return;
+    _straddleHistory.push({ ts: Date.now(), val: premium, sym: tag });
+    // keep the buffer scoped: purge points from other instruments
+    for (let i = _straddleHistory.length - 1; i >= 0; i--)
+      if (_straddleHistory[i].sym && cur && _straddleHistory[i].sym !== cur) _straddleHistory.splice(i, 1);
     if (_straddleHistory.length > MAX_STRADDLE_HIST) _straddleHistory.shift();
   }
 
@@ -5765,9 +5784,20 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const svg  = document.getElementById('straddleSparkSvg');
     const row  = document.getElementById('straddleSparkRow');
     const rng  = document.getElementById('straddleSparkRange');
-    if (!svg || _straddleHistory.length < 3) { if(row) row.style.display='none'; return; }
+    // ── self-correcting instrument scope ─────────────────────────────
+    // Read the CURRENT selection at draw time and keep only points recorded
+    // under it. Relying on a cached symbol meant any missed reset left the
+    // widget showing a previous index; this cannot, because the filter is
+    // applied to the data every time it draws.
+    const cur = state.symbol || _histSymbol || '';
+    const mine = _straddleHistory.filter(h => !h.sym || h.sym === cur);
+    if (!svg || mine.length < 3) {
+      if (row) row.style.display = 'none';
+      if (rng) rng.textContent = cur ? `${cur} …` : '';
+      return;
+    }
     row.style.display = 'flex';
-    const vals = _straddleHistory.slice(-360).map(h => h.val);
+    const vals = mine.slice(-360).map(h => h.val);
     const lo = Math.min(...vals), hi = Math.max(...vals);
     const W = 120, H = 22, PAD = 2;
     const n = vals.length;
@@ -5778,7 +5808,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const col  = last >= first ? 'var(--pos)' : 'var(--neg)';
     svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.5" stroke-linejoin="round"/>
       <circle cx="${xs[n-1].toFixed(1)}" cy="${ys[n-1].toFixed(1)}" r="2" fill="${col}"/>`;
-    if (rng) rng.textContent = `${_histSymbol || ''} ${lo.toFixed(0)}–${hi.toFixed(0)}`.trim();
+    if (rng) rng.textContent = `${cur} ${lo.toFixed(0)}–${hi.toFixed(0)}`.trim();
   }
 
   // ======================================================================
@@ -5860,7 +5890,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const todayLog = store[today];
       if (todayLog?.length) {
         _alertHistory.length = 0;
-        _alertHistory.push(...todayLog);
+        // older saved entries predate symbol tagging; leave them untagged so the
+    // filter lets them through rather than hiding history you cannot recover
+    _alertHistory.push(...todayLog);
         _renderAlertHistory();
       }
     } catch (_) {}
@@ -11274,7 +11306,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       // stream-first: one announcement across all systems; _speakOnce is the
       // standalone fallback when no server stream is connected
-      if (_streamLive) _relayAlert('custom|' + msg.slice(0, 70), msg, 'alert', 300);
+      if (_streamLive) _relayAlert(`custom|${state.symbol || 'NIFTY'}|` + msg.slice(0, 60), msg, 'alert', 300);
       else _speakOnce('alert|' + msg.slice(0, 60), msg, 300);
     } catch (_) {}
     const log = JSON.parse(localStorage.getItem('customAlertsFired') || '[]');
@@ -11851,6 +11883,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // everyone sees it; only the elected tab speaks
         if (typeof showToast === 'function')
           showToast(`${d.speak ? '🔊' : '🔇'} ${escapeHtml(line.slice(0, 90))}`);
+        // per-index filter: silence indices this browser is not watching.
+        // Falls back to reading the index out of the event key (our keys are
+        // "type|SYMBOL|...") so an older payload without an explicit symbol
+        // is still filtered rather than slipping through.
+        const evSym = d.symbol || (() => {
+          const m = String(d.key || '').match(/\b(NIFTY|BANKNIFTY|FINNIFTY|MIDCPNIFTY)\b/);
+          return m ? m[1] : null;
+        })();
+        if (evSym && !_idxAlAllows(evSym)) {
+          _voiceDiag(d.type + '|' + evSym, `silenced: ${evSym} alerts are off on this browser`);
+          return;
+        }
         if (d.type === 'm920' && !_csrcCfg().m920) {
           _voiceDiag('m920', 'silenced: 9:20 source unticked on this browser');
           return;
@@ -11893,6 +11937,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // on the first interaction and report the true state to the server.
   let _audioUnlocked = false;
   function _audioUnlock(explicit) {
+    // Deliberately NOT index-filtered: this is the browser-priming utterance
+    // and the user's own confirmation click, not a market alert.
     try {
       if (!('speechSynthesis' in window)) return false;
       const u = new SpeechSynthesisUtterance(explicit ? 'Audio enabled on this system.' : ' ');
@@ -11933,7 +11979,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const q = new URLSearchParams({ key, text, kind: kind || 'level',
-                                      cooldown: String(cooldownSec || 300) });
+                                      cooldown: String(cooldownSec || 300),
+                                      symbol: state.symbol || '' });
       const j = await (await fetch(`${base}/api/alert-emit?${q}`, { signal: AbortSignal.timeout(5000) })).json();
       _voiceDiag(key, j.broadcast ? 'relayed to all systems' : 'already announced elsewhere');
       return true;                            // handled by the stream either way
@@ -11982,6 +12029,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return true;
   }
   async function _speakOnce(key, text, ttlSec) {
+    if (!_idxAlAllows(state.symbol)) { _voiceDiag(key, 'silenced: index filter'); return false; }
     // Never take a claim we cannot honour: a browser with voice OFF used to
     // win the claim and drop the message, silencing every other machine.
     if (!_canSpeak()) {
@@ -14688,6 +14736,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function _speakLevel(label, price) {
+    if (!_idxAlAllows(state.symbol)) return;   // this index is muted here
     if (!_csrcAllows(label)) return;          // this source is muted on this browser
     // Route through the server when the stream is live so every system hears
     // it exactly once (the local path below is the standalone fallback).
@@ -14858,6 +14907,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   let _prevSpotForAlerts = null;
 
   function checkLevelTouches(levels, spot) {
+    // Index filter applies to DETECTION, not just to the voice: a muted index
+    // should not fill the history either. The baseline still advances so that
+    // re-enabling the index does not fire a burst of stale crossings.
+    if (!_idxAlAllows(state.symbol)) { _prevSpotForAlerts = spot; return; }
     const prev = _prevSpotForAlerts;
     _prevSpotForAlerts = spot;
 
@@ -16548,6 +16601,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // travels with the node, so there is exactly one control per setting and
   // nothing can drift out of sync — the failure mode a duplicated UI invites.
   function _buildAlertsTab() {
+    // every step is independent: a missing element in one group must not stop
+    // the remaining groups (or the wiring at the end) from being set up
+    const step = (fn, name) => { try { fn(); } catch (e) { console.warn('[alerts tab]', name, e.message); } };
     const slot = id => document.getElementById(id);
     const move = (el, target, wrapLabel) => {
       if (!el || !target) return;
@@ -16642,7 +16698,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
     } catch (_) {}
     _alertStatus();
-    _csrcWire();
+    step(_csrcWire, 'csrcWire');
+    step(_idxAlWire, 'idxAlWire');
     _visInterval(_alertStatus, 5000, '_alertStatus');
   }
 
@@ -16650,6 +16707,63 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Drawing and announcing were the same decision before: any line the chart
   // drew could speak, which meant turning a level on visually also turned on
   // its voice. These are separate switches now.
+  // ── per-index alert filter ────────────────────────────────────────
+  // The server polls several indices and streams alerts for all of them, so
+  // a BANKNIFTY flow alert can arrive while you are studying NIFTY. This is a
+  // per-browser mute: detection continues server-side and other machines are
+  // unaffected, only this browser stays quiet for the unticked indices.
+  const _IDXAL_KEY = 'indexAlertFilter';
+  const _IDX_LIST = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+  function _idxAlCfg() {
+    try {
+      return Object.assign({ NIFTY: true, BANKNIFTY: true, FINNIFTY: true,
+                             MIDCPNIFTY: true, activeOnly: false },
+                           JSON.parse(localStorage.getItem(_IDXAL_KEY) || '{}'));
+    } catch (_) { return { NIFTY: true, BANKNIFTY: true, FINNIFTY: true, MIDCPNIFTY: true, activeOnly: false }; }
+  }
+  function _idxAlSave(o) { try { localStorage.setItem(_IDXAL_KEY, JSON.stringify(o)); } catch (_) {} }
+  function _idxAlAllows(sym) {
+    if (!sym) return true;                       // unknown source: never silently drop
+    const cfg = _idxAlCfg();
+    if (cfg.activeOnly) return sym === (state.symbol || 'NIFTY');
+    return cfg[sym] !== false;
+  }
+  // Bound once, by delegation, so it cannot be skipped by an error in any
+  // other setup function - the previous version wired at the END of
+  // _buildAlertsTab and silently did nothing if that threw first.
+  document.addEventListener('change', ev => {
+    const t = ev.target;
+    if (!t || !t.id || !t.id.startsWith('idxal_')) return;
+    const o = _idxAlCfg();
+    if (t.id === 'idxal_activeOnly') o.activeOnly = t.checked;
+    else o[t.id.slice(6)] = t.checked;
+    _idxAlSave(o);
+    _idxAlSync();
+    try { _alertStatus(); } catch (_) {}
+    try { _renderAlertHistory(); } catch (_) {}
+    if (typeof showToast === 'function') {
+      const on = _IDX_LIST.filter(s => o[s] !== false);
+      showToast(o.activeOnly ? `📇 Alerts follow the selected index only`
+                             : `📇 Announcing: ${on.join(', ') || 'none'}`);
+    }
+  });
+  function _idxAlSync() {
+    const cfg = _idxAlCfg();
+    for (const s of _IDX_LIST) {
+      const el = document.getElementById('idxal_' + s);
+      if (!el) continue;
+      el.checked = cfg[s] !== false;
+      el.disabled = !!cfg.activeOnly;
+    }
+    const ao = document.getElementById('idxal_activeOnly');
+    if (ao) ao.checked = !!cfg.activeOnly;
+  }
+  function _idxAlWire() { _idxAlSync(); }
+  // reflect saved state as soon as the DOM is ready, whatever else happens
+  if (document.readyState === 'loading')
+    document.addEventListener('DOMContentLoaded', _idxAlSync);
+  else setTimeout(_idxAlSync, 0);
+
   const _CSRC_KEY = 'chartAlertSources';
   function _csrcCfg() {
     try {
@@ -16675,6 +16789,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!k) return true;
     return _csrcCfg()[k] !== false;
   }
+  document.addEventListener('change', ev => {
+    const t = ev.target;
+    if (!t || !t.id || !t.id.startsWith('csrc_')) return;
+    const o = _csrcCfg();
+    const k = t.id.slice(5);
+    if (k === 'tol') o.tol = Math.max(1, +t.value || 15);
+    else o[k] = t.checked;
+    _csrcSave(o);
+    try { _alertStatus(); } catch (_) {}
+  });
   function _csrcWire() {
     const cfg = _csrcCfg();
     for (const k of ['m920', 'walls', 'cpr', 'maxpain', 'cone', 'pivots']) {
@@ -16711,6 +16835,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const cs = _csrcCfg();
       const on = ['m920', 'walls', 'cpr', 'maxpain', 'cone', 'pivots'].filter(k => cs[k] !== false);
       bits.push(`📈 ${on.length}/6 chart sources announcing`);
+      const ia = _idxAlCfg();
+      bits.push(ia.activeOnly
+        ? `📇 only ${state.symbol || 'NIFTY'} (follows the top tab)`
+        : `📇 ${_IDX_LIST.filter(s => ia[s] !== false).join(', ') || 'no index'} announcing`);
     } catch (_) {}
     el.innerHTML = bits.join(' &nbsp;·&nbsp; ');
   }
@@ -23065,6 +23193,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
+    'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
     'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',
     'vol-analytics':     '<strong>Volatility &amp; Higher-Order Greeks</strong>Three institutional-style reads, all computed from NSE data alone. <b>Realized vs implied</b> compares what the market CHARGES for movement (ATM IV) against what price actually did (realized volatility from today\'s candles, annualised): a positive spread means premium sellers are being overpaid relative to the movement, a negative one means buying premium is comparatively cheap and short gamma is dangerous. Load a daily CSV in the Historical Astro Lab and it also reports where today\'s realized vol sits in the long-run distribution. <b>Charm</b> is dDelta/dTime — how much dealer hedging must shift purely because a day passed. It is the mechanical explanation for expiry-week drift, far more defensible than the folk story of max-pain magnetism, and it accelerates sharply in the final two sessions. <b>Vanna</b> is dDelta/dVol: when it is large, an IV spike alone can move spot with no directional flow at all. <b>Gamma by expiry</b> splits GEX per series, because a Tuesday weekly and a month-end series can pin at different prices and the near one\'s influence vanishes the moment it settles. Caveats stated on the panel: NSE data is 3-5 minutes delayed, realized vol from one sample per minute is noisier than tick data, and charm/vanna use the same naive dealer convention (long calls, short puts) as the GEX panel — an assumption, not an observation.',

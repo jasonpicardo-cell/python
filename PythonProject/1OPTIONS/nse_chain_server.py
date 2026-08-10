@@ -3392,6 +3392,10 @@ class Handler(BaseHTTPRequestHandler):
             key = qs.get("key", [""])[0]
             text = qs.get("text", [""])[0]
             kind = qs.get("kind", ["level"])[0]
+            # the index this alert belongs to, so every browser can apply its
+            # own per-index filter. Without it, relayed level touches reached
+            # machines that had muted that index.
+            sym = (qs.get("symbol", [""])[0] or "").upper()
             try:
                 cool = float(qs.get("cooldown", ["300"])[0])
             except Exception:
@@ -3417,7 +3421,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "broadcast": False,
                                  "reason": "already announced", "age": round(now - last, 1)})
                 return
-            _sse_broadcast({"type": kind, "ts": now, "key": key, "text": text})
+            _sse_broadcast({"type": kind, "ts": now, "key": key, "text": text,
+                            "symbol": sym or None})
             with _sse_lock:
                 n = len(_sse_clients)
             print(f"[relay] {kind}: {text[:60]} -> {n} tab(s)")
