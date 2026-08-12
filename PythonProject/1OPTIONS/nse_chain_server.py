@@ -3695,6 +3695,99 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"symbol": symbol, "dates": _replay_dates(symbol)})
             return
 
+        if parsed.path == "/api/option-candles":
+            # Intraday candles for a single OPTION (one strike, CE or PE),
+            # rebuilt from the replay archive - which already stores the whole
+            # chain every minute, so this needs no extra NSE traffic.
+            # Also returns the strike's OI series, because for an option the
+            # OI trace is as informative as the price trace.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            side = (qs.get("side", ["CE"])[0]).upper()
+            try:
+                strike = float(qs.get("strike", ["0"])[0])
+            except Exception:
+                strike = 0.0
+            try:
+                interval = max(1, min(60, int(qs.get("interval", ["5"])[0])))
+            except Exception:
+                interval = 5
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+            if not strike or side not in ("CE", "PE"):
+                self._send_json({"error": "strike and side (CE|PE) required", "candles": []})
+                return
+            if not _os.path.exists(path):
+                self._send_json({"error": "no recorded chain for that day yet", "candles": []})
+                return
+            try:
+                ticks, ois, ivs = [], [], []
+                with open(path) as f:
+                    for line in f:
+                        try:
+                            s = json.loads(line)
+                        except Exception:
+                            continue
+                        ts = s.get("_replay_ts")
+                        if not ts:
+                            continue
+                        for st_ in (s.get("strikes") or []):
+                            if st_.get("strike") != strike:
+                                continue
+                            ltp = st_.get("ce_ltp" if side == "CE" else "pe_ltp")
+                            oi = st_.get("ce_oi" if side == "CE" else "pe_oi")
+                            iv = st_.get("ce_iv" if side == "CE" else "pe_iv")
+                            if ltp:
+                                ticks.append((float(ts), float(ltp)))
+                                ois.append((float(ts), float(oi or 0)))
+                                ivs.append((float(ts), float(iv or 0)))
+                            break
+                if not ticks:
+                    self._send_json({"error": f"{int(strike)} {side} not present in today's recording",
+                                     "candles": []})
+                    return
+                # keep only regular-session samples (IST), same rule as the index
+                def _ist_min(t):
+                    g = time.gmtime(t + 5 * 3600 + 1800)
+                    return g.tm_hour * 60 + g.tm_min
+                ticks = [(t, v) for t, v in ticks if 555 <= _ist_min(t) < 930]
+                ois = [(t, v) for t, v in ois if 555 <= _ist_min(t) < 930]
+                out, cur = [], None
+                for ts, px in sorted(ticks):
+                    b = int(ts // (interval * 60)) * (interval * 60)
+                    if cur is None or cur["t"] != b:
+                        if cur:
+                            out.append(cur)
+                        cur = {"t": b, "o": px, "h": px, "l": px, "c": px, "n": 1}
+                    else:
+                        cur["h"] = max(cur["h"], px)
+                        cur["l"] = min(cur["l"], px)
+                        cur["c"] = px
+                        cur["n"] += 1
+                if cur:
+                    out.append(cur)
+                # chain opens so a one-sample bucket is not a flat, invisible bar
+                for i in range(1, len(out)):
+                    po = out[i - 1]["c"]
+                    out[i]["o"] = po
+                    out[i]["h"] = max(out[i]["h"], po)
+                    out[i]["l"] = min(out[i]["l"], po)
+                oi_series = []
+                seen = set()
+                for ts, v in sorted(ois):
+                    b = int(ts // (interval * 60)) * (interval * 60)
+                    if b in seen:
+                        oi_series[-1] = {"t": b, "oi": v}
+                    else:
+                        seen.add(b)
+                        oi_series.append({"t": b, "oi": v})
+                self._send_json({"symbol": symbol, "strike": strike, "side": side,
+                                 "interval": interval, "candles": out, "count": len(out),
+                                 "oi": oi_series,
+                                 "iv_last": ivs[-1][1] if ivs else None})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "candles": []})
+            return
+
         if parsed.path == "/api/gex-history":
             # Per-minute gamma structure from today's replay snapshots.
             # The archive already records the whole chain every minute, so the

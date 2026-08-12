@@ -1864,6 +1864,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <button class="btn" id="panUpBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view up">&#9650;</button>
                 <button class="btn" id="panDnBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view down">&#9660;</button>
               </span>
+              <span style="display:flex;gap:4px;align-items:center;">
+                <select id="chartInstrument" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Chart the index itself, or a single option contract rebuilt from the recorded chain">
+                  <option value="index">Index (spot)</option>
+                  <option value="CE">Call (CE)</option>
+                  <option value="PE">Put (PE)</option>
+                </select>
+                <select id="chartStrike" class="ohlc-inp" style="font-size:9px;padding:1px 4px;display:none;" title="Which strike to chart"></select>
+              </span>
               <span style="display:flex;gap:3px;">
                 <button class="btn chart-iv active" data-iv="1" style="font-size:9px;padding:2px 8px;">1m</button>
                 <button class="btn chart-iv" data-iv="3" style="font-size:9px;padding:2px 8px;">3m</button>
@@ -14278,6 +14286,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         renderPriceChart();
       }
     } catch (_) {}
+    try { _populateStrikeList(); } catch (_) {}
     try { _m920TouchCheck(data); } catch (_) {}
     try {
       renderMarketPulse(data);
@@ -16074,6 +16083,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _chartLevels(d) {
     const L = [];
     if (!d) return L;
+    // Index levels are meaningless in premium space (spot 24,500 vs premium 52)
+    if (_chart.optionMeta) {
+      const m = _chart.optionMeta, cs = _chart.candles || [];
+      if (cs.length) {
+        L.push({ v: cs[0].o, lab: 'Day open', col: '#9aa', dash: '4,3' });
+        L.push({ v: Math.max(...cs.map(x => x.h)), lab: 'Day high', col: 'var(--neg,#ef5350)', dash: '2,4' });
+        L.push({ v: Math.min(...cs.map(x => x.l)), lab: 'Day low', col: 'var(--pos,#26a69a)', dash: '2,4' });
+      }
+      const spot = d.underlying_value;
+      if (spot && m.strike) {
+        const intr = m.side === 'CE' ? Math.max(0, spot - m.strike) : Math.max(0, m.strike - spot);
+        if (intr > 0) L.push({ v: intr, lab: 'Intrinsic', col: 'var(--gold,#d4af37)', dash: '', wide: true });
+      }
+      return L;
+    }
     const spot = d.underlying_value;
     if (_chart.show.cpr && state._cpr) {
       L.push({ v: state._cpr.TC, lab: 'CPR TC', col: '#7aa2f7', dash: '4,3' });
@@ -16157,9 +16181,41 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return true;
   }
 
+  function _chartMode() { return document.getElementById('chartInstrument')?.value || 'index'; }
+  function _chartStrikeSel() { return +(document.getElementById('chartStrike')?.value || 0); }
+  function _populateStrikeList() {
+    const sel = document.getElementById('chartStrike');
+    const d = state.lastData;
+    if (!sel || !d?.strikes?.length) return;
+    const keep = +sel.value || d.atm;
+    const spot = d.underlying_value;
+    const opts = d.strikes.filter(s => Math.abs(s.strike - spot) / spot < 0.05)
+      .map(s => `<option value="${s.strike}"${s.strike === keep ? ' selected' : ''}>${fmtInt(s.strike)}${s.strike === d.atm ? ' (ATM)' : ''}</option>`).join('');
+    if (opts && sel.innerHTML !== opts) sel.innerHTML = opts;
+  }
+  async function _fetchOptionCandles() {
+    const box = document.getElementById('chartBody');
+    const strike = _chartStrikeSel(), side = _chartMode();
+    if (!strike) { if (box) box.innerHTML = '<div class="movers-loading">Pick a strike.</div>'; return; }
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/option-candles?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&strike=${strike}&side=${side}&interval=${_chart.interval}`);
+      const j = await r.json();
+      if (j.error || !j.candles?.length) {
+        if (box) box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error || 'no data')} — option candles are rebuilt from the recorded chain, so they fill in as the session records.</div>`;
+        _chart.candles = []; return;
+      }
+      _chart.candles = j.candles; _chart.src = 'replay-chain';
+      _chart.optionMeta = { strike: j.strike, side: j.side, oi: j.oi || [], iv: j.iv_last };
+      renderPriceChart();
+    } catch (e) { if (box) box.innerHTML = `<div class="movers-loading">Failed: ${escapeHtml(e.message)}</div>`; }
+  }
+
   async function fetchCandles(silent) {
     const box = document.getElementById('chartBody');
     if (!box) return;
+    if (_chartMode() !== 'index') return _fetchOptionCandles();
+    _chart.optionMeta = null;
     if (!silent && !_chart.candles.length) box.innerHTML = '<div class="movers-loading">Loading candles…</div>';
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
@@ -16354,8 +16410,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           </span>`;
         }).join('') || '<span style="font-size:9px;color:var(--muted);">No overlays selected.</span>'}
       </div>
+      ${_chart.optionMeta && (_chart.optionMeta.oi || []).length > 1 ? (() => {
+        const oi = _chart.optionMeta.oi, vs = oi.map(x => x.oi);
+        const mn = Math.min(...vs), mx = Math.max(...vs), w = 900, h = 42, pl = 8, pr = 72;
+        const px = i => pl + i / (oi.length - 1) * (w - pl - pr);
+        const py = v => 6 + (mx - v) / ((mx - mn) || 1) * (h - 12);
+        const chg = vs[vs.length - 1] - vs[0];
+        return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;margin-top:2px;">
+            <polyline points="${oi.map((x, i) => `${px(i).toFixed(1)},${py(x.oi).toFixed(1)}`).join(' ')}" fill="none" stroke="${chg >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'}" stroke-width="1.4"/>
+            <text x="2" y="10" style="font-size:8px;fill:var(--muted,#789);">OI ${fmtInt(Math.round(mx))}</text>
+            <text x="2" y="${h - 2}" style="font-size:8px;fill:var(--muted,#789);">${fmtInt(Math.round(mn))}</text>
+            <text x="${w - pr + 3}" y="${(py(vs[vs.length - 1]) + 3).toFixed(1)}" style="font-size:9px;fill:${chg >= 0 ? 'var(--pos)' : 'var(--neg)'};font-weight:700;">${chg >= 0 ? '+' : ''}${fmtInt(Math.round(chg))}</text>
+          </svg>
+          <div style="font-size:9px;color:#9ab;padding:1px 4px;">Open interest for this strike. Premium up with OI up is fresh buying; premium down with OI up is fresh writing — the flow-alert classification, seen as a picture.</div>`;
+      })() : ''}
       <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);padding:3px 4px;">
-        <span>${cs.length} × ${_chart.interval}m candles</span>
+        <span>${_chart.optionMeta ? `<b>${fmtInt(_chart.optionMeta.strike)} ${_chart.optionMeta.side}</b> · ` : ''}${cs.length} × ${_chart.interval}m candles</span>
         <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
         <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
         ${_chart.coverage ? `<span title="Time span covered by the merged data">covers <b>${escapeHtml(_chart.coverage)}</b></span>` : ''}
@@ -16930,6 +17000,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     document.getElementById('chartMaxBtn')?.addEventListener('click', () => _chartSetMax(!_chart.maxed));
     document.addEventListener('keydown', ev => {
       if (ev.key === 'Escape' && _chart.maxed) { ev.preventDefault(); _chartSetMax(false); }
+    });
+
+    const ci = document.getElementById('chartInstrument');
+    ci?.addEventListener('change', () => {
+      const opt = ci.value !== 'index';
+      const ss = document.getElementById('chartStrike');
+      if (ss) ss.style.display = opt ? '' : 'none';
+      if (opt) _populateStrikeList();
+      _chart.candles = []; _chart.yZoom = 1; _chart.yCenter = null;
+      fetchCandles();
+    });
+    document.getElementById('chartStrike')?.addEventListener('change', () => {
+      _chart.candles = []; _chart.yZoom = 1; _chart.yCenter = null; fetchCandles();
     });
 
     const pt = document.getElementById('chartPivotType');
@@ -23188,6 +23271,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'voice-alert':    '<strong>Voice Alerts</strong>Speaks level touches, fresh option flow and 9:20 line hits aloud. <b>Across multiple computers,</b> the server now detects alerts and streams them, electing one tab per machine to speak - so several screens never talk over each other while every computer still announces once. The 🔊 mode selector controls this: every tab, follow-me (the focused window speaks), or one browser across all PCs. <b>If a machine is silent,</b> press 🔈 enable audio there once - browsers block speech until a page is clicked, with no error - then use 🩺 systems to see each machine\'s readiness.',
     'alert-sound':    '<strong>Alert Sound</strong><b>Tone</b> — single sine wave, sharp attack.<br><b>Chime</b> — three sine oscillators at bell-like partial ratios (sounds like a chime).<br><b>Ping</b> — triangle wave with downward pitch sweep.<br>Higher pitch = resistance touched. Lower pitch = support touched.',
     'alert-volume':   '<strong>Alert Volume</strong>Sets loudness for spoken alerts and touch sounds on THIS browser. <b>Worth knowing:</b> at zero the speech engine still runs but you hear nothing, which looks identical to a broken alert - so if a machine has gone quiet, check this slider before anything else. Volume is per browser and does not travel in backups, so each computer needs setting once. The 🔈 enable audio button next to it is separate and more important: browsers block speech entirely until a page receives a click, and that block is silent.',
+    'option-chart':      '<strong>Charting a CE or PE contract</strong>Switch the chart from the index to a single option contract. Candles are rebuilt from the replay archive - which stores the whole chain every minute - so this costs no extra NSE traffic, and it covers only the part of the session your server has recorded. <b>The levels change with the mode,</b> because index levels are meaningless in premium space: a chart of the 24,600 call shows day open, day high and low, plus the <b>intrinsic value</b> line - the floor the premium cannot fall below at expiry, so the gap between price and that line is the time value you are paying or collecting. <b>Below the candles sits the strike\'s open-interest trace,</b> and read together they give the classic four-way signal: premium up with OI up is fresh buying, premium down with OI up is fresh writing, premium down with OI down is long unwinding, premium up with OI down is short covering - the same classification the flow alerts announce, seen rather than heard.',
     'price-chart':       '<strong>Live Chart &amp; Levels</strong>Intraday candles for the loaded index with every option-derived level drawn on top. Candles come from NSE\'s intraday feed when the session is warm, otherwise they are rebuilt from your replay archive (1 spot sample per minute) — the footer names the source. Interval 1/3/5/15m, refreshed once a minute; levels redraw on every chain update. Toggles: <b>9:20 lines</b> (see below), <b>OI walls</b> (heaviest call/put OI), <b>CPR</b>, <b>max pain</b>, <b>±1σ</b> IV cone, and <b>pivots</b> (from the Pivot Levels panel\'s active type). <br><br><b>About the 9:20 lines:</b> these are MY transparent formula, not a reverse-engineered copy of any vendor\'s proprietary levels. At 09:20 the 9:20 spot and ATM IV are frozen for the day, one session of volatility is computed as sigma = spot × IV × sqrt(1/365), and four fixed lines are drawn: EOR/EOS at ±0.5 sigma (inner, aggressive) and EOR+1/EOS-1 at ±1.0 sigma (outer, conservative). They do not move for the rest of the session, which is the whole point — a fixed frame beats a moving one for discipline. Whether they hold is an open question: log trades against them in the journal and let the data answer.',
     'regime-signals':    '<strong>Regime Signals</strong>Familiar Indian option-chain vocabulary, computed with transparent rules. <b>Shifting status</b> tracks the peak-OI wall on each side over the last ~45 minutes: <b>WTT (Weak Towards Top)</b> means the call wall moved up or lost more than 12 percent of its OI, so the ceiling is softening (bullish lean); <b>WTB (Weak Towards Bottom)</b> means the put wall moved down or shed OI, so the floor is softening (bearish); <b>STRONG</b> means both walls are holding position and size, which is the rangebound case; <b>BOTH WEAK</b> means writers are stepping back on each side, favouring a range expansion rather than a direction. <b>BULL RUN</b> and <b>BLOODBATH</b> require breadth plus confirmation: at least half of the active near-the-money strikes must be flowing one way AND price must have moved more than 0.25 percent in that direction, which stops a quiet drift being labelled a stampede. Everything here describes positioning that has ALREADY happened, so treat it as fast information rather than prediction, and remember the labels are dramatic by tradition, not by evidence.',
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
