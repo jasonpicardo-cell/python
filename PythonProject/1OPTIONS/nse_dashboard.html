@@ -14858,6 +14858,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   const _touchedLevels = new Set();
+  const _touchedLevelsAt = new Map();   // key -> ts, for the time-based re-arm
   const _levelTouchToastEl = () => document.getElementById('levelTouchToast');
   let _levelToastTimer = null;
   function alertLevelTouch(label, price, polarity) {
@@ -14867,6 +14868,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return;
     }
     _touchedLevels.add(key);
+    _touchedLevelsAt.set(key, Date.now());   // enables the time-based re-arm
     console.log(`[touch] ALERTING for ${key} at price=${price}`);
     _pushAlertHistory(label, price, polarity);   // ← add to history panel
     _sendBrowserNotification(label, price);       // ← browser notification if tab hidden
@@ -14928,9 +14930,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // If spot jumped more than 1% since last poll the server was likely down
     // for a while — skip this cycle to avoid spurious multi-level alerts on reconnect.
+    let gapped = false;
     if (Math.abs(spot - prev) / prev > 0.01) {
-      console.log(`[touch] gap too large (${((spot-prev)/prev*100).toFixed(2)}%) — skipping cross detection this cycle`);
-      return;
+      // A jump this large is a gap-open or a reconnect after downtime. Do not
+      // claim every level in between was "crossed", but still allow the
+      // proximity check below so a level price is actually sitting on is not
+      // silently skipped for the whole cycle.
+      gapped = true;
+      console.log(`[touch] gap ${((spot - prev) / prev * 100).toFixed(2)}% — crossing suppressed, proximity still checked`);
     }
 
     const lo     = Math.min(prev, spot);
@@ -14945,16 +14952,33 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // moves more than 0.3% away. This allows a meaningful re-test to alert again
       // without spamming on small oscillations right at the level.
       if (_touchedLevels.has(key)) {
-        if (Math.abs(spot - price) / price > 0.003) {
+        // Re-arm on TWICE the touch tolerance (so a level cannot re-fire while
+        // price is still hovering on it), or after a cooldown if price simply
+        // sits there. The old rule demanded a 0.3% move - 74 pts on Nifty,
+        // 156 on BankNifty - which an oscillation around the level never
+        // travels, leaving the level permanently disarmed after one fire.
+        const tolR = Math.max(1, (_csrcCfg().tol || 15));
+        const firedAt = _touchedLevelsAt.get(key) || 0;
+        const away = Math.abs(spot - price) > tolR * 2;
+        const stale = Date.now() - firedAt > 10 * 60 * 1000;
+        if (away || stale) {
           _touchedLevels.delete(key);
-          console.log(`[touch] ${key} re-armed (spot moved >${(0.003*100).toFixed(1)}% away)`);
+          _touchedLevelsAt.delete(key);
+          console.log(`[touch] ${key} re-armed (${away ? `moved ${Math.abs(spot - price).toFixed(0)} pts away` : '10-min cooldown'})`);
         }
-        continue;   // already fired this pass — skip cross check
+        continue;   // still armed against repeat - skip this level
       }
 
       // ── CROSS CHECK: did the price range [prev → spot] include this level?
-      if (lo <= price && price <= hi) {
-        console.log(`[touch] ${label}=${price} crossed by move ${prev}→${spot}`);
+      const crossed = !gapped && lo <= price && price <= hi;
+      // ── PROXIMITY CHECK: with a poll every few seconds price frequently
+      // approaches a level and turns away without any sample landing across
+      // it, so a strict crossing test silently misses real tests. Treat
+      // "came within the configured tolerance" as a touch too.
+      const tol = Math.max(1, (_csrcCfg().tol || 15));
+      const near = Math.abs(spot - price) <= tol;
+      if (crossed || near) {
+        console.log(`[touch] ${label}=${price} ${crossed ? `crossed by ${prev}→${spot}` : `approached within ${Math.abs(spot - price).toFixed(0)} pts (tol ${tol})`}`);
         alertLevelTouch(label, price, polarity);
       }
     }
