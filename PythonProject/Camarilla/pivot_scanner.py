@@ -2473,6 +2473,71 @@ def compute_wavetrend(df, _wdf=None, _mdf=None, n1=10, n2=21):
         out['m']=_compute_wt_tf(_mdf,n1,n2)
     return out
 
+
+def _compute_emac_tf(df, periods=(9,20,50,100,200)):
+    """Full EMA crossover scanner for one timeframe.
+    Returns current EMA values, price vs EMA flags, and EMA vs EMA crossover flags."""
+    n=len(df)
+    C=df['Close'].values.astype(float)
+    res={}; ema_vals={}; ema_prev={}
+    for p in periods:
+        if n>max(p,5):
+            s=_ema_series(C,p)
+            ema_vals[p]=float(s[-1])
+            ema_prev[p]=float(s[-2]) if n>2 else float(s[-1])
+
+    if not ema_vals: return {}
+    c=float(C[-1]); pc=float(C[-2]) if n>1 else c
+    res['emas']={str(p):r2(v) for p,v in ema_vals.items()}
+    res['close']=r2(c)
+
+    # Price vs EMA: current position + crossover
+    for p,v in ema_vals.items():
+        pv=ema_prev.get(p,v)
+        res[f'p_above_{p}']=bool(c>v)
+        res[f'p_cross_above_{p}']=bool(c>v and pc<=pv)   # price crossed above today
+        res[f'p_cross_below_{p}']=bool(c<v and pc>=pv)   # price crossed below today
+
+    # EMA vs EMA crossovers: defined pairs
+    pairs=[(9,21),(9,20),(20,50),(50,100),(50,200),(100,200)]
+    for fa,sl in pairs:
+        if fa not in ema_vals or sl not in ema_vals: continue
+        fv=ema_vals[fa]; sv=ema_vals[sl]
+        fp=ema_prev.get(fa,fv); sp=ema_prev.get(sl,sv)
+        lbl=f'ema{fa}_{sl}'
+        res[f'{lbl}_bull']=bool(fv>sv and fp<=sp)   # fast crossed above slow today
+        res[f'{lbl}_bear']=bool(fv<sv and fp>=sp)   # fast crossed below slow today
+        res[f'{lbl}_above']=bool(fv>sv)              # fast currently above slow
+        res[f'{lbl}_below']=bool(fv<sv)
+
+    # EMA stack
+    sv=sorted(ema_vals.items())                       # sorted by period asc
+    vals=[v for _,v in sv]
+    res['bull_stack']=bool(all(vals[i]>=vals[i+1] for i in range(len(vals)-1)))
+    res['bear_stack']=bool(all(vals[i]<=vals[i+1] for i in range(len(vals)-1)))
+    res['p_above_all']=bool(c>max(ema_vals.values()))
+    res['p_below_all']=bool(c<min(ema_vals.values()))
+    # pullback zone: price between EMA20 and EMA50 (inside uptrend)
+    if 20 in ema_vals and 50 in ema_vals:
+        e20,e50=ema_vals[20],ema_vals[50]
+        res['pullback_bull']=bool(e20>e50 and e50<=c<=e20)  # price between them, ema20>ema50 (uptrend)
+        res['pullback_bear']=bool(e20<e50 and e20<=c<=e50)  # price between them, ema20<ema50 (downtrend)
+    # 200 EMA reclaim: was below, now above (strong signal)
+    if 200 in ema_vals:
+        res['reclaim_200']=bool(c>ema_vals[200] and pc<=ema_prev.get(200,ema_vals[200]))
+        res['lose_200']   =bool(c<ema_vals[200] and pc>=ema_prev.get(200,ema_vals[200]))
+    return res
+
+def compute_ema_cross_scanner(df, _wdf=None, _mdf=None):
+    """Multi-EMA crossover scanner — Daily/Weekly/Monthly.
+    Covers price×EMA and EMA×EMA crossovers for 9/20/50/100/200 periods."""
+    out={'d':_compute_emac_tf(df)}
+    if _wdf is not None and len(_wdf)>=10:
+        out['w']=_compute_emac_tf(_wdf)
+    if _mdf is not None and len(_mdf)>=10:
+        out['m']=_compute_emac_tf(_mdf)
+    return out
+
 def compute_vsa(df):
     """Volume Spread Analysis: interplay of Volume, Spread (H−L), and Close position.
     The 'Big Volume Candle' strategy is the centrepiece."""
@@ -3115,6 +3180,8 @@ def precompute(fp, idx_map, nifty_df=None):
     )
     # 🌊 WaveTrend Oscillator — Daily / Weekly / Monthly
     wt = compute_wavetrend(df, _wdf=_wdf, _mdf=_mdf)
+    # 📈 Multi-EMA Crossover Scanner — Daily / Weekly / Monthly
+    emac = compute_ema_cross_scanner(df, _wdf=_wdf, _mdf=_mdf)
     # 📦 Supply & Demand Zones — Daily / Weekly / Monthly
     zones = compute_supply_demand(df,_wdf=_wdf,_mdf=_mdf)
     # 🔷 GTF-Style Zones — swing-pivot + ATR-sized + BOS-invalidated + scored
@@ -3188,7 +3255,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,ti_w=ti_w,ti_m=ti_m,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,gtf=gtf,wt=wt,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,ti_w=ti_w,ti_m=ti_m,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,gtf=gtf,wt=wt,emac=emac,**st,rs=0)
 
 
 def assign_smart_ranks(stocks):
@@ -3543,6 +3610,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .tab-btn.t-swing.active{color:#fb923c;border-bottom-color:#fb923c}
 .tab-btn.t-zones.active{color:#a78bfa;border-bottom-color:#a78bfa}
 .tab-btn.t-wt.active{color:#7c3aed;border-bottom-color:#7c3aed}
+.tab-btn.t-emac.active{color:#0ea5e9;border-bottom-color:#0ea5e9}
 .tab-btn.t-pro.active{color:#22d3ee;border-bottom-color:#22d3ee}
 /* ⑥ sector grouping */
 .gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
@@ -3598,6 +3666,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-swing" data-tab="swing" onclick="switchTab('swing')">🎯 Swing Setup</button>
   <button class="tab-btn t-zones" data-tab="zones" onclick="switchTab('zones')">📦 Supply/Demand</button>
   <button class="tab-btn t-wt" data-tab="wt" onclick="switchTab('wt')">🌊 WaveTrend</button>
+  <button class="tab-btn t-emac" data-tab="emac" onclick="switchTab('emac')">📈 EMA Cross</button>
   <button class="tab-btn t-pro" data-tab="pro" onclick="switchTab('pro')">💎 Pro Scanners</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
@@ -4721,6 +4790,51 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 </div>
 
 
+<!-- ═══ EMA CROSS SCANNER ════════════════════════════════════════════════ -->
+<div id="ctrl-emac" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="emac-strat" style="min-width:380px" onchange="updateEMACInfo()">
+      <optgroup label="── 💰 Price × EMA Crossovers ──">
+        <option value="p_cross_above_20">Price crossed Above EMA 20 — fresh bullish momentum</option>
+        <option value="p_cross_above_50">Price crossed Above EMA 50 — medium-term trend reclaim</option>
+        <option value="p_cross_above_200">Price crossed Above EMA 200 — major trend reclaim</option>
+        <option value="p_cross_below_20">Price crossed Below EMA 20 — short-term breakdown</option>
+        <option value="p_cross_below_50">Price crossed Below EMA 50 — medium-term breakdown</option>
+        <option value="p_cross_below_200">Price crossed Below EMA 200 — major trend breakdown</option>
+        <option value="p_above_all">Price Above ALL EMAs (20/50/100/200) — full bull setup</option>
+        <option value="p_below_all">Price Below ALL EMAs (20/50/100/200) — full bear setup</option>
+        <option value="pullback_bull">Pullback to EMA Zone — price between EMA20 and EMA50 (uptrend)</option>
+      </optgroup>
+      <optgroup label="── 🔀 EMA × EMA Crossovers — Daily ──">
+        <option value="ema9_20_bull_d">EMA 9 × EMA 20 Bull Cross — fastest short-term cross</option>
+        <option value="ema9_20_bear_d">EMA 9 × EMA 20 Bear Cross</option>
+        <option value="ema20_50_bull_d">EMA 20 × EMA 50 Bull Cross — medium-term momentum</option>
+        <option value="ema20_50_bear_d">EMA 20 × EMA 50 Bear Cross</option>
+        <option value="ema50_200_bull_d">EMA 50 × EMA 200 Bull Cross — Golden Cross (Daily)</option>
+        <option value="ema50_200_bear_d">EMA 50 × EMA 200 Bear Cross — Death Cross (Daily)</option>
+      </optgroup>
+      <optgroup label="── 📅 EMA × EMA Crossovers — Weekly ──">
+        <option value="ema20_50_bull_w">Weekly EMA 20 × EMA 50 Bull Cross — multi-week trend shift</option>
+        <option value="ema20_50_bear_w">Weekly EMA 20 × EMA 50 Bear Cross</option>
+        <option value="ema50_200_bull_w">Weekly Golden Cross — EMA 50 × EMA 200 (major signal)</option>
+        <option value="ema50_200_bear_w">Weekly Death Cross — EMA 50 × EMA 200</option>
+      </optgroup>
+      <optgroup label="── 📐 EMA Stack Alignment ──">
+        <option value="bull_stack_d">Full Bull Stack (Daily) — 9 > 20 > 50 > 100 > 200</option>
+        <option value="bear_stack_d">Full Bear Stack (Daily) — 9 < 20 < 50 < 100 < 200</option>
+        <option value="bull_stack_w">Full Bull Stack (Weekly)</option>
+        <option value="ema20_50_above_d">EMA 20 above EMA 50 (Daily) — medium-term uptrend</option>
+        <option value="ema50_200_above_d">EMA 50 above EMA 200 (Daily) — long-term uptrend</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('emac',document.getElementById('emac-strat').value)" title="Strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="emac-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="emac-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="emac-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#0ea5e9;color:#000" onclick="scanEMAC()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
 <!-- ═══ GAP SCANNER ════════════════════════════════════════════════════ -->
 <div id="ctrl-gap" class="ctrl" style="display:none">
   <div class="cg"><label>Gap Type</label>
@@ -4858,7 +4972,7 @@ function switchTab(tab){
   const _isCustomPage=['home','lookup','iview','toppicks','help'].includes(tab);
   const _gb=document.getElementById('global-bar'); if(_gb) _gb.style.display=_isCustomPage?'none':'flex';
   const _sr=document.getElementById('search-row'); if(_sr) _sr.style.display=_isCustomPage?'none':'flex';
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones','pro','wt'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones','pro','wt','emac'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -4912,6 +5026,7 @@ function switchTab(tab){
   else if(tab==='zones'){ updateZonesInfo(); scanZones(); }
   else if(tab==='pro'){ updateProInfo(); scanPro(); }
   else if(tab==='wt'){ updateWTInfo(); scanWT(); }
+  else if(tab==='emac'){ updateEMACInfo(); scanEMAC(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -5800,6 +5915,15 @@ const HOME_CARDS=[
   {tab:'wt',strat:'wt_ob1',      emoji:'🔴',badge:'wt',label:'Daily Overbought Level 1',     desc:'wt2 ≥ 60 on daily - the classic WaveTrend sell zone, watch for a crossunder as the potential sell trigger',stars:'★★★',  section:11},
   {tab:'wt',strat:'wt_os1_w',    emoji:'🟢',badge:'wt',label:'Weekly Oversold Level 1',      desc:'wt2 ≤ -60 on the weekly chart - a more significant oversold reading representing multi-week weakness',stars:'★★★★', section:11},
   {tab:'wt',strat:'wt_zero_bull',emoji:'➿',badge:'wt',label:'Zero-Line Cross Up',            desc:'wt1 crossed above zero - momentum shifted from net bearish to bullish, the Phase 2 trend gate signal',stars:'★★★★', section:11},
+  // 📈 EMA Cross
+  {tab:'emac',strat:'p_cross_above_200', emoji:'⭐',badge:'emac',label:'Price Crossed Above EMA 200',   desc:'Most significant EMA event - price reclaimed the 200 EMA today. Long-term trend shift from bear to bull, tracked by every institutional participant', stars:'★★★★★',section:12},
+  {tab:'emac',strat:'p_cross_above_50',  emoji:'💰',badge:'emac',label:'Price Crossed Above EMA 50',    desc:'Medium-term trend reclaim - price crossed above the 50 EMA for the first time since the breakdown, a swing trader\'s entry signal', stars:'★★★★', section:12},
+  {tab:'emac',strat:'p_cross_above_20',  emoji:'💰',badge:'emac',label:'Price Crossed Above EMA 20',    desc:'Short-term momentum flip - price crossed above its 20-day EMA, the most-watched dynamic level among active traders', stars:'★★★',  section:12},
+  {tab:'emac',strat:'ema50_200_bull_d',  emoji:'⭐',badge:'emac',label:'Golden Cross (Daily 50×200)',    desc:'50 EMA crossed above 200 EMA today - one of the most globally-tracked signals, historically associated with sustained multi-month uptrends', stars:'★★★★★',section:12},
+  {tab:'emac',strat:'ema20_50_bull_d',   emoji:'🔀',badge:'emac',label:'EMA 20×50 Bull Cross (Daily)',   desc:'20 EMA crossed above 50 EMA - medium-term trend shift, more reliable than the 9/20 cross with significantly less noise', stars:'★★★★', section:12},
+  {tab:'emac',strat:'ema50_200_bull_w',  emoji:'⭐',badge:'emac',label:'Weekly Golden Cross (50×200)',   desc:'Extremely rare - 50-week EMA crossed above 200-week EMA. When this fires, the bull run typically lasts years not months', stars:'★★★★★',section:12},
+  {tab:'emac',strat:'bull_stack_d',      emoji:'📈',badge:'emac',label:'Full Bull Stack (9>20>50>100>200)', desc:'Every EMA perfectly stacked bullishly on daily chart - all time horizons agree, characteristic of the strongest Stage-2 stocks', stars:'★★★★★',section:12},
+  {tab:'emac',strat:'pullback_bull',     emoji:'↩',badge:'emac',label:'Pullback to EMA 20/50 Zone',     desc:'EMA 20 above EMA 50 (uptrend) and price has pulled back between them - the classic "buy the dip" entry zone for trend-followers', stars:'★★★★', section:12},
 
 ];
 
@@ -5816,9 +5940,10 @@ const SECTIONS=[
   '📦 SUPPLY & DEMAND ZONES — DAILY · WEEKLY · MONTHLY',
   '💎 PRO SCANNERS — RARE TECHNIQUES NOT ON FREE SCREENERS',
   '🌊 WAVETREND — LAZYBEARLUSTRATED OSCILLATOR · OB/OS · DIVERGENCE',
+  '📈 EMA CROSSOVERS — PRICE×EMA · EMA×EMA · STACK ALIGNMENT',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend',emac:'EMA Cross'};
 
 function renderHome(){
   const sortMode=(window._homeSort)||'section';
@@ -6058,7 +6183,12 @@ const STRAT_HELP_KEY={
     wt_cross_bull:1,wt_cross_bear:1,wt_buy_zone:1,wt_sell_zone:1,
     wt_zero_bull:1,wt_zero_bear:1,
     wt_bull_div:2,wt_bear_div:2,wt_buy_div:2,wt_sell_div:2,
-    wt_htf_bull:1,wt_htf_bear:1}
+    wt_htf_bull:1,wt_htf_bear:1},
+  emac:{p_cross_above_20:0,p_cross_above_50:0,p_cross_above_200:0,p_cross_below_20:0,p_cross_below_50:0,p_cross_below_200:0,
+    p_above_all:0,p_below_all:0,pullback_bull:0,
+    ema9_20_bull_d:1,ema9_20_bear_d:1,ema20_50_bull_d:1,ema20_50_bear_d:1,ema50_200_bull_d:1,ema50_200_bear_d:1,
+    ema20_50_bull_w:1,ema20_50_bear_w:1,ema50_200_bull_w:1,ema50_200_bear_w:1,
+    bull_stack_d:2,bear_stack_d:2,bull_stack_w:2,ema20_50_above_d:0,ema50_200_above_d:0}
 };
 // Map tab → section index in Help H array
 const TAB_SEC={
@@ -6068,7 +6198,7 @@ const TAB_SEC={
   xp:11,  // Experimental / VSA
   patt:12,// Patterns
   br:13,  // Market Breadth
-  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9, pro:10, wt:11,
+  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9, pro:10, wt:11, emac:12,
 };
 
 function showHelp(tab,stratVal){
@@ -6740,6 +6870,26 @@ function renderHelp(){
         ai:'How does a WaveTrend bullish divergence in the oversold zone compare in reliability to an RSI divergence for NSE stocks? What follow-through (in % or ATR) is typically seen after a confirmed WaveTrend regular bullish divergence combined with a crossover?'
       },
     ]},
+    {icon:'📈', title:'EMA Crossovers — Price×EMA · EMA×EMA · Stack Alignment', items:[
+      { n:'Price × EMA Crossovers (EMA 20, 50, 200)',
+        f:`For each EMA period p: EMA[p] = (Close*k + EMA[p][prev]*(1-k)) where k=2/(p+1). Price cross above EMA p: Close[-1]>EMA[p][-1] AND Close[-2]<=EMA[p][-2]. Computed independently for Daily, Weekly, and Monthly resamples.`,
+        d:`The three most-watched price-vs-EMA relationships are the 20 EMA (short-term momentum), 50 EMA (medium-term trend, roughly 10 trading weeks), and 200 EMA (long-term trend divider between bull and bear regimes). A fresh CROSS above any of these is significant because it marks the first bar where price re-established above that level after being below it, rather than just trading above a level it's been above for weeks. The 200 EMA cross (called a "reclaim of the 200") is especially powerful because the 200-day EMA is watched by virtually every institutional trader, fund manager, and systematic strategy simultaneously — a stock above its 200 EMA is in the universe of eligible longs for most rules-based funds, while a stock below it is typically excluded. The "Price Above ALL EMAs" filter selects stocks where price is above the 20, 50, 100, and 200 simultaneously — the "full bull setup" used by Minervini, O'Neil, and most momentum-based fund strategies as a prerequisite before any entry. The "Pullback to 20/50 EMA zone" scan finds stocks in uptrends (EMA 20 above EMA 50) where price has pulled back INTO the zone between the two EMAs — a lower-risk re-entry point that avoids chasing extended moves.`,
+        links:[['200 EMA as trend divider','https://www.investopedia.com/terms/e/ema.asp']],
+        ai:'How often does a NSE stock that crosses back above its 200 EMA continue higher vs reverse immediately? What is the average holding period and return for stocks that enter the "price above all EMAs" state? How much lag does the 200 EMA introduce versus a faster alternative like the 100 EMA?'
+      },
+      { n:'EMA × EMA Crossovers — 9/20, 20/50, 50/200 (Golden/Death Cross)',
+        f:`EMA(fast) crosses EMA(slow): cross_bull = EMA[fast][-1] > EMA[slow][-1] AND EMA[fast][-2] <= EMA[slow][-2]. Pairs computed: 9/20, 20/50, 50/200. Computed for Daily and Weekly timeframes independently.`,
+        d:`EMA crossovers measure how much momentum has built up in the shorter term relative to the longer term. The 9/20 cross is the fastest signal (reacts within 1-2 weeks of a trend change) with highest noise — most useful as an alert that should be confirmed by price position and volume. The 20/50 cross requires roughly 4-10 weeks of sustained positive momentum before the faster average overtakes the slower, significantly filtering out whipsaws at the cost of later entry timing. The 50/200 crossover — the "Golden Cross" (bull) and "Death Cross" (bear) — is the most famous, most watched, and most lagging crossover in technical analysis. It typically fires 3-6 months after a major trend change and serves more as a trend confirmation tool for longer-term investors than a tactical entry. Critically: the WEEKLY versions of all these crosses are substantially more reliable than the daily versions because a weekly candle represents 5 days of trading, filtering noise at the source. A weekly 20/50 EMA bull cross has historically had a significantly higher follow-through rate than the daily equivalent on NSE stocks.`,
+        links:[['Golden Cross','https://www.investopedia.com/terms/g/goldencross.asp']],
+        ai:'What is the historical win rate of the daily 20×50 EMA bull cross vs the weekly 20×50 cross on NSE stocks? How early does the 9×20 EMA cross typically fire relative to the 20×50 cross on the same stock? Is the Golden Cross (50×200) better used as a buy signal or a trend filter?'
+      },
+      { n:'EMA Stack Alignment — Full Bull/Bear Stack',
+        f:`bull_stack = EMA[9] > EMA[20] > EMA[50] > EMA[100] > EMA[200] (all strict inequalities). bear_stack = EMA[9] < EMA[20] < EMA[50] < EMA[100] < EMA[200]. Computed on Daily and Weekly independently.`,
+        d:`The EMA Stack measures how aligned all major timeframe trend-followers are simultaneously. A Full Bull Stack (EMA 9 > 20 > 50 > 100 > 200) means that every group of market participants — day traders watching the 9 EMA, swing traders watching the 20 EMA, fund managers watching the 50 EMA, and long-term investors watching the 100 and 200 EMA — is sitting on a profitable position and therefore has little incentive to sell. This condition typically requires months of sustained uptrend to achieve and is characteristic of Stage-2 advancing stocks in their prime phase. When the stack is tight (EMAs bunched close together) combined with a bull stack, it's the EMA Squeeze setup. When the stack is well-separated (clear space between each EMA), it represents a confirmed, sustained trend with plenty of cushion before any reversal would hit a support level. A Weekly Full Bull Stack takes much longer to form — often a year or more — and is one of the most reliable long-term trend indicators available from OHLCV data alone.`,
+        links:[['EMA Ribbon','https://www.investopedia.com/terms/m/movingaverage.asp']],
+        ai:'How often does a daily Full Bull Stack reverse within 30 days on NSE stocks, and what is a reliable early-warning signal of the stack breaking? Is the weekly bull stack a better risk-filter than individual stock RS percentile?'
+      },
+    ]},
   ];
 
   let html=`<div class="help-wrap">
@@ -6819,6 +6969,7 @@ function triggerAutoScan(){
     else if(t==='zones'){ scanZones(); }
     else if(t==='pro'){ scanPro(); }
     else if(t==='wt'){ scanWT(); }
+    else if(t==='emac'){ scanEMAC(); }
   },350);
 }
 function initAutoScan(){
@@ -7996,7 +8147,7 @@ function scanTopPicks(){
 const TAB_NAMES={piv:'Pivot Points',smc:'Price Action/SMC',vol:'Volume',mi:'Multi-Indicator',
   adv:'Advanced',t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',ti:'India Pro',nl:'Noiseless',
   xp:'Experimental/VSA',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combiner',
-  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend'};
+  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend',emac:'EMA Cross'};
 const SIGNAL_DEFS=[
   // ── Trend / Tier-1 ──
   {cat:'Trend',tab:'t1',label:'SuperTrend Bullish',          w:3, chk:s=>s.t1?.stt?.bull},
@@ -8166,6 +8317,19 @@ const SIGNAL_DEFS=[
   {cat:'WaveTrend',tab:'wt',label:'WT Overbought Level 1 (Daily)',  w:-3, chk:s=>s.wt?.d?.in_ob},
   {cat:'WaveTrend',tab:'wt',label:'WT Bear Cross in OB Zone (Daily)',w:-6,chk:s=>s.wt?.d?.sell_zone},
   {cat:'WaveTrend',tab:'wt',label:'WT Bearish Div + Cross (Daily)', w:-7,chk:s=>s.wt?.d?.sell_div},
+
+
+  // ── EMA Crossovers ──
+  {cat:'EMACross',tab:'emac',label:'Price crossed Above EMA 200 (Daily)',  w:8, chk:s=>s.emac?.d?.p_cross_above_200},
+  {cat:'EMACross',tab:'emac',label:'Price crossed Above EMA 50 (Daily)',   w:5, chk:s=>s.emac?.d?.p_cross_above_50},
+  {cat:'EMACross',tab:'emac',label:'Price crossed Above EMA 20 (Daily)',   w:3, chk:s=>s.emac?.d?.p_cross_above_20},
+  {cat:'EMACross',tab:'emac',label:'Price Above ALL EMAs (Daily)',         w:4, chk:s=>s.emac?.d?.p_above_all},
+  {cat:'EMACross',tab:'emac',label:'Full Bull Stack Daily (9>20>50>100>200)',w:5,chk:s=>s.emac?.d?.bull_stack},
+  {cat:'EMACross',tab:'emac',label:'Golden Cross Daily (EMA50×EMA200)',    w:7, chk:s=>s.emac?.d?.ema50_200_bull},
+  {cat:'EMACross',tab:'emac',label:'EMA 20×50 Bull Cross (Daily)',         w:5, chk:s=>s.emac?.d?.ema20_50_bull},
+  {cat:'EMACross',tab:'emac',label:'Price crossed Below EMA 200 (Daily)', w:-8,chk:s=>s.emac?.d?.p_cross_below_200},
+  {cat:'EMACross',tab:'emac',label:'Price Below ALL EMAs (Daily)',         w:-4,chk:s=>s.emac?.d?.p_below_all},
+  {cat:'EMACross',tab:'emac',label:'Death Cross Daily (EMA50×EMA200)',     w:-7,chk:s=>s.emac?.d?.ema50_200_bear},
 
   // ── Gap ──
   {cat:'Gap',tab:'gap',label:'Gap Up Continuation',           w:2, chk:s=>s.gap?.up&&s.gap?.cont},
@@ -8661,6 +8825,93 @@ function scanWT(){
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// 📈 EMA CROSS SCANNER — Price×EMA + EMA×EMA crossovers for 9/20/50/100/200
+//    Computed independently on Daily, Weekly, Monthly resamples
+// ════════════════════════════════════════════════════════════════════════════
+const EMAC_INFO={
+  p_cross_above_20:'<b>Price crossed Above EMA 20</b> · Today\'s close crossed above the 20-day EMA for the first time (was below yesterday) · The 20 EMA is the most-watched short-term dynamic support/resistance level among active traders — a cross above it signals the shortest-term trend has shifted bullish',
+  p_cross_above_50:'<b>Price crossed Above EMA 50</b> · Price crossed above the 50-day EMA today · The 50 EMA represents the medium-term trend (roughly 10 trading weeks) — crossing above it confirms a trend change from short-term to medium-term bullish, used as a buy signal by swing traders and fund managers',
+  p_cross_above_200:'<b>Price crossed Above EMA 200 — Major Trend Reclaim</b> · Price crossed above the 200-day EMA today · One of the most significant daily signals possible — the 200 EMA separates the long-term bull zone (above) from bear zone (below), tracked by every institutional participant. A fresh reclaim after being below is a potential Stage-2 entry signal',
+  p_cross_below_20:'<b>Price crossed Below EMA 20</b> · Short-term momentum has shifted bearish — the first warning signal in an uptrend',
+  p_cross_below_50:'<b>Price crossed Below EMA 50</b> · Medium-term trend has shifted bearish — a more significant breakdown than the EMA 20 cross; used as an exit signal by many systematic funds',
+  p_cross_below_200:'<b>Price crossed Below EMA 200 — Major Breakdown</b> · Price lost the 200 EMA today — a major long-term bearish development. Stocks below their 200 EMA have historically underperformed significantly on a risk-adjusted basis',
+  p_above_all:'<b>Price Above ALL EMAs (20/50/100/200)</b> · Price is currently above every key moving average · This is the textbook "full bull setup" — every cohort of buyers (short, medium, long-term) is sitting on a profitable position, reducing selling pressure',
+  p_below_all:'<b>Price Below ALL EMAs (20/50/100/200)</b> · Price is below every key moving average · Full bear alignment — maximum overhead supply. Every buyer who entered at or above any of these levels is underwater',
+  pullback_bull:'<b>Pullback to EMA Zone (Bull Trend)</b> · EMA 20 is above EMA 50 (uptrend confirmed) AND price has pulled back between the two (above EMA50, below EMA20) · This is the "buy the dip to the 20/50 EMA zone" setup used by trend-followers — the trend is intact but price has given back enough to offer a lower-risk entry',
+  ema9_20_bull_d:'<b>EMA 9 × EMA 20 Bull Cross (Daily)</b> · The fastest standard crossover pair — EMA 9 crossed above EMA 20 today · Catches trend changes earliest but also generates the most noise; best combined with price above EMA 50 for trend confirmation',
+  ema9_20_bear_d:'<b>EMA 9 × EMA 20 Bear Cross (Daily)</b> · EMA 9 crossed below EMA 20 — short-term momentum has turned bearish',
+  ema20_50_bull_d:'<b>EMA 20 × EMA 50 Bull Cross (Daily)</b> · The 20-day EMA crossed above the 50-day EMA today · This cross represents roughly 4-10 weeks of positive momentum accumulation before the shorter average overtakes the longer — a more reliable signal than the 9/20 cross with significantly less noise',
+  ema20_50_bear_d:'<b>EMA 20 × EMA 50 Bear Cross (Daily)</b> · 20 EMA crossed below 50 EMA — medium-term trend has shifted bearish',
+  ema50_200_bull_d:'<b>Golden Cross (Daily) — EMA 50 × EMA 200 Bull Cross</b> · The 50-day EMA crossed above the 200-day EMA today · One of the most famous signals in technical analysis, watched globally by institutional and retail traders alike. The Golden Cross signals a long-term trend change from bearish to bullish and has historically been associated with sustained multi-month uptrends on Indian indices and stocks',
+  ema50_200_bear_d:'<b>Death Cross (Daily) — EMA 50 × EMA 200 Bear Cross</b> · The 50-day EMA crossed below the 200-day EMA today · The bearish equivalent of the Golden Cross — a long-term trend change to bearish. Historically associated with prolonged downtrends or extended consolidations on NSE stocks',
+  ema20_50_bull_w:'<b>Weekly EMA 20 × EMA 50 Bull Cross</b> · The 20-week EMA crossed above the 50-week EMA · A weekly-level crossover represents months of momentum shift — significantly more reliable than the daily equivalent. When the weekly 20/50 EMA cross fires, the underlying trend change has already been building for 4-8+ weeks',
+  ema20_50_bear_w:'<b>Weekly EMA 20 × EMA 50 Bear Cross</b> · 20-week EMA crossed below 50-week EMA — major multi-month trend deterioration',
+  ema50_200_bull_w:'<b>Weekly Golden Cross — EMA 50 × EMA 200 (Weekly)</b> · The 50-week EMA crossed above the 200-week EMA on the weekly chart · An extremely rare and significant signal representing a multi-year trend change — when this fires, the bull run typically lasts years not months',
+  ema50_200_bear_w:'<b>Weekly Death Cross — EMA 50 × EMA 200 (Weekly)</b> · 50-week below 200-week — a multi-year bearish trend is firmly established',
+  bull_stack_d:'<b>Full Bull Stack (Daily) — 9 > 20 > 50 > 100 > 200</b> · Every EMA is perfectly arranged bullishly: shorter EMAs above longer ones, all the way from 9-period to 200-period · This is the cleanest possible trend alignment — all time horizons agree. The tightest EMA stacks (where the EMAs are well-separated, not bunched) represent the most sustained, confident uptrends',
+  bear_stack_d:'<b>Full Bear Stack (Daily) — 9 < 20 < 50 < 100 < 200</b> · Perfect bearish EMA alignment — every timeframe is trending down · Maximum overhead resistance; every moving average that could act as resistance is stacked above price',
+  bull_stack_w:'<b>Full Bull Stack (Weekly)</b> · Weekly 9 > 20 > 50 > 100 > 200 EMA alignment · A weekly full bull stack takes months to years to form and is one of the most reliable trend-continuation signals available — characteristic of the strongest Stage-2 stocks',
+  ema20_50_above_d:'<b>EMA 20 above EMA 50 (Daily)</b> · The 20-day EMA is currently above the 50-day EMA · The most basic medium-term trend filter — if EMA20 > EMA50, the medium-term trend is up. Used as a universe filter to separate stocks in uptrends from those in downtrends or sideways phases',
+  ema50_200_above_d:'<b>EMA 50 above EMA 200 (Daily)</b> · The 50-day EMA is above the 200-day EMA · The long-term trend is bullish. This is equivalent to "in a Golden Cross regime" — the stock has been in a sustained uptrend long enough for the 50 EMA to be above the 200 EMA. Most systematic trend-following funds require this condition before entering any long position',
+};
+function updateEMACInfo(){const s=document.getElementById('emac-strat').value;setFbar('📈 <b>EMA Cross</b> · '+(EMAC_INFO[s]||s));}
+
+function scanEMAC(){
+  const strat=document.getElementById('emac-strat').value;
+  const rsMin=parseInt(document.getElementById('emac-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('emac-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('emac-pmax').value)||Infinity;
+  updateEMACInfo(); rows=[];
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const e=s.emac||{}; const d=e.d||{}, w=e.w||{};
+    let matched=false, sig='', extra={};
+    const fmtE=(tf,d)=>`₹${d['close']||s.price} | EMA20:${d['emas']?.['20']||'—'} EMA50:${d['emas']?.['50']||'—'}`;
+
+    // Price × EMA crossovers (daily by default)
+    if(strat==='p_cross_above_20')  {matched=!!d.p_cross_above_20;  sig='💰 P>EMA20';  extra={ema20:d.emas?.['20']};}
+    if(strat==='p_cross_above_50')  {matched=!!d.p_cross_above_50;  sig='💰 P>EMA50';  extra={ema50:d.emas?.['50']};}
+    if(strat==='p_cross_above_200') {matched=!!d.p_cross_above_200; sig='⭐ P>EMA200'; extra={ema200:d.emas?.['200']};}
+    if(strat==='p_cross_below_20')  {matched=!!d.p_cross_below_20;  sig='🔻 P<EMA20';  extra={ema20:d.emas?.['20']};}
+    if(strat==='p_cross_below_50')  {matched=!!d.p_cross_below_50;  sig='🔻 P<EMA50';  extra={ema50:d.emas?.['50']};}
+    if(strat==='p_cross_below_200') {matched=!!d.p_cross_below_200; sig='⭐ P<EMA200'; extra={ema200:d.emas?.['200']};}
+    if(strat==='p_above_all')       {matched=!!d.p_above_all;       sig='📈 P>AllEMA'; extra={e20:d.emas?.['20'],e50:d.emas?.['50'],e200:d.emas?.['200']};}
+    if(strat==='p_below_all')       {matched=!!d.p_below_all;       sig='📉 P<AllEMA'; extra={e20:d.emas?.['20'],e50:d.emas?.['50'],e200:d.emas?.['200']};}
+    if(strat==='pullback_bull')     {matched=!!d.pullback_bull;      sig='↩ Pullback';  extra={ema20:d.emas?.['20'],ema50:d.emas?.['50']};}
+
+    // EMA × EMA crossovers — daily
+    if(strat==='ema9_20_bull_d')    {matched=!!d.ema9_20_bull;      sig='🔀 9×20↑ D';   extra={ema9:d.emas?.['9'],ema20:d.emas?.['20']};}
+    if(strat==='ema9_20_bear_d')    {matched=!!d.ema9_20_bear;      sig='🔀 9×20↓ D';   extra={ema9:d.emas?.['9'],ema20:d.emas?.['20']};}
+    if(strat==='ema20_50_bull_d')   {matched=!!d.ema20_50_bull;     sig='🔀 20×50↑ D';  extra={ema20:d.emas?.['20'],ema50:d.emas?.['50']};}
+    if(strat==='ema20_50_bear_d')   {matched=!!d.ema20_50_bear;     sig='🔀 20×50↓ D';  extra={ema20:d.emas?.['20'],ema50:d.emas?.['50']};}
+    if(strat==='ema50_200_bull_d')  {matched=!!d.ema50_200_bull;    sig='⭐ GoldenX D'; extra={ema50:d.emas?.['50'],ema200:d.emas?.['200']};}
+    if(strat==='ema50_200_bear_d')  {matched=!!d.ema50_200_bear;    sig='⭐ DeathX D';  extra={ema50:d.emas?.['50'],ema200:d.emas?.['200']};}
+
+    // EMA × EMA crossovers — weekly
+    if(strat==='ema20_50_bull_w')   {matched=!!w.ema20_50_bull;     sig='🔀 20×50↑ W';  extra={ema20:w.emas?.['20'],ema50:w.emas?.['50']};}
+    if(strat==='ema20_50_bear_w')   {matched=!!w.ema20_50_bear;     sig='🔀 20×50↓ W';  extra={ema20:w.emas?.['20'],ema50:w.emas?.['50']};}
+    if(strat==='ema50_200_bull_w')  {matched=!!w.ema50_200_bull;    sig='⭐ W-GoldenX'; extra={ema50:w.emas?.['50'],ema200:w.emas?.['200']};}
+    if(strat==='ema50_200_bear_w')  {matched=!!w.ema50_200_bear;    sig='⭐ W-DeathX';  extra={ema50:w.emas?.['50'],ema200:w.emas?.['200']};}
+
+    // EMA stacks & alignment
+    if(strat==='bull_stack_d')      {matched=!!d.bull_stack;        sig='📈 BullStack D'; extra={e20:d.emas?.['20'],e50:d.emas?.['50'],e200:d.emas?.['200']};}
+    if(strat==='bear_stack_d')      {matched=!!d.bear_stack;        sig='📉 BearStack D'; extra={e20:d.emas?.['20'],e50:d.emas?.['50'],e200:d.emas?.['200']};}
+    if(strat==='bull_stack_w')      {matched=!!w.bull_stack;        sig='📈 BullStack W'; extra={e20:w.emas?.['20'],e50:w.emas?.['50'],e200:w.emas?.['200']};}
+    if(strat==='ema20_50_above_d')  {matched=!!d.ema20_50_above;    sig='📐 EMA20>50 D'; extra={ema20:d.emas?.['20'],ema50:d.emas?.['50']};}
+    if(strat==='ema50_200_above_d') {matched=!!d.ema50_200_above;   sig='📐 EMA50>200D'; extra={ema50:d.emas?.['50'],ema200:d.emas?.['200']};}
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'emac',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
 function lookupStock(){
   const q=(document.getElementById('lookup-input').value||'').trim().toUpperCase();
   const sugEl=document.getElementById('lookup-suggest');
@@ -8696,7 +8947,7 @@ function renderLookupResult(s){
   const catOrder=['Trend','Momentum','Volatility','SMC','MultiIndicator','BreakoutPro','SmartRank','Patterns','Gap'];
   const catLabels={Trend:'📈 Trend',Momentum:'⚡ Momentum',Volatility:'🗜 Volatility/Breakout',
     SMC:'🎯 Smart Money Concepts',MultiIndicator:'🏆 Minervini/Weinstein',
-    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand',ProScanners:'💎 Pro Scanners',WaveTrend:'🌊 WaveTrend'};
+    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand',ProScanners:'💎 Pro Scanners',WaveTrend:'🌊 WaveTrend',EMACross:'📈 EMA Crossovers'};
 
   let catsHtml='';
   for(const cat of catOrder){
@@ -9080,7 +9331,7 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'||tab==='pro'||tab==='wt'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'||tab==='pro'||tab==='wt'||tab==='emac'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -9161,6 +9412,7 @@ function exportCSV(){
     zones:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     pro:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     wt:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
+    emac:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];

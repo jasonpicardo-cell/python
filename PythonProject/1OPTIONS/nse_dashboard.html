@@ -1910,6 +1910,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             </div>
           </div>
 
+          <!-- ── F&O strength ranking ────────────────────────────────── -->
+          <div class="level-panel" id="strengthPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
+              <span class="skew-chart-title">💪 F&amp;O Strength Ranking<i class="hi" data-h="strength-rank">i</i></span>
+              <select id="strengthTop" class="ohlc-inp" style="font-size:9px;padding:1px 4px;">
+                <option value="10">Top 10</option><option value="15" selected>Top 15</option><option value="25">Top 25</option>
+              </select>
+              <label style="font-size:9px;color:var(--muted,#789);"><input type="checkbox" id="strengthAuto" checked> auto-refresh 60s</label>
+              <button class="btn" id="strengthBtn" style="font-size:9px;padding:2px 10px;">↻ Rank</button>
+              <span class="level-source" id="strengthStamp"></span>
+            </div>
+            <div id="strengthBody" style="padding:6px 8px;">
+              <div class="movers-loading">Press Rank to score the F&amp;O universe.</div>
+            </div>
+          </div>
+
           <!-- ── Market Pulse: VIX · PCR · direction bias ───────────── -->
           <div class="level-panel" id="pulsePanel">
             <div class="level-panel-head">
@@ -3709,6 +3725,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
       <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
 
+      <div class="level-panel" id="pcrHistPanel" style="margin-bottom:12px;">
+        <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
+          <span class="skew-chart-title">⚖️ PCR Session Curve — positioning vs today\'s flow<i class="hi" data-h="pcr-history">i</i></span>
+          <select id="pcrHistStep" class="ohlc-inp" style="font-size:9px;padding:1px 4px;">
+            <option value="1">1m</option><option value="5" selected>5m</option><option value="15">15m</option>
+          </select>
+          <button class="btn" id="pcrHistBtn" style="font-size:9px;padding:2px 10px;">↻ Load</button>
+        </div>
+        <div id="pcrHistBody" style="padding:4px 6px;"><div class="movers-loading">Press Load to plot today\'s recorded PCR.</div></div>
+      </div>
+
+      <div class="level-panel" id="oiHistPanel" style="margin-bottom:12px;">
+        <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
+          <span class="skew-chart-title">🧱 OI Build Map — every strike through the session<i class="hi" data-h="oi-history">i</i></span>
+          <select id="oiHistSide" class="ohlc-inp" style="font-size:9px;padding:1px 4px;">
+            <option value="BOTH" selected>CE &amp; PE</option><option value="CE">Calls only</option><option value="PE">Puts only</option>
+          </select>
+          <select id="oiHistMode" class="ohlc-inp" style="font-size:9px;padding:1px 4px;">
+            <option value="chg" selected>Change from open</option><option value="level">Absolute OI</option>
+          </select>
+          <select id="oiHistStep" class="ohlc-inp" style="font-size:9px;padding:1px 4px;">
+            <option value="1">1m</option><option value="5" selected>5m</option><option value="15">15m</option>
+          </select>
+          <button class="btn" id="oiHistBtn" style="font-size:9px;padding:2px 10px;">↻ Load</button>
+        </div>
+        <div id="oiHistBody" style="padding:4px 6px;"><div class="movers-loading">Press Load to map today's recorded OI.</div></div>
+      </div>
+
       <div class="level-panel" id="gexHeatPanel" style="margin-bottom:12px;">
         <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
           <span class="skew-chart-title">🔥 GEX Heatmap &amp; King Node — recorded intraday<i class="hi" data-h="gex-heat">i</i></span>
@@ -4389,6 +4433,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div class="level-panel" style="margin-bottom:12px;border:1px solid rgba(212,175,55,0.35);">
         <div class="level-panel-head"><span class="skew-chart-title">🎛 Master control</span></div>
         <div style="padding:8px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+          <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="masterEnableAll" checked> ✅ Enable ALL alerts
+          </label>
           <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;cursor:pointer;">
             <input type="checkbox" id="masterMute"> 🔇 Mute everything on this browser
           </label>
@@ -12115,7 +12162,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // category key so each flow type can be toggled and fairly scheduled
         const cat = !oiUp ? (prUp ? 'cover' : 'unwind')
                   : (side === 'CE' ? (prUp ? 'ceBuy' : 'ceSell') : (prUp ? 'peBuy' : 'peSell'));
-        if (cfg.cats && cfg.cats[cat] === false) continue;
+        if (!_enableAll() && cfg.cats && cfg.cats[cat] === false) continue;
         const fk = k + side;
         if (state._flowFired[fk] && now - state._flowFired[fk] < 5 * 60 * 1000) continue;   // 5-min per strike/side
         // NOTE: the cooldown is stamped only when an event is actually SPOKEN
@@ -12191,6 +12238,69 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _flowRenderLog();
   }
   _flowWire();
+
+  // ══ F&O strength ranking ══════════════════════════════════════════
+  // Ranks the F&O universe by a DISCLOSED score, not a proprietary one:
+  //   60% today's % change            - the move itself
+  //   25% position within today's range - is it holding the move or fading?
+  //   15% range-normalised move        - 2% in a quiet name beats 2% in a wild one
+  // Data comes from NSE's own index-constituent feed, so ~200 names cost a
+  // couple of requests rather than one per symbol.
+  let _strengthTimer = null;
+  async function loadStrengthRank() {
+    const box = document.getElementById('strengthBody');
+    if (!box) return;
+    const top = +(document.getElementById('strengthTop')?.value || 15);
+    if (!box.dataset.loaded) box.innerHTML = '<div class="movers-loading">Ranking the F&O universe…</div>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/strength-rank?top=${top}`)).json();
+      if (j.error || !j.strong?.length) {
+        box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error || 'no data')}</div>`;
+        return;
+      }
+      box.dataset.loaded = '1';
+      const row = (r, rank) => {
+        const pos = Math.round((r.range_pos ?? 0.5) * 100);
+        const col = r.pchg >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+        return `<div class="strength-row" data-sym="${r.symbol}" style="display:flex;gap:8px;align-items:center;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:10px;cursor:pointer;" title="Click to load ${r.symbol} into the esoteric tabs">
+          <span style="color:var(--muted);min-width:16px;">${rank}</span>
+          <b style="min-width:88px;">${escapeHtml(r.symbol)}</b>
+          <span style="min-width:62px;">${fmtInt(Math.round(r.ltp))}</span>
+          <span style="min-width:52px;font-weight:700;color:${col};">${r.pchg >= 0 ? '+' : ''}${r.pchg.toFixed(2)}%</span>
+          <span style="flex:1;min-width:52px;height:6px;background:rgba(255,255,255,0.07);border-radius:3px;position:relative;" title="Position in today's range: ${pos}% (100 = closing on the high)">
+            <span style="position:absolute;left:${pos}%;top:-2px;width:3px;height:10px;background:${col};border-radius:2px;"></span>
+          </span>
+          <span style="min-width:44px;text-align:right;color:var(--muted);">${r.score.toFixed(1)}</span>
+        </div>`;
+      };
+      box.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:10px;">
+          <div><div style="font-size:10px;font-weight:700;color:var(--pos,#26a69a);padding:2px 4px;">▲ STRONGEST</div>
+            ${j.strong.map((r, i) => row(r, i + 1)).join('')}</div>
+          <div><div style="font-size:10px;font-weight:700;color:var(--neg,#ef5350);padding:2px 4px;">▼ WEAKEST</div>
+            ${j.weak.map((r, i) => row(r, i + 1)).join('')}</div>
+        </div>
+        <div class="oc-sub" style="margin-top:5px;">${j.count} F&O names scored. <b>Score = 60% today's move + 25% where price sits in its own day range + 15% range-normalised move.</b> The range component is the useful part: two names both up 2% are not equal if one is closing on its high and the other has faded to its low - the marker on each bar shows exactly that (right = holding the high). Nothing proprietary here, and none of it is predictive: this ranks what has ALREADY happened today, which is a starting point for a watchlist rather than a signal.</div>`;
+      const st = document.getElementById('strengthStamp');
+      if (st) st.textContent = '· as of ' + (j.asOf || '');
+      box.querySelectorAll('.strength-row').forEach(el => el.addEventListener('click', () => {
+        const s = el.dataset.sym;
+        try { _esoLoadStock(s); } catch (_) {}
+        if (typeof showToast === 'function') showToast(`Loaded ${s} into the esoteric tabs`);
+      }));
+    } catch (e) { box.innerHTML = `<div class="movers-loading">Failed: ${escapeHtml(e.message)}</div>`; }
+  }
+  function _strengthWire() {
+    document.getElementById('strengthBtn')?.addEventListener('click', loadStrengthRank);
+    document.getElementById('strengthTop')?.addEventListener('change', loadStrengthRank);
+    const auto = document.getElementById('strengthAuto');
+    const arm = () => {
+      if (_strengthTimer) { clearInterval(_strengthTimer); _strengthTimer = null; }
+      if (auto?.checked) _strengthTimer = _visInterval(loadStrengthRank, 60000, 'strengthRank');
+    };
+    auto?.addEventListener('change', arm);
+    arm();
+  }
 
   // ══ Market Pulse: VIX · PCR · composite direction score ══
   // The "AI" here is an explainable weighted ensemble of the measured
@@ -16806,6 +16916,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // a BANKNIFTY flow alert can arrive while you are studying NIFTY. This is a
   // per-browser mute: detection continues server-side and other machines are
   // unaffected, only this browser stays quiet for the unticked indices.
+  // ══ master "enable all" ═══════════════════════════════════════════
+  // ON (default): every alert source and every index announces, whatever the
+  // individual boxes say - one switch to hear everything without losing your
+  // per-source setup. OFF: only the ticked sources/indices announce. The
+  // individual settings are never overwritten, so unticking this restores
+  // exactly the selection you had.
+  const _ENABLE_ALL_KEY = 'alertsEnableAll';
+  function _enableAll() {
+    try { const v = localStorage.getItem(_ENABLE_ALL_KEY); return v === null ? true : v === '1'; }
+    catch (_) { return true; }
+  }
+  function _setEnableAll(on) {
+    try { localStorage.setItem(_ENABLE_ALL_KEY, on ? '1' : '0'); } catch (_) {}
+  }
+
   const _IDXAL_KEY = 'indexAlertFilter';
   const _IDX_LIST = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
   function _idxAlCfg() {
@@ -16817,6 +16942,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _idxAlSave(o) { try { localStorage.setItem(_IDXAL_KEY, JSON.stringify(o)); } catch (_) {} }
   function _idxAlAllows(sym) {
+    if (_enableAll()) return true;               // master switch: hear everything
     if (!sym) return true;                       // unknown source: never silently drop
     const cfg = _idxAlCfg();
     if (cfg.activeOnly) return sym === (state.symbol || 'NIFTY');
@@ -16827,6 +16953,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // _buildAlertsTab and silently did nothing if that threw first.
   document.addEventListener('change', ev => {
     const t = ev.target;
+    if (t && t.id === 'masterEnableAll') {
+      _setEnableAll(t.checked);
+      _enableAllSync();
+      try { _alertStatus(); } catch (_) {}
+      try { _renderAlertHistory(); } catch (_) {}
+      if (typeof showToast === 'function')
+        showToast(t.checked ? '✅ All alerts enabled — individual selections kept and will return when you untick this'
+                            : '☑ Only your selected alerts will announce');
+      return;
+    }
     if (!t || !t.id || !t.id.startsWith('idxal_')) return;
     const o = _idxAlCfg();
     if (t.id === 'idxal_activeOnly') o.activeOnly = t.checked;
@@ -16841,6 +16977,26 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                              : `📇 Announcing: ${on.join(', ') || 'none'}`);
     }
   });
+  function _enableAllSync() {
+    const on = _enableAll();
+    const box = document.getElementById('masterEnableAll');
+    if (box) box.checked = on;
+    // dim the per-source controls so it is obvious they are bypassed, but do
+    // NOT clear them - the selection must survive toggling this off and on
+    for (const id of ['idxal_NIFTY', 'idxal_BANKNIFTY', 'idxal_FINNIFTY', 'idxal_MIDCPNIFTY',
+                      'idxal_activeOnly', 'csrc_m920', 'csrc_walls', 'csrc_cpr',
+                      'csrc_maxpain', 'csrc_cone', 'csrc_pivots',
+                      'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const lab = el.closest('label');
+      if (lab) lab.style.opacity = on ? 0.45 : 1;
+      el.title = on ? 'Bypassed while "Enable ALL alerts" is on' : '';
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _enableAllSync);
+  else setTimeout(_enableAllSync, 0);
+
   function _idxAlSync() {
     const cfg = _idxAlCfg();
     for (const s of _IDX_LIST) {
@@ -16879,6 +17035,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return null;                     // unknown source: allow, do not silently drop
   }
   function _csrcAllows(label) {
+    if (_enableAll()) return true;               // master switch: hear everything
     const k = _csrcKeyFor(label);
     if (!k) return true;
     return _csrcCfg()[k] !== false;
@@ -16917,6 +17074,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!el) return;
     const bits = [];
     bits.push(_masterMuted() ? '🔇 MUTED' : (_voiceEnabled() ? '🗣 voice on' : '🗣 voice off'));
+    bits.push(_enableAll() ? '✅ ALL alerts enabled' : '☑ selected alerts only');
     bits.push(_audioUnlocked ? '🔈 audio unlocked' : '⚠ audio NOT unlocked — press 🔈 enable audio');
     const si = _sseInfo || {};
     bits.push(si.id ? `📡 stream connected · ${si.tabs_here} tab(s) here, ${si.total_tabs} total · this tab ${si.speaker ? 'SPEAKS' : 'listens'}`
@@ -17050,6 +17208,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _chart.timer = setInterval(() => fetchCandles(true), secs * 1000);
   }
   _buildAlertsTab();
+  try { _strengthWire(); } catch (_) {}
+  try { _oiHistWire(); } catch (_) {}
+  try { _pcrHistWire(); } catch (_) {}
   _chartWire();   // safe here: _chart (const) is initialized above this point
 
   // ══ Regime Signals: Bull Run / Bloodbath + WTT/WTB shifting status ══
@@ -17158,6 +17319,190 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     html += `<div style="font-size:9px;color:var(--muted,#789);padding:3px 4px;">Call wall ${fmtInt(r.walls.callWall)} · put wall ${fmtInt(r.walls.putWall)} · ${r.n} active near strikes this tick · ${r.samples} wall samples today.</div>`;
     html += `<div class="oc-sub" style="margin-top:4px;">Vocabulary from Indian option-chain practice; the rules here are mine and stated plainly. <b>WTT</b> = call-side peak-OI wall moving up or losing &gt;12% OI over the last ~45 min (ceiling softening, bullish lean). <b>WTB</b> = put-side wall moving down or losing &gt;12% (floor softening, bearish). <b>STRONG</b> = both holding. <b>BULL RUN / BLOODBATH</b> need breadth — at least half the active near-the-money strikes flowing one way — <i>plus</i> price confirming by more than 0.25%, so a quiet drift never gets labelled a stampede. These describe what has ALREADY been positioned, not what happens next.</div>`;
     box.innerHTML = html;
+  }
+
+  // ══ PCR session curve ═════════════════════════════════════════════
+  // Two ratios plotted together, because they measure different things:
+  //   OI-PCR     = accumulated positioning - where money already sits
+  //   Volume-PCR = what is trading today   - where conviction is right now
+  // The SPREAD between them is the early signal: volume-PCR pulling above
+  // OI-PCR means puts are being bought now, well before the OI figure moves.
+  let _pcrHist = null;
+  async function loadPcrHistory() {
+    const box = document.getElementById('pcrHistBody');
+    if (!box) return;
+    box.innerHTML = '<span class="oc-sub">Reading recorded chain…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const step = +(document.getElementById('pcrHistStep')?.value || 5);
+      const j = await (await fetch(`${base}/api/pcr-history?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&step=${step}`)).json();
+      if (j.error || !j.rows?.length) {
+        box.innerHTML = `<span class="oc-sub">${escapeHtml(j.error || 'no data')} — this reads today\'s replay archive, so it fills in as the session records.</span>`;
+        return;
+      }
+      _pcrHist = j; renderPcrHistory();
+    } catch (e) { box.innerHTML = `<span class="oc-sub">Failed: ${escapeHtml(e.message)}</span>`; }
+  }
+  function renderPcrHistory() {
+    const box = document.getElementById('pcrHistBody');
+    if (!box || !_pcrHist) return;
+    const rows = _pcrHist.rows;
+    const W = 900, H = 220, padL = 40, padR = 66, padT = 12, padB = 24;
+    const oi = rows.map(r => r.pcr_oi);
+    const vol = rows.map(r => r.pcr_vol).filter(v => v != null);
+    // clamp the volume series: an early-session volume-PCR can be wild and
+    // would otherwise flatten the OI curve into a straight line
+    const oiLo = Math.min(...oi), oiHi = Math.max(...oi);
+    const volSorted = [...vol].sort((a, b) => a - b);
+    const volCap = volSorted.length ? volSorted[Math.floor(volSorted.length * 0.9)] : oiHi;
+    let lo = Math.min(oiLo, ...vol.filter(v => v <= volCap));
+    let hi = Math.max(oiHi, Math.min(volCap, Math.max(...vol)));
+    const pad = (hi - lo) * 0.12 || 0.1; lo -= pad; hi += pad;
+    const x = i => padL + i / Math.max(1, rows.length - 1) * (W - padL - padR);
+    const y = v => padT + (hi - Math.max(lo, Math.min(hi, v))) / (hi - lo) * (H - padT - padB);
+    let svg = '';
+    // the 1.0 balance line: above it puts dominate, below it calls do
+    if (lo < 1 && hi > 1)
+      svg += `<line x1="${padL}" y1="${y(1).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y(1).toFixed(1)}" stroke="#fff" stroke-opacity="0.25" stroke-dasharray="4,4"/>
+        <text x="${(W - padR + 3).toFixed(1)}" y="${(y(1) + 3).toFixed(1)}" style="font-size:8.5px;fill:var(--muted,#789);">1.00 balance</text>`;
+    const line = (arr, col, dash) => {
+      const pts = arr.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(' ');
+      return pts ? `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="${dash || ''}"/>` : '';
+    };
+    svg += line(oi, 'var(--gold,#d4af37)');
+    svg += line(rows.map(r => r.pcr_vol), '#7aa2f7', '5,3');
+    const lastOi = oi[oi.length - 1];
+    const lastVol = rows[rows.length - 1].pcr_vol;
+    svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(lastOi) + 3).toFixed(1)}" style="font-size:9px;fill:var(--gold,#d4af37);font-weight:700;">OI ${lastOi.toFixed(2)}</text>`;
+    if (lastVol != null)
+      svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(lastVol) + 13).toFixed(1)}" style="font-size:9px;fill:#7aa2f7;font-weight:700;">Vol ${lastVol.toFixed(2)}</text>`;
+    for (let g = 0; g <= 4; g++) {
+      const v = lo + (hi - lo) * g / 4;
+      svg += `<text x="2" y="${(y(v) + 3).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">${v.toFixed(2)}</text>`;
+    }
+    const tick = Math.max(1, Math.floor(rows.length / 8));
+    rows.forEach((r, i) => { if (i % tick) return;
+      svg += `<text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(r.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+    const chg = _pcrHist.chg, sp = _pcrHist.spread_now;
+    const dirTxt = chg > 0.05 ? ['PUT-SIDE BUILDING', 'var(--pos,#26a69a)', 'put writers have been adding through the session, which is support forming — unless price is falling with it, in which case they are buying protection instead']
+      : chg < -0.05 ? ['CALL-SIDE BUILDING', 'var(--neg,#ef5350)', 'call writers have been adding, which caps rallies — the mirror image of the same logic']
+      : ['FLAT', '#9aa', 'positioning has barely shifted today'];
+    const spTxt = sp == null ? ''
+      : Math.abs(sp) < 0.1 ? 'Volume-PCR is tracking OI-PCR, so today\'s trading matches the existing book — no new intent.'
+      : sp > 0 ? `<b style="color:var(--pos);">Volume-PCR is ${sp.toFixed(2)} ABOVE OI-PCR</b> — puts are being traded far more heavily than the accumulated book implies. That is fresh put demand, and it shows here before the OI figure moves.`
+      : `<b style="color:var(--neg);">Volume-PCR is ${Math.abs(sp).toFixed(2)} BELOW OI-PCR</b> — calls are being traded more heavily than the book implies, which is fresh call demand.`;
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}</svg>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 4px;">
+        <b style="font-size:11px;color:${dirTxt[1]};">${dirTxt[0]}</b>
+        <span style="font-size:10px;">open ${_pcrHist.open_pcr.toFixed(2)} → now ${_pcrHist.last_pcr.toFixed(2)} (${chg >= 0 ? '+' : ''}${chg.toFixed(3)})</span>
+        <span style="font-size:10px;color:var(--muted);">session range ${_pcrHist.lo.toFixed(2)}–${_pcrHist.hi.toFixed(2)}</span>
+      </div>
+      <div style="font-size:9.5px;color:#9ab;padding:2px 4px;">${dirTxt[2]}. ${spTxt}</div>
+      <div style="font-size:9px;color:var(--muted);padding:0 4px 3px;"><b style="color:var(--gold);">Gold = OI-PCR</b> (accumulated positioning) · <b style="color:#7aa2f7;">blue dashed = Volume-PCR</b> (what is trading today) · strikes within ±${_pcrHist.band}% of spot · ${rows.length} intervals from the replay archive. The volume line is clipped at its 90th percentile so an early-session spike cannot flatten the OI curve.</div>`;
+  }
+  function _pcrHistWire() {
+    document.getElementById('pcrHistBtn')?.addEventListener('click', loadPcrHistory);
+    document.getElementById('pcrHistStep')?.addEventListener('change', loadPcrHistory);
+  }
+
+  // ══ OI Build Map ══════════════════════════════════════════════════
+  // Per-strike open interest across the whole session, from the replay
+  // archive. The migration card samples two points; this is the full curve,
+  // so you can watch a wall form strike by strike instead of inferring it
+  // from a snapshot.
+  let _oiHist = null;
+  async function loadOiHistory() {
+    const box = document.getElementById('oiHistBody');
+    if (!box) return;
+    box.innerHTML = '<span class="oc-sub">Reading recorded chain…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const step = +(document.getElementById('oiHistStep')?.value || 5);
+      const side = document.getElementById('oiHistSide')?.value || 'BOTH';
+      const j = await (await fetch(`${base}/api/oi-history?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&step=${step}&side=${side}`)).json();
+      if (j.error || !j.cols?.length) {
+        box.innerHTML = `<span class="oc-sub">${escapeHtml(j.error || 'no data')} — this reads today\'s replay archive, so it fills in as the session records.</span>`;
+        return;
+      }
+      _oiHist = j;
+      renderOiHistory();
+    } catch (e) { box.innerHTML = `<span class="oc-sub">Failed: ${escapeHtml(e.message)}</span>`; }
+  }
+  function renderOiHistory() {
+    const box = document.getElementById('oiHistBody');
+    if (!box || !_oiHist) return;
+    const cols = _oiHist.cols;
+    const side = document.getElementById('oiHistSide')?.value || 'BOTH';
+    const mode = document.getElementById('oiHistMode')?.value || 'chg';
+    const sides = side === 'BOTH' ? ['ce', 'pe'] : [side.toLowerCase()];
+    // strike axis: union across the session, most active first
+    const act = {};
+    for (const c of cols) for (const sd of sides)
+      for (const [k, v] of Object.entries(c[sd] || {})) act[k] = Math.max(act[k] || 0, v);
+    const strikes = Object.keys(act).map(Number).sort((a, b) => b - a).slice(0, 24);
+    if (!strikes.length) { box.innerHTML = '<span class="oc-sub">No strikes in range.</span>'; return; }
+    const first = cols[0];
+    const val = (c, sd, k) => {
+      const now = (c[sd] || {})[k];
+      if (now == null) return null;
+      if (mode === 'level') return now;
+      const st = (first[sd] || {})[k];
+      return st == null ? null : now - st;      // change since the first snapshot
+    };
+    let maxAbs = 1;
+    for (const c of cols) for (const sd of sides) for (const k of strikes) {
+      const v = val(c, sd, k); if (v != null) maxAbs = Math.max(maxAbs, Math.abs(v));
+    }
+    const W = 900, rowH = sides.length > 1 ? 20 : 14, padL = 60, padT = 16, padB = 22;
+    const H = padT + strikes.length * rowH + padB;
+    const cw = (W - padL - 8) / cols.length;
+    let svg = '';
+    strikes.forEach((k, ri) => {
+      const y0 = padT + ri * rowH;
+      svg += `<text x="4" y="${y0 + rowH / 2 + 3}" style="font-size:9px;fill:var(--muted,#789);">${fmtInt(k)}</text>`;
+      sides.forEach((sd, si) => {
+        const y = y0 + si * (rowH / sides.length);
+        const hh = rowH / sides.length - 0.5;
+        cols.forEach((c, ci) => {
+          const v = val(c, sd, k);
+          if (v == null || v === 0) return;
+          const a = Math.min(0.92, Math.abs(v) / maxAbs);
+          // CE red / PE green (the convention used across the dashboard);
+          // in change mode a NEGATIVE change is drawn faded, because OI
+          // leaving a strike is the opposite signal to OI arriving
+          const col = sd === 'ce' ? `rgba(239,83,80,${a})` : `rgba(38,166,154,${a})`;
+          svg += `<rect x="${(padL + ci * cw).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, cw - 0.4).toFixed(1)}" height="${hh.toFixed(1)}" fill="${col}"${mode === 'chg' && v < 0 ? ' opacity="0.45"' : ''}><title>${fmtInt(k)} ${sd.toUpperCase()} @ ${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}: ${mode === 'level' ? 'OI ' + fmtInt(Math.round(v)) : (v >= 0 ? '+' : '') + fmtInt(Math.round(v))}</title></rect>`;
+        });
+      });
+    });
+    // spot trace across the strike rows
+    let sp = '';
+    cols.forEach((c, ci) => {
+      const near = strikes.reduce((a, b) => Math.abs(b - c.spot) < Math.abs(a - c.spot) ? b : a, strikes[0]);
+      const y = padT + strikes.indexOf(near) * rowH + rowH / 2;
+      sp += `${(padL + ci * cw + cw / 2).toFixed(1)},${y.toFixed(1)} `;
+    });
+    svg += `<polyline points="${sp}" fill="none" stroke="#fff" stroke-width="1.4" opacity="0.7"/>`;
+    const tick = Math.max(1, Math.floor(cols.length / 8));
+    cols.forEach((c, ci) => { if (ci % tick) return;
+      svg += `<text x="${(padL + ci * cw + cw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+    const s = _oiHist.summary || [];
+    const builds = s.filter(x => x.chg > 0).slice(0, 3);
+    const decays = s.filter(x => x.chg < 0).slice(0, 3);
+    const f = x => `${fmtInt(x.strike)} ${x.side} ${x.chg >= 0 ? '+' : ''}${fmtInt(Math.round(x.chg))} (${x.pct >= 0 ? '+' : ''}${x.pct}%)`;
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}</svg>
+      <div style="font-size:9.5px;color:#9ab;padding:3px 4px;">
+        ${mode === 'chg' ? 'Cell = OI ADDED (solid) or REMOVED (faded) since the first snapshot of the day' : 'Cell = absolute open interest'}; intensity is size. <span style="color:var(--neg,#ef5350);">Red = calls</span>, <span style="color:var(--pos,#26a69a);">green = puts</span>, white line = spot.
+        ${builds.length ? `<br><b>Building:</b> ${builds.map(f).join(' · ')}` : ''}
+        ${decays.length ? `<br><b>Unwinding:</b> ${decays.map(f).join(' · ')}` : ''}
+      </div>
+      <div style="font-size:9px;color:var(--muted);padding:0 4px 3px;">${cols.length} intervals · ${strikes.length} strikes · rebuilt from the replay archive, so it costs NSE nothing. A wall that thickens steadily is being defended; one that thins while price approaches is being abandoned — which is the moment before a level gives way.</div>`;
+  }
+  function _oiHistWire() {
+    document.getElementById('oiHistBtn')?.addEventListener('click', loadOiHistory);
+    document.getElementById('oiHistStep')?.addEventListener('change', loadOiHistory);
+    document.getElementById('oiHistSide')?.addEventListener('change', loadOiHistory);
+    document.getElementById('oiHistMode')?.addEventListener('change', () => { if (_oiHist) renderOiHistory(); });
   }
 
   // ══ Exposure suite (DEX/VEX) · GEX heatmap · flip history · vol surface ══
@@ -23298,15 +23643,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'option-chart':      '<strong>Charting a CE or PE contract</strong>Switch the chart from the index to a single option contract. Candles are rebuilt from the replay archive - which stores the whole chain every minute - so this costs no extra NSE traffic, and it covers only the part of the session your server has recorded. <b>The levels change with the mode,</b> because index levels are meaningless in premium space: a chart of the 24,600 call shows day open, day high and low, plus the <b>intrinsic value</b> line - the floor the premium cannot fall below at expiry, so the gap between price and that line is the time value you are paying or collecting. <b>Below the candles sits the strike\'s open-interest trace,</b> and read together they give the classic four-way signal: premium up with OI up is fresh buying, premium down with OI up is fresh writing, premium down with OI down is long unwinding, premium up with OI down is short covering - the same classification the flow alerts announce, seen rather than heard.',
     'price-chart':       '<strong>Live Chart &amp; Levels</strong>Intraday candles for the loaded index with every option-derived level drawn on top. Candles come from NSE\'s intraday feed when the session is warm, otherwise they are rebuilt from your replay archive (1 spot sample per minute) — the footer names the source. Interval 1/3/5/15m, refreshed once a minute; levels redraw on every chain update. Toggles: <b>9:20 lines</b> (see below), <b>OI walls</b> (heaviest call/put OI), <b>CPR</b>, <b>max pain</b>, <b>±1σ</b> IV cone, and <b>pivots</b> (from the Pivot Levels panel\'s active type). <br><br><b>About the 9:20 lines:</b> these are MY transparent formula, not a reverse-engineered copy of any vendor\'s proprietary levels. At 09:20 the 9:20 spot and ATM IV are frozen for the day, one session of volatility is computed as sigma = spot × IV × sqrt(1/365), and four fixed lines are drawn: EOR/EOS at ±0.5 sigma (inner, aggressive) and EOR+1/EOS-1 at ±1.0 sigma (outer, conservative). They do not move for the rest of the session, which is the whole point — a fixed frame beats a moving one for discipline. Whether they hold is an open question: log trades against them in the journal and let the data answer.',
     'regime-signals':    '<strong>Regime Signals</strong>Familiar Indian option-chain vocabulary, computed with transparent rules. <b>Shifting status</b> tracks the peak-OI wall on each side over the last ~45 minutes: <b>WTT (Weak Towards Top)</b> means the call wall moved up or lost more than 12 percent of its OI, so the ceiling is softening (bullish lean); <b>WTB (Weak Towards Bottom)</b> means the put wall moved down or shed OI, so the floor is softening (bearish); <b>STRONG</b> means both walls are holding position and size, which is the rangebound case; <b>BOTH WEAK</b> means writers are stepping back on each side, favouring a range expansion rather than a direction. <b>BULL RUN</b> and <b>BLOODBATH</b> require breadth plus confirmation: at least half of the active near-the-money strikes must be flowing one way AND price must have moved more than 0.25 percent in that direction, which stops a quiet drift being labelled a stampede. Everything here describes positioning that has ALREADY happened, so treat it as fast information rather than prediction, and remember the labels are dramatic by tradition, not by evidence.',
+    'pcr-history':       '<strong>PCR Session Curve</strong>Both put-call ratios plotted across the whole session, because they measure different things and the gap between them is the useful part. <b>OI-PCR</b> (gold) is accumulated positioning - where money already sits, which moves slowly. <b>Volume-PCR</b> (blue dashed) is what is actually trading today - where conviction is right now, which moves fast. When volume-PCR pulls decisively ABOVE OI-PCR, puts are being bought far more heavily than the standing book implies: that is fresh downside demand, and it appears here well before the OI figure catches up. Below OI-PCR is the same signal for calls. When the two track each other, today\'s trading is simply maintaining the existing book and there is no new intent to read. The 1.00 balance line matters too - above it puts dominate, below it calls do - but the DIRECTION of travel through the session tells you more than the level. Rebuilt from the replay archive at no cost to NSE; the volume line is clipped at its 90th percentile so an early-session spike cannot flatten the OI curve into a straight line.',
+    'oi-history':        '<strong>OI Build Map</strong>Open interest for every near-the-money strike across the whole session, rebuilt from the replay archive - so unlike the two-point migration card, you see the full curve and can watch a wall form strike by strike. <b>Change from open</b> (the default) shows OI ADDED as a solid cell and OI REMOVED as a faded one, because money arriving at a strike and money leaving it are opposite signals that a single colour scale would blur. <b>Absolute OI</b> shows the raw level instead, which answers where the wall IS rather than where it is forming. Red is calls, green is puts, the white line is spot, and the summary names the biggest builders and unwinders of the day. <b>What to look for:</b> a wall that thickens steadily is being actively defended and tends to hold; one that thins while price approaches it is being abandoned, which is usually the moment before a level gives way. Compare against the GEX heatmap below - OI counts contracts, gamma weights them by how much hedging they force, and the two disagreeing is itself informative.',
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
+    'enable-all':        '<strong>Enable ALL alerts</strong>One switch that makes every alert source and every index announce, regardless of the individual boxes below. It is ON by default, which is the right starting point: you hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b> - they are only bypassed - so unticking this restores exactly the per-source and per-index setup you had. While it is on, the individual controls are dimmed to show they are being ignored rather than silently disagreeing with what you hear. This is separate from Mute, which silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
     'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',
     'vol-analytics':     '<strong>Volatility &amp; Higher-Order Greeks</strong>Three institutional-style reads, all computed from NSE data alone. <b>Realized vs implied</b> compares what the market CHARGES for movement (ATM IV) against what price actually did (realized volatility from today\'s candles, annualised): a positive spread means premium sellers are being overpaid relative to the movement, a negative one means buying premium is comparatively cheap and short gamma is dangerous. Load a daily CSV in the Historical Astro Lab and it also reports where today\'s realized vol sits in the long-run distribution. <b>Charm</b> is dDelta/dTime — how much dealer hedging must shift purely because a day passed. It is the mechanical explanation for expiry-week drift, far more defensible than the folk story of max-pain magnetism, and it accelerates sharply in the final two sessions. <b>Vanna</b> is dDelta/dVol: when it is large, an IV spike alone can move spot with no directional flow at all. <b>Gamma by expiry</b> splits GEX per series, because a Tuesday weekly and a month-end series can pin at different prices and the near one\'s influence vanishes the moment it settles. Caveats stated on the panel: NSE data is 3-5 minutes delayed, realized vol from one sample per minute is noisier than tick data, and charm/vanna use the same naive dealer convention (long calls, short puts) as the GEX panel — an assumption, not an observation.',
     'chain-analytics':   '<strong>Chain Analytics</strong>Three reads of the same option chain that the OI walls cannot give you. <b>Time-value S/R</b> strips intrinsic value out of each premium, leaving what writers are actually paid to carry risk, then weights it by open interest and lot size: the strike holding the most put time value below spot is where support MONEY sits, the most call time value above is resistance money. When this disagrees with the biggest OI wall, that is the useful moment — the wall has more contracts, this strike has more rupees, and rupees are what get defended. <b>Net change</b> aggregates premium movement across near strikes each minute: if call premiums firm while puts bleed, buyers are paying up for upside regardless of what OI is doing, which makes it a money-flow read independent of positioning. It feeds Market Pulse as a weight-2 directional input. <b>Reversal clusters</b> compute every near strike\'s break level (strike plus its call premium, strike minus its put premium) and bucket them: a band where several strikes\' reversals coincide is where writer pain concentrates, and it need not sit on the largest wall. Time-value levels feed the Master Ladder at weight 3.',
     'flow-range':        '<strong>Projected price range</strong>Two independent answers to "where can price go today". <b>IV-implied bands</b> come from the option market\'s own ATM IV over the remaining horizon (rest of today intraday, else days to expiry): the 68%% and 90%% bands are where the market prices price closing, assuming lognormal moves with no gap or event risk — real tails are fatter, so treat them as optimistic. <b>OI walls</b> are the strikes with the heaviest call OI above and put OI below within ±6%% of spot: they act as support and resistance because writers who sold them profit from defending them, which is a capital-commitment argument, not a prediction. The CONSENSUS line shows the overlap and interprets it: walls INSIDE the statistical band mean writers expect a tighter day than IV prices (rangebound lean); walls outside mean breakouts have room; no overlap means positioning and pricing disagree, which usually resolves violently. The second line of defence shows where price travels if the first wall breaks.',
+    'strength-rank':     '<strong>F&amp;O Strength Ranking</strong>Scores the whole F&amp;O universe and shows the strongest and weakest names, with a fully disclosed formula rather than a proprietary one: <b>60%% today\'s percent change</b>, <b>25%% where price sits inside its own day range</b>, and <b>15%% the move divided by that range</b> so a 2%% move in a habitually quiet name outranks 2%% in a wild one. The range component is what makes it more useful than a plain gainers list - two stocks both up 2%% are not equal if one is closing on its high while the other has faded to its low, and the marker on each row\'s bar shows exactly where in the day range price is sitting (right edge = holding the high). Data comes from NSE\'s index-constituent feed, so about 200 names cost a couple of requests rather than one per symbol, and results are cached 30 seconds. <b>Honest framing:</b> this ranks what has ALREADY happened today. It is a way to find where the movement is, not a prediction that it continues - momentum persistence is a real but weak effect, and a name at the top of this list has by definition already moved. Click any row to load that stock into the esoteric tabs.',
     'market-pulse':      '<strong>Market Pulse</strong>Three regime reads in one place. <b>India VIX</b> — the market\'s own 30-day implied volatility, with regime bands (below 11 complacency, 11-14 calm trend, 14-18 balanced, 18-24 nervous, above 24 stress); it sizes your risk, it does not point direction. <b>PCR (OI)</b> — put/call open-interest ratio: above 1 means put writers are building support, below 1 means call writers are capping; at extremes (roughly above 1.8 or below 0.55) the read flips contrarian, which is why the score damps it there. <b>Direction Bias</b> — a −100..+100 weighted ensemble of the measured option-market signals this dashboard already computes: PCR positioning, max-pain pull (weighted by time left), GEX gamma regime, Δ-neutral position, fresh OI buildup flags, CPR position, day change, and VIX trend. Expand "Why this reading" to see every input, its score and its weight. It is an explainable ensemble, NOT machine learning and NOT a forecast — there is no training data and no backtest behind it; it compresses positioning so you can see when inputs agree. The agreement figure matters more than the number: a big score with conflicting inputs is a coin flip wearing a suit. Confirm on price before acting, and log outcomes in the trade journal if you want to know whether it is worth anything.',
     'fresh-flow':        '<strong>Fresh Flow Voice</strong>Speaks fresh option positioning as it happens, classified from each strike\'s OWN premium against its OI change — the standard read: <b>OI up + premium up = fresh BUYING</b> (longs opening), <b>OI up + premium down = fresh WRITING</b> (shorts opening); OI down + premium down is long unwinding, OI down + premium up is short covering (both off by default, tick the box to hear them). Bias mapping: fresh call buying or put writing = bullish; fresh put buying or call writing = bearish. Only strikes within ±N%% of spot are watched, and a detection needs BOTH the OI and premium thresholds crossed over a full comparison window (default 120s) — that filter is what separates real positioning from quote noise. At most 2 spoken per tick, 5-minute cooldown per strike/side, everything logged below and included in 💾 backups. Requires the 🗣 voice toggle to be on. Honest note: this reports what has ALREADY been written — it is fast information, not prediction, and OI on the near expiry gets noisy on expiry day.',
     'custom-alerts':  '<strong>Custom Price Levels</strong>Add your own targets or stops; they join the same touch-detection loop as pivots and fire the same toast, notification and voice. <b>How to use them well:</b> set them on levels the Master Ladder scores highest rather than on round numbers, so the tool watches the places where several methods already agree. Alerts survive reloads and travel in the 💾 backup. <b>Across several computers,</b> detection now happens on the server and the alert is announced once per machine, so adding a level on one screen alerts every screen without three voices talking over each other.',

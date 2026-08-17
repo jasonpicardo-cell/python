@@ -267,6 +267,9 @@ RUN_POLL = "NIFTY,BANKNIFTY"   # symbols kept warm in the background; "" to disa
                                # per cycle no matter how many browsers are open.
 RUN_POLL_INTERVAL = 5.0   # seconds between background polls per symbol
 RUN_TTL = 8.0             # seconds a cached chain counts as fresh
+RUN_KEEP_AWAKE = True     # stop the OS suspending this process when the
+                          # machine is locked or idle (macOS caffeinate /
+                          # Windows SetThreadExecutionState / systemd-inhibit)
 
 # ── Alert engine (server-side detection, streamed to every browser) ──
 RUN_ALERT_OI_PCT = 8.0     # min |open-interest change| % to raise an alert
@@ -649,6 +652,101 @@ def _adapter_streams() -> bool:
 _poller_stop = threading.Event()
 _poller_symbols: list = []
 
+# ══════════════════════════════════════════════════════════════════════
+# KEEP-AWAKE
+# A locked or idle machine will suspend this process, so polling, alert
+# detection and the SSE stream all stall until someone touches the keyboard.
+# Three defences, applied together because each covers a different case:
+#   * macOS  - spawn `caffeinate` to block idle sleep AND App Nap. App Nap in
+#              particular throttles a "background" process to ~1 wakeup/minute,
+#              which is what makes the poller appear to freeze rather than die.
+#   * Windows- SetThreadExecutionState tells the OS this process is doing
+#              real work and must not be put to sleep.
+#   * Linux  - systemd-inhibit when available.
+# A watchdog then reports any gap larger than expected, so if the OS suspends
+# us anyway the log says so instead of leaving you guessing.
+# ══════════════════════════════════════════════════════════════════════
+_caffeinate_proc = None
+
+
+def _keep_awake(enable: bool = True) -> str:
+    """Ask the OS not to suspend this process. Returns what was applied."""
+    global _caffeinate_proc
+    if not enable:
+        return "disabled"
+    plat = sys.platform
+    try:
+        if plat == "darwin":
+            import subprocess
+            # -i no idle sleep, -m no disk sleep, -s no system sleep on AC,
+            # -w tie the caffeinate lifetime to THIS pid so it dies with us
+            _caffeinate_proc = subprocess.Popen(
+                ["caffeinate", "-i", "-m", "-s", "-w", str(_os.getpid())],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return "macOS caffeinate (idle+disk+system sleep blocked)"
+        if plat == "win32":
+            import ctypes
+            ES_CONTINUOUS = 0x80000000
+            ES_SYSTEM_REQUIRED = 0x00000001
+            ES_AWAYMODE_REQUIRED = 0x00000040
+            ctypes.windll.kernel32.SetThreadExecutionState(
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED)
+            return "Windows SetThreadExecutionState (sleep blocked)"
+        if plat.startswith("linux"):
+            import shutil, subprocess
+            if shutil.which("systemd-inhibit"):
+                _caffeinate_proc = subprocess.Popen(
+                    ["systemd-inhibit", "--what=idle:sleep", "--who=1OPTIONS",
+                     "--why=market data poller", "sleep", "infinity"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return "systemd-inhibit (idle+sleep blocked)"
+            return "no inhibitor found - install systemd or run with caffeine"
+    except FileNotFoundError:
+        return f"keep-awake helper not found on {plat}"
+    except Exception as e:  # noqa: BLE001
+        return f"keep-awake failed: {e}"
+    return f"no keep-awake available for {plat}"
+
+
+def _release_awake() -> None:
+    global _caffeinate_proc
+    try:
+        if _caffeinate_proc:
+            _caffeinate_proc.terminate()
+            _caffeinate_proc = None
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)  # ES_CONTINUOUS
+    except Exception:
+        pass
+
+
+def _watchdog_loop(expected: float):
+    """Report suspensions instead of letting them pass silently.
+
+    If the wall clock jumps much further than the sleep we asked for, the
+    process was suspended - by a lock screen, a lid close, or the OS. Saying
+    so in the log turns "the poller randomly stopped" into a diagnosable fact.
+    """
+    tick = 10.0
+    last = time.time()
+    while not _poller_stop.is_set():
+        _poller_stop.wait(tick)
+        now = time.time()
+        drift = now - last - tick
+        if drift > max(20.0, expected * 2):
+            print(f"[watchdog] process was suspended for ~{drift:.0f}s "
+                  f"(machine slept or was throttled) - resuming; "
+                  f"chain cache and alert baselines will re-prime on the next tick")
+            # a long gap makes the flow baselines meaningless: reset them so
+            # the first comparison after waking is not against stale data
+            try:
+                _flow_prev.clear()
+            except Exception:
+                pass
+        last = now
+
+
 def _poller_loop(interval: float):
     """Keep hot symbols warm so browsers essentially always hit cache."""
     while not _poller_stop.is_set():
@@ -668,6 +766,7 @@ def _start_poller(symbols, interval: float):
         return
     t = threading.Thread(target=_poller_loop, args=(interval,), daemon=True)
     t.start()
+    threading.Thread(target=_watchdog_loop, args=(interval,), daemon=True).start()
     print(f"[i] Background poller: {', '.join(_poller_symbols)} every {interval}s "
           f"(browsers read the shared cache; NSE sees one request per symbol per cycle)")
 
@@ -3788,6 +3887,170 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e), "candles": []})
             return
 
+        if parsed.path == "/api/pcr-history":
+            # Session PCR curve from the replay archive.
+            # Returns BOTH ratios, because they answer different questions:
+            #   OI-PCR     = accumulated positioning (where money already sits)
+            #   Volume-PCR = what is trading TODAY (where conviction is now)
+            # The spread between them is where fresh intent shows up - a rising
+            # volume-PCR against a flat OI-PCR means puts are being bought now,
+            # long before the OI figure reflects it.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            try:
+                step = max(1, min(60, int(qs.get("step", ["5"])[0])))
+            except Exception:
+                step = 5
+            try:
+                band = max(0.5, min(10.0, float(qs.get("band", ["3"])[0])))
+            except Exception:
+                band = 3.0
+            path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+            if not _os.path.exists(path):
+                self._send_json({"error": "no recorded chain for that day yet", "rows": []})
+                return
+            try:
+                rows, last_bucket = [], None
+                for line in open(path):
+                    try:
+                        s = json.loads(line)
+                    except Exception:
+                        continue
+                    ts, spot = s.get("_replay_ts"), s.get("underlying_value")
+                    strikes = s.get("strikes") or []
+                    if not ts or not spot or not strikes:
+                        continue
+                    g = time.gmtime(ts + 5 * 3600 + 1800)
+                    mins = g.tm_hour * 60 + g.tm_min
+                    if not (555 <= mins < 930):
+                        continue
+                    bucket = int(ts // (step * 60)) * (step * 60)
+                    if bucket == last_bucket:
+                        continue
+                    last_bucket = bucket
+                    ce_oi = pe_oi = ce_vol = pe_vol = 0.0
+                    n_ce = n_pe = 0
+                    for st_ in strikes:
+                        k = st_.get("strike")
+                        if not k or abs(k - spot) / spot * 100 > band:
+                            continue
+                        ce_oi += float(st_.get("ce_oi") or 0)
+                        pe_oi += float(st_.get("pe_oi") or 0)
+                        ce_vol += float(st_.get("ce_volume") or 0)
+                        pe_vol += float(st_.get("pe_volume") or 0)
+                        n_ce += 1
+                        n_pe += 1
+                    if not ce_oi:
+                        continue
+                    pcr_oi = pe_oi / ce_oi
+                    pcr_vol = (pe_vol / ce_vol) if ce_vol else None
+                    # whole-chain PCR as the server itself reported it, when present
+                    rows.append({
+                        "t": bucket, "spot": round(spot, 2),
+                        "pcr_oi": round(pcr_oi, 3),
+                        "pcr_vol": round(pcr_vol, 3) if pcr_vol else None,
+                        "pcr_reported": s.get("pcr"),
+                        "ce_oi": int(ce_oi), "pe_oi": int(pe_oi),
+                    })
+                if not rows:
+                    self._send_json({"error": "no in-session snapshots recorded yet", "rows": []})
+                    return
+                first, last = rows[0], rows[-1]
+                spreads = [r["pcr_vol"] - r["pcr_oi"] for r in rows if r["pcr_vol"] is not None]
+                self._send_json({
+                    "symbol": symbol, "day": day, "step": step, "band": band,
+                    "rows": rows, "count": len(rows),
+                    "open_pcr": first["pcr_oi"], "last_pcr": last["pcr_oi"],
+                    "chg": round(last["pcr_oi"] - first["pcr_oi"], 3),
+                    "hi": round(max(r["pcr_oi"] for r in rows), 3),
+                    "lo": round(min(r["pcr_oi"] for r in rows), 3),
+                    "spread_now": round(spreads[-1], 3) if spreads else None,
+                    "spread_max": round(max(spreads, key=abs), 3) if spreads else None,
+                })
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "rows": []})
+            return
+
+        if parsed.path == "/api/oi-history":
+            # Per-strike OPEN INTEREST through the session, rebuilt from the
+            # replay archive. The migration card samples two points (30/60 min
+            # back); this returns the whole curve so a wall can be watched
+            # building or dissolving strike by strike.
+            #
+            # Returns both the absolute OI level and the change since the
+            # first recorded snapshot, because they answer different questions:
+            # level says where the wall IS, change says where it is FORMING.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            side = (qs.get("side", ["BOTH"])[0]).upper()
+            try:
+                step = max(1, min(60, int(qs.get("step", ["5"])[0])))
+            except Exception:
+                step = 5
+            try:
+                band = max(0.5, min(10.0, float(qs.get("band", ["4"])[0])))
+            except Exception:
+                band = 4.0
+            path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+            if not _os.path.exists(path):
+                self._send_json({"error": "no recorded chain for that day yet", "cols": []})
+                return
+            try:
+                cols, last_bucket, base = [], None, {}
+                for line in open(path):
+                    try:
+                        s = json.loads(line)
+                    except Exception:
+                        continue
+                    ts, spot = s.get("_replay_ts"), s.get("underlying_value")
+                    strikes = s.get("strikes") or []
+                    if not ts or not spot or not strikes:
+                        continue
+                    # regular session only (IST), same rule as the candles
+                    g = time.gmtime(ts + 5 * 3600 + 1800)
+                    mins = g.tm_hour * 60 + g.tm_min
+                    if not (555 <= mins < 930):
+                        continue
+                    bucket = int(ts // (step * 60)) * (step * 60)
+                    if bucket == last_bucket:
+                        continue
+                    last_bucket = bucket
+                    ce, pe = {}, {}
+                    for st_ in strikes:
+                        k = st_.get("strike")
+                        if not k or abs(k - spot) / spot * 100 > band:
+                            continue
+                        c_oi = float(st_.get("ce_oi") or 0)
+                        p_oi = float(st_.get("pe_oi") or 0)
+                        ce[k] = c_oi
+                        pe[k] = p_oi
+                        base.setdefault(("CE", k), c_oi)
+                        base.setdefault(("PE", k), p_oi)
+                    cols.append({"t": bucket, "spot": round(spot, 2), "ce": ce, "pe": pe})
+                if not cols:
+                    self._send_json({"error": "no in-session snapshots recorded yet", "cols": []})
+                    return
+                # per-strike summary: where it started, where it is, net build
+                last = cols[-1]
+                summary = []
+                for (sd, k), start in base.items():
+                    if side != "BOTH" and sd != side:
+                        continue
+                    now = (last["ce"] if sd == "CE" else last["pe"]).get(k)
+                    if now is None:
+                        continue
+                    summary.append({"strike": k, "side": sd, "start": start, "now": now,
+                                    "chg": now - start,
+                                    "pct": round((now - start) / start * 100, 1) if start else 0})
+                summary.sort(key=lambda x: -abs(x["chg"]))
+                self._send_json({"symbol": symbol, "day": day, "step": step, "band": band,
+                                 "cols": cols, "count": len(cols),
+                                 "summary": summary[:12],
+                                 "spot": last["spot"]})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "cols": []})
+            return
+
         if parsed.path == "/api/gex-history":
             # Per-minute gamma structure from today's replay snapshots.
             # The archive already records the whole chain every minute, so the
@@ -4437,6 +4700,87 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)})
             return
 
+        if parsed.path == "/api/strength-rank":
+            # F&O universe strength ranking, from NSE's own pre-built index
+            # constituent feeds. One request per index gives every member with
+            # its %change, so ranking ~200 names costs a handful of calls
+            # rather than one per symbol.
+            #
+            # "Strength" here is deliberately simple and disclosed: percent
+            # change from the previous close, optionally divided by the
+            # symbol's own recent range to make moves comparable across names
+            # of different volatility. No proprietary black box.
+            try:
+                top = max(5, min(50, int(qs.get("top", ["15"])[0])))
+            except Exception:
+                top = 15
+            idx = qs.get("index", ["SECURITIES IN F&O"])[0]
+            ftch = _shared_fetcher if (_shared_fetcher and getattr(_shared_fetcher, "_warmed", False)) else None
+            if ftch is None:
+                self._send_json({"error": "session not warmed - load an option chain first",
+                                 "rows": []})
+                return
+            try:
+                global _strength_cache
+                try:
+                    _strength_cache
+                except NameError:
+                    _strength_cache = {}
+                hit = _strength_cache.get(idx)
+                if hit and time.time() - hit[0] < 30:
+                    self._send_json(hit[1])
+                    return
+                from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+                from urllib.parse import quote as _q
+                h = dict(API_HEADERS)
+                h["Referer"] = NSE_OC_PAGE
+                url = "https://www.nseindia.com/api/equity-stockIndices?index=" + _q(idx)
+                r = ftch.session.get(url, headers=h, timeout=12)
+                if r.status_code != 200:
+                    self._send_json({"error": f"NSE returned HTTP {r.status_code}", "rows": []})
+                    return
+                data = r.json().get("data", [])
+                rows = []
+                for d in data:
+                    sym = d.get("symbol")
+                    if not sym or sym == idx:
+                        continue
+                    try:
+                        pchg = float(d.get("pChange") or 0)
+                        ltp = float(d.get("lastPrice") or 0)
+                        opn = float(d.get("open") or 0)
+                        hi = float(d.get("dayHigh") or 0)
+                        lo = float(d.get("dayLow") or 0)
+                        prev = float(d.get("previousClose") or 0)
+                        vol = float(d.get("totalTradedVolume") or 0)
+                    except Exception:
+                        continue
+                    if not ltp or not prev:
+                        continue
+                    rng = (hi - lo)
+                    # where in today's range the price is sitting: 1.0 = closing
+                    # on the high, 0.0 = on the low. A strong % move that is
+                    # also holding the top of its range is a cleaner signal
+                    # than one that has already faded.
+                    pos = ((ltp - lo) / rng) if rng > 0 else 0.5
+                    # range-normalised move, so a 2% move in a quiet name is
+                    # not treated the same as 2% in a habitually wild one
+                    norm = (pchg / (rng / prev * 100)) if rng > 0 and prev else 0
+                    score = pchg * 0.6 + (pos - 0.5) * 100 * 0.25 + max(-3, min(3, norm)) * 0.15 * 10
+                    rows.append({"symbol": sym, "ltp": round(ltp, 2), "pchg": round(pchg, 2),
+                                 "open": round(opn, 2), "high": round(hi, 2), "low": round(lo, 2),
+                                 "prev": round(prev, 2), "volume": int(vol),
+                                 "range_pos": round(pos, 3), "score": round(score, 2)})
+                rows.sort(key=lambda x: -x["score"])
+                out = {"index": idx, "count": len(rows),
+                       "strong": rows[:top], "weak": rows[-top:][::-1],
+                       "asOf": time.strftime("%H:%M:%S")}
+                _strength_cache[idx] = (time.time(), out)
+                self._send_json(out)
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e), "rows": []})
+            return
+
         if parsed.path == "/api/watchlist-prices":
             # Batch live prices for the stock watchlist (TradingView-style rows).
             # ?symbols=RELIANCE,TCS,BALAMINES — live fetch per symbol via the
@@ -4904,6 +5248,11 @@ def main():
                 return                      # routine client disconnect
             super().handle_error(request, client_address)
 
+    if _envbool("NSE_KEEP_AWAKE", RUN_KEEP_AWAKE):
+        print(f"[i] Keep-awake: {_keep_awake(True)}")
+        print("[i] Note: this prevents IDLE sleep. If you close a laptop lid or "
+              "choose Sleep from the menu, the machine still sleeps - "
+              "connect power and set the display to sleep rather than the system.")
     _start_janitor()
     server = _QuietThreadingHTTPServer((args.host, args.port), Handler)
     print(f"[i] NSE chain server running at http://{args.host}:{args.port}")
@@ -4931,6 +5280,14 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n[i] Stopped.")
+    finally:
+        # release the sleep inhibitor, otherwise the machine stays awake
+        # after the server has gone
+        _release_awake()
+        try:
+            _poller_stop.set()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
