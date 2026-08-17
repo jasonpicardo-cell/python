@@ -4434,7 +4434,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div class="level-panel-head"><span class="skew-chart-title">🎛 Master control</span></div>
         <div style="padding:8px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
           <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;cursor:pointer;">
-            <input type="checkbox" id="masterEnableAll" checked> ✅ Enable ALL alerts
+            <input type="checkbox" id="masterEnableAll" checked> ✅ Enable ALL alert types
           </label>
           <label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;cursor:pointer;">
             <input type="checkbox" id="masterMute"> 🔇 Mute everything on this browser
@@ -4451,7 +4451,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <label><input type="checkbox" id="idxal_MIDCPNIFTY"> MIDCPNIFTY</label>
             <label style="color:var(--muted,#789);"><input type="checkbox" id="idxal_activeOnly"> only the index I am viewing</label>
           </div>
-          <div class="oc-sub" style="margin-top:3px;">The server watches every index it polls, so alerts can arrive for an index you are not looking at. Untick one to silence it here without stopping detection - other machines keep announcing it. <b>Only the index I am viewing</b> is the stricter option: it follows the top tab, so switching to BANKNIFTY automatically mutes the rest.</div>
+          <div class="oc-sub" style="margin-top:3px;">The server watches every index it polls, so alerts can arrive for an index you are not looking at. Untick one to silence it here without stopping detection - other machines keep announcing it. <b>Only the index I am viewing</b> is the stricter option: it follows the top tab, so switching to BANKNIFTY automatically mutes the rest. <b style="color:var(--gold,#d4af37);">This filter always applies</b>, including when "Enable ALL alerts" is on - that switch decides which alert TYPES you hear, this decides which INSTRUMENTS.</div>
         </div>
         <div style="padding:0 8px 8px;font-size:9.5px;color:#9ab;">Everything below is grouped by what it does. Controls were moved here from the topbar, Home and Today — they are the same controls, so nothing is duplicated and no setting can drift out of sync.</div>
       </div>
@@ -12280,7 +12280,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div><div style="font-size:10px;font-weight:700;color:var(--neg,#ef5350);padding:2px 4px;">▼ WEAKEST</div>
             ${j.weak.map((r, i) => row(r, i + 1)).join('')}</div>
         </div>
-        <div class="oc-sub" style="margin-top:5px;">${j.count} F&O names scored. <b>Score = 60% today's move + 25% where price sits in its own day range + 15% range-normalised move.</b> The range component is the useful part: two names both up 2% are not equal if one is closing on its high and the other has faded to its low - the marker on each bar shows exactly that (right = holding the high). Nothing proprietary here, and none of it is predictive: this ranks what has ALREADY happened today, which is a starting point for a watchlist rather than a signal.</div>`;
+        <div class="oc-sub" style="margin-top:5px;">${j.count} names scored from <b>${escapeHtml(j.index || '?')}</b>${j.requested && j.requested !== j.index && j.requested !== 'auto' ? ` (requested ${escapeHtml(j.requested)}, fell back)` : ''}. <b>Score = 60% today's move + 25% where price sits in its own day range + 15% range-normalised move.</b> The range component is the useful part: two names both up 2% are not equal if one is closing on its high and the other has faded to its low - the marker on each bar shows exactly that (right = holding the high). Nothing proprietary here, and none of it is predictive: this ranks what has ALREADY happened today, which is a starting point for a watchlist rather than a signal.</div>`;
       const st = document.getElementById('strengthStamp');
       if (st) st.textContent = '· as of ' + (j.asOf || '');
       box.querySelectorAll('.strength-row').forEach(el => el.addEventListener('click', () => {
@@ -16942,7 +16942,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _idxAlSave(o) { try { localStorage.setItem(_IDXAL_KEY, JSON.stringify(o)); } catch (_) {} }
   function _idxAlAllows(sym) {
-    if (_enableAll()) return true;               // master switch: hear everything
+    // Deliberately NOT bypassed by "Enable ALL alerts". That switch answers
+    // "which alert TYPES do I want", this one answers "which INSTRUMENT do I
+    // care about" - they are independent questions, and letting the first
+    // override the second would make the index filter unusable.
     if (!sym) return true;                       // unknown source: never silently drop
     const cfg = _idxAlCfg();
     if (cfg.activeOnly) return sym === (state.symbol || 'NIFTY');
@@ -16959,8 +16962,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       try { _alertStatus(); } catch (_) {}
       try { _renderAlertHistory(); } catch (_) {}
       if (typeof showToast === 'function')
-        showToast(t.checked ? '✅ All alerts enabled — individual selections kept and will return when you untick this'
-                            : '☑ Only your selected alerts will announce');
+        showToast(t.checked ? '✅ All alert types enabled — the index filter below still applies'
+                            : '☑ Only your selected alert types will announce');
       return;
     }
     if (!t || !t.id || !t.id.startsWith('idxal_')) return;
@@ -16983,8 +16986,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (box) box.checked = on;
     // dim the per-source controls so it is obvious they are bypassed, but do
     // NOT clear them - the selection must survive toggling this off and on
-    for (const id of ['idxal_NIFTY', 'idxal_BANKNIFTY', 'idxal_FINNIFTY', 'idxal_MIDCPNIFTY',
-                      'idxal_activeOnly', 'csrc_m920', 'csrc_walls', 'csrc_cpr',
+    // Index selectors are intentionally absent here: they stay fully active
+    // whatever Enable-All is doing, so they must not be dimmed.
+    for (const id of ['csrc_m920', 'csrc_walls', 'csrc_cpr',
                       'csrc_maxpain', 'csrc_cone', 'csrc_pivots',
                       'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell']) {
       const el = document.getElementById(id);
@@ -17074,7 +17078,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!el) return;
     const bits = [];
     bits.push(_masterMuted() ? '🔇 MUTED' : (_voiceEnabled() ? '🗣 voice on' : '🗣 voice off'));
-    bits.push(_enableAll() ? '✅ ALL alerts enabled' : '☑ selected alerts only');
+    bits.push(_enableAll() ? '✅ ALL alert types' : '☑ selected types only');
     bits.push(_audioUnlocked ? '🔈 audio unlocked' : '⚠ audio NOT unlocked — press 🔈 enable audio');
     const si = _sseInfo || {};
     bits.push(si.id ? `📡 stream connected · ${si.tabs_here} tab(s) here, ${si.total_tabs} total · this tab ${si.speaker ? 'SPEAKS' : 'listens'}`
@@ -23648,7 +23652,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
-    'enable-all':        '<strong>Enable ALL alerts</strong>One switch that makes every alert source and every index announce, regardless of the individual boxes below. It is ON by default, which is the right starting point: you hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b> - they are only bypassed - so unticking this restores exactly the per-source and per-index setup you had. While it is on, the individual controls are dimmed to show they are being ignored rather than silently disagreeing with what you hear. This is separate from Mute, which silences this browser entirely and overrides everything.',
+    'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
     'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',

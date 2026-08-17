@@ -4701,24 +4701,31 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/strength-rank":
-            # F&O universe strength ranking, from NSE's own pre-built index
-            # constituent feeds. One request per index gives every member with
-            # its %change, so ranking ~200 names costs a handful of calls
-            # rather than one per symbol.
+            # F&O strength ranking.
             #
-            # "Strength" here is deliberately simple and disclosed: percent
-            # change from the previous close, optionally divided by the
-            # symbol's own recent range to make moves comparable across names
-            # of different volatility. No proprietary black box.
+            # This was first built on /api/equity-stockIndices, which now 404s
+            # for every index name - the endpoint appears to have been retired.
+            # Rebuilt on quote-equity instead, which the dashboard already uses
+            # successfully for the stock watchlist, so it works wherever that
+            # works. The trade-off is one request per symbol, so results are
+            # cached for 60s and the universe is capped per call; the scan runs
+            # in a thread pool to keep it to a few seconds rather than a minute.
+            #
+            # Score is disclosed, not proprietary:
+            #   60% today's % change
+            #   25% position within today's own range (holding vs fading)
+            #   15% range-normalised move (2% in a quiet name > 2% in a wild one)
             try:
                 top = max(5, min(50, int(qs.get("top", ["15"])[0])))
             except Exception:
                 top = 15
-            idx = qs.get("index", ["SECURITIES IN F&O"])[0]
+            try:
+                universe_cap = max(20, min(220, int(qs.get("cap", ["120"])[0])))
+            except Exception:
+                universe_cap = 120
             ftch = _shared_fetcher if (_shared_fetcher and getattr(_shared_fetcher, "_warmed", False)) else None
             if ftch is None:
-                self._send_json({"error": "session not warmed - load an option chain first",
-                                 "rows": []})
+                self._send_json({"error": "session not warmed - load an option chain first", "rows": []})
                 return
             try:
                 global _strength_cache
@@ -4726,56 +4733,87 @@ class Handler(BaseHTTPRequestHandler):
                     _strength_cache
                 except NameError:
                     _strength_cache = {}
-                hit = _strength_cache.get(idx)
-                if hit and time.time() - hit[0] < 30:
+                ckey = f"rank|{universe_cap}"
+                hit = _strength_cache.get(ckey)
+                if hit and time.time() - hit[0] < 60:
                     self._send_json(hit[1])
                     return
+
+                # ── universe: the F&O list, from whichever source has it ──
+                syms, src = [], None
+                try:
+                    import nse_lot_sizes
+                    syms = [s.upper() for s in (nse_lot_sizes.get_fno_symbol_list() or [])]
+                    if syms:
+                        src = "nse_lot_sizes"
+                except Exception:
+                    pass
+                if not syms:
+                    # fall back to the lot-size table's own keys
+                    try:
+                        import nse_lot_sizes
+                        tbl = getattr(nse_lot_sizes, "LOT_SIZES", None) or getattr(nse_lot_sizes, "_LOTS", None)
+                        if isinstance(tbl, dict):
+                            syms = [k.upper() for k in tbl if k.upper() not in
+                                    ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50")]
+                            src = "lot-size table"
+                    except Exception:
+                        pass
+                if not syms:
+                    self._send_json({"error": "no F&O symbol list available - "
+                                              "nse_lot_sizes.get_fno_symbol_list() returned nothing, "
+                                              "so there is no universe to rank",
+                                     "rows": []})
+                    return
+                syms = syms[:universe_cap]
+
                 from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
-                from urllib.parse import quote as _q
                 h = dict(API_HEADERS)
                 h["Referer"] = NSE_OC_PAGE
-                url = "https://www.nseindia.com/api/equity-stockIndices?index=" + _q(idx)
-                r = ftch.session.get(url, headers=h, timeout=12)
-                if r.status_code != 200:
-                    self._send_json({"error": f"NSE returned HTTP {r.status_code}", "rows": []})
-                    return
-                data = r.json().get("data", [])
-                rows = []
-                for d in data:
-                    sym = d.get("symbol")
-                    if not sym or sym == idx:
-                        continue
+
+                def _one(sym):
                     try:
-                        pchg = float(d.get("pChange") or 0)
-                        ltp = float(d.get("lastPrice") or 0)
+                        d = fetch_live_stock(sym, ftch, h)
+                        if not d:
+                            return None
+                        ltp = float(d.get("price") or 0)
+                        prev = float(d.get("prevClose") or 0)
+                        hi = float(d.get("high") or 0)
+                        lo = float(d.get("low") or 0)
                         opn = float(d.get("open") or 0)
-                        hi = float(d.get("dayHigh") or 0)
-                        lo = float(d.get("dayLow") or 0)
-                        prev = float(d.get("previousClose") or 0)
-                        vol = float(d.get("totalTradedVolume") or 0)
+                        if not ltp or not prev:
+                            return None
+                        pchg = (ltp - prev) / prev * 100
+                        rng = hi - lo
+                        pos = ((ltp - lo) / rng) if rng > 0 else 0.5
+                        norm = (pchg / (rng / prev * 100)) if rng > 0 else 0
+                        score = (pchg * 0.6
+                                 + (pos - 0.5) * 100 * 0.25
+                                 + max(-3.0, min(3.0, norm)) * 1.5)
+                        return {"symbol": sym, "ltp": round(ltp, 2), "pchg": round(pchg, 2),
+                                "open": round(opn, 2), "high": round(hi, 2), "low": round(lo, 2),
+                                "prev": round(prev, 2), "range_pos": round(pos, 3),
+                                "score": round(score, 2)}
                     except Exception:
-                        continue
-                    if not ltp or not prev:
-                        continue
-                    rng = (hi - lo)
-                    # where in today's range the price is sitting: 1.0 = closing
-                    # on the high, 0.0 = on the low. A strong % move that is
-                    # also holding the top of its range is a cleaner signal
-                    # than one that has already faded.
-                    pos = ((ltp - lo) / rng) if rng > 0 else 0.5
-                    # range-normalised move, so a 2% move in a quiet name is
-                    # not treated the same as 2% in a habitually wild one
-                    norm = (pchg / (rng / prev * 100)) if rng > 0 and prev else 0
-                    score = pchg * 0.6 + (pos - 0.5) * 100 * 0.25 + max(-3, min(3, norm)) * 0.15 * 10
-                    rows.append({"symbol": sym, "ltp": round(ltp, 2), "pchg": round(pchg, 2),
-                                 "open": round(opn, 2), "high": round(hi, 2), "low": round(lo, 2),
-                                 "prev": round(prev, 2), "volume": int(vol),
-                                 "range_pos": round(pos, 3), "score": round(score, 2)})
+                        return None
+
+                from concurrent.futures import ThreadPoolExecutor
+                rows = []
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    for res in pool.map(_one, syms):
+                        if res:
+                            rows.append(res)
+                if not rows:
+                    self._send_json({"error": f"no quotes returned for any of {len(syms)} symbols - "
+                                              "the warmed session may have expired; reload an option chain",
+                                     "rows": []})
+                    return
                 rows.sort(key=lambda x: -x["score"])
-                out = {"index": idx, "count": len(rows),
+                out = {"index": f"F&O universe ({src})", "requested": "fno",
+                       "count": len(rows), "scanned": len(syms),
                        "strong": rows[:top], "weak": rows[-top:][::-1],
                        "asOf": time.strftime("%H:%M:%S")}
-                _strength_cache[idx] = (time.time(), out)
+                _strength_cache[ckey] = (time.time(), out)
                 self._send_json(out)
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": str(e), "rows": []})
