@@ -4496,6 +4496,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>
 
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">📈 EMA crossover alerts (live chart)<i class="hi" data-h="ema-cross">i</i></span></div>
+          <div style="padding:6px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:10px;">
+            <label style="font-weight:700;"><input type="checkbox" id="emaxOn"> Announce EMA crossovers</label>
+            <label><input type="checkbox" id="emax_5x20"> 5/20</label>
+            <label><input type="checkbox" id="emax_9x21"> 9/21</label>
+            <label><input type="checkbox" id="emax_20x50"> 20/50</label>
+            <label><input type="checkbox" id="emax_50x200"> 50/200</label>
+            <label style="color:var(--muted,#789);"><input type="checkbox" id="emaxConfirm"> confirm on candle close</label>
+            <label style="color:var(--muted,#789);">min separation %
+              <input type="number" id="emaxSep" class="ohlc-inp" style="width:56px;" step="0.01" min="0" title="Ignore a cross where the two EMAs are closer together than this % of price - filters hairline touches that immediately reverse">
+            </label>
+          </div>
+          <div class="oc-sub" style="padding:0 6px 4px;"><b style="color:var(--gold,#d4af37);">Covered by "Enable ALL alert types"</b> — while that is ticked every pair announces and these boxes are bypassed (dimmed, but your selection is kept). Crossovers are detected on the chart's current interval and instrument - switch the chart to 5m and the alerts follow. With <b>confirm on candle close</b> ticked (recommended) a cross must survive to the end of its candle before it announces; without it you hear every wiggle of the forming bar, most of which reverse.</div>
+          <div id="emaxLog" style="padding:0 6px 6px;"></div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
           <div class="skew-chart-head"><span class="skew-chart-title">📊 Condition alerts — IV, PCR, velocity, ORB, risk</span></div>
           <div id="alertCondSlot" style="padding:6px;"></div>
           <div class="oc-sub" style="padding:0 6px 6px;">Market-condition triggers rather than price levels: IV spikes and thresholds, PCR extremes, price velocity, opening-range breaks, and the paper-trading loss and trailing-drawdown limits.</div>
@@ -16214,6 +16231,109 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
+  // ══ EMA crossover detection ═══════════════════════════════════════
+  // Fires when a faster EMA crosses a slower one on the CLOSED candle, not
+  // the forming one. That distinction matters: the live bar wiggles across
+  // the line repeatedly during its interval, so alerting on it produces a
+  // burst of contradictory signals that all reverse before the bar closes.
+  // Waiting for the close costs you one interval of lateness and removes
+  // almost all of the false positives.
+  const _EMAX_KEY = 'emaCrossCfg';
+  function _emaxCfg() {
+    try {
+      return Object.assign({ on: false, pairs: ['5x20', '9x21'], confirmClose: true, minSep: 0.02 },
+                           JSON.parse(localStorage.getItem(_EMAX_KEY) || '{}'));
+    } catch (_) { return { on: false, pairs: ['5x20', '9x21'], confirmClose: true, minSep: 0.02 }; }
+  }
+  function _emaxSave(o) { try { localStorage.setItem(_EMAX_KEY, JSON.stringify(o)); } catch (_) {} }
+  const _EMAX_PAIRS = [
+    { k: '5x20',    f: 5,   s: 20,  lab: 'EMA 5/20',    note: 'scalping trigger' },
+    { k: '9x21',    f: 9,   s: 21,  lab: 'EMA 9/21',    note: 'the common intraday pair' },
+    { k: '20x50',   f: 20,  s: 50,  lab: 'EMA 20/50',   note: 'intraday trend shift' },
+    { k: '50x200',  f: 50,  s: 200, lab: 'EMA 50/200',  note: 'golden / death cross' },
+  ];
+  let _emaxFired = {};        // pairKey|dir -> candle timestamp it fired on
+  function _emaCrossCheck() {
+    const cfg = _emaxCfg();
+    // "Enable ALL alert types" covers this like every other alert TYPE:
+    // when it is on, crossovers announce on every pair regardless of the
+    // individual boxes, and the saved selection is left untouched so it
+    // returns intact when the master switch goes off.
+    const all = _enableAll();
+    if (!cfg.on && !all) return;
+    const cs = _chart.candles || [];
+    if (cs.length < 6) return;
+    // ignore the forming bar when confirmation is on
+    const bars = cfg.confirmClose && _chart.liveBar ? cs.slice(0, -1) : cs;
+    if (bars.length < 6) return;
+    const closes = bars.map(b => b.c);
+    const lastT = bars[bars.length - 1].t;
+    const spot = closes[closes.length - 1];
+    for (const p of _EMAX_PAIRS) {
+      if (!all && !cfg.pairs.includes(p.k)) continue;
+      if (bars.length < p.s + 2) continue;        // not enough history to mean anything
+      const fa = _emaSeries(closes, p.f), sa = _emaSeries(closes, p.s);
+      const n = closes.length;
+      const f1 = fa[n - 1], s1 = sa[n - 1], f0 = fa[n - 2], s0 = sa[n - 2];
+      if ([f1, s1, f0, s0].some(v => v == null)) continue;
+      const prevAbove = f0 > s0, nowAbove = f1 > s1;
+      if (prevAbove === nowAbove) continue;
+      // require a minimum separation so a hairline touch does not count
+      const sepPct = Math.abs(f1 - s1) / spot * 100;
+      if (sepPct < (cfg.minSep || 0)) continue;
+      const dir = nowAbove ? 'bull' : 'bear';
+      const fk = `${p.k}|${dir}`;
+      if (_emaxFired[fk] === lastT) continue;     // already announced this bar
+      _emaxFired[fk] = lastT;
+      const sym = state.symbol || 'NIFTY';
+      const txt = `${p.lab} ${nowAbove ? 'bullish' : 'bearish'} crossover on ${sym} ${_chart.interval} minute, price ${Math.round(spot)}`;
+      const key = `emax|${sym}|${p.k}|${dir}|${lastT}`;
+      try {
+        if (_streamLive) _relayAlert(key, txt, 'level', 300);
+        else _speakOnce(key, txt, 300);
+      } catch (_) {}
+      if (typeof showToast === 'function')
+        showToast(`${nowAbove ? '📈' : '📉'} ${p.lab} ${nowAbove ? 'bull' : 'bear'} cross · ${sym} ${_chart.interval}m · ${fmtInt(Math.round(spot))}`);
+      try {
+        _pushAlertHistory(`${p.lab} ${dir === 'bull' ? '▲cross' : '▼cross'}`, spot, dir === 'bull' ? 'pos' : 'neg', sym);
+      } catch (_) {}
+      _emaxRenderLog(p, dir, spot, lastT);
+    }
+  }
+  const _emaxLog = [];
+  function _emaxRenderLog(p, dir, spot, t) {
+    _emaxLog.push({ t, lab: p.lab, dir, spot, sym: state.symbol, iv: _chart.interval });
+    while (_emaxLog.length > 20) _emaxLog.shift();
+    const box = document.getElementById('emaxLog');
+    if (!box) return;
+    box.innerHTML = _emaxLog.slice(-8).reverse().map(x =>
+      `<div style="display:flex;gap:8px;font-size:9.5px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <span style="color:var(--muted);min-width:52px;">${new Date(x.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+        <b style="min-width:82px;">${escapeHtml(x.lab)}</b>
+        <span style="color:${x.dir === 'bull' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-weight:700;">${x.dir === 'bull' ? '▲ bull' : '▼ bear'}</span>
+        <span style="color:var(--muted);">${escapeHtml(x.sym || '')} ${x.iv}m @ ${fmtInt(Math.round(x.spot))}</span>
+      </div>`).join('');
+  }
+  function _emaxWire() {
+    const cfg = _emaxCfg();
+    const on = document.getElementById('emaxOn');
+    if (on) { on.checked = !!cfg.on; on.addEventListener('change', () => { const o = _emaxCfg(); o.on = on.checked; _emaxSave(o); _alertStatus?.(); }); }
+    const cc = document.getElementById('emaxConfirm');
+    if (cc) { cc.checked = cfg.confirmClose !== false; cc.addEventListener('change', () => { const o = _emaxCfg(); o.confirmClose = cc.checked; _emaxSave(o); }); }
+    const ms = document.getElementById('emaxSep');
+    if (ms) { ms.value = cfg.minSep ?? 0.02; ms.addEventListener('change', () => { const o = _emaxCfg(); o.minSep = Math.max(0, +ms.value || 0); _emaxSave(o); }); }
+    for (const p of _EMAX_PAIRS) {
+      const el = document.getElementById('emax_' + p.k);
+      if (!el) continue;
+      el.checked = cfg.pairs.includes(p.k);
+      el.addEventListener('change', () => {
+        const o = _emaxCfg();
+        o.pairs = _EMAX_PAIRS.filter(q => document.getElementById('emax_' + q.k)?.checked).map(q => q.k);
+        _emaxSave(o);
+      });
+    }
+  }
+
   function _chartLevels(d) {
     const L = [];
     if (!d) return L;
@@ -16342,6 +16462,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _chart.candles = j.candles; _chart.src = 'replay-chain';
       _chart.optionMeta = { strike: j.strike, side: j.side, oi: j.oi || [], iv: j.iv_last };
       renderPriceChart();
+      try { _emaCrossCheck(); } catch (_) {}
     } catch (e) { if (box) box.innerHTML = `<div class="movers-loading">Failed: ${escapeHtml(e.message)}</div>`; }
   }
 
@@ -16357,6 +16478,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const j = await r.json();
       if (j.error) { box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error)}</div>`; _chart.candles = []; return; }
       _chart.candles = j.candles || []; _chart.src = j.source; _chart.coverage = j.coverage || null;
+      try { _emaCrossCheck(); } catch (_) {}
       renderPriceChart();
     } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
   }
@@ -16903,6 +17025,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
     _alertStatus();
     step(_csrcWire, 'csrcWire');
+    step(_emaxWire, 'emaxWire');
     step(_idxAlWire, 'idxAlWire');
     _visInterval(_alertStatus, 5000, '_alertStatus');
   }
@@ -16990,7 +17113,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // whatever Enable-All is doing, so they must not be dimmed.
     for (const id of ['csrc_m920', 'csrc_walls', 'csrc_cpr',
                       'csrc_maxpain', 'csrc_cone', 'csrc_pivots',
-                      'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell']) {
+                      'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell',
+                      'emaxOn', 'emax_5x20', 'emax_9x21', 'emax_20x50', 'emax_50x200']) {
       const el = document.getElementById(id);
       if (!el) continue;
       const lab = el.closest('label');
@@ -17091,6 +17215,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const cs = _csrcCfg();
       const on = ['m920', 'walls', 'cpr', 'maxpain', 'cone', 'pivots'].filter(k => cs[k] !== false);
       bits.push(`📈 ${on.length}/6 chart sources announcing`);
+      const ex = _emaxCfg();
+      if (_enableAll()) bits.push('📈 EMA cross: all pairs (via Enable ALL)');
+      else if (ex.on) bits.push(`📈 EMA cross: ${ex.pairs.join(', ') || 'none selected'}`);
       const ia = _idxAlCfg();
       bits.push(ia.activeOnly
         ? `📇 only ${state.symbol || 'NIFTY'} (follows the top tab)`
@@ -23654,6 +23781,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
+    'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
     'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',
     'vol-analytics':     '<strong>Volatility &amp; Higher-Order Greeks</strong>Three institutional-style reads, all computed from NSE data alone. <b>Realized vs implied</b> compares what the market CHARGES for movement (ATM IV) against what price actually did (realized volatility from today\'s candles, annualised): a positive spread means premium sellers are being overpaid relative to the movement, a negative one means buying premium is comparatively cheap and short gamma is dangerous. Load a daily CSV in the Historical Astro Lab and it also reports where today\'s realized vol sits in the long-run distribution. <b>Charm</b> is dDelta/dTime — how much dealer hedging must shift purely because a day passed. It is the mechanical explanation for expiry-week drift, far more defensible than the folk story of max-pain magnetism, and it accelerates sharply in the final two sessions. <b>Vanna</b> is dDelta/dVol: when it is large, an IV spike alone can move spot with no directional flow at all. <b>Gamma by expiry</b> splits GEX per series, because a Tuesday weekly and a month-end series can pin at different prices and the near one\'s influence vanishes the moment it settles. Caveats stated on the panel: NSE data is 3-5 minutes delayed, realized vol from one sample per minute is noisier than tick data, and charm/vanna use the same naive dealer convention (long calls, short puts) as the GEX panel — an assumption, not an observation.',
