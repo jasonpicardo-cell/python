@@ -272,11 +272,24 @@ RUN_KEEP_AWAKE = True     # stop the OS suspending this process when the
                           # Windows SetThreadExecutionState / systemd-inhibit)
 
 # ── Alert engine (server-side detection, streamed to every browser) ──
-RUN_ALERT_OI_PCT = 8.0     # min |open-interest change| % to raise an alert
-RUN_ALERT_PREM_PCT = 3.0   # min |premium change| % (both must be crossed)
-RUN_ALERT_NEAR_PCT = 3.0   # only strikes within this % of spot
-RUN_ALERT_WINDOW = 120.0   # seconds between the two compared snapshots
+# Tuned for Nifty. The two gates are ANDed, and the original 8%/3% pair was
+# mismatched: 8% OI on a 400k-contract strike means 32,000 contracts inside
+# two minutes (a news spike, not positioning), while 3% on a 40-rupee option
+# is 1.2 points, which tick noise crosses constantly. Loosening OI and
+# tightening premium lets real position building through and keeps jitter out.
+RUN_ALERT_OI_PCT = 3.0     # min |open-interest change| %
+RUN_ALERT_PREM_PCT = 6.0   # min |premium change| % (both must be crossed)
+RUN_ALERT_NEAR_PCT = 1.5   # only strikes within this % of spot. Nifty moves
+                           # ~0.6-1% a session, so +/-1.5% (about 15 strikes)
+                           # covers what price can reach; wider drags in thin
+                           # strikes whose small OI base trips the % gate cheaply
+RUN_ALERT_WINDOW = 90.0    # seconds between the two compared snapshots
 RUN_ALERT_COOLDOWN = 300.0 # per strike+side, seconds before it can fire again
+RUN_ALERT_MIN_OI = 4000    # absolute contract floor, to reject THIN strikes
+                           # only. A 3% move on a 150k-OI strike is just 4,500
+                           # contracts, so a floor above ~9,000 cancels the
+                           # percentage gate and the two filters fight each
+                           # other into silence. 4,000 is about 53 lots.
 RUN_ALERT_MAX = 6          # extra same-category events per cycle (all 4
                            # categories always get through regardless)
 
@@ -305,6 +318,7 @@ ALERT_CFG = {
     "cooldown": float(_os.environ.get("NSE_ALERT_COOLDOWN", RUN_ALERT_COOLDOWN)),
     # ceiling on EXTRA same-category events; distinct categories always pass
     "max_per_cycle": int(_os.environ.get("NSE_ALERT_MAX", RUN_ALERT_MAX)),
+    "min_oi": float(_os.environ.get("NSE_ALERT_MIN_OI", RUN_ALERT_MIN_OI)),
 }
 
 _sse_seq = itertools.count(1)
@@ -452,6 +466,8 @@ def _flow_detect(symbol: str, data: dict):
                 pr_pct = (l_now - l_old) / l_old * 100
                 if abs(oi_pct) < ALERT_CFG["oi_pct"] or abs(pr_pct) < ALERT_CFG["prem_pct"]:
                     continue
+                if abs(oi_now - oi_old) < ALERT_CFG.get("min_oi", 0):
+                    continue          # too few contracts to be worth saying
                 if oi_pct <= 0:
                     continue                      # fresh positions only
                 buying = pr_pct > 0

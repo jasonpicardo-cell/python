@@ -2004,8 +2004,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             </div>
             <!-- Advanced alerts: IV spike + volume spike -->
             <div class="adv-alerts">
-              <label style="display:flex;align-items:center;gap:3px;"><input type="checkbox" id="ivSpikeEnabled"> IV Spike &gt;<i class="hi" data-h="iv-spike">i</i></label>
-              <input type="number" id="ivSpikeThreshold" class="ohlc-inp" value="15" step="1" style="width:42px;" title="% change in ATM IV per poll">
+              <label style="display:flex;align-items:center;gap:3px;"><input type="checkbox" id="ivSpikeEnabled" checked> IV Spike &gt;<i class="hi" data-h="iv-spike">i</i></label>
+              <input type="number" id="ivSpikeThreshold" class="ohlc-inp" value="4" step="0.5" style="width:42px;" title="% change in ATM IV per poll. Nifty ATM IV rarely moves more than 2-3% between polls in normal trade, so 4% marks a genuine repricing; 15% would only fire on a shock.">
               <span style="color:var(--muted-2);font-size:9px;">%/poll</span>
               <span style="color:var(--border);">|</span>
               <label style="display:flex;align-items:center;gap:3px;"><input type="checkbox" id="volSpikeEnabled"> Vol Spike &gt;<i class="hi" data-h="vol-spike">i</i></label>
@@ -3099,7 +3099,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <input type="number" id="caPts" class="ohlc-inp" placeholder="± pts (near)" style="width:90px;font-size:10px;">
           <input type="text" id="caLabel" class="ohlc-inp" placeholder="label e.g. CPR TC" style="width:130px;font-size:10px;">
           <button class="btn" id="caAddBtn" style="font-size:10px;padding:3px 12px;">+ Add rule</button>
-          <span class="oc-sub" style="font-size:9px;">checked every chain tick · 5-min refire cooldown · toast + browser notification + voice (if 🗣 on)</span>
+          <span class="oc-sub" style="font-size:9px;">checked every chain tick · 5-min refire cooldown · toast + browser notification + voice (if 🗣 on) · <b style="color:var(--gold,#d4af37);">while "Enable ALL alert types" is on, every rule fires regardless of its 🔔/🔕 state</b></span>
         </div>
         <div id="caRules" style="margin-top:4px;"></div>
         <div id="caFired" style="margin-top:4px;"></div>
@@ -4440,6 +4440,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <input type="checkbox" id="masterMute"> 🔇 Mute everything on this browser
           </label>
           <span id="alertStatusLine" style="font-size:10px;color:var(--muted,#789);"></span>
+          <i class="hi" data-h="reset-defaults" style="margin-left:auto;">i</i><button class="btn" id="alertResetBtn" style="font-size:9px;padding:2px 9px;" title="Restore every alert and chart setting to the recommended Nifty defaults on THIS browser. Your trade journal, watchlist, scorecard and paper trades are not touched.">↺ Reset to recommended defaults</button>
         </div>
         <div id="alertMasterSlot" style="padding:4px 8px 8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;"></div>
         <div style="padding:4px 8px 8px;border-top:1px solid rgba(255,255,255,0.06);">
@@ -11392,7 +11393,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const prevSpot = state._caPrevSpot;
     state._caPrevSpot = spot;
     for (const r of rules) {
-      if (!r.armed) continue;
+      // Enable-All bypasses the per-rule armed flag, matching how it bypasses
+      // every other alert-TYPE selection. The flag itself is untouched, so
+      // unticking the master switch restores your armed/disarmed choices.
+      if (!r.armed && !_enableAll()) continue;
       if (r.lastFired && Date.now() - r.lastFired < 5 * 60 * 1000) continue;   // 5-min refire cooldown
       let hit = false, msg = '';
       if (r.type === 'near' && Math.abs(spot - r.value) <= (r.pts || 10)) { hit = true; msg = `Spot ${fmtInt(Math.round(spot))} within ${r.pts || 10} pts of ${r.label || r.value}`; }
@@ -11848,10 +11852,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   //   OI↑ + premium↓ = fresh SELLING/WRITING (shorts opening)
   //   OI↓ + premium↓ = long unwinding      OI↓ + premium↑ = short covering
   // Bias: fresh CE buying / PE writing = bullish; fresh PE buying / CE writing = bearish.
+  // ── Nifty-tuned defaults ──────────────────────────────────────────
+  // The original 8% OI / 3% premium pair was mismatched for Nifty and the
+  // two gates are ANDed, so almost nothing fired. On a 400k-OI near strike,
+  // 8% means 32,000 contracts inside two minutes - a news spike, not ordinary
+  // positioning - while 3% on a 40-rupee option is 1.2 points, which tick
+  // noise crosses constantly. Loosening OI and tightening premium inverts
+  // that: real position building gets through, quote jitter does not.
+  //   OI  8% -> 3%      12k on a 400k strike is genuine, still not noise
+  //   prem 3% -> 6%     2.4 pts on a 40-rupee option filters the jitter
+  //   window 120 -> 90s Nifty OI refreshes every 1-3 min; 90s catches more
+  //   near 3% -> 1.5%   Nifty moves ~0.6-1% a session, so +/-368 pts (about
+  //                     15 strikes) is the zone price can realistically reach.
+  //                     Wider pulls in thin far strikes whose small OI base
+  //                     makes the PERCENTAGE gate trip on very few contracts.
+  //   minLots 0 -> 4000 The floor exists to reject THIN strikes, not to
+  //                     re-filter normal ones. A 3% move on a 150k-OI strike
+  //                     is only 4,500 contracts, so anything above ~9,000
+  //                     starts cancelling the percentage gate and the two
+  //                     filters fight each other into silence. 4,000 (about
+  //                     53 lots) sits just under that and blocks only the
+  //                     genuinely illiquid far strikes.
+  //   unwinding/covering ON: closing flow reads the other half of the story.
+  //                     A wall being unwound as price approaches is often more
+  //                     actionable than fresh writing somewhere far away.
   const _FLOW_KEY = 'freshFlowCfg';
   function _flowCfg() {
-    try { return Object.assign({ on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false, maxPerTick: 6, cats: { ceBuy: true, peBuy: true, ceSell: true, peSell: true, unwind: false, cover: false } }, JSON.parse(localStorage.getItem(_FLOW_KEY) || '{}')); }
-    catch (_) { return { on: false, oiPct: 8, minLots: 0, premPct: 3, winSec: 120, near: 3, speakUnwind: false, maxPerTick: 6, cats: { ceBuy: true, peBuy: true, ceSell: true, peSell: true, unwind: false, cover: false } }; }
+    try { return Object.assign({ on: true, oiPct: 3, minLots: 4000, premPct: 6, winSec: 90, near: 1.5, speakUnwind: true, maxPerTick: 6, cats: { ceBuy: true, peBuy: true, ceSell: true, peSell: true, unwind: true, cover: true } }, JSON.parse(localStorage.getItem(_FLOW_KEY) || '{}')); }
+    catch (_) { return { on: true, oiPct: 3, minLots: 4000, premPct: 6, winSec: 90, near: 1.5, speakUnwind: true, maxPerTick: 6, cats: { ceBuy: true, peBuy: true, ceSell: true, peSell: true, unwind: true, cover: true } }; }
   }
   function _flowSave(c) { try { localStorage.setItem(_FLOW_KEY, JSON.stringify(c)); } catch (_) {} }
   // ── multi-browser voice arbitration ──
@@ -16131,8 +16159,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: true, ema10: false, ema15: false, ema20: false, ema50: false, ema100: false, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
@@ -16241,9 +16269,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _EMAX_KEY = 'emaCrossCfg';
   function _emaxCfg() {
     try {
-      return Object.assign({ on: false, pairs: ['5x20', '9x21'], confirmClose: true, minSep: 0.02 },
+      return Object.assign({ on: true, pairs: ['20x50', '50x200'], confirmClose: true, minSep: 0.03 },
                            JSON.parse(localStorage.getItem(_EMAX_KEY) || '{}'));
-    } catch (_) { return { on: false, pairs: ['5x20', '9x21'], confirmClose: true, minSep: 0.02 }; }
+    } catch (_) { return { on: true, pairs: ['20x50', '50x200'], confirmClose: true, minSep: 0.03 }; }
   }
   function _emaxSave(o) { try { localStorage.setItem(_EMAX_KEY, JSON.stringify(o)); } catch (_) {} }
   const _EMAX_PAIRS = [
@@ -16809,6 +16837,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ── Voice alert when price touches a 9:20 line (EOR/EOR+1/EOS/EOS-1) ──
   function _m920TouchCheck(d) {
     if (_streamLive) return;          // server raises 9:20 touches for everyone
+    // Local path: honour the same source filter the streamed path uses, so
+    // "Enable ALL alert types" turns 9:20 announcements on here too.
+    if (!_csrcAllows('EOR')) return;
     const m = _m920Load();
     const spot = d?.underlying_value;
     if (!m || !spot) return;
@@ -17058,10 +17089,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _IDX_LIST = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
   function _idxAlCfg() {
     try {
-      return Object.assign({ NIFTY: true, BANKNIFTY: true, FINNIFTY: true,
-                             MIDCPNIFTY: true, activeOnly: false },
+      return Object.assign({ NIFTY: true, BANKNIFTY: false, FINNIFTY: false,
+                             MIDCPNIFTY: false, activeOnly: false },
                            JSON.parse(localStorage.getItem(_IDXAL_KEY) || '{}'));
-    } catch (_) { return { NIFTY: true, BANKNIFTY: true, FINNIFTY: true, MIDCPNIFTY: true, activeOnly: false }; }
+    } catch (_) { return { NIFTY: true, BANKNIFTY: false, FINNIFTY: false, MIDCPNIFTY: false, activeOnly: false }; }
   }
   function _idxAlSave(o) { try { localStorage.setItem(_IDXAL_KEY, JSON.stringify(o)); } catch (_) {} }
   function _idxAlAllows(sym) {
@@ -17077,6 +17108,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Bound once, by delegation, so it cannot be skipped by an error in any
   // other setup function - the previous version wired at the END of
   // _buildAlertsTab and silently did nothing if that threw first.
+  document.addEventListener('click', ev => {
+    if (ev.target && ev.target.id === 'alertResetBtn') { ev.preventDefault(); _resetSettings(); }
+  });
   document.addEventListener('change', ev => {
     const t = ev.target;
     if (t && t.id === 'masterEnableAll') {
@@ -17145,10 +17179,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _CSRC_KEY = 'chartAlertSources';
   function _csrcCfg() {
     try {
-      return Object.assign({ m920: true, walls: true, cpr: true, maxpain: false,
-                             cone: false, pivots: true, tol: 15 },
+      return Object.assign({ m920: true, walls: true, cpr: true, maxpain: true,
+                             cone: true, pivots: true, tol: 20 },
                            JSON.parse(localStorage.getItem(_CSRC_KEY) || '{}'));
-    } catch (_) { return { m920: true, walls: true, cpr: true, maxpain: false, cone: false, pivots: true, tol: 15 }; }
+    } catch (_) { return { m920: true, walls: true, cpr: true, maxpain: true, cone: true, pivots: true, tol: 20 }; }
   }
   function _csrcSave(o) { try { localStorage.setItem(_CSRC_KEY, JSON.stringify(o)); } catch (_) {} }
   // map a level label to its source key
@@ -17191,6 +17225,45 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       t.value = cfg.tol ?? 15;
       t.addEventListener('change', () => { const o = _csrcCfg(); o.tol = Math.max(1, +t.value || 15); _csrcSave(o); });
     }
+  }
+
+  // ══ reset to recommended defaults ═════════════════════════════════
+  // Settings live in localStorage per browser, which is normally right - a
+  // code update should not wipe values you tuned. The side effect is that
+  // shipped default changes never reach a browser that has already run the
+  // dashboard. This clears ONLY the settings keys, so the next load picks up
+  // the current recommended values, and deliberately leaves your data alone:
+  // trade journal, watchlist, suggestion scorecard, paper trades and the
+  // astro-lab history all survive.
+  const _SETTINGS_KEYS = [
+    'freshFlowCfg',        // fresh option-flow thresholds and categories
+    'chartAlertSources',   // which chart lines announce, and tolerance
+    'indexAlertFilter',    // which indices announce
+    'alertsEnableAll',     // the master enable-all switch
+    'emaCrossCfg',         // EMA crossover pairs and filters
+    'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
+    'customAlerts',        // user-defined rules
+    'customAlertsFired',
+    'voiceMode', 'masterMute', 'alertVolume', 'alertSound', 'alertDuration',
+    'm920Levels',          // today's frozen 9:20 lines (recomputed next tick)
+    'sq9Conv', 'tvWlOpen',
+  ];
+  const _KEEP_KEYS = ['tradeJournal', 'sugScorecard', 'esoStockWatchlist',
+                      'astroLabHistory', 'oiFlowFirstSeen', 'freshFlowLog', 'paperTrades'];
+  function _resetSettings() {
+    const found = _SETTINGS_KEYS.filter(k => { try { return localStorage.getItem(k) !== null; } catch (_) { return false; } });
+    const kept = _KEEP_KEYS.filter(k => { try { return localStorage.getItem(k) !== null; } catch (_) { return false; } });
+    const msg = `Reset ${found.length} setting${found.length === 1 ? '' : 's'} on THIS browser to the recommended Nifty defaults?\n\n` +
+      (found.length ? `Will be reset:\n  ${found.join(', ')}\n\n` : '') +
+      (kept.length ? `Will be KEPT (your data):\n  ${kept.join(', ')}\n\n` : '') +
+      `Other computers are unaffected. The page will reload.`;
+    if (!confirm(msg)) return;
+    let n = 0;
+    for (const k of _SETTINGS_KEYS) {
+      try { if (localStorage.getItem(k) !== null) { localStorage.removeItem(k); n++; } } catch (_) {}
+    }
+    try { showToast(`↺ ${n} setting(s) reset — reloading`); } catch (_) {}
+    setTimeout(() => location.reload(), 400);
   }
 
   function _masterMuted() {
@@ -23779,6 +23852,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
+    'reset-defaults':    '<strong>Reset to recommended defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',
