@@ -1960,7 +1960,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               </div>
               <div class="alert-controls">
                 <label class="level-alert-toggle" title="Enable price-touch alerts">
-                  <input type="checkbox" id="pivotAlertToggle" checked> 🔔<i class="hi" data-h="bell-alert">i</i>
+                  <input type="checkbox" id="pivotAlertToggle" checked> 🔔 sound<i class="hi" data-h="bell-alert">i</i>
                 </label>
                 <i class="hi" data-h="alert-sound">i</i><select id="alertSoundSelect" class="level-select" title="Alert sound type">
                   <option value="tone">Tone</option>
@@ -1978,7 +1978,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <button class="btn" onclick="window._previewSound('chime')" style="font-size:9px;padding:2px 5px;" title="Preview Chime">Chime▶</button>
                 <button class="btn" onclick="window._previewSound('ping')"  style="font-size:9px;padding:2px 5px;" title="Preview Ping">Ping▶</button>
                 <label class="level-alert-toggle" title="Speak the level name when touched">
-                  <input type="checkbox" id="voiceToggle" checked> 🗣<i class="hi" data-h="voice-alert">i</i>
+                  <input type="checkbox" id="voiceToggle" checked> 🗣 voice<i class="hi" data-h="voice-alert">i</i>
                 </label>
                 <button class="btn" id="compactToggle" style="font-size:9px;padding:2px 7px;" title="Hide decorative LORE-tier panels">◱ Compact: OFF<i class="hi" data-h="compact-mode">i</i></button>
               </div>
@@ -4492,6 +4492,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
           <div class="skew-chart-head"><span class="skew-chart-title">📐 Level &amp; pivot touch alerts<i class="hi" data-h="bell-alert">i</i></span></div>
+          <div style="padding:6px 6px 0;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:10px;">
+            <label style="font-weight:700;"><input type="checkbox" id="lvlVoiceOn" checked> 🗣 Speak level touches</label><i class="hi" data-h="level-voice">i</i>
+            <label style="color:var(--muted,#789);"><input type="checkbox" id="lvlVoicePrice" checked> include the price</label>
+            <label style="color:var(--muted,#789);"><input type="checkbox" id="lvlVoiceDist"> include distance from spot</label>
+            <button class="btn" id="lvlVoiceTest" style="font-size:9px;padding:2px 9px;">🔊 test phrase</button>
+          </div>
+          <div class="oc-sub" style="padding:2px 6px 4px;">Speaks when price reaches a pivot, CPR band, OI wall, 9:20 line or 1σ edge. Which of those announce is set in the card above; this controls the wording and whether they are spoken at all on this browser.</div>
           <div id="alertLevelSlot" style="padding:6px;"></div>
           <div class="oc-sub" style="padding:0 6px 6px;">Fires when price reaches a pivot, CPR, OI wall, 9:20 line or one of your own levels — the same detection the chart uses, so what you hear matches what you see drawn.</div>
         </div>
@@ -14899,16 +14906,58 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
   }
 
+  // ── wording for spoken level touches ──────────────────────────────
+  // Kept configurable because the useful phrase differs by use: "Resistance 1
+  // touched" is enough when you are watching the chart, while the price and
+  // the distance from spot matter when the alert reaches you away from it.
+  const _LVLV_KEY = 'levelVoiceCfg';
+  function _lvlVoiceCfg() {
+    try { return Object.assign({ on: true, price: true, dist: false },
+                               JSON.parse(localStorage.getItem(_LVLV_KEY) || '{}')); }
+    catch (_) { return { on: true, price: true, dist: false }; }
+  }
+  function _lvlVoiceSave(o) { try { localStorage.setItem(_LVLV_KEY, JSON.stringify(o)); } catch (_) {} }
+  function _lvlPhrase(label, price) {
+    const cfg = _lvlVoiceCfg();
+    let t = /^R(\d+)$/.test(label) ? `Resistance ${label.slice(1)}`
+          : /^S(\d+)$/.test(label) ? `Support ${label.slice(1)}`
+          : String(label).replace(/\+1/g, ' plus one').replace(/-1/g, ' minus one');
+    t += ' touched';
+    if (cfg.price) t += ` at ${Math.round(price)}`;
+    if (cfg.dist) {
+      const spot = state.lastData?.underlying_value;
+      if (spot) {
+        const d = Math.round(spot - price);
+        t += `, ${Math.abs(d)} points ${d >= 0 ? 'below' : 'above'} spot`;
+      }
+    }
+    return t;
+  }
+  function _lvlVoiceWire() {
+    const cfg = _lvlVoiceCfg();
+    for (const [id, k] of [['lvlVoiceOn', 'on'], ['lvlVoicePrice', 'price'], ['lvlVoiceDist', 'dist']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.checked = cfg[k] !== false && !(k === 'dist' && cfg.dist === false);
+      if (k === 'dist') el.checked = !!cfg.dist;
+      el.addEventListener('change', () => { const o = _lvlVoiceCfg(); o[k] = el.checked; _lvlVoiceSave(o); });
+    }
+    document.getElementById('lvlVoiceTest')?.addEventListener('click', () => {
+      const spot = state.lastData?.underlying_value || 24500;
+      const phrase = _lvlPhrase('R1', Math.round(spot + 42));
+      if (_canSpeak()) { _flowSpeak(phrase); showToast?.('🔊 ' + phrase); }
+      else showToast?.('🔇 Voice is off or audio is not unlocked on this browser — see Master control');
+    });
+  }
+
   function _speakLevel(label, price) {
     if (!_idxAlAllows(state.symbol)) return;   // this index is muted here
     if (!_csrcAllows(label)) return;          // this source is muted on this browser
     // Route through the server when the stream is live so every system hears
     // it exactly once (the local path below is the standalone fallback).
+    if (!_lvlVoiceCfg().on) return;            // level voice switched off here
     if (_streamLive) {
-      let t = label;
-      if (/^R(\d+)$/.test(label)) t = `Resistance ${label.slice(1)} touched at ${Math.round(price)}`;
-      else if (/^S(\d+)$/.test(label)) t = `Support ${label.slice(1)} touched at ${Math.round(price)}`;
-      else t = `${label} touched at ${Math.round(price)}`;
+      const t = _lvlPhrase(label, price);
       _relayAlert(`level|${state.symbol || 'NIFTY'}|${label}|${Math.round(price)}`, t, 'level', 600);
       return;
     }
@@ -17057,6 +17106,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _alertStatus();
     step(_csrcWire, 'csrcWire');
     step(_emaxWire, 'emaxWire');
+    step(_lvlVoiceWire, 'lvlVoiceWire');
     step(_idxAlWire, 'idxAlWire');
     _visInterval(_alertStatus, 5000, '_alertStatus');
   }
@@ -23855,6 +23905,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'reset-defaults':    '<strong>Reset to recommended defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
+    'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',
     'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
     'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',
