@@ -3122,6 +3122,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <label><input type="checkbox" id="cat_peBuy"> put buying</label>
             <label><input type="checkbox" id="cat_ceSell"> call selling</label>
             <label><input type="checkbox" id="cat_peSell"> put selling</label>
+            <label><input type="checkbox" id="cat_cover"> short covering</label>
+            <label><input type="checkbox" id="cat_unwind"> long unwinding</label>
           </span>
           <label style="font-size:9px;color:var(--muted,#789);">max/tick <input type="number" id="flowMaxTick" class="ohlc-inp" style="width:48px;" step="1" min="1" max="6"></label>
         </div>
@@ -7063,7 +7065,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _computeGex(data) {
     const strikes = data.strikes || [];
     const spot = data.underlying_value, lot = data.lot_size || 50;
-    // dte is now FRACTIONAL (measured to 15:30 IST), so the old 0.25-day floor
+    // dte is now FRACTIONAL (measured to 15:40 (derivatives) IST), so the old 0.25-day floor
     // would freeze Greeks for the last six hours of expiry day. Floor at one
     // minute instead, and scale by TRADING days: volatility accrues on
     // sessions, not on weekends.
@@ -7803,7 +7805,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const now = new Date();
     const ist = new Date(now.getTime() + (5.5 * 3600 + now.getTimezoneOffset() * 60) * 1000);
     const mins = Math.max(15, ist.getHours() * 60 + ist.getMinutes() - (9 * 60 + 15));
-    const dayFrac = Math.min(1, mins / 375);
+    const dayFrac = Math.min(1, mins / 385);
     const park = Math.sqrt(Math.pow(Math.log(so.high / so.low), 2) / (4 * Math.LN2));
     return park / Math.sqrt(dayFrac) * Math.sqrt(252) * 100;   // annualized %
   }
@@ -12010,6 +12012,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           _voiceDiag(d.type + '|' + evSym, `silenced: ${evSym} alerts are off on this browser`);
           return;
         }
+        // Fresh-flow category filter for STREAMED events. The tick boxes only
+        // gated the local detector, which stands down whenever the stream is
+        // live - so unticking a category had no effect in normal use.
+        if (d.type === 'flow' && d.cat) {
+          const fc = _flowCfg();
+          const closing = d.cat === 'unwind' || d.cat === 'cover';
+          if (!_enableAll()) {
+            if (closing && fc.speakUnwind === false) {
+              _voiceDiag('flow|' + d.cat, 'silenced: closing flow is off on this browser');
+              return;
+            }
+            if (fc.cats && fc.cats[d.cat] === false) {
+              _voiceDiag('flow|' + d.cat, `silenced: ${d.cat} is unticked on this browser`);
+              return;
+            }
+          }
+        }
         if (d.type === 'm920' && !_csrcCfg().m920) {
           _voiceDiag('m920', 'silenced: 9:20 source unticked on this browser');
           return;
@@ -12220,6 +12239,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const isFresh = oiUp;
         if (!isFresh && !cfg.speakUnwind) continue;
         // category key so each flow type can be toggled and fairly scheduled
+        // same six categories the server emits, so local and streamed
+        // detection classify identically
         const cat = !oiUp ? (prUp ? 'cover' : 'unwind')
                   : (side === 'CE' ? (prUp ? 'ceBuy' : 'ceSell') : (prUp ? 'peBuy' : 'peSell'));
         if (!_enableAll() && cfg.cats && cfg.cats[cat] === false) continue;
@@ -12270,7 +12291,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _flowWire() {
     const cfg = _flowCfg();
     const ids = { flowOn: 'on', flowOiPct: 'oiPct', flowPremPct: 'premPct', flowWin: 'winSec', flowNear: 'near', flowMinLots: 'minLots', flowUnwind: 'speakUnwind', flowMaxTick: 'maxPerTick' };
-    for (const cat of ['ceBuy', 'peBuy', 'ceSell', 'peSell']) {
+    for (const cat of ['ceBuy', 'peBuy', 'ceSell', 'peSell', 'cover', 'unwind']) {
       const el = document.getElementById('cat_' + cat);
       if (!el) continue;
       el.checked = cfg.cats ? cfg.cats[cat] !== false : true;
@@ -16722,10 +16743,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     _chart._lastMid = (lo + hi) / 2; _chart._lastSpan = hi - lo;
     try { if (typeof _zoomSync === 'function') _zoomSync(); } catch (_) {}
-    // Fixed session grid: the x-axis always spans the full trading day
-    // (09:15-15:30 = 375 minutes), so a candle occupies the same width at
-    // 09:20 as at 15:20 and the chart stops re-scaling every new bar.
-    const SESSION_MIN = 375;
+    // Fixed session grid spanning the full DERIVATIVES trading day.
+    // Under SEBI's Closing Auction Session (from 3 Aug 2026) equity
+    // derivatives trade until 15:40, ten minutes past the old cash close, so
+    // the grid is 385 minutes. A 375-minute grid silently dropped the last
+    // ten minutes of options trading - a window where price discovery is
+    // unusually active because the CAS-derived underlying close is landing.
+    const SESSION_MIN = 385;
     const slots = Math.max(1, Math.ceil(SESSION_MIN / _chart.interval));
     // slot index of a candle from its own timestamp (IST minutes since 09:15)
     const slotOf = t => {
@@ -16741,7 +16765,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // says plainly that nothing was recorded.
     let gapSvg = '';
     if ((_chart.gaps || []).length && cs.length) {
-      const SESS = 375;
+      const SESS = 385;
       const nSlots = Math.max(1, Math.ceil(SESS / _chart.interval));
       const slotOfTs = t => {
         const g2 = new Date((t + 5.5 * 3600) * 1000);
@@ -16821,6 +16845,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const dayStart = cs.length ? (() => { const g = new Date((cs[0].t + 5.5 * 3600) * 1000);
       const m = g.getUTCHours() * 60 + g.getUTCMinutes();
       return cs[0].t - (m - (9 * 60 + 15)) * 60; })() : 0;
+    // CAS cash cutoff: F&O-eligible stocks stop continuous trading at 15:15
+    // and enter the auction, so the index underlying is being priced by
+    // auction from here while index options continue to 15:40.
+    {
+      const casM = (15 * 60 + 15) - (9 * 60 + 15);
+      const cx = padL + (casM / _chart.interval + 0.5) / slots * (W - padL - padR);
+      if (cx < W - padR) {
+        axis += `<line x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${(H - padB).toFixed(1)}" stroke="rgba(212,175,55,0.35)" stroke-width="1" stroke-dasharray="5,4"><title>15:15 — F&amp;O cash stocks enter the closing auction; index options trade on to 15:40</title></line>`;
+        axis += `<text x="${(cx + 3).toFixed(1)}" y="${(padT + 9).toFixed(1)}" style="font-size:8px;fill:rgba(212,175,55,0.75);">CAS</text>`;
+      }
+    }
     for (let m = 0; m <= SESSION_MIN; m += 30) {
       const sx = padL + (m / _chart.interval + 0.5) / slots * (W - padL - padR);
       if (sx > W - padR) break;
@@ -17335,6 +17370,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     for (const id of ['csrc_m920', 'csrc_walls', 'csrc_cpr',
                       'csrc_maxpain', 'csrc_cone', 'csrc_pivots',
                       'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell',
+                      'cat_cover', 'cat_unwind',
                       'emaxOn', 'emax_5x20', 'emax_9x21', 'emax_20x50', 'emax_50x200']) {
       const el = document.getElementById(id);
       if (!el) continue;
@@ -17428,6 +17464,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'indexAlertFilter',    // which indices announce
     'alertsEnableAll',     // the master enable-all switch
     'emaCrossCfg',         // EMA crossover pairs and filters
+    'levelVoiceCfg',       // spoken wording for level touches
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
     'customAlerts',        // user-defined rules
     'customAlertsFired',
@@ -20629,7 +20666,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   });
 
   // ====================================================================
-  // EXPIRY COUNTDOWN TIMER — live clock to 15:30 IST on expiry day.
+  // EXPIRY COUNTDOWN TIMER — live clock to 15:40 (derivatives) IST on expiry day.
   // NSE weekly options expire at 15:30 IST (3:30 PM) on the expiry date.
   // We compute from the `data.expiry` string (format "23-Jun-2026") that
   // the server already returns, so no additional data source is needed.
@@ -24049,6 +24086,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'alert-volume':   '<strong>Alert Volume</strong>Sets loudness for spoken alerts and touch sounds on THIS browser. <b>Worth knowing:</b> at zero the speech engine still runs but you hear nothing, which looks identical to a broken alert - so if a machine has gone quiet, check this slider before anything else. Volume is per browser and does not travel in backups, so each computer needs setting once. The 🔈 enable audio button next to it is separate and more important: browsers block speech entirely until a page receives a click, and that block is silent.',
     'yahoo-backfill':    '<strong>Yahoo Finance backfill</strong>When NSE\'s own intraday feed is unavailable and your archive has holes - typically because the server was started or restarted mid-session - the chart can fill the missing minutes from Yahoo Finance. It needs no account and no cookie warm-up, which is precisely why it works when NSE does not. <b>It never overwrites NSE data:</b> Yahoo points are dropped for any minute already held locally, so it fills gaps rather than replacing authoritative prices, and it is only consulted when real holes exist. <b>Know what you are looking at:</b> Yahoo is a derived, slightly delayed feed, so those prices will not match NSE tick for tick. The shape of the morning will be right; a level computed to the point from Yahoo minutes will not be. The chart footer shows a gold "partly Yahoo-filled" flag whenever any of it came from there, and the source string names the count. Disable it with NSE_YAHOO_BACKFILL=false in .env if you would rather see an honest gap than an approximate fill.',
     'candle-health':     '<strong>Candle completeness</strong>Shows minutes recorded against minutes elapsed in the session, so a hole is visible immediately rather than only when you happen to scroll to it. A green tick means the session is fully recorded; a gold warning means minutes are missing or provisional. <b>Provisional</b> counts minutes filled from Yahoo Finance because NSE data was unavailable at the time - those prices are close but not authoritative. <b>The server re-checks every five minutes</b> while the market is open: it fills any new holes from NSE\'s full-day feed, and upgrades provisional minutes to real NSE prices once that feed recovers, so a temporary outage does not permanently degrade the day. It goes quiet once the session is complete from authoritative sources, so a clean day costs nothing. This matters beyond the chart: the tick archive it maintains is what the GEX heatmap, OI Build Map, PCR curve and Claims-on-Trial all read, so a gap left unrepaired today quietly weakens every historical panel for as long as the file exists.',
+    'cas-window':        '<strong>CAS and the 15:15-15:40 window</strong>From 3 August 2026 SEBI\'s Closing Auction Session changed the end of the trading day. F&amp;O-eligible CASH stocks stop continuous trading at <b>15:15</b> and enter a 20-minute auction that sets their closing price; the Nifty close is then derived from those auction equilibrium prices, which is why 3 August saw a roughly 200-point move in the final minutes. <b>Index options are not in the auction</b> - they trade continuously until <b>15:40</b>, ten minutes past the old close. The dashboard now runs to 15:40 throughout: candles, OI flow, alerts and every archive the historical panels read. Before this fix the session was cut at 15:30, silently discarding the last ten minutes of options trading during a window where price discovery is unusually active. The gold dashed CAS line on the chart marks 15:15, so you can see where the underlying stopped trading continuously while the options you hold kept going. Practical consequence: the underlying is being priced by auction in that window, so spot can move sharply on the close without matching option flow, and levels derived from the underlying should be treated with more caution there than during continuous trade.',
     'chart-fill':        '<strong>Fill from 9:15</strong>Re-pulls the whole trading session and redraws the chart from the open. It merges three sources and de-duplicates them to one sample per minute: NSE\'s own intraday series (which carries the full day regardless of when your server started), the replay archive your server records each minute, and the on-disk tick archive that survives restarts. <b>Why you need it:</b> a server started at 10:30 has no replay data for the morning, so the chart begins at 10:30 and every level derived from the session - the day range, the developing high and low - is computed from a partial picture. This recovers the morning without restarting anything. If the footer shows the chart starting later than 09:15, a gold prompt appears there offering the same action. Pre-open auction prices (09:00-09:15) are always excluded, since those quotes are indicative and not tradable.',
     'option-chart':      '<strong>Charting a CE or PE contract</strong>Switch the chart from the index to a single option contract. Candles are rebuilt from the replay archive - which stores the whole chain every minute - so this costs no extra NSE traffic, and it covers only the part of the session your server has recorded. <b>The levels change with the mode,</b> because index levels are meaningless in premium space: a chart of the 24,600 call shows day open, day high and low, plus the <b>intrinsic value</b> line - the floor the premium cannot fall below at expiry, so the gap between price and that line is the time value you are paying or collecting. <b>Below the candles sits the strike\'s open-interest trace,</b> and read together they give the classic four-way signal: premium up with OI up is fresh buying, premium down with OI up is fresh writing, premium down with OI down is long unwinding, premium up with OI down is short covering - the same classification the flow alerts announce, seen rather than heard.',
     'price-chart':       '<strong>Live Chart &amp; Levels</strong>Intraday candles for the loaded index with every option-derived level drawn on top. Candles come from NSE\'s intraday feed when the session is warm, otherwise they are rebuilt from your replay archive (1 spot sample per minute) — the footer names the source. Interval 1/3/5/15m, refreshed once a minute; levels redraw on every chain update. Toggles: <b>9:20 lines</b> (see below), <b>OI walls</b> (heaviest call/put OI), <b>CPR</b>, <b>max pain</b>, <b>±1σ</b> IV cone, and <b>pivots</b> (from the Pivot Levels panel\'s active type). <br><br><b>About the 9:20 lines:</b> these are MY transparent formula, not a reverse-engineered copy of any vendor\'s proprietary levels. At 09:20 the 9:20 spot and ATM IV are frozen for the day, one session of volatility is computed as sigma = spot × IV × sqrt(1/365), and four fixed lines are drawn: EOR/EOS at ±0.5 sigma (inner, aggressive) and EOR+1/EOS-1 at ±1.0 sigma (outer, conservative). They do not move for the rest of the session, which is the whole point — a fixed frame beats a moving one for discipline. Whether they hold is an open question: log trades against them in the journal and let the data answer.',

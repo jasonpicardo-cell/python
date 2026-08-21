@@ -221,6 +221,34 @@ import os as _os
 # a variable already exported in the shell wins over the file, and command
 # line flags win over both.
 # ══════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════
+# SESSION BOUNDS — updated for the Closing Auction Session (CAS)
+#
+# From 3 August 2026, SEBI's CAS changed the end of the trading day:
+#   * continuous trading in F&O-eligible CASH stocks ends 15:15, then those
+#     stocks go into a 20-minute auction that sets their closing price
+#   * EQUITY DERIVATIVES keep trading until 15:40 - ten minutes past the old
+#     close - so index options are live after the cash market has stopped
+#   * the Nifty close is now derived from CAS equilibrium prices, which is why
+#     3 August saw a ~200-point move in the final minutes
+#
+# Index options themselves are NOT in the auction; they trade continuously to
+# 15:40. So a dashboard that stops at 15:30 silently drops the last ten
+# minutes of options trading from candles, OI flow, alerts and every archive
+# the historical panels read - during a window where price discovery is
+# unusually active because the underlying close is landing.
+# ══════════════════════════════════════════════════════════════════════
+SESSION_OPEN_MIN = 9 * 60 + 15         # 09:15 IST
+SESSION_END_MIN = int(_os.environ.get("NSE_SESSION_END_MIN", 15 * 60 + 40))   # 15:40
+CAS_CASH_CUTOFF_MIN = 15 * 60 + 15     # F&O cash stocks stop continuous trade
+SESSION_LEN_MIN = SESSION_END_MIN - SESSION_OPEN_MIN                          # 385
+
+
+def _in_session(mins: int) -> bool:
+    """True for a minute inside the derivatives trading day (09:15-15:40)."""
+    return SESSION_OPEN_MIN <= mins < SESSION_END_MIN
+
+
 def _envbool_g(name: str, default: bool) -> bool:
     v = _os.environ.get(name)
     return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
@@ -296,6 +324,10 @@ RUN_ALERT_NEAR_PCT = 1.5   # only strikes within this % of spot. Nifty moves
                            # strikes whose small OI base trips the % gate cheaply
 RUN_ALERT_WINDOW = 90.0    # seconds between the two compared snapshots
 RUN_ALERT_COOLDOWN = 300.0 # per strike+side, seconds before it can fire again
+RUN_ALERT_CLOSING = True   # also announce unwinding and short covering, not
+                           # just freshly-opened positions. Closing flow at a
+                           # level price is approaching is often the earlier
+                           # signal - a wall being abandoned precedes the break.
 RUN_ALERT_MIN_OI = 4000    # absolute contract floor, to reject THIN strikes
                            # only. A 3% move on a 150k-OI strike is just 4,500
                            # contracts, so a floor above ~9,000 cancels the
@@ -330,6 +362,9 @@ ALERT_CFG = {
     # ceiling on EXTRA same-category events; distinct categories always pass
     "max_per_cycle": int(_os.environ.get("NSE_ALERT_MAX", RUN_ALERT_MAX)),
     "min_oi": float(_os.environ.get("NSE_ALERT_MIN_OI", RUN_ALERT_MIN_OI)),
+    # emit closing flow (unwinding / short covering) as well as fresh positions
+    "closing_flow": _os.environ.get("NSE_ALERT_CLOSING", str(RUN_ALERT_CLOSING)).strip().lower()
+                    in ("1", "true", "yes", "on"),
 }
 
 _sse_seq = itertools.count(1)
@@ -479,12 +514,32 @@ def _flow_detect(symbol: str, data: dict):
                     continue
                 if abs(oi_now - oi_old) < ALERT_CFG.get("min_oi", 0):
                     continue          # too few contracts to be worth saying
-                if oi_pct <= 0:
-                    continue                      # fresh positions only
+                # Four flow types, not two. OI RISING is a new position being
+                # opened; OI FALLING is an existing one being closed, and that
+                # is the other half of the story - a wall being unwound as
+                # price approaches it is often more actionable than fresh
+                # writing somewhere far away. The client could ask for these
+                # ("also unwinding/covering") but the server never sent them,
+                # so the setting did nothing whenever the stream was live.
                 buying = pr_pct > 0
-                kind = f"fresh {'call' if side == 'CE' else 'put'} {'buying' if buying else 'selling'}"
-                bias = ("bullish" if buying else "bearish") if side == "CE" else ("bearish" if buying else "bullish")
-                cat = ("ce" if side == "CE" else "pe") + ("Buy" if buying else "Sell")
+                opening = oi_pct > 0
+                if opening:
+                    kind = f"fresh {'call' if side == 'CE' else 'put'} {'buying' if buying else 'selling'}"
+                    bias = ("bullish" if buying else "bearish") if side == "CE" else ("bearish" if buying else "bullish")
+                    cat = ("ce" if side == "CE" else "pe") + ("Buy" if buying else "Sell")
+                else:
+                    # premium up while OI falls = shorts buying back (covering)
+                    # premium down while OI falls = longs giving up (unwinding)
+                    covering = buying
+                    side_word = "call" if side == "CE" else "put"
+                    kind = f"{side_word} {'short covering' if covering else 'long unwinding'}"
+                    if side == "CE":
+                        bias = "bullish" if covering else "bearish"
+                    else:
+                        bias = "bearish" if covering else "bullish"
+                    cat = "cover" if covering else "unwind"
+                if cat in ("cover", "unwind") and not ALERT_CFG.get("closing_flow", True):
+                    continue
                 fk = f"{symbol}|{k}|{side}"
                 if now - _flow_fired.get(fk, 0) < ALERT_CFG["cooldown"]:
                     continue
@@ -720,7 +775,7 @@ def _yahoo_intraday(symbol: str, interval_min: int = 1) -> list:
             if g.tm_yday != today_yday:
                 continue
             mins = g.tm_hour * 60 + g.tm_min
-            if not (555 <= mins < 930):
+            if not (_in_session(mins)):
                 continue
             out.append((float(ts), float(px)))
         if out:
@@ -755,8 +810,8 @@ _recon_state: dict = {"last": 0.0, "runs": 0, "filled": 0, "upgraded": 0,
 
 
 def _session_minutes(day: str = None) -> tuple:
-    """(first, last) IST session minute indices for a given day."""
-    return (9 * 60 + 15, 15 * 60 + 30)
+    """(first, last) IST session minute indices - now 09:15-15:40 under CAS."""
+    return (SESSION_OPEN_MIN, SESSION_END_MIN)
 
 
 def _ist_min_of(ts: float) -> int:
@@ -840,7 +895,7 @@ def _nse_full_day(symbol: str) -> dict:
                 if g.tm_yday != today_yday:
                     continue
                 mn = g.tm_hour * 60 + g.tm_min
-                if not (555 <= mn < 930):
+                if not (_in_session(mn)):
                     continue
                 out[int(ts // 60)] = px
             if out:
@@ -926,7 +981,7 @@ def _reconcile_loop(interval: float, symbols):
         if _poller_stop.is_set():
             break
         mn = _ist_min_of(time.time())
-        if not (9 * 60 + 20 <= mn <= 15 * 60 + 40):
+        if not (SESSION_OPEN_MIN + 5 <= mn <= SESSION_END_MIN + 10):
             continue                       # only during and just after the session
         for sym in symbols:
             try:
@@ -3894,7 +3949,7 @@ class Handler(BaseHTTPRequestHandler):
                                 mins = g.tm_hour * 60 + g.tm_min
                                 if g.tm_yday != time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday:
                                     continue
-                                if not (555 <= mins < 930):
+                                if not (_in_session(mins)):
                                     continue
                                 ticks.append((ts, px))
                                 got += 1
@@ -4010,7 +4065,7 @@ class Handler(BaseHTTPRequestHandler):
                 # IST = UTC+5:30, computed without relying on the host timezone
                 ist = time.gmtime(ts + 5 * 3600 + 1800)
                 return ist.tm_hour * 60 + ist.tm_min, ist.tm_sec, ist.tm_wday
-            MKT_OPEN, MKT_CLOSE = 9 * 60 + 15, 15 * 60 + 30
+            MKT_OPEN, MKT_CLOSE = SESSION_OPEN_MIN, SESSION_END_MIN
             before = len(ticks)
             ticks = [(ts, px) for (ts, px) in ticks
                      if MKT_OPEN <= _ist_parts(ts)[0] < MKT_CLOSE]
@@ -4527,8 +4582,8 @@ class Handler(BaseHTTPRequestHandler):
                 def _ist_min(t):
                     g = time.gmtime(t + 5 * 3600 + 1800)
                     return g.tm_hour * 60 + g.tm_min
-                ticks = [(t, v) for t, v in ticks if 555 <= _ist_min(t) < 930]
-                ois = [(t, v) for t, v in ois if 555 <= _ist_min(t) < 930]
+                ticks = [(t, v) for t, v in ticks if _in_session(_ist_min(t))]
+                ois = [(t, v) for t, v in ois if _in_session(_ist_min(t))]
                 out, cur = [], None
                 for ts, px in sorted(ticks):
                     b = int(ts // (interval * 60)) * (interval * 60)
@@ -4608,7 +4663,7 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     g = time.gmtime(ts + 5 * 3600 + 1800)
                     mins = g.tm_hour * 60 + g.tm_min
-                    if not (555 <= mins < 930):
+                    if not (_in_session(mins)):
                         continue
                     bucket = int(ts // (step * 60)) * (step * 60)
                     if bucket == last_bucket:
@@ -4695,7 +4750,7 @@ class Handler(BaseHTTPRequestHandler):
                     # regular session only (IST), same rule as the candles
                     g = time.gmtime(ts + 5 * 3600 + 1800)
                     mins = g.tm_hour * 60 + g.tm_min
-                    if not (555 <= mins < 930):
+                    if not (_in_session(mins)):
                         continue
                     bucket = int(ts // (step * 60)) * (step * 60)
                     if bucket == last_bucket:
