@@ -1860,6 +1860,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                     <option value="2">2s</option><option value="5">5s</option>
                     <option value="10">10s</option><option value="30">30s</option><option value="60">60s</option>
                   </select></label>
+                <button class="btn" id="chartFillBtn" style="font-size:9px;padding:1px 8px;margin-left:4px;" title="Re-pull the whole session from 09:15 — merges NSE's own intraday feed with the replay archive and the tick archive. Use it when the server was started after the open.">⤢ fill from 9:15</button>
+                <button class="btn" id="chartDiagBtn" style="font-size:9px;padding:1px 8px;margin-left:2px;" title="Why is the chart not filling? Tests every backfill source and reports which one is failing.">🩺</button>
                 <button class="btn" id="chartMaxBtn" style="font-size:11px;padding:0 7px;line-height:16px;margin-left:4px;" title="Maximise chart to full page (Esc to exit)">&#9974;</button>
                 <button class="btn" id="panUpBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view up">&#9650;</button>
                 <button class="btn" id="panDnBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view down">&#9660;</button>
@@ -6175,7 +6177,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   function _getDeltaAdjOi(s, dte, spot) {
     if (!s.ce_iv || !dte || !spot) return { ce: s.ce_oi||0, pe: s.pe_oi||0 };
-    const T  = Math.max(0.5, dte) / 365;
+    const T  = _volT( dte);
     const v  = s.ce_iv / 100, r = 0.065;
     const d1 = (Math.log(spot / s.strike) + (r + 0.5*v*v)*T) / (v * Math.sqrt(T));
     const ceDelta = _ncdf(d1);
@@ -7061,8 +7063,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _computeGex(data) {
     const strikes = data.strikes || [];
     const spot = data.underlying_value, lot = data.lot_size || 50;
-    const dte = Math.max(0.25, data.dte ?? 1);            // avoid T=0 blowup on expiry day
-    const T = dte / 365;
+    // dte is now FRACTIONAL (measured to 15:30 IST), so the old 0.25-day floor
+    // would freeze Greeks for the last six hours of expiry day. Floor at one
+    // minute instead, and scale by TRADING days: volatility accrues on
+    // sessions, not on weekends.
+    const dte = Math.max(1 / 1440, data.dte ?? 1);
+    const T = _volT(dte);
     if (!strikes.length || !spot) return null;
     const rows = [];
     for (const s of strikes) {
@@ -7214,7 +7220,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _findStrikeByDelta(targetAbs, side) {
     const data = state.lastData;
     if (!data?.strikes?.length) return null;
-    const spot = data.underlying_value, T = Math.max(0.25, data.dte ?? 1) / 365;
+    const spot = data.underlying_value, T = _volT( data.dte ?? 1);
     let best = null, bestDiff = Infinity;
     for (const s of data.strikes) {
       const iv = (side === 'CE' ? s.ce_iv : s.pe_iv) / 100;
@@ -11913,6 +11919,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   _tabPing();
   _visInterval(_tabPing, 20000, '_tabPing');
+  _visInterval(_fetchCandleHealth, 60000, 'candleHealth');
+  setTimeout(_fetchCandleHealth, 2500);
 
   // ══ ALERT STREAM: the server detects alerts and tells us whether to speak ══
   // One open EventSource per tab. The server uses these connections as its
@@ -13715,7 +13723,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   function computeExpectedValue(legs, spot, lotSize, atmIv, dteNear, expiryDteMap) {
     if (!legs.length || !atmIv || dteNear < 0) return null;
-    const T = Math.max(0.5, dteNear) / 365;
+    const T = _volT( dteNear);
     const sigma = (atmIv / 100) * Math.sqrt(T);
     if (sigma <= 0) return null;
     // integrate over ±4σ in log space, 160 steps
@@ -16512,6 +16520,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return true;
   }
 
+  // ── candle completeness indicator ─────────────────────────────────
+  // Shows how much of the session is actually recorded and how much of it is
+  // provisional (Yahoo-filled). Without this, a hole is invisible until you
+  // happen to look at the right part of the chart.
+  let _candleHealth = null;
+  async function _fetchCandleHealth() {
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/candle-health`, { signal: AbortSignal.timeout(5000) })).json();
+      _candleHealth = j?.symbols?.[state.symbol || 'NIFTY'] || null;
+    } catch (_) { _candleHealth = null; }
+  }
+
   function _chartMode() { return document.getElementById('chartInstrument')?.value || 'index'; }
   function _chartStrikeSel() { return +(document.getElementById('chartStrike')?.value || 0); }
   function _populateStrikeList() {
@@ -16543,6 +16564,86 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (e) { if (box) box.innerHTML = `<div class="movers-loading">Failed: ${escapeHtml(e.message)}</div>`; }
   }
 
+  // ── full-session backfill ─────────────────────────────────────────
+  // A server started at 10:30 has no replay data for the morning, but NSE's
+  // own intraday series still carries the whole day. This forces the endpoint
+  // to re-warm a session and re-pull it, merging with whatever the archive
+  // holds, so the chart fills back to 09:15 without restarting anything.
+  // ── backfill diagnostics ──────────────────────────────────────────
+  // Rather than guessing why a fill produced nothing, ask the server to test
+  // each source in turn and report which stage failed and with what error.
+  async function _chartDiagnose() {
+    const box = document.getElementById('chartBody');
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/candles-debug?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`)).json();
+      const rows = (j.checks || []).map(c =>
+        `<div style="display:flex;gap:8px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10px;">
+          <b style="color:${c.ok ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};min-width:44px;">${c.ok ? 'OK' : 'FAIL'}</b>
+          <b style="min-width:118px;">${escapeHtml(c.source)}</b>
+          <span style="color:var(--muted);flex:1;word-break:break-word;">${escapeHtml(c.detail)}</span>
+        </div>`).join('');
+      const first = (j.checks || []).find(c => !c.ok);
+      const hint = !first ? ''
+        : first.source === 'shared_session'
+          ? 'Load an option chain first — every NSE call reuses that session, and without it nothing can reach NSE.'
+        : first.source === 'nse_chart_feed'
+          ? 'NSE\'s intraday feed is refusing this server. Yahoo backfill is the fallback; if that is also failing, the morning cannot be recovered today.'
+        : first.source === 'yahoo'
+          ? 'Yahoo returned nothing — check the server console for a [yahoo] line naming the exact error, and confirm NSE_YAHOO_BACKFILL is not set to false.'
+          : 'See the detail above.';
+      box.innerHTML = `<div style="padding:6px;">
+          <div style="font-size:11px;font-weight:700;margin-bottom:4px;">🩺 Backfill diagnosis — ${escapeHtml(j.verdict || '')}</div>
+          ${rows}
+          ${hint ? `<div style="font-size:10px;color:var(--gold,#d4af37);padding:5px 4px;">→ ${hint}</div>` : ''}
+          <button class="btn" id="chartDiagBack" style="font-size:9px;padding:2px 10px;margin-top:4px;">← back to chart</button>
+        </div>`;
+      document.getElementById('chartDiagBack')?.addEventListener('click', () => renderPriceChart());
+    } catch (e) {
+      showToast?.(`Diagnosis failed: ${e.message}`);
+    }
+  }
+
+  async function _chartFillSession() {
+    const prevCount = (_chart.candles || []).length;
+    const btn = document.getElementById('chartFillBtn');
+    const box = document.getElementById('chartBody');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ filling…'; }
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const url = `${base}/api/intraday-candles?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}` +
+                  `&interval=${_chart.interval}&force=1`;
+      const j = await (await fetch(url)).json();
+      if (j.error || !j.candles?.length) {
+        showToast?.(`⚠ ${j.error || 'no candles returned'}`);
+        return;
+      }
+      _chart.candles = j.candles;
+      _chart.src = j.source;
+      _chart.coverage = j.coverage || null;
+      _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
+      _chart.optionMeta = null;
+      _chart.yZoom = 1; _chart.yCenter = null;      // refit to the fuller range
+      renderPriceChart();
+      const first = j.coverage ? j.coverage.split('-')[0] : '?';
+      const before = prevCount;
+      const gm = j.gap_mins || 0;
+      if (j.candles.length <= before && first !== '09:15') {
+        showToast?.(`No new data — the fill returned the same ${j.candles.length} candles. Press 🩺 to see which source is failing.`);
+      }
+      showToast?.(first === '09:15' && !gm
+        ? `✅ Full session filled — ${j.candles.length} candles (${j.source})`
+        : first === '09:15'
+        ? `✅ Filled from 09:15 — ${j.candles.length} candles, ${gm} min still missing (shaded on the chart)`
+        : `Filled from ${first} — ${j.candles.length} candles. NSE's chart feed returned nothing earlier, so the morning cannot be recovered; the archive begins when the server first ran today.`);
+      try { _emaCrossCheck(); } catch (_) {}
+    } catch (e) {
+      showToast?.(`⚠ Backfill failed: ${e.message}`);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '⤢ fill from 9:15'; }
+    }
+  }
+
   async function fetchCandles(silent) {
     const box = document.getElementById('chartBody');
     if (!box) return;
@@ -16555,6 +16656,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const j = await r.json();
       if (j.error) { box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error)}</div>`; _chart.candles = []; return; }
       _chart.candles = j.candles || []; _chart.src = j.source; _chart.coverage = j.coverage || null;
+      _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
       try { _emaCrossCheck(); } catch (_) {}
       renderPriceChart();
     } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
@@ -16633,13 +16735,37 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     };
     const x = i => padL + (slotOf(cs[i].t) + 0.5) / slots * (W - padL - padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+    // ── shade recording gaps ─────────────────────────────────────────
+    // A mid-session restart leaves minutes with no data. Drawing candles
+    // straight across the hole would imply price traded there; a shaded band
+    // says plainly that nothing was recorded.
+    let gapSvg = '';
+    if ((_chart.gaps || []).length && cs.length) {
+      const SESS = 375;
+      const nSlots = Math.max(1, Math.ceil(SESS / _chart.interval));
+      const slotOfTs = t => {
+        const g2 = new Date((t + 5.5 * 3600) * 1000);
+        const m = g2.getUTCHours() * 60 + g2.getUTCMinutes() - (9 * 60 + 15);
+        return Math.max(0, Math.min(nSlots - 1, Math.floor(m / _chart.interval)));
+      };
+      for (const g of _chart.gaps) {
+        const x1 = padL + slotOfTs(g.from) / nSlots * (W - padL - padR);
+        const x2 = padL + (slotOfTs(g.to) + 1) / nSlots * (W - padL - padR);
+        if (x2 - x1 < 1) continue;
+        gapSvg += `<rect x="${x1.toFixed(1)}" y="${padT}" width="${(x2 - x1).toFixed(1)}" height="${(H - padT - padB).toFixed(1)}" fill="rgba(255,255,255,0.05)"/>
+          <line x1="${x1.toFixed(1)}" y1="${padT}" x2="${x1.toFixed(1)}" y2="${(H - padB).toFixed(1)}" stroke="rgba(255,255,255,0.18)" stroke-dasharray="3,3"/>
+          <line x1="${x2.toFixed(1)}" y1="${padT}" x2="${x2.toFixed(1)}" y2="${(H - padB).toFixed(1)}" stroke="rgba(255,255,255,0.18)" stroke-dasharray="3,3"/>
+          <title>${g.mins} minutes not recorded (server restart or downtime)</title>`;
+      }
+    }
+
     // TradingView candle geometry: body width ~80% of slot with a 1px gap,
     // wick centred and scaled to the body width (never wider than 25% of it,
     // min 1px), body outlined in its own colour so doji bars stay visible.
     const slotPx = (W - padL - padR) / slots;
     const cw = Math.max(1, Math.min(24, Math.floor(slotPx * 0.8)));
     const wickW = Math.max(1, Math.min(3, Math.round(cw * 0.3)));
-    let svg = '';
+    let svg = gapSvg;
     cs.forEach((c, i) => {
       // colour by body; for a flat body fall back to change vs the previous close
       const prevC = i > 0 ? cs[i - 1].c : c.o;
@@ -16759,14 +16885,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       })() : ''}
       <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);padding:3px 4px;">
         <span>${_chart.optionMeta ? `<b>${fmtInt(_chart.optionMeta.strike)} ${_chart.optionMeta.side}</b> · ` : ''}${cs.length} × ${_chart.interval}m candles</span>
+        ${(() => {
+          const h = _candleHealth;
+          if (!h || !h.expected) return '';
+          const pct = Math.round((h.minutes / h.expected) * 100);
+          const full = h.minutes >= h.expected;
+          return `<span style="color:${full ? 'var(--pos,#26a69a)' : 'var(--gold,#d4af37)'};" title="Minutes recorded versus minutes elapsed in the session. The reconciler re-checks every 5 minutes, fills holes from NSE, and upgrades any Yahoo-filled minute to NSE data once the authoritative feed recovers.">${full ? '✓' : '⚠'} ${h.minutes}/${h.expected} min${h.provisional ? ` · ${h.provisional} provisional` : ''}</span>`;
+        })()}
+        ${_chart.gapMins ? `<span style="color:var(--gold,#d4af37);" title="Shaded bands mark minutes with no recorded data — the server was not running then. NSE's own feed fills these when reachable; press ⤢ fill from 9:15 to retry.">⚠ ${_chart.gapMins} min not recorded</span>` : ''}
+        ${!_chart.optionMeta && _chart.coverage && !/^09:1[0-9]/.test(_chart.coverage) ? `<span style="color:var(--gold,#d4af37);cursor:pointer;" id="chartFillHint" title="The chart does not reach back to the open — click to pull the morning from NSE's own feed">⤢ starts ${escapeHtml(_chart.coverage.split('-')[0])} — fill from 9:15</span>` : ''}
         <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
-        <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
+        <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts, yahoo = Yahoo Finance backfill used only where the others left gaps">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
+        ${/yahoo\(/.test(_chart.src || '') ? `<span style="color:var(--gold,#d4af37);" title="Part of this chart was filled from Yahoo Finance because NSE data was unavailable for those minutes. Yahoo is a derived feed: the shape is right, but prices will not match NSE tick for tick, so treat levels drawn from those minutes with that in mind.">⚠ partly Yahoo-filled</span>` : ''}
         ${_chart.coverage ? `<span title="Time span covered by the merged data">covers <b>${escapeHtml(_chart.coverage)}</b></span>` : ''}
         <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
         ${_chart.show.vwap ? '<span title="Index feeds carry no traded volume">VWAP = tick-weighted (no index volume published)</span>' : ''}
         ${m ? `<span>9:20 lines frozen at ${escapeHtml(m.frozenAt)} (spot ${fmtInt(Math.round(m.spot920))}, σ ${Math.round(m.sigma)} pts @ ${m.iv.toFixed(1)}% IV)</span>` : '<span>9:20 lines: waiting for 09:20</span>'}
       </div>
       <div id="chartHover" style="font-size:10px;color:#cdd;padding:2px 4px;min-height:14px;"></div>`;
+    document.getElementById('chartFillHint')?.addEventListener('click', () => _chartFillSession());
     document.getElementById('zoomReset')?.addEventListener('click', ev => {
       ev.preventDefault(); _chart.yZoom = 1; _chart.yCenter = null; renderPriceChart();
     });
@@ -17438,6 +17575,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (ev.key === 'Escape' && _chart.maxed) { ev.preventDefault(); _chartSetMax(false); }
     });
 
+    document.getElementById('chartFillBtn')?.addEventListener('click', _chartFillSession);
+    document.getElementById('chartDiagBtn')?.addEventListener('click', _chartDiagnose);
     const ci = document.getElementById('chartInstrument');
     ci?.addEventListener('change', () => {
       const opt = ci.value !== 'index';
@@ -17768,7 +17907,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // (long calls, short puts) - an assumption about who holds what.
   function _exposureSuite(d) {
     const st = d?.strikes || [], spot = d?.underlying_value, lot = d?.lot_size || 75;
-    const T = Math.max(0.25, d?.dte ?? 1) / 365;
+    const T = _volT( d?.dte ?? 1);
     if (!st.length || !spot) return null;
     let dex = 0, vex = 0, gex = 0;
     const rows = [];
@@ -18511,6 +18650,20 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return optionType==='CE' ? Math.max(S-strike,0) : Math.max(strike-S,0);
   }
   function bsNormPdf(x) { return Math.exp(-x*x/2) / Math.sqrt(2*Math.PI); }
+  // Single risk-free rate for every Greek on the dashboard. It was 0.07 in
+  // some panels and 0.10 in others, which made two views disagree about the
+  // same position. The exact figure matters far less than consistency at
+  // intraday horizons - a 3-point rate difference moves ATM delta by ~0.01.
+  const RISK_FREE = 0.07;
+
+  // Time in years for volatility scaling. Volatility accrues on TRADING days:
+  // a Friday-to-Tuesday weekly spans 4 calendar days but only ~3 sessions, and
+  // pricing it on 365 overstates the expected-move band by roughly 11%.
+  // 252/365 is the standard approximation; exact enough without a holiday file.
+  function _volT(calDays) {
+    return Math.max(1 / 1440, calDays) * (252 / 365) / 252;
+  }
+
   function bsGreeks(S,K,T,sigma,r,optionType) {
     const [d1,d2] = bsD1D2(S,K,T,sigma,r);
     if (d1===null) {
@@ -23894,6 +24047,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'voice-alert':    '<strong>Voice Alerts</strong>Speaks level touches, fresh option flow and 9:20 line hits aloud. <b>Across multiple computers,</b> the server now detects alerts and streams them, electing one tab per machine to speak - so several screens never talk over each other while every computer still announces once. The 🔊 mode selector controls this: every tab, follow-me (the focused window speaks), or one browser across all PCs. <b>If a machine is silent,</b> press 🔈 enable audio there once - browsers block speech until a page is clicked, with no error - then use 🩺 systems to see each machine\'s readiness.',
     'alert-sound':    '<strong>Alert Sound</strong><b>Tone</b> — single sine wave, sharp attack.<br><b>Chime</b> — three sine oscillators at bell-like partial ratios (sounds like a chime).<br><b>Ping</b> — triangle wave with downward pitch sweep.<br>Higher pitch = resistance touched. Lower pitch = support touched.',
     'alert-volume':   '<strong>Alert Volume</strong>Sets loudness for spoken alerts and touch sounds on THIS browser. <b>Worth knowing:</b> at zero the speech engine still runs but you hear nothing, which looks identical to a broken alert - so if a machine has gone quiet, check this slider before anything else. Volume is per browser and does not travel in backups, so each computer needs setting once. The 🔈 enable audio button next to it is separate and more important: browsers block speech entirely until a page receives a click, and that block is silent.',
+    'yahoo-backfill':    '<strong>Yahoo Finance backfill</strong>When NSE\'s own intraday feed is unavailable and your archive has holes - typically because the server was started or restarted mid-session - the chart can fill the missing minutes from Yahoo Finance. It needs no account and no cookie warm-up, which is precisely why it works when NSE does not. <b>It never overwrites NSE data:</b> Yahoo points are dropped for any minute already held locally, so it fills gaps rather than replacing authoritative prices, and it is only consulted when real holes exist. <b>Know what you are looking at:</b> Yahoo is a derived, slightly delayed feed, so those prices will not match NSE tick for tick. The shape of the morning will be right; a level computed to the point from Yahoo minutes will not be. The chart footer shows a gold "partly Yahoo-filled" flag whenever any of it came from there, and the source string names the count. Disable it with NSE_YAHOO_BACKFILL=false in .env if you would rather see an honest gap than an approximate fill.',
+    'candle-health':     '<strong>Candle completeness</strong>Shows minutes recorded against minutes elapsed in the session, so a hole is visible immediately rather than only when you happen to scroll to it. A green tick means the session is fully recorded; a gold warning means minutes are missing or provisional. <b>Provisional</b> counts minutes filled from Yahoo Finance because NSE data was unavailable at the time - those prices are close but not authoritative. <b>The server re-checks every five minutes</b> while the market is open: it fills any new holes from NSE\'s full-day feed, and upgrades provisional minutes to real NSE prices once that feed recovers, so a temporary outage does not permanently degrade the day. It goes quiet once the session is complete from authoritative sources, so a clean day costs nothing. This matters beyond the chart: the tick archive it maintains is what the GEX heatmap, OI Build Map, PCR curve and Claims-on-Trial all read, so a gap left unrepaired today quietly weakens every historical panel for as long as the file exists.',
+    'chart-fill':        '<strong>Fill from 9:15</strong>Re-pulls the whole trading session and redraws the chart from the open. It merges three sources and de-duplicates them to one sample per minute: NSE\'s own intraday series (which carries the full day regardless of when your server started), the replay archive your server records each minute, and the on-disk tick archive that survives restarts. <b>Why you need it:</b> a server started at 10:30 has no replay data for the morning, so the chart begins at 10:30 and every level derived from the session - the day range, the developing high and low - is computed from a partial picture. This recovers the morning without restarting anything. If the footer shows the chart starting later than 09:15, a gold prompt appears there offering the same action. Pre-open auction prices (09:00-09:15) are always excluded, since those quotes are indicative and not tradable.',
     'option-chart':      '<strong>Charting a CE or PE contract</strong>Switch the chart from the index to a single option contract. Candles are rebuilt from the replay archive - which stores the whole chain every minute - so this costs no extra NSE traffic, and it covers only the part of the session your server has recorded. <b>The levels change with the mode,</b> because index levels are meaningless in premium space: a chart of the 24,600 call shows day open, day high and low, plus the <b>intrinsic value</b> line - the floor the premium cannot fall below at expiry, so the gap between price and that line is the time value you are paying or collecting. <b>Below the candles sits the strike\'s open-interest trace,</b> and read together they give the classic four-way signal: premium up with OI up is fresh buying, premium down with OI up is fresh writing, premium down with OI down is long unwinding, premium up with OI down is short covering - the same classification the flow alerts announce, seen rather than heard.',
     'price-chart':       '<strong>Live Chart &amp; Levels</strong>Intraday candles for the loaded index with every option-derived level drawn on top. Candles come from NSE\'s intraday feed when the session is warm, otherwise they are rebuilt from your replay archive (1 spot sample per minute) — the footer names the source. Interval 1/3/5/15m, refreshed once a minute; levels redraw on every chain update. Toggles: <b>9:20 lines</b> (see below), <b>OI walls</b> (heaviest call/put OI), <b>CPR</b>, <b>max pain</b>, <b>±1σ</b> IV cone, and <b>pivots</b> (from the Pivot Levels panel\'s active type). <br><br><b>About the 9:20 lines:</b> these are MY transparent formula, not a reverse-engineered copy of any vendor\'s proprietary levels. At 09:20 the 9:20 spot and ATM IV are frozen for the day, one session of volatility is computed as sigma = spot × IV × sqrt(1/365), and four fixed lines are drawn: EOR/EOS at ±0.5 sigma (inner, aggressive) and EOR+1/EOS-1 at ±1.0 sigma (outer, conservative). They do not move for the rest of the session, which is the whole point — a fixed frame beats a moving one for discipline. Whether they hold is an open question: log trades against them in the journal and let the data answer.',
     'regime-signals':    '<strong>Regime Signals</strong>Familiar Indian option-chain vocabulary, computed with transparent rules. <b>Shifting status</b> tracks the peak-OI wall on each side over the last ~45 minutes: <b>WTT (Weak Towards Top)</b> means the call wall moved up or lost more than 12 percent of its OI, so the ceiling is softening (bullish lean); <b>WTB (Weak Towards Bottom)</b> means the put wall moved down or shed OI, so the floor is softening (bearish); <b>STRONG</b> means both walls are holding position and size, which is the rangebound case; <b>BOTH WEAK</b> means writers are stepping back on each side, favouring a range expansion rather than a direction. <b>BULL RUN</b> and <b>BLOODBATH</b> require breadth plus confirmation: at least half of the active near-the-money strikes must be flowing one way AND price must have moved more than 0.25 percent in that direction, which stops a quiet drift being labelled a stampede. Everything here describes positioning that has ALREADY happened, so treat it as fast information rather than prediction, and remember the labels are dramatic by tradition, not by evidence.',

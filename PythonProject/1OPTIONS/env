@@ -41,6 +41,10 @@ NSE_LAN=true
 NSE_PORT=8765
 NSE_CHAIN_TTL=8
 
+# Fill chart gaps from Yahoo Finance when NSE data is missing (no account
+# needed). Never overwrites NSE prices - gap-fill only. false = honest gaps.
+NSE_YAHOO_BACKFILL=true
+
 # Background poller — only meaningful for DATA_SOURCE=nse.
 # It is force-disabled when an adapter streams its own data.
 NSE_POLL=NIFTY,BANKNIFTY

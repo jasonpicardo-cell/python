@@ -96,6 +96,7 @@ import json
 import sys
 import itertools
 import threading
+from urllib.parse import quote as _urlquote
 import time
 import concurrent.futures
 from dataclasses import asdict
@@ -220,6 +221,11 @@ import os as _os
 # a variable already exported in the shell wins over the file, and command
 # line flags win over both.
 # ══════════════════════════════════════════════════════════════════════
+def _envbool_g(name: str, default: bool) -> bool:
+    v = _os.environ.get(name)
+    return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _load_dotenv(path: str = None) -> int:
     path = path or _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".env")
     if not _os.path.exists(path):
@@ -267,6 +273,11 @@ RUN_POLL = "NIFTY,BANKNIFTY"   # symbols kept warm in the background; "" to disa
                                # per cycle no matter how many browsers are open.
 RUN_POLL_INTERVAL = 5.0   # seconds between background polls per symbol
 RUN_TTL = 8.0             # seconds a cached chain counts as fresh
+RUN_RECONCILE = True       # periodically re-check today's candles for holes,
+                           # fill them, and upgrade Yahoo-filled minutes to NSE
+                           # data once the authoritative feed recovers
+RUN_RECONCILE_INTERVAL = 300.0   # seconds between sweeps
+
 RUN_KEEP_AWAKE = True     # stop the OS suspending this process when the
                           # machine is locked or idle (macOS caffeinate /
                           # Windows SetThreadExecutionState / systemd-inhibit)
@@ -584,6 +595,401 @@ def _cached_chain(symbol: str, expiry, band: int, client: str = "?"):
         except Exception:
             pass
         return data, {"cache": "miss", "age": 0.0, "ttl": _CHAIN_TTL, "shared_hits": 0}
+
+_YAHOO_SYMBOLS = {
+    "NIFTY": "^NSEI",
+    "BANKNIFTY": "^NSEBANK",
+    "FINNIFTY": "NIFTY_FIN_SERVICE.NS",
+    "MIDCPNIFTY": "NIFTY_MID_SELECT.NS",
+    "SENSEX": "^BSESN",
+}
+_yahoo_cache: dict = {}
+_yahoo_state: dict = {"session": None, "last_call": 0.0, "blocked_until": 0.0}
+
+
+def _yahoo_intraday(symbol: str, interval_min: int = 1) -> list:
+    """Fetch today's intraday series from Yahoo Finance as a backfill source.
+
+    Yahoo rate-limits aggressively (HTTP 429) when requests arrive without a
+    session cookie or too often from one IP. Three defences:
+      * a real session with a cookie obtained from the fc.yahoo.com handshake,
+        reused across calls rather than a bare request each time
+      * a hard floor between calls, plus honouring Retry-After on a 429
+      * a long success cache and a backoff window after a 429, so a failing
+        endpoint is not hammered into a longer ban
+
+    Honest limits, surfaced to the UI rather than hidden: it is a derived and
+    slightly delayed feed, so prices will not match NSE tick for tick - good
+    enough to draw the shape of the morning, not to compute a level from.
+    Returns [(epoch_sec, price)] or [] on any failure.
+    """
+    ysym = _YAHOO_SYMBOLS.get(symbol.upper())
+    if not ysym:
+        return []
+    key = (ysym, interval_min)
+    now = time.time()
+    hit = _yahoo_cache.get(key)
+    # serve a cached series for 5 minutes; intraday backfill does not need
+    # to be fresher than that and every extra call risks the 429
+    if hit and now - hit[0] < 300:
+        return hit[1]
+    # after a 429, stay away for a while rather than retrying into a ban
+    if now < _yahoo_state.get("blocked_until", 0):
+        wait = int(_yahoo_state["blocked_until"] - now)
+        print(f"[yahoo] backing off {wait}s after rate limit; using cached/local data")
+        return hit[1] if hit else []
+    # global floor between any two Yahoo calls
+    gap = now - _yahoo_state.get("last_call", 0)
+    if gap < 3.0:
+        time.sleep(3.0 - gap)
+    _yahoo_state["last_call"] = time.time()
+
+    iv = "1m" if interval_min <= 1 else ("5m" if interval_min <= 5 else "15m")
+    sess = _yahoo_state.get("session")
+    if sess is None:
+        try:
+            import requests
+            sess = requests.Session()
+            sess.headers.update({
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/121.0 Safari/537.36",
+                "Accept": "application/json,text/plain,*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://finance.yahoo.com/",
+                "Connection": "keep-alive",
+            })
+            # this handshake sets the cookies the chart API expects; without
+            # them Yahoo answers 429 almost immediately
+            try:
+                sess.get("https://fc.yahoo.com", timeout=8)
+            except Exception:
+                pass
+            try:
+                sess.get("https://finance.yahoo.com/quote/" + ysym, timeout=8)
+            except Exception:
+                pass
+            _yahoo_state["session"] = sess
+        except Exception as e:  # noqa: BLE001
+            print(f"[yahoo] could not create session: {e}")
+            return hit[1] if hit else []
+
+    hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]
+    payload = None
+    for host in hosts:
+        url = (f"https://{host}/v8/finance/chart/{_urlquote(ysym)}"
+               f"?interval={iv}&range=1d&includePrePost=false")
+        try:
+            r = sess.get(url, timeout=12)
+        except Exception as e:  # noqa: BLE001
+            print(f"[yahoo] {ysym} via {host}: {type(e).__name__} {str(e)[:60]}")
+            continue
+        if r.status_code == 429:
+            retry = r.headers.get("Retry-After")
+            back = int(retry) if (retry or "").isdigit() else 900
+            _yahoo_state["blocked_until"] = time.time() + back
+            _yahoo_state["session"] = None          # rebuild cookies next time
+            print(f"[yahoo] {ysym}: rate limited, backing off {back}s "
+                  f"(chart will use NSE/archive data meanwhile)")
+            return hit[1] if hit else []
+        if r.status_code != 200:
+            print(f"[yahoo] {ysym} via {host}: HTTP {r.status_code}")
+            continue
+        try:
+            payload = r.json()
+            break
+        except Exception as e:  # noqa: BLE001
+            print(f"[yahoo] {ysym}: bad json {e}")
+    if payload is None:
+        return hit[1] if hit else []
+
+    try:
+        res = (payload.get("chart", {}).get("result") or [None])[0]
+        if not res:
+            print(f"[yahoo] {ysym}: no result ({payload.get('chart', {}).get('error')})")
+            return hit[1] if hit else []
+        stamps = res.get("timestamp") or []
+        quote = ((res.get("indicators", {}).get("quote") or [{}])[0]) or {}
+        closes = quote.get("close") or []
+        out = []
+        today_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday
+        for ts, px in zip(stamps, closes):
+            if px is None:
+                continue
+            g = time.gmtime(ts + 5 * 3600 + 1800)
+            if g.tm_yday != today_yday:
+                continue
+            mins = g.tm_hour * 60 + g.tm_min
+            if not (555 <= mins < 930):
+                continue
+            out.append((float(ts), float(px)))
+        if out:
+            _yahoo_cache[key] = (time.time(), out)
+            _yahoo_state["blocked_until"] = 0
+            f0 = time.gmtime(out[0][0] + 5 * 3600 + 1800)
+            l0 = time.gmtime(out[-1][0] + 5 * 3600 + 1800)
+            print(f"[yahoo] {ysym}: {len(out)} points "
+                  f"{f0.tm_hour:02d}:{f0.tm_min:02d}-{l0.tm_hour:02d}:{l0.tm_min:02d} IST")
+        else:
+            print(f"[yahoo] {ysym}: 200 but no session points in range")
+        return out
+    except Exception as e:  # noqa: BLE001
+        print(f"[yahoo] parse failed: {e}")
+        return hit[1] if hit else []
+
+# ══════════════════════════════════════════════════════════════════════
+# CANDLE RECONCILER
+# Backfill has been on-demand only: at startup and when the button is pressed.
+# Two things then go unnoticed. A brief network drop mid-session leaves a hole
+# nobody sees, because the poller keeps running and nothing errors. And a
+# minute filled from Yahoo stays Yahoo-filled even after NSE's feed recovers
+# and could supply the authoritative price.
+#
+# This sweeps today's series every few minutes, fills holes, and UPGRADES
+# provisional minutes to NSE data where it becomes available. It goes quiet
+# once the session is complete from authoritative sources, so a clean day
+# costs nothing, and it reuses the shared session rather than handshaking.
+# ══════════════════════════════════════════════════════════════════════
+_recon_state: dict = {"last": 0.0, "runs": 0, "filled": 0, "upgraded": 0,
+                      "report": {}, "provisional": {}}
+
+
+def _session_minutes(day: str = None) -> tuple:
+    """(first, last) IST session minute indices for a given day."""
+    return (9 * 60 + 15, 15 * 60 + 30)
+
+
+def _ist_min_of(ts: float) -> int:
+    g = time.gmtime(ts + 5 * 3600 + 1800)
+    return g.tm_hour * 60 + g.tm_min
+
+
+def _load_archive(symbol: str, day: str) -> dict:
+    """minute-epoch -> price from the on-disk tick archive."""
+    out = {}
+    p = _os.path.join(_TICK_DIR, f"{symbol}_{day}.csv")
+    if not _os.path.exists(p):
+        return out
+    try:
+        with open(p) as f:
+            for line in f:
+                parts = line.strip().split(",")
+                if len(parts) >= 2:
+                    try:
+                        out[int(float(parts[0]) // 60)] = float(parts[1])
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    return out
+
+
+def _write_archive(symbol: str, day: str, series: dict) -> None:
+    p = _os.path.join(_TICK_DIR, f"{symbol}_{day}.csv")
+    try:
+        _os.makedirs(_TICK_DIR, exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            for m in sorted(series):
+                f.write(f"{m * 60},{series[m]}\n")
+        _os.replace(tmp, p)            # atomic, so a crash cannot truncate it
+    except Exception as e:  # noqa: BLE001
+        print(f"[reconcile] archive write failed: {e}")
+
+
+def _nse_full_day(symbol: str) -> dict:
+    """NSE's own intraday series as minute -> price, or {} if unavailable."""
+    idx_names = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                 "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
+    name = idx_names.get(symbol.upper())
+    f = _shared_fetcher
+    if not name or f is None:
+        return {}
+    try:
+        from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+        from urllib.parse import quote_plus as _qp
+        h = dict(API_HEADERS)
+        h["Referer"] = NSE_OC_PAGE
+        nospace = name.replace(" ", "")
+        for url in (f"https://www.nseindia.com/api/chart-databyindex?index={_qp(name)}&indices=true",
+                    f"https://www.nseindia.com/api/chart-databyindex?index={_qp(nospace)}&indices=true"):
+            r = f.session.get(url, headers=h, timeout=12)
+            if r.status_code != 200:
+                continue
+            pl = r.json()
+            rows = []
+            if isinstance(pl, dict):
+                for k in ("grapthData", "graphData", "data", "chartData"):
+                    v = pl.get(k)
+                    if isinstance(v, list) and v:
+                        rows = v
+                        break
+            elif isinstance(pl, list):
+                rows = pl
+            out = {}
+            today_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday
+            for row in rows:
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
+                    continue
+                try:
+                    ts = float(row[0]) / 1000.0
+                    px = float(row[4]) if len(row) >= 5 else float(row[1])
+                except Exception:
+                    continue
+                g = time.gmtime(ts + 5 * 3600 + 1800)
+                if g.tm_yday != today_yday:
+                    continue
+                mn = g.tm_hour * 60 + g.tm_min
+                if not (555 <= mn < 930):
+                    continue
+                out[int(ts // 60)] = px
+            if out:
+                return out
+    except Exception as e:  # noqa: BLE001
+        print(f"[reconcile] nse feed: {type(e).__name__} {str(e)[:60]}")
+    return {}
+
+
+def _reconcile_symbol(symbol: str) -> dict:
+    """Fill holes and upgrade provisional minutes for one symbol."""
+    day = time.strftime("%Y-%m-%d")
+    series = _load_archive(symbol, day)
+    prov = _recon_state["provisional"].setdefault(symbol, set())
+    now_min = _ist_min_of(time.time())
+    open_m, close_m = _session_minutes()
+    if now_min < open_m:
+        return {"status": "pre-open"}
+    upto = min(now_min, close_m - 1)
+
+    # which session minutes SHOULD exist by now
+    day_mid = None
+    for m in series:
+        day_mid = m - (_ist_min_of(m * 60) - open_m)
+        break
+    if day_mid is None:
+        # derive today's 09:15 minute index without any existing sample
+        base = time.time()
+        g = time.gmtime(base + 5 * 3600 + 1800)
+        secs_today = g.tm_hour * 3600 + g.tm_min * 60 + g.tm_sec
+        day_mid = int((base - secs_today + open_m * 60) // 60)
+    expected = {day_mid + i for i in range(0, upto - open_m + 1)}
+    missing = expected - set(series)
+    upgradable = prov & set(series)
+
+    if not missing and not upgradable:
+        return {"status": "complete", "minutes": len(series),
+                "expected": len(expected), "provisional": len(prov)}
+
+    filled = upgraded = 0
+    nse = _nse_full_day(symbol)
+    if nse:
+        for m in list(missing):
+            if m in nse:
+                series[m] = nse[m]
+                filled += 1
+                prov.discard(m)
+        for m in list(upgradable):
+            if m in nse and abs(nse[m] - series[m]) > 0.001:
+                series[m] = nse[m]           # authoritative price wins
+                upgraded += 1
+                prov.discard(m)
+            elif m in nse:
+                prov.discard(m)              # same value, no longer provisional
+        missing = expected - set(series)
+
+    # anything NSE could not supply, try Yahoo - and remember it as provisional
+    if missing and _envbool_g("NSE_YAHOO_BACKFILL", True):
+        ypts = _yahoo_intraday(symbol, 1)
+        for ts, px in ypts:
+            m = int(ts // 60)
+            if m in missing:
+                series[m] = px
+                prov.add(m)
+                filled += 1
+        missing = expected - set(series)
+
+    if filled or upgraded:
+        _write_archive(symbol, day, series)
+    rep = {"status": "repaired" if (filled or upgraded) else "gaps-remain",
+           "minutes": len(series), "expected": len(expected),
+           "filled": filled, "upgraded": upgraded,
+           "still_missing": len(missing), "provisional": len(prov)}
+    if filled or upgraded:
+        print(f"[reconcile] {symbol}: +{filled} filled, {upgraded} upgraded to NSE, "
+              f"{len(missing)} still missing ({len(series)}/{len(expected)} minutes)")
+    return rep
+
+
+def _reconcile_loop(interval: float, symbols):
+    while not _poller_stop.is_set():
+        _poller_stop.wait(interval)
+        if _poller_stop.is_set():
+            break
+        mn = _ist_min_of(time.time())
+        if not (9 * 60 + 20 <= mn <= 15 * 60 + 40):
+            continue                       # only during and just after the session
+        for sym in symbols:
+            try:
+                _recon_state["report"][sym] = _reconcile_symbol(sym)
+                r = _recon_state["report"][sym]
+                _recon_state["filled"] += r.get("filled", 0)
+                _recon_state["upgraded"] += r.get("upgraded", 0)
+            except Exception as e:  # noqa: BLE001
+                print(f"[reconcile] {sym}: {e}")
+        _recon_state["runs"] += 1
+        _recon_state["last"] = time.time()
+
+
+def _start_reconciler(symbols, interval: float = 300.0):
+    syms = [s.strip().upper() for s in symbols if s and s.strip()]
+    if not syms:
+        return
+    threading.Thread(target=_reconcile_loop, args=(interval, syms), daemon=True).start()
+    print(f"[i] Candle reconciler: {', '.join(syms)} every {int(interval)}s "
+          f"- fills gaps and upgrades Yahoo-filled minutes to NSE data when it recovers")
+
+
+def _dte_fractional(expiry_str: str) -> float:
+    """Days to expiry as a FRACTION, measured to 15:30 IST on expiry day.
+
+    The shared days_to_expiry() truncates to whole days, which has two
+    consequences that matter for an intraday options dashboard:
+      * on expiry day it returns 0 from 09:15 to 15:30, so T is pinned to a
+        floor and every Greek is frozen for the whole session - theta stops
+        decaying exactly when it decays fastest
+      * on any other day it ignores the time, so the morning and the close
+        share a T that differs by a full trading session
+
+    Measuring to the 15:30 close in fractional days fixes both, and returns
+    a small positive floor after expiry rather than zero so Black-Scholes
+    does not divide by zero.
+    """
+    from datetime import datetime as _dtc, timedelta as _td
+    for fmt in ("%d-%b-%Y", "%d-%b-%y", "%Y-%m-%d"):
+        try:
+            exp = _dtc.strptime(str(expiry_str), fmt)
+        except ValueError:
+            continue
+        # expiry settles at 15:30 IST
+        exp = exp.replace(hour=15, minute=30)
+        # "now" in IST regardless of where the server runs
+        now_ist = _dtc.utcfromtimestamp(time.time() + 5 * 3600 + 1800)
+        secs = (exp - now_ist).total_seconds()
+        return max(secs / 86400.0, 1.0 / (24 * 60))    # floor: one minute
+    return 1.0
+
+
+def _trading_dte(cal_days: float) -> float:
+    """Convert calendar days to trading days for volatility scaling.
+
+    Volatility accrues on trading days, not calendar days: a Friday-to-Tuesday
+    weekly spans 4 calendar days but only ~3 sessions, and pricing it on 365
+    overstates the expected-move band by roughly 11%. This applies the 252/365
+    ratio, which is the standard approximation and close enough for intraday
+    use without a full holiday calendar.
+    """
+    return cal_days * (252.0 / 365.0)
+
 
 def _prune_state() -> None:
     """Bound the in-memory maps so a long-running server does not creep.
@@ -1752,7 +2158,7 @@ def _fetch_futures_price(fetcher: NSESession, symbol: str):
             raise NSEFetchError("no futures rows in quote-derivative payload")
         futs.sort(key=lambda x: x[0])
         exp, price = futs[0]
-        dte = max(0, (exp - _dt.now()).days)
+        dte = max(0.0, (exp - _dt.now()).total_seconds() / 86400.0)  # fractional
         result = (price, dte)
         _futures_cache[sym] = (now, result)
         return result
@@ -1882,7 +2288,9 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         try:
             exp_snap = snap if exp == snap.expiry else parse_chain(raw, symbol, exp)
             expiries_data[exp] = {
-                "dte": days_to_expiry(exp),
+                "dte": round(_dte_fractional(exp), 4),
+            "dte_days": days_to_expiry(exp),
+            "dte_trading": round(_trading_dte(_dte_fractional(exp)), 4),
         "strikes": [asdict(s) for s in exp_snap.strikes],
             }
         except NSEFetchError:
@@ -3211,6 +3619,100 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e)})
             return
 
+        if parsed.path == "/api/candle-health":
+            out = {"runs": _recon_state["runs"],
+                   "last_run": _recon_state["last"],
+                   "age_sec": round(time.time() - _recon_state["last"], 1) if _recon_state["last"] else None,
+                   "total_filled": _recon_state["filled"],
+                   "total_upgraded": _recon_state["upgraded"],
+                   "symbols": _recon_state["report"]}
+            self._send_json(out)
+            return
+
+        if parsed.path == "/api/candles-debug":
+            # Tells you exactly WHY the chart is not filling: which sources were
+            # tried, what each returned, and where it failed. Built because
+            # three rounds of fixes to the backfill produced no visible change
+            # and there was no way to see which stage was breaking.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = time.strftime("%Y-%m-%d")
+            rep = {"symbol": symbol, "day": day, "checks": []}
+
+            def add(name, ok, detail):
+                rep["checks"].append({"source": name, "ok": bool(ok), "detail": str(detail)[:300]})
+
+            # 1. shared NSE session
+            f = _shared_fetcher
+            add("shared_session",
+                f is not None,
+                f"exists={f is not None} warmed={getattr(f, '_warmed', None)}"
+                + ("" if f is not None else " - no option chain has been loaded yet, so nothing can reach NSE"))
+
+            # 2. NSE chart feed, tried live right now
+            idx_names = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                         "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
+            if symbol in idx_names and f is not None:
+                try:
+                    from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
+                    from urllib.parse import quote_plus as _qp
+                    h = dict(API_HEADERS)
+                    h["Referer"] = NSE_OC_PAGE
+                    u = ("https://www.nseindia.com/api/chart-databyindex?index="
+                         + _qp(idx_names[symbol]) + "&indices=true")
+                    r = f.session.get(u, headers=h, timeout=12)
+                    body = (r.text or "")[:200]
+                    n = 0
+                    if r.status_code == 200:
+                        try:
+                            pl = r.json()
+                            n = len(pl.get("grapthData") or pl.get("graphData") or pl.get("data") or [])
+                        except Exception as e:  # noqa: BLE001
+                            body = f"json parse failed: {e} | {body}"
+                    add("nse_chart_feed", r.status_code == 200 and n > 0,
+                        f"HTTP {r.status_code}, {n} raw points. url={u} body~={body}")
+                except Exception as e:  # noqa: BLE001
+                    add("nse_chart_feed", False, f"{type(e).__name__}: {e}")
+            else:
+                add("nse_chart_feed", False, "skipped - no warmed session or unknown symbol")
+
+            # 3. Yahoo
+            try:
+                y = _yahoo_intraday(symbol, 1)
+                add("yahoo", len(y) > 0, f"{len(y)} session points returned")
+            except Exception as e:  # noqa: BLE001
+                add("yahoo", False, f"{type(e).__name__}: {e}")
+
+            # 4. local files
+            rpath = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+            apath = _os.path.join(_TICK_DIR, f"{symbol}_{day}.csv")
+            for label, p in (("replay_file", rpath), ("tick_archive", apath)):
+                if _os.path.exists(p):
+                    try:
+                        lines = sum(1 for _ in open(p))
+                    except Exception:
+                        lines = -1
+                    add(label, lines > 0, f"{p} exists, {lines} lines")
+                else:
+                    add(label, False, f"{p} does not exist")
+
+            # 5. what a real call produces right now
+            try:
+                import urllib.request as _u
+                inner = f"http://127.0.0.1:{self.server.server_address[1]}/api/intraday-candles?symbol={symbol}&interval=5&force=1"
+                with _u.urlopen(inner, timeout=25) as rr:
+                    j = json.loads(rr.read().decode())
+                add("actual_result", bool(j.get("candles")),
+                    f"source={j.get('source')} coverage={j.get('coverage')} "
+                    f"candles={j.get('count')} error={j.get('error')}")
+            except Exception as e:  # noqa: BLE001
+                add("actual_result", False, f"{type(e).__name__}: {e}")
+
+            rep["verdict"] = ("Backfill sources are all failing - see the first check that reads ok=false"
+                              if not any(x["ok"] for x in rep["checks"][:3])
+                              else "At least one backfill source is working")
+            self._send_json(rep)
+            return
+
         if parsed.path == "/api/intraday-candles":
             # Intraday OHLC candles for the chart widget.
             # Source 1: NSE chart-databyindex (live intraday data for indices);
@@ -3250,7 +3752,10 @@ class Handler(BaseHTTPRequestHandler):
                 # candle. Setting each open to the previous close produces a
                 # continuous, properly coloured series (standard practice when
                 # building candles from a sparse tick stream).
+                bucket2 = interval * 60
                 for i in range(1, len(out)):
+                    if out[i]["t"] - out[i - 1]["t"] > bucket2:
+                        continue          # do not chain across a recording gap
                     po = out[i - 1]["c"]
                     out[i]["o"] = po
                     out[i]["h"] = max(out[i]["h"], po)
@@ -3265,13 +3770,26 @@ class Handler(BaseHTTPRequestHandler):
             #   3. add the on-disk tick archive (survives server restarts)
             # then de-duplicate to one price per minute.
             ticks, srcs = [], []
+            # ?force=1 makes the endpoint re-warm a session and re-pull NSE's
+            # full-day series even if the local archive already has coverage.
+            # Used by the chart's "fill from 9:15" button, so a server started
+            # late can recover the morning on demand rather than only at boot.
+            force = qs.get("force", ["0"])[0] in ("1", "true", "yes")
 
             def _warm_fetcher():
-                """Return a warmed session, warming one on demand if needed."""
+                """Return a usable session, preferring the one already working.
+
+                The shared fetcher is what serves the option chain, so if the
+                dashboard is loading data at all, that session is good. Reuse
+                it rather than performing a fresh handshake - a new warm-up can
+                fail (rate limit, cookie churn) while the working session sits
+                idle, which made the backfill look broken even though NSE was
+                perfectly reachable.
+                """
                 global _shared_fetcher
                 f = _shared_fetcher
-                if f is not None and getattr(f, "_warmed", False):
-                    return f
+                if f is not None:
+                    return f              # reuse whatever is serving the chain
                 try:
                     f = NSESession()
                     f._warm_up()
@@ -3288,32 +3806,105 @@ class Handler(BaseHTTPRequestHandler):
 
             # 1 ── NSE intraday series (authoritative back-history for today)
             if symbol in idx_names:
+                if force:
+                    print(f"[candles] FORCED backfill for {symbol} - re-warming session")
                 ftch = _warm_fetcher()
                 if ftch is not None:
                     try:
                         from nse_options_strategy import API_HEADERS, NSE_OC_PAGE
-                        from urllib.parse import quote as _q
+                        # '+' not %20 - the same encoding that made every
+                        # equity-stockIndices name 404. quote() breaks this feed.
+                        from urllib.parse import quote_plus as _q
                         h = dict(API_HEADERS)
                         h["Referer"] = NSE_OC_PAGE
-                        url = "https://www.nseindia.com/api/chart-databyindex?index=" + _q(idx_names[symbol]) + "&indices=true"
-                        r = ftch.session.get(url, headers=h, timeout=12)
-                        if r.status_code == 200:
-                            pl = r.json() if isinstance(r.json(), dict) else {}
-                            rows = pl.get("grapthData") or pl.get("graphData") or []
-                            today0 = time.mktime(time.strptime(time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
-                            got = 0
+                        name = idx_names[symbol]
+                        # This feed has appeared under more than one spelling.
+                        # Try each and keep the first that returns real points,
+                        # recording the failures so an empty chart is explainable.
+                        # NSE serves index intraday under several shapes. The
+                        # "&indices=true" form wants the index name; the plain
+                        # form wants a SYMBOL identifier. Sending the wrong one
+                        # returns HTTP 200 with an EMPTY array rather than an
+                        # error, which is why this failed silently for so long.
+                        nospace = name.replace(" ", "")
+                        urls = [
+                            f"https://www.nseindia.com/api/chart-databyindex?index={_q(name)}&indices=true",
+                            f"https://www.nseindia.com/api/chart-databyindex?index={_q(nospace)}&indices=true",
+                            f"https://www.nseindia.com/api/chart-databyindex?index={_q(nospace.upper())}&indices=true",
+                            f"https://www.nseindia.com/api/chart-databyindex-dynamic?index={_q(name)}&type=symbol",
+                            # equity-style identifier used by some index pages
+                            f"https://www.nseindia.com/api/chart-databyindex?index={_q(name)}",
+                        ]
+                        got, why = 0, []
+                        for url in urls:
+                            try:
+                                r = ftch.session.get(url, headers=h, timeout=12)
+                            except Exception as e:  # noqa: BLE001
+                                why.append(f"{type(e).__name__}")
+                                continue
+                            if r.status_code != 200:
+                                why.append(f"HTTP{r.status_code}")
+                                continue
+                            try:
+                                pl = r.json()
+                            except Exception:
+                                why.append("badjson")
+                                continue
+                            # Accept any of the shapes NSE has used, and if a
+                            # 200 arrives with none of them, print the actual
+                            # keys - an "empty" that repeats forever means the
+                            # data is there under a name we are not reading.
+                            rows = []
+                            if isinstance(pl, dict):
+                                for k in ("grapthData", "graphData", "data",
+                                          "chartData", "indexChart", "records"):
+                                    v = pl.get(k)
+                                    if isinstance(v, list) and v:
+                                        rows = v
+                                        break
+                                    if isinstance(v, dict):
+                                        for k2 in ("grapthData", "graphData", "data"):
+                                            v2 = v.get(k2)
+                                            if isinstance(v2, list) and v2:
+                                                rows = v2
+                                                break
+                                    if rows:
+                                        break
+                            elif isinstance(pl, list):
+                                rows = pl
+                            if not rows:
+                                shape = (f"keys={list(pl)[:8]}" if isinstance(pl, dict)
+                                         else f"type={type(pl).__name__}")
+                                body = (r.text or "")[:200].replace("\n", " ")
+                                why.append("empty")
+                                print(f"[candles] 200 but no series: {shape} | body~={body}")
+                                continue
+                            # Keep anything inside today's IST session; the old
+                            # code compared against LOCAL midnight, which is wrong
+                            # on any server not running in IST.
                             for row in rows:
                                 if not isinstance(row, (list, tuple)) or len(row) < 2:
                                     continue
-                                ts = float(row[0]) / 1000.0
-                                if ts < today0:
+                                try:
+                                    ts = float(row[0]) / 1000.0
+                                    px = float(row[4]) if len(row) >= 5 else float(row[1])
+                                except Exception:
                                     continue
-                                ticks.append((ts, float(row[4]) if len(row) >= 5 else float(row[1])))
+                                g = time.gmtime(ts + 5 * 3600 + 1800)
+                                mins = g.tm_hour * 60 + g.tm_min
+                                if g.tm_yday != time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday:
+                                    continue
+                                if not (555 <= mins < 930):
+                                    continue
+                                ticks.append((ts, px))
                                 got += 1
                             if got:
                                 srcs.append(f"nse_chart({got})")
-                        else:
-                            print(f"[candles] chart feed HTTP {r.status_code}")
+                                break
+                            why.append("no-session-points")
+                        if not got:
+                            print(f"[candles] chart feed gave nothing for {name}: {', '.join(why[:4])}")
+                            srcs.append("nse_chart(0)")
                     except Exception as e:  # noqa: BLE001
                         print(f"[candles] chart feed failed: {e}")
 
@@ -3338,6 +3929,32 @@ class Handler(BaseHTTPRequestHandler):
                 if got:
                     srcs.append(f"replay({got})")
 
+            # 2b ── ANY earlier replay file for today, including one written by
+            # a previous run of the server before it was restarted. The current
+            # process only appends to today's file, but a crash-restart can
+            # leave more than one archive shard around; sweep them all so a
+            # mid-day restart does not orphan the morning.
+            try:
+                import glob as _glob
+                for extra in sorted(_glob.glob(_os.path.join(_REPLAY_DIR, f"{symbol}_{day}*.jsonl"))):
+                    if extra == rpath:
+                        continue
+                    got = 0
+                    with open(extra) as f:
+                        for line in f:
+                            try:
+                                s = json.loads(line)
+                                v, t = s.get("underlying_value"), s.get("_replay_ts")
+                                if v and t:
+                                    ticks.append((float(t), float(v)))
+                                    got += 1
+                            except Exception:
+                                continue
+                    if got:
+                        srcs.append(f"replay-shard({got})")
+            except Exception:
+                pass
+
             # 3 ── persistent tick archive (so a restart never loses back-history)
             apath = _os.path.join(_TICK_DIR, symbol + "_" + day + ".csv")
             if _os.path.exists(apath):
@@ -3357,6 +3974,32 @@ class Handler(BaseHTTPRequestHandler):
                 if got:
                     srcs.append(f"archive({got})")
 
+            # 4 ── Yahoo Finance backfill (no auth, no warm-up).
+            # Only consulted when the local sources leave real holes, and its
+            # points are dropped for any minute we already hold - NSE data
+            # always wins where both exist, so this fills gaps rather than
+            # overwriting authoritative prices.
+            if symbol in _YAHOO_SYMBOLS and _envbool_g("NSE_YAHOO_BACKFILL", True):
+                have_mins = {int(t // 60) for t, _ in ticks}
+                need_fill = force or not have_mins
+                if have_mins and not need_fill:
+                    lo_m, hi_m = min(have_mins), max(have_mins)
+                    missing = (hi_m - lo_m + 1) - len(have_mins)
+                    # the morning is missing if our earliest sample is late
+                    g0 = time.gmtime(lo_m * 60 + 5 * 3600 + 1800)
+                    starts_late = (g0.tm_hour * 60 + g0.tm_min) > 560   # after 09:20
+                    need_fill = missing > 2 or starts_late
+                if need_fill:
+                    ypts = _yahoo_intraday(symbol, interval)
+                    added = 0
+                    for ts, px in ypts:
+                        if int(ts // 60) in have_mins:
+                            continue          # never overwrite a real NSE sample
+                        ticks.append((ts, px))
+                        added += 1
+                    if added:
+                        srcs.append(f"yahoo({added})")
+
             # ── keep only REGULAR SESSION ticks (09:15:00-15:30:00 IST) ──
             # NSE's intraday feed also carries the pre-open call auction
             # (09:00-09:15), whose indicative prices are not tradable and
@@ -3374,6 +4017,24 @@ class Handler(BaseHTTPRequestHandler):
             dropped = before - len(ticks)
             if dropped:
                 srcs.append(f"-preopen({dropped})")
+
+            # ── report and interpolate GAPS ───────────────────────────
+            # A mid-session restart leaves a hole: the archive stops when the
+            # old process died and resumes when the new one warms up. We do
+            # NOT invent prices inside a hole - that would draw candles that
+            # never traded. Instead the gaps are measured and returned, so the
+            # chart can show them honestly and the UI can say what is missing.
+            gaps = []
+            if ticks:
+                by_min_pre = {}
+                for ts, px in sorted(ticks):
+                    by_min_pre.setdefault(int(ts // 60), px)
+                mins_sorted = sorted(by_min_pre)
+                for a, b in zip(mins_sorted, mins_sorted[1:]):
+                    if b - a > 2:                     # more than a 2-minute hole
+                        gaps.append({"from": a * 60, "to": b * 60,
+                                     "mins": b - a - 1,
+                                     "from_px": by_min_pre[a], "to_px": by_min_pre[b]})
 
             # ── de-duplicate to one sample per minute (first writer wins) ──
             if ticks:
@@ -3403,6 +4064,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"symbol": symbol, "interval": interval,
                              "source": "+".join(srcs) or "none",
                              "coverage": f"{first}-{last}",
+                             "gaps": gaps,
+                             "gap_mins": sum(g["mins"] for g in gaps),
                              "candles": candles, "count": len(candles),
                              "asOf": time.strftime("%H:%M:%S")})
             return
@@ -3880,8 +4543,15 @@ class Handler(BaseHTTPRequestHandler):
                         cur["n"] += 1
                 if cur:
                     out.append(cur)
-                # chain opens so a one-sample bucket is not a flat, invisible bar
+                # Chain opens so a one-sample bucket is not a flat, invisible
+                # bar - but ONLY across contiguous candles. Chaining across a
+                # recording gap would stretch the first post-gap candle over
+                # the entire missing move, inventing a range that never traded
+                # and corrupting the day high/low computed from it.
+                bucket = interval * 60
                 for i in range(1, len(out)):
+                    if out[i]["t"] - out[i - 1]["t"] > bucket:
+                        continue          # a gap sits between: leave the open alone
                     po = out[i - 1]["c"]
                     out[i]["o"] = po
                     out[i]["h"] = max(out[i]["h"], po)
@@ -5308,7 +5978,20 @@ def main():
               "choose Sleep from the menu, the machine still sleeps - "
               "connect power and set the display to sleep rather than the system.")
     _start_janitor()
+    if _envbool("NSE_RECONCILE", RUN_RECONCILE):
+        _start_reconciler([s.strip() for s in (args.poll or "NIFTY").split(",")],
+                          float(_os.environ.get("NSE_RECONCILE_INTERVAL", RUN_RECONCILE_INTERVAL)))
     server = _QuietThreadingHTTPServer((args.host, args.port), Handler)
+    # Build stamp: printed so you can confirm at a glance which version is
+    # actually running. Several rounds of "still not working" turned out to be
+    # an older file still in place, which no amount of code fixing can cure.
+    _feat = []
+    for name, present in (("yahoo-backfill", "_yahoo_intraday" in globals()),
+                          ("candles-debug", True),
+                          ("alert-stream", "_sse_broadcast" in globals()),
+                          ("keep-awake", "_keep_awake" in globals())):
+        _feat.append(f"{name}:{'yes' if present else 'NO'}")
+    print(f"[i] Build 2026-08-21 · {' · '.join(_feat)}")
     print(f"[i] NSE chain server running at http://{args.host}:{args.port}")
     if args.host == "0.0.0.0":
         try:
