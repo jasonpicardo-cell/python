@@ -2538,6 +2538,275 @@ def compute_ema_cross_scanner(df, _wdf=None, _mdf=None):
         out['m']=_compute_emac_tf(_mdf)
     return out
 
+
+def _atr_trailing_stop_tf(df, ap1=5, af1=0.5, ap2=10, af2=3.0, prox_pct=1.0):
+    """ATR Trailing Stop by ceyhun — ported from Pine Script v6.
+    Two trailing stop lines: Fast (Trail1: period=5, mult=0.5) and
+    Slow (Trail2: period=10, mult=3.0). Signals from Trail1 × Trail2 crossovers.
+    Changes vs original: candle-color and fill logic removed (scan-only);
+    near_trail flag when price is within prox_pct% of a stop line."""
+    n=len(df)
+    if n<max(ap1,ap2)+5: return {}
+    C=df['Close'].values.astype(float)
+    H=df['High'].values.astype(float)
+    L=df['Low'].values.astype(float)
+
+    # ATR (Wilder smoothing)
+    def _atr(period):
+        tr=np.maximum(H[1:]-L[1:],np.maximum(np.abs(H[1:]-C[:-1]),np.abs(L[1:]-C[:-1])))
+        tr=np.concatenate([[H[0]-L[0]],tr])
+        a=np.zeros(n); a[0]=tr[0]
+        for i in range(1,n): a[i]=(a[i-1]*(period-1)+tr[i])/period
+        return a
+
+    sl1=af1*_atr(ap1); sl2=af2*_atr(ap2)
+
+    # Trail1 (Fast) — identical logic to Pine nz(Trail1[1],0)
+    trail1=np.zeros(n)
+    for i in range(n):
+        sc=C[i]; sl=sl1[i]
+        if i==0: trail1[i]=sc-sl; continue
+        prev=trail1[i-1]; prev_sc=C[i-1]
+        if sc>prev and prev_sc>prev:   trail1[i]=max(prev,sc-sl)   # above and rising → ratchet up
+        elif sc<prev and prev_sc<prev: trail1[i]=min(prev,sc+sl)   # below and falling → ratchet down
+        elif sc>prev:                  trail1[i]=sc-sl              # crossover up
+        else:                          trail1[i]=sc+sl              # crossover down
+
+    # Trail2 (Slow)
+    trail2=np.zeros(n)
+    for i in range(n):
+        sc=C[i]; sl=sl2[i]
+        if i==0: trail2[i]=sc-sl; continue
+        prev=trail2[i-1]; prev_sc=C[i-1]
+        if sc>prev and prev_sc>prev:   trail2[i]=max(prev,sc-sl)
+        elif sc<prev and prev_sc<prev: trail2[i]=min(prev,sc+sl)
+        elif sc>prev:                  trail2[i]=sc-sl
+        else:                          trail2[i]=sc+sl
+
+    # Current bar values
+    c=float(C[-1]); h=float(H[-1]); l=float(L[-1])
+    t1=float(trail1[-1]); t2=float(trail2[-1])
+    t1p=float(trail1[-2]) if n>1 else t1
+    t2p=float(trail2[-2]) if n>1 else t2
+
+    bull=bool(t1>t2); bear=bool(t2>t1)
+    buy =bool(t1>t2 and t1p<=t2p)   # Trail1 just crossed above Trail2 → BUY
+    sell=bool(t1<t2 and t1p>=t2p)   # Trail1 just crossed below Trail2 → SELL
+    sr  =1 if t1>t2 else (-1 if t2>t1 else 0)
+
+    # Proximity: price within prox_pct% of either trail
+    near_t1=bool(c>0 and abs(c-t1)/c*100<=prox_pct)
+    near_t2=bool(c>0 and abs(c-t2)/c*100<=prox_pct)
+
+    # Support/resistance distances as % (from Pine info panel)
+    t2_dist=r2((c-t2)/t2*100) if t2>0 else 0
+    t1_dist=r2((c-t1)/t1*100) if t1>0 else 0
+
+    # State bars (no bar-color or fill, just the underlying logic for scanning)
+    green_state=bool(t1>t2 and c>t2 and l>t2)   # fully bullish — low stayed above slow trail
+    red_state  =bool(t2>t1 and c<t2 and h<t2)   # fully bearish — high stayed below slow trail
+
+    # Best composite setups
+    bull_near_t2=bool(bull and near_t2)   # bull trend + price retesting slow trail (ideal re-entry)
+    bear_near_t2=bool(bear and near_t2)   # bear + price retesting slow trail (potential short)
+
+    return dict(
+        trail1=r2(t1), trail2=r2(t2), sr=sr,
+        bull=bull, bear=bear, buy=buy, sell=sell,
+        green=green_state, red=red_state,
+        near_t1=near_t1, near_t2=near_t2,
+        t1_dist=t1_dist, t2_dist=t2_dist,
+        bull_near_t2=bull_near_t2, bear_near_t2=bear_near_t2,
+    )
+
+def compute_atr_trail(df, _wdf=None, _mdf=None):
+    """ATR Trailing Stop — Daily / Weekly / Monthly."""
+    out={'d':_atr_trailing_stop_tf(df)}
+    if _wdf is not None and len(_wdf)>=20:
+        out['w']=_atr_trailing_stop_tf(_wdf)
+    if _mdf is not None and len(_mdf)>=20:
+        out['m']=_atr_trailing_stop_tf(_mdf)
+    return out
+
+
+def _build_renko_bricks(C, H, L, brick, use_hl=True, reversal=2):
+    """
+    Core Renko brick builder.
+    use_hl=True  → High-Low method: detects brick formation within a day
+                    using the high to extend up bricks and low to extend down.
+    use_hl=False → Close-only method: only uses closing price.
+    reversal     → number of bricks needed to reverse (standard=2, ATM=1).
+    """
+    n = len(C)
+    bricks = []          # list of (direction: 1/-1, open, close)
+    curr = round(float(C[0]) / brick) * brick
+
+    for i in range(1, n):
+        p_close = float(C[i])
+        p_high  = float(H[i]) if use_hl else p_close
+        p_low   = float(L[i]) if use_hl else p_close
+
+        # How many bricks up/down can we form from the last brick close?
+        if not bricks:
+            if p_high >= curr + brick:
+                nb = int((p_high - curr) / brick)
+                for j in range(nb):
+                    o = curr + j*brick; c = o + brick
+                    bricks.append((1, r2(o), r2(c)))
+                curr = curr + nb*brick
+            elif p_low <= curr - brick:
+                nb = int((curr - p_low) / brick)
+                for j in range(nb):
+                    o = curr - j*brick; c = o - brick
+                    bricks.append((-1, r2(o), r2(c)))
+                curr = curr - nb*brick
+            continue
+
+        ld, lo, lc = bricks[-1]
+        if ld == 1:
+            # Continuation up
+            if p_high >= lc + brick:
+                nb = int((p_high - lc) / brick)
+                for j in range(nb):
+                    o = lc + j*brick; c = o + brick
+                    bricks.append((1, r2(o), r2(c)))
+                curr = lc + nb*brick
+            # Reversal down (needs 'reversal' bricks)
+            elif p_low <= lc - reversal*brick:
+                nb = int((lc - p_low) / brick)
+                for j in range(nb):
+                    o = lc - j*brick; c = o - brick
+                    bricks.append((-1, r2(o), r2(c)))
+                curr = lc - nb*brick
+        else:
+            # Continuation down
+            if p_low <= lc - brick:
+                nb = int((lc - p_low) / brick)
+                for j in range(nb):
+                    o = lc - j*brick; c = o - brick
+                    bricks.append((-1, r2(o), r2(c)))
+                curr = lc - nb*brick
+            # Reversal up
+            elif p_high >= lc + reversal*brick:
+                nb = int((p_high - lc) / brick)
+                for j in range(nb):
+                    o = lc + j*brick; c = o + brick
+                    bricks.append((1, r2(o), r2(c)))
+                curr = lc + nb*brick
+
+    return bricks
+
+
+def _analyse_bricks(bricks, price, brick):
+    """Extract all scanner signals from a brick list."""
+    if not bricks:
+        return {}
+
+    ld, lo, lc = bricks[-1]
+
+    # Consecutive streak
+    consec = 0
+    for b in reversed(bricks):
+        if b[0] == ld: consec += 1
+        else: break
+
+    # Just reversed (last direction ≠ direction before)
+    just_rev = bool(len(bricks) >= 2 and bricks[-1][0] != bricks[-2][0])
+
+    # Trend age: how many bricks since the reversal that started this trend
+    # = current consec count (already computed)
+    trend_age = consec
+
+    # Brick acceleration: compare trend_age vs avg of prior 3 trends
+    trend_lengths = []
+    cur_d = bricks[-1][0]; cur_len = 0; prev_lens = []
+    for b in reversed(bricks):
+        if b[0] == cur_d:
+            cur_len += 1
+        else:
+            if cur_len > 0:
+                prev_lens.append(cur_len)
+            cur_d = b[0]; cur_len = 1
+        if len(prev_lens) >= 3:
+            break
+    avg_trend_len = sum(prev_lens) / len(prev_lens) if prev_lens else consec
+    accelerating = bool(consec > avg_trend_len * 1.2 and consec >= 3)
+
+    # Double Top / Bottom — two up-runs or down-runs reaching same level
+    up_tops  = [b[2] for b in bricks if b[0] ==  1]
+    dn_bots  = [b[2] for b in bricks if b[0] == -1]
+    dbl_top  = bool(len(up_tops)  >= 2 and abs(up_tops[-1]  - up_tops[-2])  <= brick * 1.5)
+    dbl_bot  = bool(len(dn_bots)  >= 2 and abs(dn_bots[-1]  - dn_bots[-2])  <= brick * 1.5)
+    trpl_top = bool(len(up_tops)  >= 3 and abs(up_tops[-1]  - up_tops[-3])  <= brick * 2.0)
+    trpl_bot = bool(len(dn_bots)  >= 3 and abs(dn_bots[-1]  - dn_bots[-3])  <= brick * 2.0)
+
+    # Catapult: Double top/bottom followed by breakout (Definedge pattern)
+    # Bull catapult: dbl_bot + current brick is UP past the neckline
+    catapult_bull = bool(dbl_bot and ld == 1 and consec == 1)
+    catapult_bear = bool(dbl_top and ld == -1 and consec == 1)
+
+    # Support / Resistance from last reversal level
+    # The level where the last reversal happened = lo of first brick in current trend
+    reversal_level = lo  # open of the current streak's first brick
+
+    # Price proximity to reversal level (within 1 brick)
+    near_support    = bool(ld ==  1 and abs(price - reversal_level) <= brick * 1.2)
+    near_resistance = bool(ld == -1 and abs(price - reversal_level) <= brick * 1.2)
+
+    return dict(
+        bull=bool(ld == 1), bear=bool(ld == -1),
+        just_rev=just_rev,
+        consec=consec, punch3=bool(consec >= 3), punch5=bool(consec >= 5), punch8=bool(consec >= 8),
+        trend_age=trend_age, avg_trend_len=r2(avg_trend_len), accelerating=accelerating,
+        dbl_top=dbl_top, dbl_bot=dbl_bot, trpl_top=trpl_top, trpl_bot=trpl_bot,
+        catapult_bull=catapult_bull, catapult_bear=catapult_bear,
+        near_support=near_support, near_resistance=near_resistance,
+        reversal_level=r2(reversal_level),
+        n_bricks=len(bricks), brick=r2(brick),
+    )
+
+
+def compute_renko_full(df, _wdf=None, _mdf=None):
+    """
+    Comprehensive Renko scanner — Daily (Close-only + High-Low methods),
+    Weekly, and Monthly. ATR-adaptive brick size per timeframe.
+    Returns dict with keys: d_cl, d_hl, w, m.
+    """
+    def brick_size(tf_df):
+        H = tf_df['High'].values.astype(float)
+        L = tf_df['Low'].values.astype(float)
+        C = tf_df['Close'].values.astype(float)
+        lb = min(14, len(tf_df)-1)
+        atr14 = float(np.mean(H[-lb-1:-1] - L[-lb-1:-1])) if lb > 0 else float(C[-1]*0.01)
+        return max(atr14, float(C[-1]) * 0.005)
+
+    def run(tf_df, use_hl):
+        C = tf_df['Close'].values.astype(float)
+        H = tf_df['High'].values.astype(float)
+        L = tf_df['Low'].values.astype(float)
+        brick = brick_size(tf_df)
+        bricks = _build_renko_bricks(C, H, L, brick, use_hl=use_hl)
+        return _analyse_bricks(bricks, float(C[-1]), brick)
+
+    out = {}
+    out['d_cl'] = run(df, use_hl=False)        # Close-only daily (original method)
+    out['d_hl'] = run(df, use_hl=True)          # High-Low daily (more accurate)
+
+    if _wdf is not None and len(_wdf) >= 15:
+        out['w'] = run(_wdf, use_hl=True)
+    if _mdf is not None and len(_mdf) >= 10:
+        out['m'] = run(_mdf, use_hl=True)
+
+    # Multi-TF shortcuts
+    d = out.get('d_hl', {})
+    w = out.get('w', {})
+    out['mtf_bull'] = bool(d.get('bull') and w.get('bull'))   # D+W both bull
+    out['mtf_bear'] = bool(d.get('bear') and w.get('bear'))   # D+W both bear
+    out['htf_rev_bull'] = bool(d.get('just_rev') and d.get('bull') and w.get('bull'))  # D just reversed UP + W already bull
+    out['htf_rev_bear'] = bool(d.get('just_rev') and d.get('bear') and w.get('bear'))  # D just reversed DOWN + W already bear
+
+    return out
+
 def compute_vsa(df):
     """Volume Spread Analysis: interplay of Volume, Spread (H−L), and Close position.
     The 'Big Volume Candle' strategy is the centrepiece."""
@@ -3178,10 +3447,15 @@ def precompute(fp, idx_map, nifty_df=None):
         cp   = compute_chart_patterns(df),
         dbl  = compute_double_patterns(df,_wdf=_wdf,_mdf=_mdf),
     )
+    # 🧱 Renko — Close-only + High-Low, D/W/M, full signal suite
+    _renko_df = df.set_index(pd.to_datetime(df['Date'])) if 'Date' in df.columns else df
+    renko = compute_renko_full(_renko_df, _wdf=_wdf, _mdf=_mdf)
     # 🌊 WaveTrend Oscillator — Daily / Weekly / Monthly
     wt = compute_wavetrend(df, _wdf=_wdf, _mdf=_mdf)
     # 📈 Multi-EMA Crossover Scanner — Daily / Weekly / Monthly
     emac = compute_ema_cross_scanner(df, _wdf=_wdf, _mdf=_mdf)
+    # 🔵 ATR Trailing Stop (ceyhun) — Fast Trail + Slow Trail, D/W/M
+    atr_trail = compute_atr_trail(df, _wdf=_wdf, _mdf=_mdf)
     # 📦 Supply & Demand Zones — Daily / Weekly / Monthly
     zones = compute_supply_demand(df,_wdf=_wdf,_mdf=_mdf)
     # 🔷 GTF-Style Zones — swing-pivot + ATR-sized + BOS-invalidated + scored
@@ -3255,7 +3529,7 @@ def precompute(fp, idx_map, nifty_df=None):
                 date=str(df.iloc[-1]["Date"].date()),
                 d=ds,w=ws,m=ms,q=qs,y=ys,ytd=yts,
                 mh=mh,wh=wh,qh=qh,
-                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,ti_w=ti_w,ti_m=ti_m,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,gtf=gtf,wt=wt,emac=emac,**st,rs=0)
+                smc=smc,vol=vol,mi=mi,t1=t1,t2=t2,t3=t3,ti=ti,ti_w=ti_w,ti_m=ti_m,nl=nl,patt=patt,xp=xp,adv=adv,gap=gap,spark=spark,bp=bp,sr=sr,pb=pb,swing=swing,zones=zones,pro=pro,gtf=gtf,wt=wt,emac=emac,atr_trail=atr_trail,renko=renko,**st,rs=0)
 
 
 def assign_smart_ranks(stocks):
@@ -3611,6 +3885,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 .tab-btn.t-zones.active{color:#a78bfa;border-bottom-color:#a78bfa}
 .tab-btn.t-wt.active{color:#7c3aed;border-bottom-color:#7c3aed}
 .tab-btn.t-emac.active{color:#0ea5e9;border-bottom-color:#0ea5e9}
+.tab-btn.t-renko.active{color:#f59e0b;border-bottom-color:#f59e0b}
 .tab-btn.t-pro.active{color:#22d3ee;border-bottom-color:#22d3ee}
 /* ⑥ sector grouping */
 .gb-chk{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--mu);cursor:pointer;user-select:none;white-space:nowrap}
@@ -3667,6 +3942,7 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
   <button class="tab-btn t-zones" data-tab="zones" onclick="switchTab('zones')">📦 Supply/Demand</button>
   <button class="tab-btn t-wt" data-tab="wt" onclick="switchTab('wt')">🌊 WaveTrend</button>
   <button class="tab-btn t-emac" data-tab="emac" onclick="switchTab('emac')">📈 EMA Cross</button>
+  <button class="tab-btn t-renko" data-tab="renko" onclick="switchTab('renko')">🧱 Renko</button>
   <button class="tab-btn t-pro" data-tab="pro" onclick="switchTab('pro')">💎 Pro Scanners</button>
   <button class="tab-btn t-help" data-tab="help" onclick="switchTab('help')">❓ Help</button>
 </div>
@@ -4835,6 +5111,57 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 </div>
 
 
+<!-- ═══ RENKO SCANNER ═══════════════════════════════════════════════════ -->
+<div id="ctrl-renko" class="ctrl" style="display:none">
+  <div class="cg"><label>Strategy</label>
+    <div style="display:flex;gap:6px;align-items:center"><select id="renko-strat" style="min-width:380px" onchange="updateRENKOInfo()">
+      <optgroup label="── 🟢 Trend Direction (High-Low Daily) ──">
+        <option value="rk_bull_d">Bull — Current brick is UP (Daily HL)</option>
+        <option value="rk_bear_d">Bear — Current brick is DOWN (Daily HL)</option>
+        <option value="rk_rev_bull_d">★ Just Reversed UP — First up brick after downtrend (Daily HL)</option>
+        <option value="rk_rev_bear_d">Just Reversed DOWN — First down brick after uptrend (Daily HL)</option>
+      </optgroup>
+      <optgroup label="── 🔥 Brick Streak — Momentum Runs ──">
+        <option value="rk_punch3_d">3-Brick Run — 3 consecutive same-direction bricks</option>
+        <option value="rk_punch5_d">5-Brick Punch — 5 consecutive (Definedge signature)</option>
+        <option value="rk_punch8_d">8-Brick Power Run — 8+ consecutive bricks (rare)</option>
+        <option value="rk_accel_d">Accelerating Run — Current trend longer than recent average</option>
+      </optgroup>
+      <optgroup label="── 🎯 Patterns ──">
+        <option value="rk_dbl_top_d">Double Top — Two up-runs hit same level (bearish reversal)</option>
+        <option value="rk_dbl_bot_d">Double Bottom — Two down-runs hit same level (bullish reversal)</option>
+        <option value="rk_trpl_top_d">Triple Top — Three peaks at same resistance</option>
+        <option value="rk_trpl_bot_d">Triple Bottom — Three troughs at same support</option>
+        <option value="rk_catapult_bull">★ Catapult Bull — Double bottom breakout (Definedge)</option>
+        <option value="rk_catapult_bear">Catapult Bear — Double top breakdown (Definedge)</option>
+      </optgroup>
+      <optgroup label="── 📍 Support / Resistance Proximity ──">
+        <option value="rk_near_support">Near Renko Support — Price within 1 brick of last reversal low</option>
+        <option value="rk_near_resistance">Near Renko Resistance — Price within 1 brick of last reversal high</option>
+      </optgroup>
+      <optgroup label="── 📅 Weekly / Multi-Timeframe ──">
+        <option value="rk_bull_w">Weekly Bull Renko</option>
+        <option value="rk_rev_bull_w">★ Weekly Just Reversed UP</option>
+        <option value="rk_punch3_w">Weekly 3-Brick Run</option>
+        <option value="rk_mtf_bull">★ Multi-TF Bull — Daily HL + Weekly both bull</option>
+        <option value="rk_mtf_bear">Multi-TF Bear — Daily HL + Weekly both bear</option>
+        <option value="rk_htf_rev_bull">★ Best Setup — Daily reversed UP + Weekly already bull</option>
+        <option value="rk_htf_rev_bear">Daily reversed DOWN + Weekly already bear</option>
+      </optgroup>
+      <optgroup label="── 🔬 Close-Only Method (Classic) ──">
+        <option value="rk_bull_cl">Bull (Close-only) — classic Renko method</option>
+        <option value="rk_rev_bull_cl">Just Reversed UP (Close-only)</option>
+        <option value="rk_punch5_cl">5-Brick Punch (Close-only)</option>
+      </optgroup>
+    </select><button class="info-btn" onclick="showHelp('renko',document.getElementById('renko-strat').value)" title="Strategy info">ℹ</button></div>
+  </div>
+  <div class="cg"><label>Min RS</label><select id="renko-rs"><option value="0" selected>Any</option><option value="50">≥ 50</option><option value="70">≥ 70</option><option value="80">≥ 80</option></select></div>
+  <div class="cg"><label>Price ₹</label><div class="prange"><input type="number" id="renko-pmin" placeholder="Min" min="0"><span>–</span><input type="number" id="renko-pmax" placeholder="Max" min="0"></div></div>
+  <button class="btn" style="background:#f59e0b;color:#000" onclick="scanRenko()">▶ SCAN</button>
+  <button class="btn btn-out" onclick="exportCSV()">↓ CSV</button>
+</div>
+
+
 <!-- ═══ GAP SCANNER ════════════════════════════════════════════════════ -->
 <div id="ctrl-gap" class="ctrl" style="display:none">
   <div class="cg"><label>Gap Type</label>
@@ -4909,8 +5236,29 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
 </div>
 
 <script>
-const S = __JSON__;
-const BREADTH = __BREADTH_JSON__;
+// ── Data decompression ─────────────────────────────────────────────────────
+// Stock data and breadth data are gzip-compressed + base64-encoded at build time.
+// DecompressionStream (supported Chrome 80+, Firefox 113+, Safari 16.4+) is used
+// to decompress asynchronously, then the scanner initialises.
+let S = [];
+let BREADTH = {};
+const _S_B64 = "__JSON_B64__";
+const _BR_B64 = "__BREADTH_B64__";
+
+async function _decompress(b64){
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+  const ds = new DecompressionStream('gzip');
+  const writer = ds.writable.getWriter();
+  writer.write(bytes); writer.close();
+  const chunks=[]; const reader=ds.readable.getReader();
+  while(true){ const {done,value}=await reader.read(); if(done)break; chunks.push(value); }
+  const total=chunks.reduce((n,c)=>n+c.length,0);
+  const buf=new Uint8Array(total); let off=0;
+  for(const c of chunks){ buf.set(c,off); off+=c.length; }
+  return JSON.parse(new TextDecoder().decode(buf));
+}
 
 // ── Pivot helpers (unchanged) ──────────────────────────────────────────────
 const TYPE_META = {
@@ -4972,7 +5320,7 @@ function switchTab(tab){
   const _isCustomPage=['home','lookup','iview','toppicks','help'].includes(tab);
   const _gb=document.getElementById('global-bar'); if(_gb) _gb.style.display=_isCustomPage?'none':'flex';
   const _sr=document.getElementById('search-row'); if(_sr) _sr.style.display=_isCustomPage?'none':'flex';
-  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones','pro','wt','emac'].forEach(t=>{
+  ['piv','smc','vol','mi','adv','t1','t2','t3','ti','nl','xp','patt','br','gap','combo','bp','sr','swing','zones','pro','wt','emac','renko'].forEach(t=>{
     const el=document.getElementById('ctrl-'+t);
     if(el) el.style.display=t===tab?'flex':'none';
   });
@@ -5027,6 +5375,7 @@ function switchTab(tab){
   else if(tab==='pro'){ updateProInfo(); scanPro(); }
   else if(tab==='wt'){ updateWTInfo(); scanWT(); }
   else if(tab==='emac'){ updateEMACInfo(); scanEMAC(); }
+  else if(tab==='renko'){ updateRENKOInfo(); scanRenko(); }
 }
 
 // ── Level dropdown (pivot) ─────────────────────────────────────────────────
@@ -5924,6 +6273,14 @@ const HOME_CARDS=[
   {tab:'emac',strat:'ema50_200_bull_w',  emoji:'⭐',badge:'emac',label:'Weekly Golden Cross (50×200)',   desc:'Extremely rare - 50-week EMA crossed above 200-week EMA. When this fires, the bull run typically lasts years not months', stars:'★★★★★',section:12},
   {tab:'emac',strat:'bull_stack_d',      emoji:'📈',badge:'emac',label:'Full Bull Stack (9>20>50>100>200)', desc:'Every EMA perfectly stacked bullishly on daily chart - all time horizons agree, characteristic of the strongest Stage-2 stocks', stars:'★★★★★',section:12},
   {tab:'emac',strat:'pullback_bull',     emoji:'↩',badge:'emac',label:'Pullback to EMA 20/50 Zone',     desc:'EMA 20 above EMA 50 (uptrend) and price has pulled back between them - the classic "buy the dip" entry zone for trend-followers', stars:'★★★★', section:12},
+  // 🧱 Renko
+  {tab:'renko',strat:'rk_htf_rev_bull',emoji:'⭐',badge:'renko',label:'★ HTF Rev UP (Best Setup)',      desc:'Daily Renko reversed UP today + Weekly Renko already bullish - entry in direction of the weekly trend at the earliest daily reversal signal', stars:'★★★★★',section:13},
+  {tab:'renko',strat:'rk_catapult_bull',emoji:'⭐',badge:'renko',label:'★ Catapult Bull (Definedge)',      desc:'Double bottom formed + current brick is the first UP brick breaking the neckline - Definedge highest-probability Renko buy pattern', stars:'★★★★★',section:13},
+  {tab:'renko',strat:'rk_mtf_bull',    emoji:'🌐',badge:'renko',label:'Multi-TF Bull (D+W)',               desc:'Daily High-Low Renko AND Weekly Renko both show UP bricks - trend confirmed at multiple timeframes simultaneously', stars:'★★★★', section:13},
+  {tab:'renko',strat:'rk_rev_bull_d',  emoji:'🟢',badge:'renko',label:'Daily Just Reversed UP',            desc:'The very first UP brick after a downtrend on the High-Low daily chart - earliest possible Renko reversal entry', stars:'★★★★', section:13},
+  {tab:'renko',strat:'rk_punch5_d',    emoji:'🔥',badge:'renko',label:'5-Brick Punch (Daily HL)',           desc:'5 consecutive UP bricks without reversal - Definedge signature scan, stocks with a 5-brick run show significantly higher continuation probability', stars:'★★★★', section:13},
+  {tab:'renko',strat:'rk_rev_bull_w',  emoji:'🟢',badge:'renko',label:'Weekly Just Reversed UP',           desc:'First UP brick after weekly DOWN bricks - a weekly Renko reversal requires weeks of buying to overcome the 2-brick threshold, making it a high-conviction signal', stars:'★★★★★',section:13},
+  {tab:'renko',strat:'rk_accel_d',     emoji:'⚡',badge:'renko',label:'Accelerating Run',                   desc:'Current brick streak is longer than the average of the last 3 trends - unusual directional conviction, often seen during breakouts', stars:'★★★',  section:13},
 
 ];
 
@@ -5941,9 +6298,10 @@ const SECTIONS=[
   '💎 PRO SCANNERS — RARE TECHNIQUES NOT ON FREE SCREENERS',
   '🌊 WAVETREND — LAZYBEARLUSTRATED OSCILLATOR · OB/OS · DIVERGENCE',
   '📈 EMA CROSSOVERS — PRICE×EMA · EMA×EMA · STACK ALIGNMENT',
+  '🧱 RENKO — ATR-ADAPTIVE · HIGH-LOW · CATAPULT · MULTI-TIMEFRAME',
 ];
 const BADGES={t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',mi:'Multi-Ind',adv:'Advanced',piv:'Pivot',
-              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend',emac:'EMA Cross'};
+              ti:'India Pro',nl:'Noiseless',xp:'Experimental',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combo',bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend',emac:'EMA Cross',renko:'Renko'};
 
 function renderHome(){
   const sortMode=(window._homeSort)||'section';
@@ -6188,7 +6546,13 @@ const STRAT_HELP_KEY={
     p_above_all:0,p_below_all:0,pullback_bull:0,
     ema9_20_bull_d:1,ema9_20_bear_d:1,ema20_50_bull_d:1,ema20_50_bear_d:1,ema50_200_bull_d:1,ema50_200_bear_d:1,
     ema20_50_bull_w:1,ema20_50_bear_w:1,ema50_200_bull_w:1,ema50_200_bear_w:1,
-    bull_stack_d:2,bear_stack_d:2,bull_stack_w:2,ema20_50_above_d:0,ema50_200_above_d:0}
+    bull_stack_d:2,bear_stack_d:2,bull_stack_w:2,ema20_50_above_d:0,ema50_200_above_d:0},
+  renko:{rk_bull_d:0,rk_bear_d:0,rk_rev_bull_d:0,rk_rev_bear_d:0,
+    rk_punch3_d:1,rk_punch5_d:1,rk_punch8_d:1,rk_accel_d:1,
+    rk_dbl_top_d:2,rk_dbl_bot_d:2,rk_trpl_top_d:2,rk_trpl_bot_d:2,rk_catapult_bull:2,rk_catapult_bear:2,
+    rk_near_support:2,rk_near_resistance:2,
+    rk_bull_w:3,rk_rev_bull_w:3,rk_punch3_w:3,rk_mtf_bull:3,rk_mtf_bear:3,rk_htf_rev_bull:3,rk_htf_rev_bear:3,
+    rk_bull_cl:0,rk_rev_bull_cl:0,rk_punch5_cl:1}
 };
 // Map tab → section index in Help H array
 const TAB_SEC={
@@ -6198,7 +6562,7 @@ const TAB_SEC={
   xp:11,  // Experimental / VSA
   patt:12,// Patterns
   br:13,  // Market Breadth
-  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9, pro:10, wt:11, emac:12,
+  gap:14, combo:14, bp:15, sr:16, swing:8, zones:9, pro:10, wt:11, emac:12, renko:13,
 };
 
 function showHelp(tab,stratVal){
@@ -6890,6 +7254,32 @@ function renderHelp(){
         ai:'How often does a daily Full Bull Stack reverse within 30 days on NSE stocks, and what is a reliable early-warning signal of the stack breaking? Is the weekly bull stack a better risk-filter than individual stock RS percentile?'
       },
     ]},
+    {icon:'🧱', title:'Renko Scanner — ATR-Adaptive · High-Low Method · Catapult · Multi-Timeframe', items:[
+      { n:'How Renko Works — Bricks, ATR Sizing, and the Two Methods',
+        f:`Brick size = ATR(14) of the timeframe. Close-only: a new UP brick forms when Close >= last brick close + brick_size. A DOWN brick forms when Close <= last brick close - brick_size. High-Low: within each daily bar, the High is used to test for UP brick extension and the Low to test for DOWN brick extension. Reversal rule: 2 bricks in the opposite direction needed to reverse (standard). ATR-adaptive: brick size recalculated per stock, per timeframe.`,
+        d:`Renko charts completely remove the time dimension — a new brick only forms when price moves a fixed amount, regardless of how many days it takes. This makes trends visually cleaner and eliminates the noise of low-volatility days. The brick size on this scanner is ATR-adaptive: each stock gets its own brick size based on its own recent Average True Range, so a volatile stock (like a mid-cap with high daily swings) gets a larger brick than a low-volatility large-cap. This makes the signals comparable across stocks — a 5-brick run on stock A and stock B both represent the same magnitude of movement relative to each stock's normal volatility. The HIGH-LOW method (used as the primary method here) extends this further: within each daily bar, the High is used to detect upward brick formation and the Low for downward — this is more accurate than close-only Renko because it captures intraday moves that close-only would miss. The downside is slightly more sensitivity; the CLOSE-ONLY method (also available) is more conservative and traditional.`,
+        links:[['Renko Charts Explained','https://www.investopedia.com/terms/r/renkochart.asp']],
+        ai:'How does ATR-adaptive brick sizing compare to fixed-brick-size Renko for scanning NSE stocks? What are the main differences between close-only and High-Low Renko in terms of signal frequency and reliability? How is the reversal threshold (2 bricks) different from a 1-brick reversal?'
+      },
+      { n:'Reversal · Streak Signals — Punch3, Punch5, Punch8, Acceleration',
+        f:`just_rev = True if bricks[-1].direction != bricks[-2].direction. consec = count of consecutive same-direction bricks from the end. punch3/5/8 = consec >= 3/5/8. accelerating = consec > avg(last 3 trend lengths) * 1.2 AND consec >= 3.`,
+        d:`A REVERSAL on a Renko chart is cleaner than a candlestick reversal because Renko requires price to move a full 2*brick_size in the new direction before registering a reversal brick — it cannot happen from a single day's tail or noise. The "Just Reversed UP" signal (first UP brick after DOWN bricks) is therefore a confirmed, filtered reversal entry rather than a raw price level. STREAK SIGNALS count consecutive bricks in the same direction. Three consecutive bricks (Punch3) shows early directional conviction. Five bricks (Punch5) is the Definedge "signature scan" made famous by Prashant Shah — in their research, stocks forming a 5-brick run on ATR-sized Renko have historically shown significantly higher continuation probability over the next 5-10 bricks vs stocks with shorter streaks. Eight bricks (Punch8) is genuinely rare and typically seen only in the most strongly trending names. ACCELERATION is a dynamic version: rather than a fixed count, it compares the current streak to that stock's own recent average trend lengths — if this trend is already 20%+ longer than the prior three trends, the stock is showing unusual directional conviction regardless of the absolute brick count.`,
+        links:[['Prashant Shah Renko','https://definedge.com/']],
+        ai:'What is the statistical follow-through rate after a 5-brick Renko punch on NSE stocks? How long does a Renko reversal signal typically last before the next reversal on the daily High-Low chart? Is the Punch5 or the Catapult pattern more reliable for NSE mid-caps?'
+      },
+      { n:'Catapult Pattern · Double/Triple Top/Bottom (Definedge)',
+        f:`dbl_top: last two UP-run peaks within 1.5 bricks of each other. dbl_bot: last two DOWN-run bottoms within 1.5 bricks. trpl_top/bot: last three peaks/troughs within 2 bricks. catapult_bull: dbl_bot=True AND current brick is UP AND consec==1 (first brick of new up-run). catapult_bear: mirror for dbl_top.`,
+        d:`The CATAPULT is the highest-probability buy/sell pattern in Definedge Renko methodology. It requires two conditions to be simultaneously true: (1) a double bottom (or top) has already formed — meaning price twice reached the same Renko support level before reversing up — AND (2) the current brick is the VERY FIRST up brick breaking above the neckline of that double bottom. The catapult metaphor is apt: the double bottom loads the spring (twice establishing that buyers are at this level), and the breakout brick is the spring releasing. Because this pattern requires both pattern formation AND breakout confirmation, it generates fewer false signals than simply buying at a double bottom. TRIPLE TOP/BOTTOM simply extends this to three rejections at the same level — even stronger pattern, even rarer, and historically higher reliability as a standalone pattern. On a Renko chart, these patterns are cleaner than on candlestick charts because the time axis is removed — two Renko peaks at the same price level represent two genuine supply/demand events at that level, not two coincidental daily closes near the same price on different dates in different conditions.`,
+        links:[['Definedge Renko Patterns','https://definedge.com/']],
+        ai:'How does a Renko Catapult compare to a standard double-bottom neckline breakout in terms of follow-through? Can the Catapult pattern fail, and what is the typical stop-loss placement on a Renko Catapult entry? What is the minimum brick count between the two troughs of a valid Renko double bottom?'
+      },
+      { n:'Multi-Timeframe Renko · HTF Reversal Setup',
+        f:`w = weekly OHLC resampled via resample("W-FRI"), run through same HL-Renko builder with weekly ATR brick size. mtf_bull = d_hl.bull AND w.bull. htf_rev_bull = d_hl.just_rev AND d_hl.bull AND w.bull. Monthly uses resample("ME").`,
+        d:`Multi-timeframe Renko combines the noise-filtering of Renko with the directional bias of higher timeframes. The WEEKLY RENKO is built from weekly OHLC bars — each brick requires price to move one weekly ATR in one direction (a larger absolute move than daily), and reversals require 2 weekly bricks. A weekly Renko reversal therefore represents 2-4+ weeks of sustained directional movement — a much stronger signal than a daily reversal. The MTF BULL setup (daily HL and weekly both show UP bricks) confirms the trend at two independent timeframes simultaneously. The HTF REVERSAL BULL is the premium setup: the weekly Renko is already in an uptrend (the higher-timeframe direction is bullish), AND the daily Renko has JUST reversed from down to up (providing an early, lower-risk daily entry). This combines the directionality of the weekly trend with the precision timing of the daily reversal — the "trade with the trend, enter on the pullback/reversal" principle applied to noise-filtered Renko bricks rather than raw price charts.`,
+        links:[['Multi-Timeframe Analysis','https://www.investopedia.com/articles/trading/07/timeframes.asp']],
+        ai:'How many daily Renko bricks does it typically take to form one weekly Renko brick for NSE stocks? What percentage of daily Renko reversals that occur in the direction of the weekly trend continue successfully vs those that go against the weekly trend? When both daily and weekly Renko are bullish, how does the stop-loss placement differ from a daily-only signal?'
+      },
+    ]},
   ];
 
   let html=`<div class="help-wrap">
@@ -6970,6 +7360,7 @@ function triggerAutoScan(){
     else if(t==='pro'){ scanPro(); }
     else if(t==='wt'){ scanWT(); }
     else if(t==='emac'){ scanEMAC(); }
+    else if(t==='renko'){ scanRenko(); }
   },350);
 }
 function initAutoScan(){
@@ -8147,7 +8538,7 @@ function scanTopPicks(){
 const TAB_NAMES={piv:'Pivot Points',smc:'Price Action/SMC',vol:'Volume',mi:'Multi-Indicator',
   adv:'Advanced',t1:'Tier-1',t2:'Tier-2',t3:'Tier-3',ti:'India Pro',nl:'Noiseless',
   xp:'Experimental/VSA',patt:'Patterns',br:'Breadth',gap:'Gaps',combo:'Combiner',
-  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend',emac:'EMA Cross'};
+  bp:'Breakout Pro',sr:'Smart Rank',swing:'Swing Setup',zones:'Supply/Demand',pro:'Pro Scanners',wt:'WaveTrend',emac:'EMA Cross',renko:'Renko'};
 const SIGNAL_DEFS=[
   // ── Trend / Tier-1 ──
   {cat:'Trend',tab:'t1',label:'SuperTrend Bullish',          w:3, chk:s=>s.t1?.stt?.bull},
@@ -8330,6 +8721,17 @@ const SIGNAL_DEFS=[
   {cat:'EMACross',tab:'emac',label:'Price crossed Below EMA 200 (Daily)', w:-8,chk:s=>s.emac?.d?.p_cross_below_200},
   {cat:'EMACross',tab:'emac',label:'Price Below ALL EMAs (Daily)',         w:-4,chk:s=>s.emac?.d?.p_below_all},
   {cat:'EMACross',tab:'emac',label:'Death Cross Daily (EMA50×EMA200)',     w:-7,chk:s=>s.emac?.d?.ema50_200_bear},
+
+
+  // ── Renko ──
+  {cat:'Renko',tab:'renko',label:'Renko HTF Reversal UP (D+W)',    w:8, chk:s=>s.renko?.htf_rev_bull},
+  {cat:'Renko',tab:'renko',label:'Renko Catapult Bull',            w:8, chk:s=>s.renko?.d_hl?.catapult_bull},
+  {cat:'Renko',tab:'renko',label:'Renko MTF Bull (D+W)',           w:6, chk:s=>s.renko?.mtf_bull},
+  {cat:'Renko',tab:'renko',label:'Renko Just Reversed UP (Daily)', w:5, chk:s=>s.renko?.d_hl?.just_rev&&s.renko?.d_hl?.bull},
+  {cat:'Renko',tab:'renko',label:'Renko 5-Brick Punch (Daily)',    w:5, chk:s=>s.renko?.d_hl?.punch5},
+  {cat:'Renko',tab:'renko',label:'Renko Weekly Rev UP',            w:7, chk:s=>s.renko?.w?.just_rev&&s.renko?.w?.bull},
+  {cat:'Renko',tab:'renko',label:'Renko Catapult Bear',            w:-8,chk:s=>s.renko?.d_hl?.catapult_bear},
+  {cat:'Renko',tab:'renko',label:'Renko MTF Bear (D+W)',           w:-6,chk:s=>s.renko?.mtf_bear},
 
   // ── Gap ──
   {cat:'Gap',tab:'gap',label:'Gap Up Continuation',           w:2, chk:s=>s.gap?.up&&s.gap?.cont},
@@ -8912,6 +9314,97 @@ function scanEMAC(){
   sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
 }
 
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🧱 RENKO SCANNER — ATR-adaptive bricks, Close-only + High-Low methods
+//    Daily / Weekly / Monthly  ·  Patterns: Catapult, Triple Top/Bot, Reversal
+// ════════════════════════════════════════════════════════════════════════════
+const RENKO_INFO={
+  rk_bull_d:'<b>Bull Renko (Daily High-Low)</b> · The current Renko brick is an UP brick on the daily High-Low chart · High-Low Renko uses intraday highs and lows to detect brick formation within each daily bar, making it more responsive than close-only Renko. An up brick means price has moved at least one brick-size (ATR-based) above the prior brick',
+  rk_bear_d:'<b>Bear Renko (Daily High-Low)</b> · The current brick is DOWN · Price has declined at least one ATR-brick below the prior brick close',
+  rk_rev_bull_d:'<b>★ Just Reversed UP (Daily HL)</b> · The very first UP brick after a sequence of DOWN bricks · This is the earliest possible entry signal — Renko charts cannot form a reversal until price moves the reversal distance (2 bricks by default), so a fresh reversal is a high-conviction momentum shift',
+  rk_rev_bear_d:'<b>Just Reversed DOWN (Daily HL)</b> · First DOWN brick after a sequence of UP bricks · A confirmed exit or short entry signal on the Renko chart',
+  rk_punch3_d:'<b>3-Brick Run (Daily)</b> · 3 consecutive same-direction bricks without a reversal · The Definedge/Prashant Shah "3-brick" momentum signal — three in a row confirms directional conviction rather than noise',
+  rk_punch5_d:'<b>5-Brick Punch (Daily)</b> · 5 consecutive same-direction bricks · The "Punch 5" — Definedge\'s signature scan that identifies the most sustained Renko moves; in their research, stocks forming a 5-brick run have significantly higher continuation probability over the next 5-10 bars',
+  rk_punch8_d:'<b>8-Brick Power Run (Daily)</b> · 8 or more consecutive bricks — a sustained momentum run that is genuinely rare, typically occurring only in the strongest trending stocks · A 8-brick run implies price has moved at least 8×ATR in one direction without a 2-ATR reversal',
+  rk_accel_d:'<b>Accelerating Run (Daily)</b> · The current trend\'s brick count exceeds the average length of the prior 3 trends by 20%+ · Acceleration means this run is already longer than usual, suggesting unusual directional conviction — often seen during breakouts from consolidation',
+  rk_dbl_top_d:'<b>Double Top (Daily)</b> · Two successive UP runs have reached approximately the same level (within 1.5 bricks) · On a Renko chart, a double top is cleaner than on a candlestick chart because time is removed — the two peaks represent price twice rejecting the same level, not coincidentally on two different dates',
+  rk_dbl_bot_d:'<b>Double Bottom (Daily)</b> · Two successive DOWN runs have bottomed at approximately the same level · A Renko double bottom is a reliable support confirmation — price twice found buyers at the same Renko level',
+  rk_trpl_top_d:'<b>Triple Top (Daily)</b> · Three UP runs have all stalled at approximately the same resistance level · Even stronger than a double top — three rejections at the same brick level is a very strong Renko resistance signal',
+  rk_trpl_bot_d:'<b>Triple Bottom (Daily)</b> · Three DOWN runs have all reversed at approximately the same support level · Very strong Renko support — three bounces from the same level',
+  rk_catapult_bull:'<b>★ Catapult Bull — Double Bottom Breakout (Definedge)</b> · A double bottom has formed AND the current brick is the FIRST up brick breaking above the neckline of the double bottom · This is the highest-probability Renko buy pattern in Definedge methodology: the two equal lows establish a support, and the new up brick confirms buyers have overpowered sellers at that level — the "catapult" metaphor captures the explosive potential',
+  rk_catapult_bear:'<b>Catapult Bear — Double Top Breakdown (Definedge)</b> · A double top has formed AND the current brick is the FIRST down brick breaking below the neckline of the double top · The mirror of the bull catapult — sellers overwhelming buyers at a confirmed resistance',
+  rk_near_support:'<b>Near Renko Support</b> · Price is currently within 1 brick of the last Renko reversal level (the low of the current uptrend) · The reversal level is a natural pullback support on the Renko chart — stocks testing this level in an uptrend are potentially offering a lower-risk re-entry',
+  rk_near_resistance:'<b>Near Renko Resistance</b> · Price is within 1 brick of the last Renko reversal high · The level where the current downtrend began is now acting as overhead resistance',
+  rk_bull_w:'<b>Weekly Bull Renko</b> · The current Weekly Renko brick is UP · Weekly Renko uses each week\'s High-Low-Close to form bricks; a weekly up brick requires price to have moved at least one weekly ATR-brick upward',
+  rk_rev_bull_w:'<b>★ Weekly Just Reversed UP</b> · The first UP brick after weekly DOWN bricks · A weekly-level Renko reversal is a much stronger signal than a daily reversal — it implies at least 1-2 weeks of sustained buying sufficient to overcome the 2-brick reversal distance on the weekly chart',
+  rk_punch3_w:'<b>Weekly 3-Brick Run</b> · Three consecutive UP bricks on the weekly Renko chart · Three weekly up bricks represents 3-6+ weeks of consistent buying without a 2-brick reversal — a genuine multi-week trend',
+  rk_mtf_bull:'<b>★ Multi-Timeframe Bull (Daily + Weekly)</b> · Both the daily High-Low Renko AND the weekly Renko show UP bricks · Trend agreement across timeframes dramatically reduces false signals — when both daily and weekly Renko are bullish, the underlying trend is confirmed at multiple horizons',
+  rk_mtf_bear:'<b>Multi-Timeframe Bear (Daily + Weekly)</b> · Both daily and weekly Renko show DOWN bricks · Full multi-TF bear confirmation',
+  rk_htf_rev_bull:'<b>★ Best Renko Setup — Daily Reversed UP + Weekly Already Bull</b> · The daily Renko just reversed from DOWN to UP (first up brick today) WHILE the weekly Renko is already in an uptrend · This combines the weekly trend direction filter (Phase 4 in most trading methodologies) with the precision of a daily-level reversal entry — catching the earliest daily re-entry in the direction of the weekly trend',
+  rk_htf_rev_bear:'<b>Daily Reversed DOWN + Weekly Already Bear</b> · Daily Renko just reversed bearish while weekly is already bearish — trend-following exit/short signal',
+  rk_bull_cl:'<b>Bull Renko (Close-Only)</b> · The current Renko brick on the classic close-only chart is UP · Close-only Renko only uses the daily closing price to form bricks; it is slower to react than High-Low Renko but produces fewer false signals and is the traditional method',
+  rk_rev_bull_cl:'<b>Just Reversed UP (Close-Only)</b> · First UP brick after DOWN bricks on the close-only chart · More conservative than the HL method — this signal requires two full closing prices above/below the reversal threshold',
+  rk_punch5_cl:'<b>5-Brick Punch (Close-Only)</b> · 5 consecutive bricks on the close-only chart — a very clean momentum signal since each brick requires a significant close-to-close move',
+};
+function updateRENKOInfo(){const s=document.getElementById('renko-strat').value;setFbar('🧱 <b>Renko</b> · '+(RENKO_INFO[s]||s));}
+
+function scanRenko(){
+  const strat=document.getElementById('renko-strat').value;
+  const rsMin=parseInt(document.getElementById('renko-rs').value)||0;
+  const prMin=parseFloat(document.getElementById('renko-pmin').value)||0;
+  const prMax=parseFloat(document.getElementById('renko-pmax').value)||Infinity;
+  updateRENKOInfo(); rows=[];
+  for(const s of S){
+    if(!passesIdx(s))continue;
+    if(s.price<prMin||s.price>prMax)continue;
+    if((s.rs||0)<rsMin)continue;
+    const rk=s.renko||{};
+    const d=rk.d_hl||{}, cl=rk.d_cl||{}, w=rk.w||{};
+    let matched=false,sig='',extra={};
+    const fmtRk=r=>`${r.bull?'UP':'DN'} ×${r.consec} bricks | sz:${r.brick}`;
+
+    // Daily HL
+    if(strat==='rk_bull_d')        {matched=!!d.bull;          sig='🟢 Bull';         extra={rk:fmtRk(d)};}
+    if(strat==='rk_bear_d')        {matched=!!d.bear;          sig='🔴 Bear';         extra={rk:fmtRk(d)};}
+    if(strat==='rk_rev_bull_d')    {matched=!!d.just_rev&&!!d.bull;  sig='⭐🟢 Rev UP';  extra={rk:fmtRk(d)};}
+    if(strat==='rk_rev_bear_d')    {matched=!!d.just_rev&&!!d.bear;  sig='⭐🔴 Rev DN';  extra={rk:fmtRk(d)};}
+    if(strat==='rk_punch3_d')      {matched=!!d.punch3;        sig='🔥×3';            extra={consec:d.consec,dir:d.bull?'UP':'DN'};}
+    if(strat==='rk_punch5_d')      {matched=!!d.punch5;        sig='🔥×5';            extra={consec:d.consec,dir:d.bull?'UP':'DN'};}
+    if(strat==='rk_punch8_d')      {matched=!!d.punch8;        sig='🔥×8';            extra={consec:d.consec};}
+    if(strat==='rk_accel_d')       {matched=!!d.accelerating;  sig='⚡ Accel';        extra={consec:d.consec,avg:d.avg_trend_len};}
+    // Patterns
+    if(strat==='rk_dbl_top_d')     {matched=!!d.dbl_top;       sig='🔻 Dbl Top';      extra={level:d.reversal_level,brick:d.brick};}
+    if(strat==='rk_dbl_bot_d')     {matched=!!d.dbl_bot;       sig='🟢 Dbl Bot';      extra={level:d.reversal_level,brick:d.brick};}
+    if(strat==='rk_trpl_top_d')    {matched=!!d.trpl_top;      sig='🔺 Trpl Top';     extra={level:d.reversal_level};}
+    if(strat==='rk_trpl_bot_d')    {matched=!!d.trpl_bot;      sig='🟢 Trpl Bot';     extra={level:d.reversal_level};}
+    if(strat==='rk_catapult_bull') {matched=!!d.catapult_bull; sig='⭐ Catapult↑';    extra={level:d.reversal_level,brick:d.brick};}
+    if(strat==='rk_catapult_bear') {matched=!!d.catapult_bear; sig='⭐ Catapult↓';    extra={level:d.reversal_level};}
+    // Support/Resistance
+    if(strat==='rk_near_support')  {matched=!!d.near_support;  sig='📍 Near S';       extra={support:d.reversal_level,brick:d.brick};}
+    if(strat==='rk_near_resistance'){matched=!!d.near_resistance;sig='📍 Near R';      extra={resist:d.reversal_level,brick:d.brick};}
+    // Weekly
+    if(strat==='rk_bull_w')        {matched=!!w.bull;          sig='🟢 W-Bull';       extra={rk:fmtRk(w)};}
+    if(strat==='rk_rev_bull_w')    {matched=!!w.just_rev&&!!w.bull; sig='⭐🟢 W-Rev↑';extra={rk:fmtRk(w)};}
+    if(strat==='rk_punch3_w')      {matched=!!w.punch3;        sig='🔥 W×3';          extra={consec:w.consec};}
+    // Multi-TF
+    if(strat==='rk_mtf_bull')      {matched=!!rk.mtf_bull;     sig='🌐🟢 MTF Bull';   extra={d_consec:d.consec,w_consec:w.consec};}
+    if(strat==='rk_mtf_bear')      {matched=!!rk.mtf_bear;     sig='🌐🔴 MTF Bear';   extra={d_consec:d.consec,w_consec:w.consec};}
+    if(strat==='rk_htf_rev_bull')  {matched=!!rk.htf_rev_bull; sig='⭐ HTF Rev↑';     extra={w_consec:w.consec,d_brick:d.brick};}
+    if(strat==='rk_htf_rev_bear')  {matched=!!rk.htf_rev_bear; sig='⭐ HTF Rev↓';     extra={w_consec:w.consec};}
+    // Close-only
+    if(strat==='rk_bull_cl')       {matched=!!cl.bull;         sig='🟢 CL-Bull';      extra={rk:fmtRk(cl)};}
+    if(strat==='rk_rev_bull_cl')   {matched=!!cl.just_rev&&!!cl.bull; sig='⭐ CL-Rev↑';extra={rk:fmtRk(cl)};}
+    if(strat==='rk_punch5_cl')     {matched=!!cl.punch5;       sig='🔥 CL×5';         extra={consec:cl.consec};}
+
+    if(!matched)continue;
+    rows.push({sym:s.sym,idx:s.idx,price:s.price,date:s.date,avol:s.avol,
+      above200:s.above200,rs:s.rs,dma200:s.dma200,w52h:s.w52h,w52l:s.w52l,
+      sig,extra,strat,_tab:'renko',sector:s.sector||''});
+  }
+  sc=2;sd=1;rows.sort((a,b)=>a.sym.localeCompare(b.sym));render();
+}
+
 function lookupStock(){
   const q=(document.getElementById('lookup-input').value||'').trim().toUpperCase();
   const sugEl=document.getElementById('lookup-suggest');
@@ -8947,7 +9440,7 @@ function renderLookupResult(s){
   const catOrder=['Trend','Momentum','Volatility','SMC','MultiIndicator','BreakoutPro','SmartRank','Patterns','Gap'];
   const catLabels={Trend:'📈 Trend',Momentum:'⚡ Momentum',Volatility:'🗜 Volatility/Breakout',
     SMC:'🎯 Smart Money Concepts',MultiIndicator:'🏆 Minervini/Weinstein',
-    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand',ProScanners:'💎 Pro Scanners',WaveTrend:'🌊 WaveTrend',EMACross:'📈 EMA Crossovers'};
+    BreakoutPro:'🏹 Breakout Pro',SmartRank:'🔢 Smart Rank',Patterns:'🎨 Patterns',Gap:'⚡ Gaps',SupplyDemand:'📦 Supply/Demand',ProScanners:'💎 Pro Scanners',WaveTrend:'🌊 WaveTrend',EMACross:'📈 EMA Crossovers',Renko:'🧱 Renko'};
 
   let catsHtml='';
   for(const cat of catOrder){
@@ -9331,7 +9824,7 @@ function buildCols(tab,r0){
       {k:'date',    h:'Last Date',fn:r=>`<td class="mu">${r.date}</td>`},
     ];
   }
-  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'||tab==='pro'||tab==='wt'||tab==='emac'){
+  if(tab==='nl'||tab==='xp'||tab==='patt'||tab==='br'||tab==='gap'||tab==='combo'||tab==='bp'||tab==='sr'||tab==='swing'||tab==='zones'||tab==='pro'||tab==='wt'||tab==='emac'||tab==='renko'){
     const colorMap={nl:'#e879f9',xp:'#f59e0b',patt:'#06b6d4',br:'#84cc16'};
     const color=colorMap[tab]||'#888';
     const extraCols=rows.length?Object.keys(rows[0].extra||{}).map(k=>({
@@ -9413,6 +9906,7 @@ function exportCSV(){
     pro:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     wt:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     emac:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
+    renko:r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,...Object.values(r.extra||{}),r.rs,r.date],
     br: r=>[r.sym,r.idx||'Other',r.price.toFixed(2),r.sig,r.rs,`${((r.price-r.dma200)/r.dma200*100).toFixed(1)}%`,r.avol,r.date],
   };
   const lines=[(hdrs[tab]||hdrs.piv).join(','),...vis.map(r=>(cells[tab]||cells.piv)(r).join(','))];
@@ -9422,7 +9916,15 @@ function exportCSV(){
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded',()=>{
+document.addEventListener('DOMContentLoaded',async ()=>{
+  // Decompress stock data
+  try{
+    const ldMsg2=document.getElementById('_ld_msg');
+    if(ldMsg2) ldMsg2.textContent='Decompressing data...';
+    [S, BREADTH] = await Promise.all([_decompress(_S_B64), _decompress(_BR_B64)]);
+  }catch(decompErr){
+    console.error('Decompression failed:',decompErr);
+  }
   // Dismiss loading overlay
   const ld=document.getElementById('_ld');
   const bar=document.getElementById('_ld_bar');
@@ -9485,18 +9987,18 @@ class _NpEnc(json.JSONEncoder):
         return super().default(o)
 
 def build_html(stocks, data_dir):
-    import json as _json
+    import json as _json, gzip as _gz, base64 as _b64
     gt = datetime.now().strftime("%d %b %Y  %H:%M")
-    # Extract breadth data (stored on first stock by assign_breadth)
+    # Extract breadth data
     breadth_data = stocks[0].get('_breadth', {}) if stocks else {}
-    # Remove internal breadth keys from all stocks before serializing
-    clean_stocks = []
-    for s in stocks:
-        cs = {k:v for k,v in s.items() if k not in ('_breadth','_breadth_ref')}
-        clean_stocks.append(cs)
+    clean_stocks = [{k:v for k,v in s.items() if k not in ('_breadth','_breadth_ref')} for s in stocks]
+    # Gzip-compress + base64-encode both JSON payloads (typically 88%+ size reduction)
+    def _pack(obj):
+        raw = _json.dumps(obj, separators=(",",":"), cls=_NpEnc).encode('utf-8')
+        return _b64.b64encode(_gz.compress(raw, compresslevel=9)).decode('ascii')
     return (HTML
-            .replace("__JSON__", _json.dumps(clean_stocks, separators=(",",":"), cls=_NpEnc))
-            .replace("__BREADTH_JSON__", _json.dumps(breadth_data, separators=(",",":"), cls=_NpEnc))
+            .replace("__JSON_B64__", _pack(clean_stocks))
+            .replace("__BREADTH_B64__", _pack(breadth_data))
             .replace("__STOCK_COUNT__", str(len(stocks)))
             .replace("__GT__", gt).replace("__DD__", data_dir))
 

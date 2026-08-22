@@ -1867,6 +1867,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <button class="btn" id="panDnBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view down">&#9660;</button>
               </span>
               <span style="display:flex;gap:4px;align-items:center;">
+                <select id="chartType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Candles show time honestly; Renko strips it out to filter noise">
+                  <option value="candle" selected>Candles</option>
+                  <option value="renko">Renko</option>
+                </select>
+                <select id="renkoBox" class="ohlc-inp" style="font-size:9px;padding:1px 4px;display:none;" title="Brick size. ATR adapts to today's volatility; a fixed size keeps bricks comparable across days.">
+                  <option value="atr" selected>ATR-14</option>
+                  <option value="10">10 pts</option>
+                  <option value="15">15 pts</option>
+                  <option value="20">20 pts</option>
+                  <option value="25">25 pts</option>
+                  <option value="50">50 pts</option>
+                </select>
                 <select id="chartInstrument" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Chart the index itself, or a single option contract rebuilt from the recorded chain">
                   <option value="index">Index (spot)</option>
                   <option value="CE">Call (CE)</option>
@@ -1913,6 +1925,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           </div>
 
           <!-- ── F&O strength ranking ────────────────────────────────── -->
+          <div class="level-panel" id="rangeFcPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🎯 Expected Range — day · week · month<i class="hi" data-h="range-forecast">i</i></span>
+            </div>
+            <div id="rangeFc" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
+          </div>
+
           <div class="level-panel" id="strengthPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
               <span class="skew-chart-title">💪 F&amp;O Strength Ranking<i class="hi" data-h="strength-rank">i</i></span>
@@ -3729,6 +3748,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
       <div class="builder-panel-head"><h3>OI Flow — Top Buildup</h3></div>
 
+      <div class="level-panel" id="eodPanel" style="margin-bottom:12px;">
+        <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
+          <span class="skew-chart-title">📋 Session Review — what the levels actually did<i class="hi" data-h="eod-report">i</i></span>
+          <button class="btn" id="eodBtn" style="font-size:9px;padding:2px 10px;">↻ Review today</button>
+        </div>
+        <div id="eodBody" style="padding:4px 6px;"><div class="movers-loading">Press Review to score today against the levels drawn this morning.</div></div>
+      </div>
+
       <div class="level-panel" id="pcrHistPanel" style="margin-bottom:12px;">
         <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
           <span class="skew-chart-title">⚖️ PCR Session Curve — positioning vs today\'s flow<i class="hi" data-h="pcr-history">i</i></span>
@@ -4505,6 +4532,26 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div class="oc-sub" style="padding:2px 6px 4px;">Speaks when price reaches a pivot, CPR band, OI wall, 9:20 line or 1σ edge. Which of those announce is set in the card above; this controls the wording and whether they are spoken at all on this browser.</div>
           <div id="alertLevelSlot" style="padding:6px;"></div>
           <div class="oc-sub" style="padding:0 6px 6px;">Fires when price reaches a pivot, CPR, OI wall, 9:20 line or one of your own levels — the same detection the chart uses, so what you hear matches what you see drawn.</div>
+        </div>
+
+        <div class="skew-chart-wrap" style="grid-column:1 / -1;">
+          <div class="skew-chart-head"><span class="skew-chart-title">🔮 Leading signals — conditions that change before price<i class="hi" data-h="leading-signals">i</i></span></div>
+          <div style="padding:6px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:10px;">
+            <label style="font-weight:700;"><input type="checkbox" id="lead_on" checked> Announce leading signals</label>
+            <label><input type="checkbox" id="lead_regime" checked> regime flips (WTT/WTB/bull run/bloodbath)</label>
+            <label><input type="checkbox" id="lead_gflip" checked> gamma flip cross</label>
+            <label><input type="checkbox" id="lead_wall" checked> wall abandonment</label>
+            <label><input type="checkbox" id="lead_straddle" checked> straddle expansion</label>
+            <label><input type="checkbox" id="lead_pcr" checked> vol-PCR divergence</label>
+          </div>
+          <div style="padding:0 6px 4px;display:flex;gap:12px;flex-wrap:wrap;font-size:9.5px;color:var(--muted,#789);">
+            <label>wall decay ≥ <input type="number" id="lead_wallPct" class="ohlc-inp" style="width:48px;" step="1" min="3">%</label>
+            <label>straddle rise ≥ <input type="number" id="lead_strPct" class="ohlc-inp" style="width:48px;" step="1" min="2">%</label>
+            <label>PCR gap ≥ <input type="number" id="lead_pcrGap" class="ohlc-inp" style="width:52px;" step="0.05" min="0.05"></label>
+            <label>re-fire after <input type="number" id="lead_cd" class="ohlc-inp" style="width:44px;" step="1" min="1">min</label>
+          </div>
+          <div class="oc-sub" style="padding:0 6px 4px;">These are <b>mechanical</b>, not predictive. None forecasts direction; each marks a moment when a move becomes more likely or more violent — a claim that can be defended. The regime signals were already computed on the OI Flow tab but never spoken, so they only helped if you happened to be looking.</div>
+          <div id="leadLog" style="padding:0 6px 6px;"></div>
         </div>
 
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
@@ -14466,10 +14513,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _resetHistoriesIfSymbolChanged(state.symbol || data?.symbol); } catch (_) {}
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
+    try { _leadingCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
     try { renderRegimeSignals(data); } catch (_) {}
     try { renderChainAnalytics(data); } catch (_) {}
     try { renderVolPanel(data); } catch (_) {}
+    try { renderRangeForecast(data); } catch (_) {}
     try { renderVolSurfaceTerm(data); } catch (_) {}
     try {
       if (_chart.candles.length) {
@@ -16337,6 +16386,432 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
+  // ══ RENKO ═════════════════════════════════════════════════════════
+  // Bricks print only when price moves a full box, so time is stripped out.
+  // That is the whole point of Renko and also its danger for OPTIONS: time is
+  // the decay, and a chart where three bricks in two minutes look identical to
+  // one brick in forty hides the variable that is always working against a
+  // long option. Every brick here therefore carries the minutes it took, the
+  // slow ones are visibly dimmed, and the panel reports the elapsed session
+  // time - so the view keeps Renko's noise filtering without pretending the
+  // clock stopped.
+  function _atr(cs, period) {
+    if (!cs || cs.length < 2) return null;
+    const trs = [];
+    for (let i = 1; i < cs.length; i++) {
+      const pc = cs[i - 1].c;
+      trs.push(Math.max(cs[i].h - cs[i].l, Math.abs(cs[i].h - pc), Math.abs(cs[i].l - pc)));
+    }
+    const n = Math.min(period, trs.length);
+    if (!n) return null;
+    return trs.slice(-n).reduce((s, v) => s + v, 0) / n;
+  }
+
+  function _renkoBuild(cs, box) {
+    if (!cs?.length || !(box > 0)) return [];
+    const bricks = [];
+    let anchor = Math.round(cs[0].c / box) * box;
+    let dir = 0;
+    let openedAt = cs[0].t, hiSince = cs[0].h, loSince = cs[0].l;
+    for (const c of cs) {
+      hiSince = Math.max(hiSince, c.h); loSince = Math.min(loSince, c.l);
+      // A brick needs a FULL box in the same direction, or two boxes to
+      // reverse - the standard rule, and what stops a wobble printing bricks.
+      let guard = 0;
+      while (guard++ < 40) {
+        const upNeed = anchor + box * (dir >= 0 ? 1 : 2);
+        const dnNeed = anchor - box * (dir <= 0 ? 1 : 2);
+        if (c.c >= upNeed) {
+          const from = dir >= 0 ? anchor : anchor + box;
+          bricks.push({ dir: 1, o: from, c: from + box, t: c.t,
+                        mins: Math.max(1, Math.round((c.t - openedAt) / 60)),
+                        hi: hiSince, lo: loSince });
+          anchor = from + box; dir = 1;
+          openedAt = c.t; hiSince = c.h; loSince = c.l;
+        } else if (c.c <= dnNeed) {
+          const from = dir <= 0 ? anchor : anchor - box;
+          bricks.push({ dir: -1, o: from, c: from - box, t: c.t,
+                        mins: Math.max(1, Math.round((c.t - openedAt) / 60)),
+                        hi: hiSince, lo: loSince });
+          anchor = from - box; dir = -1;
+          openedAt = c.t; hiSince = c.h; loSince = c.l;
+        } else break;
+      }
+    }
+    return bricks;
+  }
+
+  function _renkoStats(bricks) {
+    if (!bricks.length) return null;
+    let flips = 0, run = 1, maxRun = 1;
+    for (let i = 1; i < bricks.length; i++) {
+      if (bricks[i].dir !== bricks[i - 1].dir) { flips++; run = 1; }
+      else { run++; maxRun = Math.max(maxRun, run); }
+    }
+    const last = bricks[bricks.length - 1];
+    let curRun = 1;
+    for (let i = bricks.length - 2; i >= 0 && bricks[i].dir === last.dir; i--) curRun++;
+    const mins = bricks.map(b => b.mins);
+    return {
+      total: bricks.length, up: bricks.filter(b => b.dir > 0).length,
+      flips, maxRun, curRun, dir: last.dir,
+      medianMins: mins.slice().sort((a, b) => a - b)[Math.floor(mins.length / 2)],
+      slowest: Math.max(...mins), elapsed: mins.reduce((s, v) => s + v, 0),
+    };
+  }
+
+  function renderRenko() {
+    const box = document.getElementById('chartBody');
+    const cs = _chart.candles || [];
+    if (!box) return;
+    if (cs.length < 5) { box.innerHTML = '<div class="movers-loading">Not enough candles yet for Renko.</div>'; return; }
+    const mode = document.getElementById('renkoBox')?.value || 'atr';
+    let bs;
+    if (mode === 'atr') {
+      const a = _atr(cs, 14);
+      bs = Math.max(2, Math.round((a || 10) * 100) / 100);
+    } else bs = +mode;
+    const bricks = _renkoBuild(cs, bs);
+    if (!bricks.length) { box.innerHTML = `<div class="movers-loading">No brick has completed yet at a ${bs}-point box — price has not moved a full box. Choose a smaller box to see structure sooner.</div>`; return; }
+    const st = _renkoStats(bricks);
+    const show = bricks.slice(-90);
+    const W = 900, H = _chart.maxed ? 620 : 420, padL = 8, padR = 74, padT = 12, padB = 34;
+    const prices = show.flatMap(b => [b.o, b.c]);
+    let lo = Math.min(...prices), hi = Math.max(...prices);
+    const pad = (hi - lo) * 0.06 || bs; lo -= pad; hi += pad;
+    const bw = (W - padL - padR) / show.length;
+    const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+    let svg = '';
+    show.forEach((b, i) => {
+      const x = padL + i * bw;
+      const top = y(Math.max(b.o, b.c)), bot = y(Math.min(b.o, b.c));
+      const col = b.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+      // slow bricks are dimmed: a brick that took 20 minutes cost real theta,
+      // and Renko would otherwise draw it identically to a 30-second one
+      const slow = b.mins >= (st.medianMins * 3);
+      svg += `<rect x="${(x + bw * 0.12).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * 0.76).toFixed(1)}" height="${Math.max(2, bot - top).toFixed(1)}" fill="${col}" opacity="${slow ? 0.42 : 0.95}" stroke="${col}" stroke-width="0.6"><title>${b.dir > 0 ? 'UP' : 'DOWN'} ${Math.round(b.o)}→${Math.round(b.c)} · took ${b.mins} min · ${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}${slow ? ' · SLOW: heavy theta for a single box' : ''}</title></rect>`;
+    });
+    for (let g = 0; g <= 4; g++) {
+      const v = lo + (hi - lo) * g / 4;
+      svg += `<text x="${(W - padR + 4).toFixed(1)}" y="${(y(v) + 3).toFixed(1)}" style="font-size:9px;fill:var(--muted,#789);">${fmtInt(Math.round(v))}</text>`;
+    }
+    const tick = Math.max(1, Math.floor(show.length / 8));
+    show.forEach((b, i) => { if (i % tick) return;
+      svg += `<text x="${(padL + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+    const dirTxt = st.dir > 0 ? ['UP', 'var(--pos,#26a69a)'] : ['DOWN', 'var(--neg,#ef5350)'];
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}</svg>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 6px;font-size:10px;">
+        <b style="color:${dirTxt[1]};">${dirTxt[0]} · ${st.curRun} brick${st.curRun === 1 ? '' : 's'} running</b>
+        <span>box <b>${bs}</b> pts${mode === 'atr' ? ' (ATR-14)' : ''}</span>
+        <span style="color:var(--muted);">${st.total} bricks · ${st.up} up / ${st.total - st.up} down · ${st.flips} reversals · longest run ${st.maxRun}</span>
+        <span style="color:var(--muted);">median ${st.medianMins} min per brick · slowest ${st.slowest} min</span>
+      </div>
+      <div class="oc-sub" style="padding:0 6px 6px;">Faded bricks took at least three times the median to form — Renko draws them the same as a fast one, but for a long option they cost far more theta for the same points. <b>${st.flips <= 2 ? 'Few reversals so far: the tape is trending, which is when Renko is most useful.' : st.flips >= 8 ? 'Many reversals: price is chopping around the box size, so the filtering is not working — widen the box.' : 'Moderate reversal count.'}</b> ${st.elapsed} minutes of session are represented here.</div>`;
+  }
+
+  // ══ Multi-horizon expected range ══════════════════════════════════
+  // The option market prices a move for each expiry it lists. Reading them
+  // together shows the term structure of expected movement: 1-sigma for the
+  // day, the week and the month, each from that expiry's own ATM IV rather
+  // than scaling one number, so a near-term event premium shows up as a
+  // weekly range that is disproportionate to the monthly.
+  function _rangeForecast(d) {
+    const spot = d?.underlying_value;
+    if (!spot) return null;
+    const rows = [];
+    const push = (lab, iv, calDays, note) => {
+      if (!iv || !calDays) return;
+      const sigma = spot * (iv / 100) * Math.sqrt(_volT(calDays) );
+      rows.push({ lab, iv, days: calDays, sigma,
+                  lo: spot - sigma, hi: spot + sigma,
+                  lo2: spot - 2 * sigma, hi2: spot + 2 * sigma, note });
+    };
+    const nearIv = d.atm_iv;
+    const nearDte = d.dte ?? 1;
+    // rest of today, from the near expiry's IV
+    const mins = (() => { const g = new Date(Date.now() + 5.5 * 3600000);
+      return Math.max(5, (15 * 60 + 40) - (g.getUTCHours() * 60 + g.getUTCMinutes())); })();
+    push('Rest of today', nearIv, mins / 375, 'what is left of this session');
+    push('Near expiry', nearIv, Math.max(nearDte, 0.02), `${Number(nearDte).toFixed(1)}d to the ${d.expiry || 'near'} expiry`);
+    // other listed expiries, each with its OWN IV
+    const ed = d.expiries_data || {};
+    const others = Object.entries(ed)
+      .filter(([e, i]) => e !== d.expiry && i?.strikes?.length)
+      .map(([e, i]) => {
+        const atm = i.strikes.reduce((a, b) => Math.abs(b.strike - spot) < Math.abs(a.strike - spot) ? b : a);
+        const iv = ((atm.ce_iv || 0) + (atm.pe_iv || 0)) / 2 || null;
+        return { e, dte: i.dte, iv };
+      })
+      .filter(x => x.iv && x.dte)
+      .sort((a, b) => a.dte - b.dte)
+      .slice(0, 3);
+    for (const o of others) push(o.e, o.iv, o.dte, `${o.dte}d`);
+    return { spot, rows };
+  }
+
+  function renderRangeForecast(data) {
+    const box = document.getElementById('rangeFc');
+    if (!box) return;
+    const d = data || state.lastData;
+    const f = _rangeForecast(d);
+    if (!f?.rows?.length) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
+    const rows = f.rows.map(r => `
+      <div style="display:flex;gap:10px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10.5px;flex-wrap:wrap;">
+        <b style="min-width:104px;">${escapeHtml(r.lab)}</b>
+        <span style="color:var(--muted);min-width:56px;">IV ${r.iv.toFixed(1)}%</span>
+        <span style="min-width:132px;">±<b>${Math.round(r.sigma)}</b> pts (1σ)</span>
+        <span style="color:var(--pos,#26a69a);">${fmtInt(Math.round(r.lo))}</span>
+        <span style="color:var(--muted);">–</span>
+        <span style="color:var(--neg,#ef5350);">${fmtInt(Math.round(r.hi))}</span>
+        <span style="color:var(--muted);font-size:9px;">2σ ${fmtInt(Math.round(r.lo2))}–${fmtInt(Math.round(r.hi2))} · ${escapeHtml(r.note || '')}</span>
+      </div>`).join('');
+    // term-structure read
+    let note = '';
+    if (f.rows.length > 2) {
+      const a = f.rows[1], b = f.rows[f.rows.length - 1];
+      const slope = b.iv - a.iv;
+      note = slope < -0.5
+        ? `Near IV sits ${Math.abs(slope).toFixed(1)} points above the far expiry — <b>backwardation</b>, which prices a near-term event. Calendars and diagonals are favoured by that shape.`
+        : slope > 0.5
+        ? `Far IV sits ${slope.toFixed(1)} points above the near — the <b>normal</b> shape, so near-dated premium is comparatively cheap.`
+        : 'Term structure is flat, so there is no calendar edge either way.';
+    }
+    box.innerHTML = rows + `<div class="oc-sub" style="margin-top:4px;">Each horizon uses <b>its own expiry's ATM IV</b> rather than scaling one number, which is what lets a near-term event premium show up as a weekly range disproportionate to the monthly. ${note} Under a lognormal assumption about 68% of closes land inside 1σ and 95% inside 2σ — real markets have fatter tails, so treat 2σ as optimistic rather than a wall.</div>`;
+  }
+
+  // ══ End-of-day session review ═════════════════════════════════════
+  async function loadEodReport() {
+    const box = document.getElementById('eodBody');
+    if (!box) return;
+    box.innerHTML = '<span class="oc-sub">Reading today\'s recording…</span>';
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/eod-report?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`)).json();
+      if (!j.ok) { box.innerHTML = `<span class="oc-sub">${escapeHtml(j.error || 'no data')}</span>`; return; }
+      const lv = (j.lines || []).map(l => {
+        const col = l.verdict === 'held' ? 'var(--pos,#26a69a)' : l.verdict === 'broke' ? 'var(--neg,#ef5350)' : 'var(--muted)';
+        return `<div style="display:flex;gap:10px;font-size:10px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.05);">
+          <b style="min-width:62px;">${escapeHtml(l.label)}</b>
+          <span style="min-width:70px;">${fmtInt(Math.round(l.value))}</span>
+          <span style="color:${col};font-weight:700;">${l.verdict}</span>
+        </div>`; }).join('');
+      const w = j.walls || {};
+      const moved = (a, b) => a && b && a !== b;
+      box.innerHTML = `
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;">
+          <b style="font-size:11px;color:${j.change_pct >= 0 ? 'var(--pos)' : 'var(--neg)'};">${j.change_pct >= 0 ? '+' : ''}${j.change_pct}%</b>
+          <span style="font-size:10px;">O ${fmtInt(Math.round(j.open))} H ${fmtInt(Math.round(j.high))} L ${fmtInt(Math.round(j.low))} C ${fmtInt(Math.round(j.close))}</span>
+          <span style="font-size:10px;color:var(--muted);">range ${Math.round(j.range)} pts · ${j.minutes} min recorded</span>
+          <span style="font-size:10px;color:${j.trend_day ? 'var(--gold,#d4af37)' : 'var(--muted)'};">${j.trend_day ? `TREND DAY (body ${j.body_pct}% of range)` : `range day (body ${j.body_pct}% of range)`}</span>
+        </div>
+        <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">9:20 lines — what actually happened</div>
+        ${lv || '<span class="oc-sub">no 9:20 lines recorded for today</span>'}
+        <div style="font-size:10px;font-weight:700;margin:6px 4px 2px;">Positioning shift</div>
+        <div style="font-size:10px;padding:2px 4px;">
+          Call wall ${fmtInt(w.call_wall_open)} → <b>${fmtInt(w.call_wall_close)}</b>${moved(w.call_wall_open, w.call_wall_close) ? ' <span style="color:var(--gold);">(migrated)</span>' : ' (held)'} ·
+          Put wall ${fmtInt(w.put_wall_open)} → <b>${fmtInt(w.put_wall_close)}</b>${moved(w.put_wall_open, w.put_wall_close) ? ' <span style="color:var(--gold);">(migrated)</span>' : ' (held)'}
+          ${w.pcr_open ? ` · PCR ${w.pcr_open} → ${w.pcr_close}` : ''}
+        </div>
+        <div class="oc-sub" style="margin-top:5px;">Scored from the recorded session, not asserted. "Held" means the line was touched and not broken beyond a small buffer; "broke" means price went through it; "never reached" means it was not tested at all — which is information too, since a line price never approaches is neither right nor wrong. Feed the verdicts into Claims on Trial over enough sessions and the 9:20 method becomes measurable rather than believed.</div>`;
+    } catch (e) { box.innerHTML = `<span class="oc-sub">Failed: ${escapeHtml(e.message)}</span>`; }
+  }
+
+  // ══ LEADING SIGNALS ═══════════════════════════════════════════════
+  // Conditions that change BEFORE price does, because each is mechanical
+  // rather than predictive. None of them forecasts direction; what they do
+  // is mark moments when a move becomes more likely or more violent, which
+  // is a claim that can actually be defended:
+  //   * gamma flip cross - dealer hedging literally reverses sign here, from
+  //     damping moves to amplifying them. The regime change is arithmetic.
+  //   * wall abandonment - writers pulling OI out of a level they were
+  //     defending, while price approaches it. The defence stops before the
+  //     break, not after.
+  //   * straddle expansion on a flat tape - the market paying up for a move
+  //     that has not happened yet.
+  //   * volume-PCR pulling away from OI-PCR - today's conviction diverging
+  //     from the standing book, visible before OI reflects it.
+  //   * regime flips (WTT/WTB/BULL RUN/BLOODBATH) - already computed here
+  //     but never announced, so they only helped if you were looking.
+  const _LEAD_KEY = 'leadingSignalsCfg';
+  function _leadCfg() {
+    try {
+      return Object.assign({
+        on: true, regime: true, gammaFlip: true, wallAbandon: true,
+        straddleExp: true, pcrDiverge: true,
+        wallDecayPct: 12, straddlePct: 8, pcrGap: 0.25, cooldownMin: 10,
+      }, JSON.parse(localStorage.getItem(_LEAD_KEY) || '{}'));
+    } catch (_) {
+      return { on: true, regime: true, gammaFlip: true, wallAbandon: true,
+               straddleExp: true, pcrDiverge: true,
+               wallDecayPct: 12, straddlePct: 8, pcrGap: 0.25, cooldownMin: 10 };
+    }
+  }
+  function _leadSave(o) { try { localStorage.setItem(_LEAD_KEY, JSON.stringify(o)); } catch (_) {} }
+
+  const _leadState = { fired: {}, prevFlip: null, prevRegime: null,
+                       wallBase: {}, straddleBase: null, log: [] };
+
+  function _leadFire(key, text, label, tone) {
+    const cfg = _leadCfg();
+    const now = Date.now();
+    const cd = (cfg.cooldownMin || 10) * 60000;
+    if (_leadState.fired[key] && now - _leadState.fired[key] < cd) return;
+    _leadState.fired[key] = now;
+    const sym = state.symbol || 'NIFTY';
+    const ak = `lead|${sym}|${key}`;
+    try {
+      if (_streamLive) _relayAlert(ak, text, 'level', 300);
+      else _speakOnce(ak, text, 300);
+    } catch (_) {}
+    if (typeof showToast === 'function') showToast(`${tone === 'pos' ? '🟢' : tone === 'neg' ? '🔴' : '🟡'} ${label}`);
+    try { _pushAlertHistory(label, state.lastData?.underlying_value || 0, tone, sym); } catch (_) {}
+    _leadState.log.push({ t: now, label, sym });
+    while (_leadState.log.length > 24) _leadState.log.shift();
+    const box = document.getElementById('leadLog');
+    if (box) box.innerHTML = _leadState.log.slice(-8).reverse().map(x =>
+      `<div style="display:flex;gap:8px;font-size:9.5px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);">
+         <span style="color:var(--muted);min-width:52px;">${new Date(x.t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+         <b>${escapeHtml(x.label)}</b><span style="color:var(--muted);">${escapeHtml(x.sym)}</span>
+       </div>`).join('');
+  }
+
+  function _leadingCheck(d) {
+    const cfg = _leadCfg();
+    if ((!cfg.on && !_enableAll()) || !d?.underlying_value) return;
+    const all = _enableAll();
+    const spot = d.underlying_value;
+    const want = k => all || cfg[k] !== false;
+
+    // ── 1. regime flip (WTT / WTB / BULL RUN / BLOODBATH) ──
+    if (want('regime')) {
+      try {
+        const r = _regimeCompute(d);
+        const sig = r?.signal || r?.label || null;
+        if (sig && sig !== _leadState.prevRegime) {
+          const prev = _leadState.prevRegime;
+          _leadState.prevRegime = sig;
+          if (prev !== null) {
+            const spoken = String(sig)
+              .replace('WTT', 'weakness at the top')
+              .replace('WTB', 'weakness at the bottom')
+              .replace('BOTH WEAK', 'both sides weak')
+              .replace('BULL RUN', 'bull run')
+              .replace('BLOODBATH', 'bloodbath');
+            const tone = /BULL|WTB/.test(sig) ? 'pos' : /BLOOD|WTT/.test(sig) ? 'neg' : 'mid';
+            _leadFire(`regime|${sig}`,
+              `Regime change on ${state.symbol || 'NIFTY'}: ${spoken}`,
+              `Regime → ${sig}`, tone);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // ── 2. gamma flip cross: hedging reverses sign here ──
+    if (want('gammaFlip')) {
+      try {
+        const g = _computeGex(d);
+        const flip = g?.flip;
+        if (flip) {
+          const above = spot >= flip;
+          if (_leadState.prevFlip !== null && above !== _leadState.prevFlip) {
+            _leadFire(`gflip|${above ? 'up' : 'dn'}`,
+              above
+                ? `Spot crossed above the gamma flip at ${Math.round(flip)}. Dealer hedging now damps moves, so ranges tend to hold`
+                : `Spot crossed below the gamma flip at ${Math.round(flip)}. Dealer hedging now amplifies moves, so expect wider swings`,
+              `Gamma flip crossed ${above ? '▲' : '▼'} ${fmtInt(Math.round(flip))}`,
+              above ? 'pos' : 'neg');
+          }
+          _leadState.prevFlip = above;
+        }
+      } catch (_) {}
+    }
+
+    // ── 3. wall abandonment: OI leaving a level price is approaching ──
+    if (want('wallAbandon')) {
+      try {
+        const gap = d.strike_gap || 50;
+        for (const s of (d.strikes || [])) {
+          for (const side of ['ce', 'pe']) {
+            const oi = s[side + '_oi'] || 0;
+            if (oi < 100000) continue;                    // only real walls
+            const near = Math.abs(s.strike - spot) <= gap * 2;
+            const k = `${s.strike}${side}`;
+            const base = _leadState.wallBase[k];
+            if (base === undefined || oi > base) { _leadState.wallBase[k] = oi; continue; }
+            const decay = (base - oi) / base * 100;
+            if (near && decay >= (cfg.wallDecayPct || 12)) {
+              const isRes = side === 'ce';
+              _leadFire(`wall|${k}`,
+                `${isRes ? 'Call' : 'Put'} wall at ${Math.round(s.strike)} is being abandoned, open interest down ${decay.toFixed(0)} percent while price approaches. The level is losing its defence`,
+                `Wall abandoned ${fmtInt(s.strike)}${side.toUpperCase()} −${decay.toFixed(0)}%`,
+                isRes ? 'pos' : 'neg');
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // ── 4. straddle expansion while spot is flat ──
+    if (want('straddleExp')) {
+      try {
+        const atm = (d.strikes || []).reduce((a, b) =>
+          Math.abs(b.strike - spot) < Math.abs(a.strike - spot) ? b : a, (d.strikes || [])[0]);
+        const prem = (atm?.ce_ltp || 0) + (atm?.pe_ltp || 0);
+        if (prem > 0) {
+          const b = _leadState.straddleBase;
+          if (!b || Math.abs(spot - b.spot) / spot > 0.004) {
+            _leadState.straddleBase = { prem, spot, t: Date.now() };
+          } else if (Date.now() - b.t > 120000) {
+            const rise = (prem - b.prem) / b.prem * 100;
+            if (rise >= (cfg.straddlePct || 8)) {
+              _leadFire('straddle',
+                `Straddle premium up ${rise.toFixed(0)} percent while price has barely moved. The market is paying for a move that has not happened yet`,
+                `Straddle +${rise.toFixed(0)}% on a flat tape`, 'mid');
+              _leadState.straddleBase = { prem, spot, t: Date.now() };
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // ── 5. volume-PCR diverging from OI-PCR ──
+    if (want('pcrDiverge')) {
+      try {
+        const oiPcr = d.pcr;
+        const volPcr = (typeof _computePcrVol === 'function') ? _computePcrVol(d) : null;
+        if (oiPcr && volPcr) {
+          const gapv = volPcr - oiPcr;
+          if (Math.abs(gapv) >= (cfg.pcrGap || 0.25)) {
+            const puts = gapv > 0;
+            _leadFire(`pcrdiv|${puts ? 'p' : 'c'}`,
+              `Volume put-call ratio is ${Math.abs(gapv).toFixed(2)} ${puts ? 'above' : 'below'} the open interest ratio. ${puts ? 'Puts' : 'Calls'} are trading far heavier than the standing book implies`,
+              `Vol-PCR ${puts ? '▲' : '▼'} ${Math.abs(gapv).toFixed(2)} vs OI-PCR`,
+              puts ? 'neg' : 'pos');
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  function _leadWire() {
+    const cfg = _leadCfg();
+    for (const [id, k] of [['lead_on', 'on'], ['lead_regime', 'regime'], ['lead_gflip', 'gammaFlip'],
+                           ['lead_wall', 'wallAbandon'], ['lead_straddle', 'straddleExp'],
+                           ['lead_pcr', 'pcrDiverge']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.checked = cfg[k] !== false;
+      el.addEventListener('change', () => { const o = _leadCfg(); o[k] = el.checked; _leadSave(o); });
+    }
+    for (const [id, k] of [['lead_wallPct', 'wallDecayPct'], ['lead_strPct', 'straddlePct'],
+                           ['lead_pcrGap', 'pcrGap'], ['lead_cd', 'cooldownMin']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.value = cfg[k];
+      el.addEventListener('change', () => { const o = _leadCfg(); o[k] = +el.value || o[k]; _leadSave(o); });
+    }
+  }
+
   // ══ EMA crossover detection ═══════════════════════════════════════
   // Fires when a faster EMA crosses a slower one on the CLOSED candle, not
   // the forming one. That distinction matters: the live bar wiggles across
@@ -16713,6 +17188,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   window.addEventListener('blur', _dragEnd);
 
   function renderPriceChart() {
+    // Renko replaces the candle body entirely; levels and overlays do not
+    // apply because the x-axis is no longer time.
+    if ((document.getElementById('chartType')?.value || 'candle') === 'renko') {
+      try { return renderRenko(); } catch (e) { console.warn('[renko]', e.message); }
+    }
     const box = document.getElementById('chartBody');
     if (!box) return;
     const cs = _chart.candles;
@@ -17278,6 +17758,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _alertStatus();
     step(_csrcWire, 'csrcWire');
     step(_emaxWire, 'emaxWire');
+    step(_leadWire, 'leadWire');
     step(_lvlVoiceWire, 'lvlVoiceWire');
     step(_idxAlWire, 'idxAlWire');
     _visInterval(_alertStatus, 5000, '_alertStatus');
@@ -17371,6 +17852,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                       'csrc_maxpain', 'csrc_cone', 'csrc_pivots',
                       'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell',
                       'cat_cover', 'cat_unwind',
+                      'lead_on', 'lead_regime', 'lead_gflip', 'lead_wall',
+                      'lead_straddle', 'lead_pcr',
                       'emaxOn', 'emax_5x20', 'emax_9x21', 'emax_20x50', 'emax_50x200']) {
       const el = document.getElementById(id);
       if (!el) continue;
@@ -17465,6 +17948,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'alertsEnableAll',     // the master enable-all switch
     'emaCrossCfg',         // EMA crossover pairs and filters
     'levelVoiceCfg',       // spoken wording for level touches
+    'leadingSignalsCfg',   // leading-signal detectors and thresholds
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
     'customAlerts',        // user-defined rules
     'customAlertsFired',
@@ -17614,6 +18098,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     document.getElementById('chartFillBtn')?.addEventListener('click', _chartFillSession);
     document.getElementById('chartDiagBtn')?.addEventListener('click', _chartDiagnose);
+    const ct = document.getElementById('chartType');
+    ct?.addEventListener('change', () => {
+      const rb = document.getElementById('renkoBox');
+      if (rb) rb.style.display = ct.value === 'renko' ? '' : 'none';
+      renderPriceChart();
+    });
+    document.getElementById('renkoBox')?.addEventListener('change', () => renderPriceChart());
+
     const ci = document.getElementById('chartInstrument');
     ci?.addEventListener('change', () => {
       const opt = ci.value !== 'index';
@@ -17640,6 +18132,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   _buildAlertsTab();
   try { _strengthWire(); } catch (_) {}
   try { _oiHistWire(); } catch (_) {}
+  document.getElementById('eodBtn')?.addEventListener('click', loadEodReport);
   try { _pcrHistWire(); } catch (_) {}
   _chartWire();   // safe here: _chart (const) is initialized above this point
 
@@ -24088,6 +24581,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'candle-health':     '<strong>Candle completeness</strong>Shows minutes recorded against minutes elapsed in the session, so a hole is visible immediately rather than only when you happen to scroll to it. A green tick means the session is fully recorded; a gold warning means minutes are missing or provisional. <b>Provisional</b> counts minutes filled from Yahoo Finance because NSE data was unavailable at the time - those prices are close but not authoritative. <b>The server re-checks every five minutes</b> while the market is open: it fills any new holes from NSE\'s full-day feed, and upgrades provisional minutes to real NSE prices once that feed recovers, so a temporary outage does not permanently degrade the day. It goes quiet once the session is complete from authoritative sources, so a clean day costs nothing. This matters beyond the chart: the tick archive it maintains is what the GEX heatmap, OI Build Map, PCR curve and Claims-on-Trial all read, so a gap left unrepaired today quietly weakens every historical panel for as long as the file exists.',
     'cas-window':        '<strong>CAS and the 15:15-15:40 window</strong>From 3 August 2026 SEBI\'s Closing Auction Session changed the end of the trading day. F&amp;O-eligible CASH stocks stop continuous trading at <b>15:15</b> and enter a 20-minute auction that sets their closing price; the Nifty close is then derived from those auction equilibrium prices, which is why 3 August saw a roughly 200-point move in the final minutes. <b>Index options are not in the auction</b> - they trade continuously until <b>15:40</b>, ten minutes past the old close. The dashboard now runs to 15:40 throughout: candles, OI flow, alerts and every archive the historical panels read. Before this fix the session was cut at 15:30, silently discarding the last ten minutes of options trading during a window where price discovery is unusually active. The gold dashed CAS line on the chart marks 15:15, so you can see where the underlying stopped trading continuously while the options you hold kept going. Practical consequence: the underlying is being priced by auction in that window, so spot can move sharply on the close without matching option flow, and levels derived from the underlying should be treated with more caution there than during continuous trade.',
     'chart-fill':        '<strong>Fill from 9:15</strong>Re-pulls the whole trading session and redraws the chart from the open. It merges three sources and de-duplicates them to one sample per minute: NSE\'s own intraday series (which carries the full day regardless of when your server started), the replay archive your server records each minute, and the on-disk tick archive that survives restarts. <b>Why you need it:</b> a server started at 10:30 has no replay data for the morning, so the chart begins at 10:30 and every level derived from the session - the day range, the developing high and low - is computed from a partial picture. This recovers the morning without restarting anything. If the footer shows the chart starting later than 09:15, a gold prompt appears there offering the same action. Pre-open auction prices (09:00-09:15) are always excluded, since those quotes are indicative and not tradable.',
+    'renko-chart':       '<strong>Renko</strong>Bricks print only when price moves a full box, so consecutive bricks say nothing about how long anything took. That is the point - it filters chop - and it is also the reason to be careful with it for OPTIONS: <b>time is the decay</b>, and a chart where three bricks in two minutes look identical to one brick in forty hides the one variable always working against a long option. This view therefore keeps the clock visible: every brick reports the minutes it took, bricks that took at least three times the median are <b>faded</b> because they cost far more theta for the same points, and the footer states how much session time is on screen. <b>Where it genuinely helps:</b> seeing trend structure without noise, and resisting the urge to trade every wobble - the reversal count tells you directly whether the filtering is working, since many reversals means price is chopping around your box size and the box is too small. <b>Where it does not:</b> Renko is lagging by construction, because a brick only appears after price has already travelled a full box. Scalping 25-point Nifty moves with a 20-point box leaves you permanently a box behind on both entry and exit. Treat it as a companion to the candle chart for reading structure, not as the chart you execute from. Box size can follow ATR-14, which adapts to the day\'s volatility, or be fixed so bricks stay comparable across sessions.',
     'option-chart':      '<strong>Charting a CE or PE contract</strong>Switch the chart from the index to a single option contract. Candles are rebuilt from the replay archive - which stores the whole chain every minute - so this costs no extra NSE traffic, and it covers only the part of the session your server has recorded. <b>The levels change with the mode,</b> because index levels are meaningless in premium space: a chart of the 24,600 call shows day open, day high and low, plus the <b>intrinsic value</b> line - the floor the premium cannot fall below at expiry, so the gap between price and that line is the time value you are paying or collecting. <b>Below the candles sits the strike\'s open-interest trace,</b> and read together they give the classic four-way signal: premium up with OI up is fresh buying, premium down with OI up is fresh writing, premium down with OI down is long unwinding, premium up with OI down is short covering - the same classification the flow alerts announce, seen rather than heard.',
     'price-chart':       '<strong>Live Chart &amp; Levels</strong>Intraday candles for the loaded index with every option-derived level drawn on top. Candles come from NSE\'s intraday feed when the session is warm, otherwise they are rebuilt from your replay archive (1 spot sample per minute) — the footer names the source. Interval 1/3/5/15m, refreshed once a minute; levels redraw on every chain update. Toggles: <b>9:20 lines</b> (see below), <b>OI walls</b> (heaviest call/put OI), <b>CPR</b>, <b>max pain</b>, <b>±1σ</b> IV cone, and <b>pivots</b> (from the Pivot Levels panel\'s active type). <br><br><b>About the 9:20 lines:</b> these are MY transparent formula, not a reverse-engineered copy of any vendor\'s proprietary levels. At 09:20 the 9:20 spot and ATM IV are frozen for the day, one session of volatility is computed as sigma = spot × IV × sqrt(1/365), and four fixed lines are drawn: EOR/EOS at ±0.5 sigma (inner, aggressive) and EOR+1/EOS-1 at ±1.0 sigma (outer, conservative). They do not move for the rest of the session, which is the whole point — a fixed frame beats a moving one for discipline. Whether they hold is an open question: log trades against them in the journal and let the data answer.',
     'regime-signals':    '<strong>Regime Signals</strong>Familiar Indian option-chain vocabulary, computed with transparent rules. <b>Shifting status</b> tracks the peak-OI wall on each side over the last ~45 minutes: <b>WTT (Weak Towards Top)</b> means the call wall moved up or lost more than 12 percent of its OI, so the ceiling is softening (bullish lean); <b>WTB (Weak Towards Bottom)</b> means the put wall moved down or shed OI, so the floor is softening (bearish); <b>STRONG</b> means both walls are holding position and size, which is the rangebound case; <b>BOTH WEAK</b> means writers are stepping back on each side, favouring a range expansion rather than a direction. <b>BULL RUN</b> and <b>BLOODBATH</b> require breadth plus confirmation: at least half of the active near-the-money strikes must be flowing one way AND price must have moved more than 0.25 percent in that direction, which stops a quiet drift being labelled a stampede. Everything here describes positioning that has ALREADY happened, so treat it as fast information rather than prediction, and remember the labels are dramatic by tradition, not by evidence.',
@@ -24100,6 +24594,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',
+    'range-forecast':    '<strong>Expected Range — day, week, month</strong>The option market prices a move for every expiry it lists, and reading them together shows the TERM STRUCTURE of expected movement rather than one number. Each horizon uses <b>its own expiry\'s ATM implied volatility</b> instead of scaling a single figure, which is what lets a near-term event premium show up as a weekly range disproportionate to the monthly - scale one number and that signal vanishes. <b>Rest of today</b> shrinks through the session as time runs out, which is why it is the most useful line for intraday sizing. Under a lognormal assumption roughly 68%% of closes land inside 1σ and 95%% inside 2σ, but real markets have fatter tails, so treat 2σ as optimistic rather than a wall. The term-structure note below the rows reads the shape: backwardation (near IV above far) prices a near-term event and favours calendars, contango is the normal shape and makes near-dated premium comparatively cheap.',
+    'eod-report':        '<strong>Session Review</strong>Scores the day against the levels the dashboard drew that morning, rebuilt from the recorded session rather than asserted. For each 9:20 line it reports one of three verdicts: <b>held</b> (touched but not broken beyond a small buffer), <b>broke</b> (price went through), or <b>never reached</b> - and that third case is information too, because a line price never approaches is neither right nor wrong, and counting it as either would flatter or damn the method unfairly. It also reports whether the day was a trend day (body at least 60%% of range) and how positioning shifted: whether the call and put walls held their strikes or migrated, and where PCR started and finished. <b>Why this matters:</b> commercial tools advertise accuracy tracking as a number you are asked to believe. This shows the working, and over enough sessions the verdicts feed Claims on Trial, where the 9:20 method becomes measurable rather than trusted.',
+    'leading-signals':   '<strong>Leading signals</strong>Five conditions that change before price does, because each is <b>mechanical rather than predictive</b>. None of them forecasts direction; what they mark is a moment when a move becomes more likely or more violent, which is a claim that can actually be defended. <b>Gamma flip cross</b> is the strongest of them: dealer hedging literally reverses sign at that level, from damping moves to amplifying them, so crossing it changes the character of the tape as arithmetic rather than opinion. <b>Wall abandonment</b> fires when writers pull open interest out of a level while price approaches it - the defence stops before the break, not after, which is why it leads. <b>Straddle expansion on a flat tape</b> means the market is paying up for a move that has not happened yet. <b>Volume-PCR divergence</b> catches today\'s conviction pulling away from the standing book, visible well before open interest reflects it. <b>Regime flips</b> - WTT, WTB, bull run, bloodbath - were already being computed on the OI Flow tab but never announced, so they only helped if you happened to be looking at that panel. <b>Honest limits:</b> each of these can fire and be followed by nothing. They identify conditions, not outcomes, and the wall and straddle detectors in particular will fire on ordinary repositioning in a quiet market - raise their thresholds if that happens. Everything here routes through the same voice, index filter and Enable-All controls as the rest.',
     'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
     'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',

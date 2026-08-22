@@ -4628,6 +4628,108 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": str(e), "candles": []})
             return
 
+        if parsed.path == "/api/eod-report":
+            # End-of-day session review, rebuilt from the replay archive.
+            # This is the honest version of an "accuracy tracker": rather than
+            # asserting a hit rate, it reports what actually happened to the
+            # levels the dashboard drew that morning - which were touched,
+            # which held, which broke - so the claim can be checked instead of
+            # believed. It reads only recorded data, so it costs NSE nothing.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = qs.get("date", [time.strftime("%Y-%m-%d")])[0]
+            path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+            apath = _os.path.join(_TICK_DIR, f"{symbol}_{day}.csv")
+            spots = []
+            if _os.path.exists(apath):
+                try:
+                    for line in open(apath):
+                        p = line.strip().split(",")
+                        if len(p) >= 2:
+                            spots.append((float(p[0]), float(p[1])))
+                except Exception:
+                    pass
+            snaps = []
+            if _os.path.exists(path):
+                for line in open(path):
+                    try:
+                        s = json.loads(line)
+                        if s.get("_replay_ts") and s.get("underlying_value"):
+                            snaps.append(s)
+                    except Exception:
+                        continue
+            if not spots and not snaps:
+                self._send_json({"error": "nothing recorded for that day", "ok": False})
+                return
+            if not spots and snaps:
+                spots = [(float(s["_replay_ts"]), float(s["underlying_value"])) for s in snaps]
+            spots.sort()
+            prices = [p for _, p in spots]
+            o, hi, lo, c_ = prices[0], max(prices), min(prices), prices[-1]
+
+            # the 09:20 lines as they were frozen that morning
+            lines = {}
+            m920 = _m920.get(symbol)
+            if m920 and m920.get("day") == day:
+                lines = {k: m920[k] for k in ("EOR+1", "EOR", "EOS", "EOS-1") if k in m920}
+            elif snaps:
+                # reconstruct from the 09:20 snapshot if the live one is gone
+                for s in snaps:
+                    g = time.gmtime(s["_replay_ts"] + 5 * 3600 + 1800)
+                    if g.tm_hour * 60 + g.tm_min >= 560:
+                        sp, iv = s.get("underlying_value"), s.get("atm_iv")
+                        if sp and iv:
+                            sg = sp * (iv / 100.0) * (1.0 / 365.0) ** 0.5
+                            lines = {"EOR+1": sp + sg, "EOR": sp + 0.5 * sg,
+                                     "EOS": sp - 0.5 * sg, "EOS-1": sp - sg}
+                        break
+
+            level_report = []
+            for lab, v in sorted(lines.items(), key=lambda kv: -kv[1]):
+                touched = any(abs(p - v) <= max(4.0, v * 0.0006) for p in prices)
+                broke_up = max(prices) > v + max(8.0, v * 0.0012)
+                broke_dn = min(prices) < v - max(8.0, v * 0.0012)
+                is_res = lab.startswith("EOR")
+                held = (touched and not broke_up) if is_res else (touched and not broke_dn)
+                level_report.append({
+                    "label": lab, "value": round(v, 1), "touched": touched,
+                    "held": bool(held),
+                    "verdict": "held" if held else ("broke" if touched else "never reached"),
+                })
+
+            # OI extremes and where the walls ended up
+            wall_note = {}
+            if snaps:
+                last = snaps[-1]
+                st = last.get("strikes") or []
+                if st:
+                    ce = max(st, key=lambda x: x.get("ce_oi") or 0)
+                    pe = max(st, key=lambda x: x.get("pe_oi") or 0)
+                    first = snaps[0]
+                    fst = first.get("strikes") or []
+                    ce0 = max(fst, key=lambda x: x.get("ce_oi") or 0) if fst else None
+                    pe0 = max(fst, key=lambda x: x.get("pe_oi") or 0) if fst else None
+                    wall_note = {
+                        "call_wall_open": ce0.get("strike") if ce0 else None,
+                        "call_wall_close": ce.get("strike"),
+                        "put_wall_open": pe0.get("strike") if pe0 else None,
+                        "put_wall_close": pe.get("strike"),
+                        "pcr_open": first.get("pcr"), "pcr_close": last.get("pcr"),
+                    }
+
+            rng = hi - lo
+            body = abs(c_ - o)
+            self._send_json({
+                "ok": True, "symbol": symbol, "day": day,
+                "open": round(o, 2), "high": round(hi, 2), "low": round(lo, 2),
+                "close": round(c_, 2), "range": round(rng, 2),
+                "change_pct": round((c_ - o) / o * 100, 2) if o else 0,
+                "trend_day": bool(rng and body / rng >= 0.6),
+                "body_pct": round(body / rng * 100, 1) if rng else 0,
+                "minutes": len(spots), "snapshots": len(snaps),
+                "lines": level_report, "walls": wall_note,
+            })
+            return
+
         if parsed.path == "/api/pcr-history":
             # Session PCR curve from the replay archive.
             # Returns BOTH ratios, because they answer different questions:
