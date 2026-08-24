@@ -1925,6 +1925,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           </div>
 
           <!-- ── F&O strength ranking ────────────────────────────────── -->
+          <div class="level-panel" id="trendPanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.35);">
+            <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
+              <span class="skew-chart-title">🧭 Trend Engine — price action × option positioning<i class="hi" data-h="trend-engine">i</i></span>
+              <label style="font-size:9px;"><input type="checkbox" id="trend_on" checked> announce</label>
+              <label style="font-size:9px;"><input type="checkbox" id="trend_both" checked> require both to agree</label>
+              <label style="font-size:9px;color:var(--muted,#789);">score ≥ <input type="number" id="trend_min" class="ohlc-inp" style="width:46px;" step="5" min="15" max="90"></label>
+              <label style="font-size:9px;color:var(--muted,#789);">re-fire <input type="number" id="trend_cd" class="ohlc-inp" style="width:40px;" step="1" min="1">min</label>
+            </div>
+            <div id="trendBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain and let the chart collect a few candles.</div></div>
+          </div>
+
+          <div class="level-panel" id="aggrPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">⚡ Aggressor Flow — who is paying the spread<i class="hi" data-h="aggressor">i</i></span>
+            </div>
+            <div id="aggrBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
+          </div>
+
           <div class="level-panel" id="rangeFcPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">🎯 Expected Range — day · week · month<i class="hi" data-h="range-forecast">i</i></span>
@@ -3713,7 +3731,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <input type="text" id="tjNote" class="ohlc-inp" placeholder="note (optional)" style="width:160px;font-size:10px;">
             <button class="btn" id="tjAddBtn" style="font-size:10px;padding:3px 12px;">+ Log</button>
           </div>
-          <div id="tjStats" style="margin-top:4px;"></div>
+          <div class="skew-chart-head" style="margin-top:8px;"><span class="skew-chart-title">🧬 P&amp;L Attribution — why the position moved<i class="hi" data-h="pnl-attrib">i</i></span></div>
+        <div id="attribBody" style="padding:4px 6px;"><div class="movers-loading">Build a position in the Strategy Builder.</div></div>
+        <div class="skew-chart-head" style="margin-top:8px;"><span class="skew-chart-title">📊 Trade Statistics — is there an edge?<i class="hi" data-h="trade-stats">i</i></span></div>
+        <div id="tjStatsBox" style="padding:4px 6px;"></div>
+        <div id="tjStats" style="margin-top:4px;"></div>
           <div id="tjList" style="margin-top:4px;"></div>
         </div>
       </div>
@@ -14514,11 +14536,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { _leadingCheck(data); } catch (_) {}
+    try { renderAggressor(data); } catch (_) {}
+    try { _trendCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
     try { renderRegimeSignals(data); } catch (_) {}
     try { renderChainAnalytics(data); } catch (_) {}
     try { renderVolPanel(data); } catch (_) {}
     try { renderRangeForecast(data); } catch (_) {}
+    try { renderAttribution(data); } catch (_) {}
+    try { renderTradeStats(); } catch (_) {}
     try { renderVolSurfaceTerm(data); } catch (_) {}
     try {
       if (_chart.candles.length) {
@@ -16386,6 +16412,638 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
+  // ══ AGGRESSOR / ORDER-FLOW READ ═══════════════════════════════════
+  // The closest honest approximation of order-flow analysis on NSE data.
+  //
+  // Full-depth order books are a broker-feed product. But the chain already
+  // carries bid and ask per strike, and WHERE THE LAST TRADE SAT between them
+  // tells you who was the aggressor: a print at the ask is a buyer lifting the
+  // offer, a print at the bid is a seller hitting it. Someone paying the
+  // spread is expressing urgency, and urgency is what precedes movement -
+  // which is why this leads the OI figure, since OI only updates after the
+  // exchange processes the position change.
+  //
+  // Honest limits, stated on the panel: this is ONE snapshot per refresh, not
+  // a tape. It cannot see order size, cancellations, or iceberg orders, and a
+  // wide spread on an illiquid strike makes the classification meaningless -
+  // so strikes with a spread wider than a configurable share of the premium
+  // are excluded rather than guessed at.
+  function _aggressorRead(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const gap = d.strike_gap || 50;
+    const rows = [];
+    let ceBuy = 0, ceSell = 0, peBuy = 0, peSell = 0, skipped = 0;
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) > gap * 6) continue;
+      for (const side of ['ce', 'pe']) {
+        const bid = s[side + '_bid'] || 0, ask = s[side + '_ask'] || 0;
+        const ltp = s[side + '_ltp'] || 0;
+        const vol = s[side + '_volume'] || 0;
+        if (!bid || !ask || !ltp || ask <= bid || !vol) { continue; }
+        const spread = ask - bid;
+        // an illiquid strike has a spread so wide that "at the ask" means
+        // nothing - exclude rather than pretend to classify it
+        if (spread / ltp > 0.15) { skipped++; continue; }
+        // 0 = traded at bid (seller aggressive), 1 = at ask (buyer aggressive)
+        const pos = (ltp - bid) / spread;
+        const weight = vol;                       // weight by what actually traded
+        const buyShare = Math.max(0, Math.min(1, pos));
+        if (side === 'ce') { ceBuy += buyShare * weight; ceSell += (1 - buyShare) * weight; }
+        else { peBuy += buyShare * weight; peSell += (1 - buyShare) * weight; }
+        rows.push({ strike: s.strike, side: side.toUpperCase(), pos: buyShare, vol,
+                    spreadPct: spread / ltp * 100 });
+      }
+    }
+    if (!rows.length) return null;
+    const ceTot = ceBuy + ceSell, peTot = peBuy + peSell;
+    const ceRatio = ceTot ? ceBuy / ceTot : 0.5;    // share of call volume bought aggressively
+    const peRatio = peTot ? peBuy / peTot : 0.5;
+    // Direction: aggressive CALL buying and aggressive PUT selling are both
+    // bullish; the reverse is bearish. Weighted by how much traded on each side.
+    const bull = (ceRatio - 0.5) * ceTot + (0.5 - peRatio) * peTot;
+    const norm = (ceTot + peTot) ? bull / (ceTot + peTot) * 2 : 0;
+    // the most aggressively traded individual strikes, for context
+    rows.sort((a, b) => b.vol * Math.abs(b.pos - 0.5) - a.vol * Math.abs(a.pos - 0.5));
+    return { ceRatio, peRatio, ceTot, peTot, score: Math.max(-1, Math.min(1, norm)),
+             top: rows.slice(0, 6), skipped, counted: rows.length };
+  }
+
+  function renderAggressor(data) {
+    const box = document.getElementById('aggrBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    const a = _aggressorRead(d);
+    if (!a) { box.innerHTML = '<div class="movers-loading">Needs bid, ask and volume per strike — load the chain.</div>'; return; }
+    const pct = v => (v * 100).toFixed(0) + '%';
+    const bar = (v, col) => `<span style="display:inline-block;width:96px;height:7px;background:rgba(255,255,255,0.08);border-radius:4px;position:relative;vertical-align:middle;">
+        <span style="position:absolute;left:50%;top:-2px;width:1px;height:11px;background:rgba(255,255,255,0.25);"></span>
+        <span style="position:absolute;left:${Math.max(0, Math.min(96, v * 100))}%;top:-2px;width:3px;height:11px;background:${col};border-radius:2px;"></span></span>`;
+    const label = a.score > 0.15 ? ['BUYERS AGGRESSIVE', 'var(--pos,#26a69a)']
+                : a.score < -0.15 ? ['SELLERS AGGRESSIVE', 'var(--neg,#ef5350)']
+                : ['BALANCED', '#9aa'];
+    const top = a.top.map(r => {
+      const buyer = r.pos > 0.5;
+      return `<div style="display:flex;gap:8px;font-size:9.5px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <b style="min-width:76px;">${fmtInt(r.strike)} ${r.side}</b>
+        <span style="color:${buyer ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};min-width:104px;">${buyer ? 'bought at ask' : 'sold at bid'} ${pct(r.pos)}</span>
+        <span style="color:var(--muted);">vol ${fmtInt(Math.round(r.vol))} · spread ${r.spreadPct.toFixed(1)}%</span>
+      </div>`; }).join('');
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 4px;">
+        <b style="font-size:12px;color:${label[1]};">${label[0]}</b>
+        <span style="font-size:10.5px;">score ${a.score >= 0 ? '+' : ''}${(a.score * 100).toFixed(0)}</span>
+        <span style="font-size:10px;color:var(--muted);">${a.counted} strike-sides classified, ${a.skipped} skipped for wide spreads</span>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:3px 4px;font-size:10.5px;">
+        <span>Calls ${bar(a.ceRatio, 'var(--pos,#26a69a)')} <b>${pct(a.ceRatio)}</b> bought aggressively</span>
+        <span>Puts ${bar(a.peRatio, 'var(--neg,#ef5350)')} <b>${pct(a.peRatio)}</b> bought aggressively</span>
+      </div>
+      <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">Most aggressive strikes</div>${top}
+      <div class="oc-sub" style="margin-top:4px;">Where the last trade sat between bid and ask says who was the <b>aggressor</b>: a print at the ask is a buyer lifting the offer, at the bid a seller hitting it. Someone paying the spread is expressing urgency, and urgency precedes movement — which is why this <b>leads the OI figure</b>, since open interest only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish; the reverse is bearish. <b>Honest limits:</b> this is one snapshot per refresh, not a tape — it cannot see order size, cancellations or icebergs, and strikes whose spread exceeds 15% of premium are excluded rather than guessed at, because "at the ask" means nothing on an illiquid contract. A true order-flow read needs Level 2 depth from a broker feed.</div>`;
+  }
+
+  // ══ FUTURES POSITIONING ═══════════════════════════════════════════
+  // Two reads the option chain cannot give you.
+  //
+  // BASIS (futures minus spot) is the cleanest sentiment gauge in Indian
+  // markets: an expanding premium means longs are paying up to carry risk, and
+  // a flip into discount is frequently the first sign of stress - it shows up
+  // in the basis before it shows up in price, because carrying a long gets
+  // repriced before anyone sells the index.
+  //
+  // FUTURES OI paired with price gives the classic four-way on a SINGLE
+  // instrument, which is cleaner than inferring the same thing across sixty
+  // option strikes where flow is fragmented and partly hedging:
+  //   price up   + OI up   = long buildup      (conviction, bullish)
+  //   price up   + OI down = short covering    (a squeeze, less durable)
+  //   price down + OI up   = short buildup     (conviction, bearish)
+  //   price down + OI down = long unwinding    (giving up, less durable)
+  function _futuresRead(d) {
+    const fp = d?.futures_price, spot = d?.underlying_value;
+    if (!fp || !spot) return null;
+    const basis = fp - spot;
+    const basisPct = basis / spot * 100;
+    const prev = _futState.prevBasis;
+    _futState.prevBasis = basis;
+    const basisDelta = prev == null ? null : basis - prev;
+
+    const oi = d.futures_oi, oiChg = d.futures_oi_chg;
+    const fpc = d.futures_prev_close;
+    const priceUp = fpc ? fp > fpc : null;
+    let buildup = null, buildupBias = 0;
+    if (oiChg != null && priceUp != null) {
+      const oiUp = oiChg > 0;
+      buildup = priceUp && oiUp ? 'long buildup'
+              : priceUp && !oiUp ? 'short covering'
+              : !priceUp && oiUp ? 'short buildup' : 'long unwinding';
+      buildupBias = priceUp && oiUp ? 1 : priceUp && !oiUp ? 0.4
+                  : !priceUp && oiUp ? -1 : -0.4;
+    }
+    // rollover: OI migrating to the far month tells you the near contract is
+    // being abandoned rather than positions being closed
+    const far = d.futures_far_oi;
+    const roll = (oi && far) ? far / (oi + far) * 100 : null;
+    return { fp, basis, basisPct, basisDelta, oi, oiChg, buildup, buildupBias, roll,
+             cost: (d.dte ? basisPct / Math.max(0.5, d.dte) * 365 : null) };
+  }
+  const _futState = { prevBasis: null, prevSkew: null };
+
+  // ══ IV SKEW DYNAMICS ══════════════════════════════════════════════
+  // The LEVEL of skew is structural and says little day to day. Its CHANGE is
+  // the signal: skew steepening means puts are being bid relative to calls,
+  // which is protection being bought - and that usually happens before the
+  // selling it protects against, not after.
+  function _skewRead(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const gap = d.strike_gap || 50;
+    const near = k => st.find(s => Math.abs(s.strike - k) < gap / 2);
+    const otmPut = near(spot - gap * 4), otmCall = near(spot + gap * 4);
+    if (!otmPut?.pe_iv || !otmCall?.ce_iv) return null;
+    const skew = otmPut.pe_iv - otmCall.ce_iv;
+    const prev = _futState.prevSkew;
+    _futState.prevSkew = skew;
+    return { skew, delta: prev == null ? null : skew - prev,
+             putIv: otmPut.pe_iv, callIv: otmCall.ce_iv };
+  }
+
+  // ══ SCALPER TREND ENGINE ══════════════════════════════════════════
+  // Fuses PRICE ACTION and OPTIONS POSITIONING into one directional call.
+  //
+  // The design decision that matters: a strong call REQUIRES both families to
+  // agree. Price-action-only signals whipsaw in chop; options-only signals are
+  // early but frequently wrong about timing. Demanding agreement costs a few
+  // points of entry and removes most of the false starts - which is the right
+  // trade for a scalper, because a whipsawed scalp costs more than a late one.
+  //
+  // Every input is listed with its weight and current reading, so the score is
+  // auditable rather than a black box. Weights are judgement, not fitted -
+  // they have not been optimised on history, and saying so is more useful than
+  // implying a precision that does not exist.
+  const _TREND_KEY = 'trendEngineCfg';
+  function _trendCfg() {
+    try {
+      return Object.assign({ on: true, minScore: 45, requireBoth: true,
+                             cooldownMin: 5, speak: true },
+                           JSON.parse(localStorage.getItem(_TREND_KEY) || '{}'));
+    } catch (_) { return { on: true, minScore: 45, requireBoth: true, cooldownMin: 5, speak: true }; }
+  }
+  function _trendSave(o) { try { localStorage.setItem(_TREND_KEY, JSON.stringify(o)); } catch (_) {} }
+  const _trendState = { last: null, lastAt: 0, log: [] };
+
+  function _trendCompute(d) {
+    if (!d?.underlying_value) return null;
+    const spot = d.underlying_value;
+    const P = [], O = [];                       // price-action, options
+    const add = (arr, name, w, score, why) => {
+      if (score == null || !isFinite(score)) return;
+      arr.push({ name, w, score: Math.max(-1, Math.min(1, score)), why });
+    };
+    const cs = _chart.candles || [];
+
+    // ── PRICE ACTION ───────────────────────────────────────────────
+    if (cs.length >= 12) {
+      const closes = cs.map(c => c.c);
+      // 1. market structure: higher highs+lows vs lower highs+lows
+      const seg = cs.slice(-10);
+      const hh = seg[seg.length - 1].h > Math.max(...seg.slice(0, -3).map(c => c.h));
+      const ll = seg[seg.length - 1].l < Math.min(...seg.slice(0, -3).map(c => c.l));
+      add(P, 'Market structure', 3, hh ? 1 : ll ? -1 : 0,
+          hh ? 'making higher highs' : ll ? 'making lower lows' : 'no clean structure');
+      // 2. EMA alignment (fast over slow = trend)
+      const f = _emaSeries(closes, 9), s = _emaSeries(closes, 21);
+      const f1 = f[f.length - 1], s1 = s[s.length - 1];
+      if (f1 && s1) {
+        const sep = (f1 - s1) / spot * 100;
+        add(P, 'EMA 9/21', 3, Math.max(-1, Math.min(1, sep / 0.08)),
+            `fast EMA ${sep >= 0 ? 'above' : 'below'} slow by ${Math.abs(sep).toFixed(3)}%`);
+      }
+      // 3. VWAP position - the intraday fair-value reference
+      const vw = _vwapSeries(cs);
+      const v1 = vw[vw.length - 1];
+      if (v1) {
+        const dv = (spot - v1) / spot * 100;
+        add(P, 'VWAP position', 2, Math.max(-1, Math.min(1, dv / 0.15)),
+            `${Math.abs(dv).toFixed(2)}% ${dv >= 0 ? 'above' : 'below'} VWAP`);
+      }
+      // 4. momentum: rate of change over the last few bars
+      const n = Math.min(6, closes.length - 1);
+      const roc = (closes[closes.length - 1] - closes[closes.length - 1 - n]) / spot * 100;
+      add(P, 'Momentum', 2, Math.max(-1, Math.min(1, roc / 0.25)),
+          `${roc >= 0 ? '+' : ''}${roc.toFixed(2)}% over ${n} bars`);
+      // 5. position within the day range
+      const dh = Math.max(...cs.map(c => c.h)), dl = Math.min(...cs.map(c => c.l));
+      if (dh > dl) {
+        const pos = (spot - dl) / (dh - dl);
+        add(P, 'Day range position', 1, (pos - 0.5) * 2,
+            `${(pos * 100).toFixed(0)}% of today's range`);
+      }
+    }
+
+    // ── OPTIONS POSITIONING ────────────────────────────────────────
+    // 6. fresh flow bias from the recent classified events
+    try {
+      const log = JSON.parse(localStorage.getItem('freshFlowLog') || '[]')
+        .filter(x => Date.now() - x.ts < 15 * 60000);
+      if (log.length) {
+        let b = 0;
+        for (const e of log) b += /bullish/i.test(e.bias) ? 1 : /bearish/i.test(e.bias) ? -1 : 0;
+        add(O, 'Fresh option flow', 3, b / Math.max(3, log.length),
+            `${log.length} classified event(s) in 15 min, net ${b >= 0 ? 'bullish' : 'bearish'}`);
+      }
+    } catch (_) {}
+    // 7. PCR level, read contrarian at the extremes
+    if (d.pcr) {
+      const p = d.pcr;
+      const sc = p > 1.6 ? -0.4 : p < 0.6 ? 0.4 : (p - 1) / 0.5;
+      add(O, 'PCR', 2, sc,
+          `${p.toFixed(2)}${p > 1.6 ? ' — extreme, read contrarian' : p < 0.6 ? ' — extreme, read contrarian' : p >= 1 ? ' put-heavy (support building)' : ' call-heavy (resistance building)'}`);
+    }
+    // 8. volume-PCR vs OI-PCR: today's conviction vs the standing book
+    try {
+      const vp = _computePcrVol(d);
+      if (vp && d.pcr) {
+        const gap = vp - d.pcr;
+        add(O, 'Vol-PCR vs OI-PCR', 2, Math.max(-1, Math.min(1, -gap / 0.4)),
+            `volume ratio ${gap >= 0 ? 'above' : 'below'} OI ratio by ${Math.abs(gap).toFixed(2)} — fresh ${gap >= 0 ? 'put' : 'call'} demand`);
+      }
+    } catch (_) {}
+    // 9. gamma regime: above the flip hedging damps, below it amplifies
+    try {
+      const g = _computeGex(d);
+      if (g?.flip) {
+        const above = spot >= g.flip;
+        add(O, 'Gamma regime', 2, above ? 0.35 : -0.5,
+            above ? `above flip ${Math.round(g.flip)} — hedging damps moves, ranges hold`
+                  : `below flip ${Math.round(g.flip)} — hedging amplifies, moves extend`);
+      }
+    } catch (_) {}
+    // 10. wall proximity: which side is price pinned against
+    try {
+      const st = d.strikes || [];
+      const ceW = st.reduce((a, b) => (b.ce_oi || 0) > (a.ce_oi || 0) ? b : a, st[0]);
+      const peW = st.reduce((a, b) => (b.pe_oi || 0) > (a.pe_oi || 0) ? b : a, st[0]);
+      if (ceW && peW) {
+        const up = ceW.strike - spot, dn = spot - peW.strike;
+        if (up > 0 && dn > 0) {
+          const skew = (dn - up) / (dn + up);      // closer to call wall = capped
+          add(O, 'Wall proximity', 2, -skew,
+              `call wall ${Math.round(up)} pts up, put wall ${Math.round(dn)} pts down`);
+        }
+      }
+    } catch (_) {}
+    // 11. VIX direction: rising vol usually accompanies downside
+    if (d.india_vix) {
+      const prev = _trendState.prevVix;
+      _trendState.prevVix = d.india_vix;
+      if (prev) {
+        const dv = d.india_vix - prev;
+        if (Math.abs(dv) > 0.02)
+          add(O, 'India VIX', 1, Math.max(-1, Math.min(1, -dv / 0.3)),
+              `${dv >= 0 ? 'rising' : 'falling'} ${Math.abs(dv).toFixed(2)} — ${dv >= 0 ? 'fear bid' : 'fear easing'}`);
+      }
+    }
+    // 12. futures basis and its direction
+    try {
+      const fr = _futuresRead(d);
+      if (fr) {
+        // premium expanding = longs paying up; discount = stress
+        const lvl = Math.max(-1, Math.min(1, fr.basisPct / 0.12));
+        add(O, 'Futures basis', 3, lvl,
+            `${fr.basis >= 0 ? 'premium' : 'DISCOUNT'} ${Math.abs(fr.basis).toFixed(1)} pts${fr.basisDelta != null ? `, ${fr.basisDelta >= 0 ? 'widening' : 'narrowing'}` : ''}`);
+        if (fr.basisDelta != null && Math.abs(fr.basisDelta) > 1)
+          add(O, 'Basis direction', 2, Math.max(-1, Math.min(1, fr.basisDelta / 4)),
+              `${fr.basisDelta >= 0 ? 'expanding' : 'contracting'} ${Math.abs(fr.basisDelta).toFixed(1)} pts this tick`);
+        if (fr.buildup)
+          add(O, 'Futures OI buildup', 3, fr.buildupBias, fr.buildup);
+      }
+    } catch (_) {}
+    // 12b. aggressor flow: who is paying the spread. Leads OI, because OI
+    //      updates only after the exchange processes the position change.
+    try {
+      const ag = _aggressorRead(d);
+      if (ag) add(O, 'Aggressor flow', 3, ag.score,
+        `calls ${(ag.ceRatio * 100).toFixed(0)}% / puts ${(ag.peRatio * 100).toFixed(0)}% bought at the ask`);
+    } catch (_) {}
+    // 13. skew CHANGE - protection being bid before the move it protects against
+    try {
+      const sk = _skewRead(d);
+      if (sk && sk.delta != null && Math.abs(sk.delta) > 0.05)
+        add(O, 'IV skew shift', 2, Math.max(-1, Math.min(1, -sk.delta / 0.6)),
+            `put-call skew ${sk.delta >= 0 ? 'steepening' : 'flattening'} ${Math.abs(sk.delta).toFixed(2)} pts — protection being ${sk.delta >= 0 ? 'bid' : 'sold'}`);
+    } catch (_) {}
+    // 14. regime signal (WTT / WTB / bull run / bloodbath)
+    try {
+      const r = _regimeCompute(d);
+      const sig = r?.signal || r?.label;
+      if (sig) {
+        const sc = /BULL RUN/i.test(sig) ? 1 : /BLOODBATH/i.test(sig) ? -1
+                 : /WTB/i.test(sig) ? 0.6 : /WTT/i.test(sig) ? -0.6 : 0;
+        add(O, 'OI regime', 3, sc, String(sig));
+      }
+    } catch (_) {}
+
+    const wsum = arr => arr.reduce((s, x) => s + x.w, 0);
+    const wscore = arr => { const w = wsum(arr); return w ? arr.reduce((s, x) => s + x.w * x.score, 0) / w : 0; };
+    const pScore = wscore(P), oScore = wscore(O);
+    const agree = (pScore > 0 && oScore > 0) || (pScore < 0 && oScore < 0);
+    // combined, price weighted slightly higher for a scalper because it is
+    // what you actually execute against
+    const raw = (pScore * 0.55 + oScore * 0.45) * 100;
+    const score = Math.round(raw);
+    return { score, pScore: Math.round(pScore * 100), oScore: Math.round(oScore * 100),
+             agree, price: P, options: O,
+             label: score >= 45 ? 'BULLISH' : score <= -45 ? 'BEARISH'
+                  : score >= 20 ? 'MILD BULL' : score <= -20 ? 'MILD BEAR' : 'NEUTRAL' };
+  }
+
+  function _trendCheck(d) {
+    const cfg = _trendCfg();
+    if (!cfg.on && !_enableAll()) return;
+    const t = _trendCompute(d);
+    if (!t) return;
+    renderTrendPanel(t);
+    const strong = Math.abs(t.score) >= (cfg.minScore || 45);
+    const ok = strong && (!cfg.requireBoth || t.agree);
+    if (!ok) return;
+    const dir = t.score > 0 ? 'BULLISH' : 'BEARISH';
+    if (_trendState.last === dir && Date.now() - _trendState.lastAt < (cfg.cooldownMin || 5) * 60000) return;
+    _trendState.last = dir; _trendState.lastAt = Date.now();
+    const top = [...t.price, ...t.options]
+      .sort((a, b) => Math.abs(b.w * b.score) - Math.abs(a.w * a.score)).slice(0, 2)
+      .map(x => x.name).join(' and ');
+    const sym = state.symbol || 'NIFTY';
+    const txt = `${dir} trend on ${sym}, score ${Math.abs(t.score)}, price action and option positioning agree. Led by ${top}`;
+    try {
+      if (_streamLive) _relayAlert(`trend|${sym}|${dir}|${Math.round(Date.now() / 60000)}`, txt, 'level', 300);
+      else _speakOnce(`trend|${sym}|${dir}`, txt, 300);
+    } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`${t.score > 0 ? '🟢' : '🔴'} ${dir} ${Math.abs(t.score)} · ${top}`);
+    try { _pushAlertHistory(`Trend ${dir} ${Math.abs(t.score)}`, d.underlying_value, t.score > 0 ? 'pos' : 'neg', sym); } catch (_) {}
+  }
+
+  function renderTrendPanel(t) {
+    const box = document.getElementById('trendBody');
+    if (!box) return;
+    if (!t) { box.innerHTML = '<div class="movers-loading">Load the chain and let the chart collect a few candles.</div>'; return; }
+    const col = t.score >= 45 ? 'var(--pos,#26a69a)' : t.score <= -45 ? 'var(--neg,#ef5350)'
+              : t.score >= 20 ? '#7fbf9f' : t.score <= -20 ? '#e08f8f' : '#9aa';
+    const bar = v => {
+      const pct = (v + 100) / 2;
+      return `<span style="display:inline-block;width:88px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;position:relative;vertical-align:middle;">
+        <span style="position:absolute;left:50%;top:-2px;width:1px;height:10px;background:rgba(255,255,255,0.25);"></span>
+        <span style="position:absolute;left:${Math.max(0, Math.min(98, pct))}%;top:-2px;width:3px;height:10px;background:${v >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};border-radius:2px;"></span></span>`;
+    };
+    const rows = arr => arr.sort((a, b) => Math.abs(b.w * b.score) - Math.abs(a.w * a.score)).map(x =>
+      `<div style="display:flex;gap:8px;align-items:center;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);font-size:10px;">
+         <b style="min-width:126px;">${escapeHtml(x.name)}</b>
+         <span style="color:var(--muted);min-width:24px;">w${x.w}</span>
+         ${bar(Math.round(x.score * 100))}
+         <span style="color:var(--muted);flex:1;">${escapeHtml(x.why)}</span>
+       </div>`).join('');
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 4px;">
+        <b style="font-size:15px;color:${col};">${t.label} ${t.score >= 0 ? '+' : ''}${t.score}</b>
+        <span style="font-size:10.5px;">price ${t.pScore >= 0 ? '+' : ''}${t.pScore}</span>
+        <span style="font-size:10.5px;">options ${t.oScore >= 0 ? '+' : ''}${t.oScore}</span>
+        <span style="font-size:10.5px;color:${t.agree ? 'var(--pos,#26a69a)' : 'var(--gold,#d4af37)'};font-weight:700;">
+          ${t.agree ? '✓ both families agree' : '⚠ price and options disagree — no trade signal'}</span>
+      </div>
+      <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">Price action</div>${rows(t.price) || '<span class="oc-sub">waiting for candles</span>'}
+      <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">Options positioning</div>${rows(t.options) || '<span class="oc-sub">waiting for chain data</span>'}
+      <div class="oc-sub" style="margin-top:4px;">A signal is only announced when <b>both families agree</b> and the score clears your threshold. Price-action-only signals whipsaw in chop; options-only signals are early but often wrong about timing. Demanding agreement costs a few points of entry and removes most false starts — the right trade for a scalper, because a whipsawed scalp costs more than a late one. <b>Weights are judgement, not fitted:</b> they have not been optimised on history, and treating the number as precise would be a mistake. Use it to confirm what you already see, not as a reason to trade something you do not.</div>`;
+  }
+
+  function _trendWire() {
+    const cfg = _trendCfg();
+    for (const [id, k] of [['trend_on', 'on'], ['trend_both', 'requireBoth']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.checked = cfg[k] !== false;
+      el.addEventListener('change', () => { const o = _trendCfg(); o[k] = el.checked; _trendSave(o); });
+    }
+    for (const [id, k] of [['trend_min', 'minScore'], ['trend_cd', 'cooldownMin']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.value = cfg[k];
+      el.addEventListener('change', () => { const o = _trendCfg(); o[k] = +el.value || o[k]; _trendSave(o); });
+    }
+  }
+
+  // ══ P&L ATTRIBUTION BY GREEK ══════════════════════════════════════
+  // The single most useful thing a prop desk measures that a retail screen
+  // never shows: WHY a position made or lost money. An options P&L decomposes
+  // almost exactly into four sources, and knowing the split is the difference
+  // between a repeatable process and a lucky outcome:
+  //
+  //   delta  - the directional call. Did the underlying move your way?
+  //   gamma  - convexity. Did the move being LARGE help or hurt?
+  //   vega   - the volatility call. Did IV move your way?
+  //   theta  - time. What decay did you pay or collect?
+  //
+  // A trader convinced he reads direction well, whose P&L is actually all
+  // theta, will be destroyed the first time volatility regime changes - and
+  // he will not see it coming, because the equity curve looks the same either
+  // way. This panel is the thing that tells him.
+  function _greekAttribution(legs, prevSnap, d) {
+    if (!legs?.length || !d?.underlying_value) return null;
+    const spot = d.underlying_value, lot = d.lot_size || 75;
+    const T = _volT(Math.max(1 / 1440, d.dte ?? 1));
+    const nowIv = d.atm_iv || 0;
+    if (!prevSnap) return { seeded: true };
+    const dS = spot - prevSnap.spot;
+    const dIv = (nowIv - prevSnap.iv) / 100;
+    const dT = Math.max(0, (Date.now() - prevSnap.t) / 86400000);   // days elapsed
+    let delta = 0, gamma = 0, vega = 0, theta = 0, actual = 0;
+    for (const l of legs) {
+      const row = (d.strikes || []).find(s => s.strike === l.strike);
+      if (!row) continue;
+      const side = l.type === 'CE' ? 'ce' : 'pe';
+      const iv = (row[side + '_iv'] || 0) / 100;
+      if (!(iv > 0.01)) continue;
+      const g = bsGreeks(spot, l.strike, T, iv, RISK_FREE, l.type);
+      const qty = (l.action === 'SELL' ? -1 : 1) * (l.lots || 1) * lot;
+      // Taylor terms, in rupees
+      delta += g.delta * dS * qty;
+      gamma += 0.5 * g.gamma * dS * dS * qty;
+      vega  += g.vega * (dIv * 100) * qty;
+      theta += g.theta * dT * qty;
+      const ltp = row[side + '_ltp'] || 0;
+      const prevLtp = prevSnap.prices?.[`${l.strike}${l.type}`];
+      if (prevLtp != null) actual += (ltp - prevLtp) * qty;
+    }
+    const explained = delta + gamma + vega + theta;
+    return {
+      delta, gamma, vega, theta, explained, actual,
+      residual: actual - explained,
+      dS, dIv: dIv * 100, dT,
+      // how much of the real move the four terms account for. A low number
+      // means something else moved the position - usually a skew shift or a
+      // stale quote - and the split should be trusted less.
+      quality: Math.abs(actual) > 1 ? Math.max(0, 1 - Math.abs(actual - explained) / Math.abs(actual)) : null,
+    };
+  }
+
+  function _attribSnap(legs, d) {
+    const prices = {};
+    for (const l of (legs || [])) {
+      const row = (d.strikes || []).find(s => s.strike === l.strike);
+      if (row) prices[`${l.strike}${l.type}`] = row[(l.type === 'CE' ? 'ce' : 'pe') + '_ltp'] || 0;
+    }
+    return { t: Date.now(), spot: d.underlying_value, iv: d.atm_iv || 0, prices };
+  }
+
+  let _attribPrev = null, _attribCum = { delta: 0, gamma: 0, vega: 0, theta: 0, actual: 0 };
+  function renderAttribution(data) {
+    const box = document.getElementById('attribBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    const legs = (typeof builderState !== 'undefined' && builderState.legs?.length)
+      ? builderState.legs
+      : (typeof _tjOpenLegs === 'function' ? _tjOpenLegs() : []);
+    if (!legs?.length || !d?.underlying_value) {
+      box.innerHTML = '<div class="movers-loading">Build a position in the Strategy Builder — attribution follows whatever legs are loaded there.</div>';
+      _attribPrev = null;
+      return;
+    }
+    const a = _greekAttribution(legs, _attribPrev, d);
+    _attribPrev = _attribSnap(legs, d);
+    if (!a || a.seeded) { box.innerHTML = '<span class="oc-sub">Baseline set — attribution appears on the next refresh.</span>'; return; }
+    for (const k of ['delta', 'gamma', 'vega', 'theta']) _attribCum[k] += a[k];
+    _attribCum.actual += a.actual;
+    const rows = [
+      ['Delta', a.delta, _attribCum.delta, `underlying moved ${a.dS >= 0 ? '+' : ''}${a.dS.toFixed(1)} pts`, 'the directional call'],
+      ['Gamma', a.gamma, _attribCum.gamma, `convexity on a ${Math.abs(a.dS).toFixed(1)}-pt move`, 'whether the move being large helped'],
+      ['Vega', a.vega, _attribCum.vega, `ATM IV ${a.dIv >= 0 ? '+' : ''}${a.dIv.toFixed(2)} pts`, 'the volatility call'],
+      ['Theta', a.theta, _attribCum.theta, `${(a.dT * 24 * 60).toFixed(0)} min elapsed`, 'decay paid or collected'],
+    ];
+    const money = v => (v >= 0 ? '+' : '−') + '₹' + fmtInt(Math.abs(Math.round(v)));
+    const tot = _attribCum.delta + _attribCum.gamma + _attribCum.vega + _attribCum.theta;
+    const biggest = rows.reduce((x, y) => Math.abs(y[2]) > Math.abs(x[2]) ? y : x);
+    box.innerHTML = rows.map(([lab, tick, cum, why, meaning]) => {
+      const share = tot ? Math.abs(cum / tot) * 100 : 0;
+      const col = cum >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+      return `<div style="display:flex;gap:10px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10.5px;flex-wrap:wrap;">
+        <b style="min-width:52px;">${lab}</b>
+        <span style="min-width:96px;color:${col};font-weight:700;">${money(cum)}</span>
+        <span style="min-width:82px;color:var(--muted);">${share.toFixed(0)}% of P&amp;L</span>
+        <span style="min-width:90px;color:var(--muted);font-size:9.5px;">tick ${money(tick)}</span>
+        <span style="color:var(--muted);font-size:9.5px;">${escapeHtml(why)} — ${escapeHtml(meaning)}</span>
+      </div>`; }).join('') +
+      `<div style="display:flex;gap:12px;padding:4px;font-size:10.5px;flex-wrap:wrap;">
+        <b>Explained ${money(tot)}</b>
+        <span style="color:var(--muted);">actual ${money(_attribCum.actual)}</span>
+        ${a.quality != null ? `<span style="color:${a.quality > 0.85 ? 'var(--pos)' : 'var(--gold,#d4af37)'};">model fit ${(a.quality * 100).toFixed(0)}%</span>` : ''}
+      </div>
+      <div class="oc-sub">Your P&amp;L on this position is dominated by <b>${biggest[0].toLowerCase()}</b> — ${escapeHtml(biggest[4])}. ${
+        biggest[0] === 'Theta' ? 'That is a short-premium income process, and it works until volatility expands: size it for the day IV doubles, not for the average day.'
+        : biggest[0] === 'Delta' ? 'That is a directional process, so your edge has to be in reading direction — the option structure is just the expression, and it can be improved independently.'
+        : biggest[0] === 'Vega' ? 'You are being paid or charged for volatility itself, so check the IV-vs-realized panel before sizing: this is the P&amp;L that reverses fastest.'
+        : 'Gamma dominance means large moves are what pay you — which also means quiet days bleed. Check that your theta cost is worth the convexity.'
+      } <b>Model fit</b> is how much of the real price change the four terms account for; when it drops below about 85% something else is moving the position — usually a skew shift or a stale quote — and the split deserves less trust.</div>`;
+  }
+
+  // ══ TRADE STATISTICS ══════════════════════════════════════════════
+  // A journal records what happened; statistics tell you whether there is an
+  // edge. The four that matter most, and why:
+  //   EXPECTANCY - average rupees per trade. The only number that decides
+  //     whether the process is worth running at all. A 70% win rate with
+  //     negative expectancy is a losing system that feels like a winning one.
+  //   MAE - how far underwater a WINNING trade went before it worked. If your
+  //     stop sits inside the typical MAE you are stopping out of trades that
+  //     would have paid. This is the most actionable statistic here.
+  //   MFE - how far a LOSING trade was ahead before it turned. Large MFE on
+  //     losers means you are giving back open profit and need an exit rule.
+  //   PROFIT FACTOR - gross win over gross loss. Below 1.0 is unprofitable
+  //     however good the story sounds.
+  function _tradeStats(trades) {
+    const done = (trades || []).filter(t => t.pnl != null && t.status !== 'open');
+    if (done.length < 3) return { n: done.length, tooFew: true };
+    const pnls = done.map(t => +t.pnl);
+    const wins = pnls.filter(v => v > 0), losses = pnls.filter(v => v <= 0);
+    const sum = a => a.reduce((s, v) => s + v, 0);
+    const grossWin = sum(wins), grossLoss = Math.abs(sum(losses));
+    const expectancy = sum(pnls) / pnls.length;
+    const avgWin = wins.length ? grossWin / wins.length : 0;
+    const avgLoss = losses.length ? grossLoss / losses.length : 0;
+    const mean = expectancy;
+    const sd = Math.sqrt(pnls.reduce((s, v) => s + (v - mean) ** 2, 0) / Math.max(1, pnls.length - 1));
+    // equity curve and worst peak-to-trough
+    let eq = 0, peak = 0, maxDd = 0;
+    const curve = pnls.map(v => { eq += v; peak = Math.max(peak, eq); maxDd = Math.min(maxDd, eq - peak); return eq; });
+    const maeWins = done.filter(t => +t.pnl > 0 && t.mae != null).map(t => Math.abs(+t.mae));
+    const mfeLosers = done.filter(t => +t.pnl <= 0 && t.mfe != null).map(t => Math.abs(+t.mfe));
+    const med = a => a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : null;
+    // per-setup breakdown
+    const bySetup = {};
+    for (const t of done) {
+      const k = t.setup || 'unlabelled';
+      (bySetup[k] = bySetup[k] || { n: 0, sum: 0, wins: 0 });
+      bySetup[k].n++; bySetup[k].sum += +t.pnl; if (+t.pnl > 0) bySetup[k].wins++;
+    }
+    return {
+      n: done.length, expectancy, winRate: wins.length / done.length * 100,
+      avgWin, avgLoss, grossWin, grossLoss,
+      profitFactor: grossLoss ? grossWin / grossLoss : (grossWin ? Infinity : 0),
+      payoff: avgLoss ? avgWin / avgLoss : null,
+      // per-trade Sharpe-like ratio; not annualised, deliberately, because
+      // annualising a handful of intraday trades produces a flattering number
+      // that means nothing
+      consistency: sd ? mean / sd : null,
+      maxDd, curve, total: sum(pnls),
+      medMaeWin: med(maeWins), medMfeLoss: med(mfeLosers),
+      bySetup,
+    };
+  }
+
+  function renderTradeStats() {
+    const box = document.getElementById('tjStatsBox');
+    if (!box) return;
+    let trades = [];
+    try { trades = _tjLoad() || []; } catch (_) {}
+    const s = _tradeStats(trades);
+    if (!s || s.tooFew) {
+      box.innerHTML = `<div class="movers-loading">${s?.n || 0} closed trade(s) logged — statistics need at least 3, and mean very little under about 30. Until then the journal is a diary, not a measurement.</div>`;
+      return;
+    }
+    const money = v => (v >= 0 ? '+' : '−') + '₹' + fmtInt(Math.abs(Math.round(v)));
+    const pf = s.profitFactor === Infinity ? '∞' : s.profitFactor.toFixed(2);
+    const verdict = s.expectancy > 0 && s.profitFactor > 1.2
+      ? ['EDGE PRESENT', 'var(--pos,#26a69a)', `Positive expectancy of ${money(s.expectancy)} per trade over ${s.n} trades. Small samples flatter, so treat this as provisional until ${Math.max(30, s.n)}+ trades.`]
+      : s.expectancy > 0
+      ? ['MARGINAL', 'var(--gold,#d4af37)', 'Positive but thin. A profit factor under 1.2 does not survive a bad week or a rise in costs.']
+      : ['NO EDGE YET', 'var(--neg,#ef5350)', 'Negative expectancy: on this sample the process loses money per trade. That is worth knowing early rather than late.'];
+    const setups = Object.entries(s.bySetup).sort((a, b) => b[1].sum - a[1].sum).slice(0, 6).map(([k, v]) =>
+      `<div style="display:flex;gap:10px;font-size:10px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <b style="min-width:118px;">${escapeHtml(k)}</b>
+        <span style="min-width:44px;color:var(--muted);">${v.n}×</span>
+        <span style="min-width:74px;color:${v.sum >= 0 ? 'var(--pos)' : 'var(--neg)'};">${money(v.sum)}</span>
+        <span style="color:var(--muted);">${(v.wins / v.n * 100).toFixed(0)}% win · avg ${money(v.sum / v.n)}</span>
+      </div>`).join('');
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 4px;">
+        <b style="font-size:12px;color:${verdict[1]};">${verdict[0]}</b>
+        <span style="font-size:10.5px;">expectancy <b>${money(s.expectancy)}</b>/trade</span>
+        <span style="font-size:10.5px;">profit factor <b>${pf}</b></span>
+        <span style="font-size:10.5px;">win rate ${s.winRate.toFixed(0)}%</span>
+        <span style="font-size:10.5px;color:var(--muted);">${s.n} trades · net ${money(s.total)}</span>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--muted);padding:2px 4px;">
+        <span>avg win ${money(s.avgWin)} · avg loss ${money(-s.avgLoss)}${s.payoff ? ` · payoff ${s.payoff.toFixed(2)}×` : ''}</span>
+        <span>worst drawdown ${money(s.maxDd)}</span>
+        ${s.consistency != null ? `<span>consistency ${s.consistency.toFixed(2)} (mean ÷ std dev per trade)</span>` : ''}
+      </div>
+      ${(s.medMaeWin != null || s.medMfeLoss != null) ? `<div style="font-size:10px;padding:3px 4px;color:#9ab;">
+        ${s.medMaeWin != null ? `<b>Median MAE on winners: ${money(-s.medMaeWin)}</b> — winning trades typically went this far underwater first. A stop tighter than that is cutting trades that would have paid.` : ''}
+        ${s.medMfeLoss != null ? `<br><b>Median MFE on losers: ${money(s.medMfeLoss)}</b> — losing trades were this far ahead before turning. If that number is large you are giving back open profit and need an exit rule, not a better entry.` : ''}
+      </div>` : '<div style="font-size:9.5px;color:var(--muted);padding:3px 4px;">Log MAE and MFE per trade to unlock the stop-placement analysis — they are the two most actionable numbers here.</div>'}
+      <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">By setup</div>
+      ${setups || '<span class="oc-sub">tag trades with a setup name to see which ones actually pay</span>'}
+      <div class="oc-sub" style="margin-top:4px;">${verdict[2]} Expectancy is the only number that decides whether the process is worth running: a 70% win rate with negative expectancy is a losing system that feels like a winning one.</div>`;
+  }
+
   // ══ RENKO ═════════════════════════════════════════════════════════
   // Bricks print only when price moves a full box, so time is stripped out.
   // That is the whole point of Renko and also its danger for OPTIONS: time is
@@ -16770,6 +17428,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               _leadState.straddleBase = { prem, spot, t: Date.now() };
             }
           }
+        }
+      } catch (_) {}
+    }
+
+    // ── 4b. futures basis flipping sign: premium to discount is a stress
+    //    marker that typically shows before price, because carrying a long
+    //    gets repriced before anyone actually sells the index.
+    if (want('regime')) {
+      try {
+        const fr = _futuresRead(d);
+        if (fr) {
+          const disc = fr.basis < 0;
+          if (_leadState.prevDisc !== undefined && _leadState.prevDisc !== null && disc !== _leadState.prevDisc) {
+            _leadFire(`basis|${disc ? 'disc' : 'prem'}`,
+              disc
+                ? `Futures have flipped into discount, ${Math.abs(fr.basis).toFixed(0)} points below spot. Carrying a long has been repriced, which usually precedes weakness`
+                : `Futures have returned to premium, ${fr.basis.toFixed(0)} points above spot. Long carry is being paid for again`,
+              `Futures ${disc ? 'DISCOUNT' : 'premium'} ${Math.abs(fr.basis).toFixed(0)} pts`,
+              disc ? 'neg' : 'pos');
+          }
+          _leadState.prevDisc = disc;
         }
       } catch (_) {}
     }
@@ -17759,6 +18438,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     step(_csrcWire, 'csrcWire');
     step(_emaxWire, 'emaxWire');
     step(_leadWire, 'leadWire');
+    step(_trendWire, 'trendWire');
     step(_lvlVoiceWire, 'lvlVoiceWire');
     step(_idxAlWire, 'idxAlWire');
     _visInterval(_alertStatus, 5000, '_alertStatus');
@@ -17852,6 +18532,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                       'csrc_maxpain', 'csrc_cone', 'csrc_pivots',
                       'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell',
                       'cat_cover', 'cat_unwind',
+                      'trend_on', 'trend_both',
                       'lead_on', 'lead_regime', 'lead_gflip', 'lead_wall',
                       'lead_straddle', 'lead_pcr',
                       'emaxOn', 'emax_5x20', 'emax_9x21', 'emax_20x50', 'emax_50x200']) {
@@ -17949,6 +18630,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'emaCrossCfg',         // EMA crossover pairs and filters
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
+    'trendEngineCfg',      // trend engine threshold and agreement rule
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
     'customAlerts',        // user-defined rules
     'customAlertsFired',
@@ -24594,8 +25276,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',
+    'pnl-attrib':        '<strong>P&amp;L Attribution by Greek</strong>The single most useful thing a professional desk measures that a retail screen never shows: <b>why</b> a position made or lost money. An options P&amp;L decomposes almost exactly into four sources - <b>delta</b> (the directional call), <b>gamma</b> (whether the move being large helped), <b>vega</b> (the volatility call) and <b>theta</b> (decay paid or collected) - and the split is the difference between a repeatable process and a lucky outcome. A trader convinced he reads direction well, whose P&amp;L is actually almost all theta, will be destroyed the first time the volatility regime changes, and he will not see it coming because the equity curve looks identical either way. This panel is what tells him. <b>Model fit</b> reports how much of the real price change the four terms account for; below about 85%% something else is moving the position, usually a skew shift or a stale quote, and the split deserves less trust. Attribution follows whatever legs are loaded in the Strategy Builder and accumulates through the session.',
+    'trade-stats':       '<strong>Trade Statistics</strong>A journal records what happened; these numbers tell you whether there is an edge. <b>Expectancy</b> - average rupees per trade - is the only one that decides whether the process is worth running at all, because a 70%% win rate with negative expectancy is a losing system that feels like a winning one. <b>Profit factor</b> under 1.0 is unprofitable however good the story sounds, and under about 1.2 will not survive a bad week or a rise in costs. <b>Median MAE on winners</b> is the most actionable statistic here: it shows how far underwater your winning trades typically went before working, so a stop tighter than that number is cutting trades that would have paid. <b>Median MFE on losers</b> is its mirror - how far ahead losing trades were before turning - and a large value means you are giving back open profit and need an exit rule rather than a better entry. The per-setup table shows which of your labelled setups actually pay. <b>Honest caveat:</b> statistics on fewer than about 30 trades mean very little, small samples flatter, and the panel says so rather than showing you a confident number built on five results.',
     'range-forecast':    '<strong>Expected Range — day, week, month</strong>The option market prices a move for every expiry it lists, and reading them together shows the TERM STRUCTURE of expected movement rather than one number. Each horizon uses <b>its own expiry\'s ATM implied volatility</b> instead of scaling a single figure, which is what lets a near-term event premium show up as a weekly range disproportionate to the monthly - scale one number and that signal vanishes. <b>Rest of today</b> shrinks through the session as time runs out, which is why it is the most useful line for intraday sizing. Under a lognormal assumption roughly 68%% of closes land inside 1σ and 95%% inside 2σ, but real markets have fatter tails, so treat 2σ as optimistic rather than a wall. The term-structure note below the rows reads the shape: backwardation (near IV above far) prices a near-term event and favours calendars, contango is the normal shape and makes near-dated premium comparatively cheap.',
     'eod-report':        '<strong>Session Review</strong>Scores the day against the levels the dashboard drew that morning, rebuilt from the recorded session rather than asserted. For each 9:20 line it reports one of three verdicts: <b>held</b> (touched but not broken beyond a small buffer), <b>broke</b> (price went through), or <b>never reached</b> - and that third case is information too, because a line price never approaches is neither right nor wrong, and counting it as either would flatter or damn the method unfairly. It also reports whether the day was a trend day (body at least 60%% of range) and how positioning shifted: whether the call and put walls held their strikes or migrated, and where PCR started and finished. <b>Why this matters:</b> commercial tools advertise accuracy tracking as a number you are asked to believe. This shows the working, and over enough sessions the verdicts feed Claims on Trial, where the 9:20 method becomes measurable rather than trusted.',
+    'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
+    'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP position, momentum, position in the day range) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
     'leading-signals':   '<strong>Leading signals</strong>Five conditions that change before price does, because each is <b>mechanical rather than predictive</b>. None of them forecasts direction; what they mark is a moment when a move becomes more likely or more violent, which is a claim that can actually be defended. <b>Gamma flip cross</b> is the strongest of them: dealer hedging literally reverses sign at that level, from damping moves to amplifying them, so crossing it changes the character of the tape as arithmetic rather than opinion. <b>Wall abandonment</b> fires when writers pull open interest out of a level while price approaches it - the defence stops before the break, not after, which is why it leads. <b>Straddle expansion on a flat tape</b> means the market is paying up for a move that has not happened yet. <b>Volume-PCR divergence</b> catches today\'s conviction pulling away from the standing book, visible well before open interest reflects it. <b>Regime flips</b> - WTT, WTB, bull run, bloodbath - were already being computed on the OI Flow tab but never announced, so they only helped if you happened to be looking at that panel. <b>Honest limits:</b> each of these can fire and be followed by nothing. They identify conditions, not outcomes, and the wall and straddle detectors in particular will fire on ordinary repositioning in a quiet market - raise their thresholds if that happens. Everything here routes through the same voice, index filter and Enable-All controls as the rest.',
     'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',

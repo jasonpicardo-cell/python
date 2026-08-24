@@ -2207,19 +2207,48 @@ def _fetch_futures_price(fetcher: NSESession, symbol: str):
             except ValueError:
                 continue
             price = meta.get("lastPrice")
-            if price:
-                futs.append((exp, float(price)))
+            if not price:
+                continue
+            # Open interest and volume matter more than price for signals:
+            # futures OI paired with price direction gives the four-way read
+            # (long buildup / short buildup / covering / unwinding) on a
+            # SINGLE instrument, which is cleaner than inferring it across
+            # sixty option strikes where flow is fragmented.
+            mkt = st.get("marketDeptOrderBook", {}) or {}
+            tinfo = mkt.get("tradeInfo", {}) or {}
+            def _f(*keys):
+                for src in (tinfo, meta, st):
+                    for k in keys:
+                        v = src.get(k)
+                        if v not in (None, "", "-"):
+                            try:
+                                return float(str(v).replace(",", ""))
+                            except Exception:
+                                pass
+                return None
+            futs.append((exp, float(price), {
+                "oi": _f("openInterest", "opnInterest"),
+                "oi_chg": _f("changeinOpenInterest", "changeInOpenInterest"),
+                "volume": _f("tradedVolume", "totalTradedVolume", "vmap"),
+                "prev_close": _f("previousClose", "prevClose", "closePrice"),
+                "change_pct": _f("pChange", "percentChange"),
+            }))
         if not futs:
             raise NSEFetchError("no futures rows in quote-derivative payload")
         futs.sort(key=lambda x: x[0])
-        exp, price = futs[0]
+        exp, price, extra = futs[0]
         dte = max(0.0, (exp - _dt.now()).total_seconds() / 86400.0)  # fractional
-        result = (price, dte)
+        # next-month, for the rollover read
+        nxt = futs[1] if len(futs) > 1 else None
+        extra = dict(extra or {})
+        extra["far_price"] = nxt[1] if nxt else None
+        extra["far_oi"] = (nxt[2] or {}).get("oi") if nxt else None
+        result = (price, dte, extra)
         _futures_cache[sym] = (now, result)
         return result
     except Exception as e:  # noqa: BLE001 — strictly best-effort
         print(f"[!] Futures price fetch failed (non-fatal): {e}")
-        return cached[1] if cached else (None, None)
+        return cached[1] if cached else (None, None, {})
 
 
 def _update_session_ohlc(symbol: str, spot: float) -> None:
@@ -2392,7 +2421,7 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
     iv_rank = _compute_iv_rank(symbol, round(atm_iv, 2))
 
     # Nearest-month futures — basis / cost-of-carry card (best-effort, cached 30s)
-    futures_price, futures_dte = _fetch_futures_price(fetcher, symbol)
+    futures_price, futures_dte, futures_extra = _fetch_futures_price(fetcher, symbol)
 
     response = {
         "symbol": snap.symbol,
@@ -2409,6 +2438,16 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         "iv_rank": iv_rank["rank_pct"] if iv_rank else None,   # flat field for the IV Rank stat card
         "futures_price": futures_price,
         "futures_dte": futures_dte,
+        # Futures OI is the cleanest positioning read available: paired with
+        # price direction it gives the four-way classification on a SINGLE
+        # instrument, rather than inferring it across sixty option strikes
+        # where the flow is fragmented and partly hedging.
+        "futures_oi": (futures_extra or {}).get("oi"),
+        "futures_oi_chg": (futures_extra or {}).get("oi_chg"),
+        "futures_volume": (futures_extra or {}).get("volume"),
+        "futures_prev_close": (futures_extra or {}).get("prev_close"),
+        "futures_far_price": (futures_extra or {}).get("far_price"),
+        "futures_far_oi": (futures_extra or {}).get("far_oi"),
         "straddle_premium": straddle_premium,
         "strike_gap": strike_gap,
         "lot_size": lot_size,
