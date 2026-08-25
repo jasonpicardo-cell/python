@@ -1682,6 +1682,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <option value="focus" selected>follow me · 1 per PC</option>
           <option value="one">1 across all PCs</option>
         </select></label>
+      <button class="btn" id="audioBothBtn" style="font-size:9px;padding:1px 7px;margin-right:4px;" title="Test the bell and the voice separately — they are independent paths and fail independently">🔔🗣 test both</button>
       <button class="btn" id="audioUnlockBtn" style="font-size:9px;padding:1px 7px;margin-right:4px;" title="Chrome blocks speech until the page is clicked. Press this once on EVERY computer to enable audio there.">🔈 enable audio</button>
       <button class="btn" id="audioReportBtn" style="font-size:9px;padding:1px 7px;margin-right:4px;" title="Show the audio readiness of every connected system">🩺 systems</button>
       <button class="btn" id="voiceTestBtn" style="font-size:9px;padding:1px 7px;margin-right:6px;" title="Speak a test alert through the full path (claim + speech) and show exactly what happened on this machine">🔊 test</button>
@@ -14918,7 +14919,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return _audioCtx;
   }
 
-  function _alertEnabled() { return document.getElementById('pivotAlertToggle')?.checked; }
+  // Bell and voice are two INDEPENDENT audio paths, and neither toggle was
+  // persisted - so each machine drifted to whatever was last clicked in that
+  // session, and "Reset to recommended defaults" could not restore them.
+  // That is exactly how one machine ends up with bell only and another with
+  // voice only. Both now save, both default to ON, and both are in the reset.
+  const _AUDIO_TOGGLES_KEY = 'audioToggles';
+  function _audioToggles() {
+    try { return Object.assign({ bell: true, voice: true },
+                               JSON.parse(localStorage.getItem(_AUDIO_TOGGLES_KEY) || '{}')); }
+    catch (_) { return { bell: true, voice: true }; }
+  }
+  function _audioTogglesSave(o) {
+    try { localStorage.setItem(_AUDIO_TOGGLES_KEY, JSON.stringify(o)); } catch (_) {}
+  }
+  function _alertEnabled() {
+    const el = document.getElementById('pivotAlertToggle');
+    if (el) return el.checked;
+    return _audioToggles().bell !== false;      // before wiring, use the saved value
+  }
 
   function _alertDuration() {
     const v = parseFloat(document.getElementById('alertDurationInput')?.value);
@@ -14934,7 +14953,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return isFinite(v) ? v : 1.0;
   }
 
-  function _voiceEnabled() { return document.getElementById('voiceToggle')?.checked; }
+  function _voiceEnabled() {
+    const el = document.getElementById('voiceToggle');
+    if (el) return el.checked;
+    return _audioToggles().voice !== false;
+  }
 
   // Chrome has a long-standing bug where speechSynthesis silently stops
   // working after the queue has been idle for ~15s — calling resume()
@@ -15144,6 +15167,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ── Dispatcher: polarity drives pitch; sound type drives timbre ───────
   // polarity: 'r' = resistance (higher pitch), 's' = support (lower), else neutral
   function playAlert(polarity) {
+    if (_masterMuted()) return;                 // mute must silence BOTH paths
+    if (!_idxAlAllows(state.symbol)) return;    // and the index filter applies to both
     if (!_alertEnabled()) return;
     const dur  = _alertDuration();
     const type = _alertSound();
@@ -18267,6 +18292,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     });
   })();
 
+  document.getElementById('audioBothBtn')?.addEventListener('click', () => {
+    // Tests the two paths SEPARATELY and reports each, because they fail
+    // independently - which is how a machine ends up with one and not the other.
+    let bellOk = false, voiceOk = false, why = [];
+    try { if (_masterMuted()) why.push('master mute is ON'); } catch (_) {}
+    try {
+      if (!_alertEnabled()) why.push('bell toggle is OFF');
+      else { playAlert('pos'); bellOk = true; }
+    } catch (e) { why.push('bell error: ' + e.message); }
+    try {
+      if (!_voiceEnabled()) why.push('voice toggle is OFF');
+      else if (!('speechSynthesis' in window)) why.push('no speech engine');
+      else if (!_audioUnlocked) why.push('audio not unlocked — press 🔈 enable audio');
+      else { _flowSpeak('Bell and voice test on this system'); voiceOk = true; }
+    } catch (e) { why.push('voice error: ' + e.message); }
+    if (typeof showToast === 'function')
+      showToast(`🔔 bell ${bellOk ? 'OK' : 'silent'} · 🗣 voice ${voiceOk ? 'OK' : 'silent'}${why.length ? ' — ' + why.join(', ') : ''}`);
+  });
+
   document.getElementById('voiceTestBtn')?.addEventListener('click', async () => {
     // fire through the SERVER so every connected system is exercised at once
     try {
@@ -18491,6 +18535,26 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Bound once, by delegation, so it cannot be skipped by an error in any
   // other setup function - the previous version wired at the END of
   // _buildAlertsTab and silently did nothing if that threw first.
+  document.addEventListener('change', ev => {
+    const t = ev.target;
+    if (!t || (t.id !== 'pivotAlertToggle' && t.id !== 'voiceToggle')) return;
+    const o = _audioToggles();
+    if (t.id === 'pivotAlertToggle') o.bell = t.checked; else o.voice = t.checked;
+    _audioTogglesSave(o);
+    try { _alertStatus(); } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`${t.id === 'pivotAlertToggle' ? '🔔 Bell' : '🗣 Voice'} ${t.checked ? 'ON' : 'OFF'} on this browser`);
+  });
+  function _audioTogglesSync() {
+    const cfg = _audioToggles();
+    const b = document.getElementById('pivotAlertToggle');
+    if (b) b.checked = cfg.bell !== false;
+    const v = document.getElementById('voiceToggle');
+    if (v) v.checked = cfg.voice !== false;
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _audioTogglesSync);
+  else setTimeout(_audioTogglesSync, 0);
+
   document.addEventListener('click', ev => {
     if (ev.target && ev.target.id === 'alertResetBtn') { ev.preventDefault(); _resetSettings(); }
   });
@@ -18631,6 +18695,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
     'trendEngineCfg',      // trend engine threshold and agreement rule
+    'audioToggles',        // bell and voice on/off — the pair that used to drift
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
     'customAlerts',        // user-defined rules
     'customAlertsFired',
@@ -18664,7 +18729,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const el = document.getElementById('alertStatusLine');
     if (!el) return;
     const bits = [];
-    bits.push(_masterMuted() ? '🔇 MUTED' : (_voiceEnabled() ? '🗣 voice on' : '🗣 voice off'));
+    const at = _audioToggles();
+    bits.push(_masterMuted() ? '🔇 MUTED'
+      : `🔔 bell ${_alertEnabled() ? 'on' : 'OFF'} · 🗣 voice ${_voiceEnabled() ? 'on' : 'OFF'}`);
     bits.push(_enableAll() ? '✅ ALL alert types' : '☑ selected types only');
     bits.push(_audioUnlocked ? '🔈 audio unlocked' : '⚠ audio NOT unlocked — press 🔈 enable audio');
     const si = _sseInfo || {};
