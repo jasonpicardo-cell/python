@@ -1937,6 +1937,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="trendBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain and let the chart collect a few candles.</div></div>
           </div>
 
+          <div class="level-panel" id="shockPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">⚠️ Premium Shock — gamma × vega<i class="hi" data-h="premium-shock">i</i></span>
+            </div>
+            <div id="shockBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
+          </div>
+
           <div class="level-panel" id="aggrPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">⚡ Aggressor Flow — who is paying the spread<i class="hi" data-h="aggressor">i</i></span>
@@ -14537,6 +14544,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { _leadingCheck(data); } catch (_) {}
+    try { _shockCheck(data); } catch (_) {}
     try { renderAggressor(data); } catch (_) {}
     try { _trendCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
@@ -16435,6 +16443,142 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     if (_chart.show.vwap) out.push({ lab: 'VWAP', col: '#00d2d3', vals: _vwapSeries(cs), vwap: true });
     return out;
+  }
+
+  // ══ PREMIUM SHOCK — gamma concentration × vega expansion ══════════
+  // The condition that makes option premium move violently, and the one an
+  // option SELLER most needs warning of.
+  //
+  // Two forces multiply rather than add:
+  //   GAMMA CONCENTRATION - how much gamma-weighted open interest sits within
+  //     a strike or two of spot. Gamma goes to infinity at the money as time
+  //     runs out, so on expiry day an ATM strike can carry more gamma than the
+  //     entire rest of the chain. When spot sits on that pile, delta reprices
+  //     with every tick and premium moves non-linearly.
+  //   VEGA EXPANSION - IV rising repriceds the WHOLE surface at once, so
+  //     premium moves even when spot does not.
+  //
+  // Either alone is manageable. Together, an ATM straddle that cost 150 can be
+  // worth 260 inside a few minutes: gamma makes the delta run away while vega
+  // lifts the base. A short-premium book is exactly wrong-footed by that,
+  // which is why this is framed as a warning rather than an opportunity.
+  const _shockState = { ivHist: [], prevScore: null, firedAt: 0 };
+
+  function _premiumShock(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value, iv = d?.atm_iv;
+    if (!st.length || !spot || !iv) return null;
+    const gap = d.strike_gap || 50;
+    const lot = d.lot_size || 75;
+    const dteCal = Math.max(1 / 1440, d.dte ?? 1);
+    const T = _volT(dteCal);
+
+    // ── 1. gamma concentration: share of total near-chain gamma sitting
+    //      within two strikes of spot. High share = a coiled spring.
+    let gNear = 0, gAll = 0, atmGamma = 0;
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) > gap * 10) continue;
+      for (const side of ['ce', 'pe']) {
+        const sIv = (s[side + '_iv'] || 0) / 100;
+        const oi = s[side + '_oi'] || 0;
+        if (!(sIv > 0.01) || !oi) continue;
+        const g = bsGreeks(spot, s.strike, T, sIv, RISK_FREE, side.toUpperCase()).gamma;
+        const w = g * oi * lot;
+        gAll += w;
+        if (Math.abs(s.strike - spot) <= gap * 2) gNear += w;
+        if (Math.abs(s.strike - spot) <= gap / 2) atmGamma += w;
+      }
+    }
+    const conc = gAll ? gNear / gAll : 0;
+
+    // ── 2. IV velocity: change per minute, not just level ──
+    const now = Date.now();
+    _shockState.ivHist.push({ t: now, iv });
+    while (_shockState.ivHist.length && now - _shockState.ivHist[0].t > 10 * 60000)
+      _shockState.ivHist.shift();
+    let ivVel = 0;
+    if (_shockState.ivHist.length > 2) {
+      const a = _shockState.ivHist[0], b = _shockState.ivHist[_shockState.ivHist.length - 1];
+      const mins = Math.max(1, (b.t - a.t) / 60000);
+      ivVel = (b.iv - a.iv) / mins;          // IV points per minute
+    }
+
+    // ── 3. time urgency: gamma risk is dramatically higher near expiry ──
+    const urgency = Math.min(1, 1 / Math.max(0.15, dteCal));
+
+    // ── 4. what it actually means in rupees: reprice an ATM straddle for a
+    //      1% spot move together with a 2-point IV rise, so the warning is
+    //      concrete rather than an abstract score.
+    const atm = st.reduce((a, b) => Math.abs(b.strike - spot) < Math.abs(a.strike - spot) ? b : a);
+    const basePrem = (atm.ce_ltp || 0) + (atm.pe_ltp || 0);
+    let shocked = null;
+    if (basePrem > 0 && atm.ce_iv && atm.pe_iv) {
+      const S2 = spot * 1.01;
+      const c2 = bsPriceCalc(S2, atm.strike, T, (atm.ce_iv + 2) / 100, RISK_FREE, 'CE');
+      const p2 = bsPriceCalc(S2, atm.strike, T, (atm.pe_iv + 2) / 100, RISK_FREE, 'PE');
+      if (isFinite(c2) && isFinite(p2)) shocked = c2 + p2;
+    }
+
+    // combined score: concentration and IV velocity MULTIPLY, then time scales
+    const concScore = Math.max(0, (conc - 0.35) / 0.4);          // 0 at 35%, 1 at 75%
+    const velScore = Math.max(0, Math.min(1, ivVel / 0.08));     // 0.08 IV pts/min = fast
+    const score = Math.round(Math.min(100, (concScore * 0.5 + velScore * 0.5) *
+                                          (0.6 + 0.4 * urgency) * 100 *
+                                          (1 + concScore * velScore)));   // the multiply
+    return { conc, ivVel, urgency, score, dte: dteCal, iv,
+             basePrem, shocked,
+             shockPct: (basePrem && shocked) ? (shocked - basePrem) / basePrem * 100 : null,
+             atmStrike: atm.strike };
+  }
+
+  function renderPremiumShock(data) {
+    const box = document.getElementById('shockBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    const s = _premiumShock(d);
+    if (!s) { box.innerHTML = '<div class="movers-loading">Load the chain.</div>'; return; }
+    const band = s.score >= 60 ? ['SHOCK RISK HIGH', 'var(--neg,#ef5350)']
+               : s.score >= 35 ? ['ELEVATED', 'var(--gold,#d4af37)']
+               : ['NORMAL', 'var(--pos,#26a69a)'];
+    const bar = (v, lab, note) => `<div style="display:flex;gap:8px;align-items:center;padding:2px 4px;font-size:10px;">
+        <b style="min-width:132px;">${lab}</b>
+        <span style="display:inline-block;width:104px;height:7px;background:rgba(255,255,255,0.08);border-radius:4px;position:relative;">
+          <span style="position:absolute;left:0;top:0;height:7px;width:${Math.max(0, Math.min(100, v * 100))}%;background:${v > 0.6 ? 'var(--neg,#ef5350)' : v > 0.3 ? 'var(--gold,#d4af37)' : 'var(--pos,#26a69a)'};border-radius:4px;"></span></span>
+        <span style="color:var(--muted);flex:1;">${note}</span>
+      </div>`;
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 4px;">
+        <b style="font-size:13px;color:${band[1]};">${band[0]} · ${s.score}</b>
+        <span style="font-size:10px;color:var(--muted);">${s.dte < 1 ? 'EXPIRY DAY' : s.dte.toFixed(1) + 'd to expiry'} · ATM IV ${s.iv.toFixed(1)}%</span>
+      </div>
+      ${bar(s.conc, 'Gamma at spot', `${(s.conc * 100).toFixed(0)}% of near-chain gamma within 2 strikes of ${fmtInt(s.atmStrike)}`)}
+      ${bar(Math.max(0, Math.min(1, s.ivVel / 0.08)), 'IV velocity', `${s.ivVel >= 0 ? '+' : ''}${s.ivVel.toFixed(3)} IV pts/min over the last 10 min`)}
+      ${bar(s.urgency, 'Time urgency', s.dte < 1 ? 'expiry day — gamma is at its most violent' : `${s.dte.toFixed(1)} days left`)}
+      ${s.shockPct != null ? `<div style="font-size:10.5px;padding:4px;">
+        <b>What a 1% move plus 2 IV points does:</b> the ${fmtInt(s.atmStrike)} straddle goes
+        <b>₹${s.basePrem.toFixed(0)} → ₹${s.shocked.toFixed(0)}</b>
+        <span style="color:${s.shockPct > 40 ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)'};font-weight:700;">(+${s.shockPct.toFixed(0)}%)</span>
+      </div>` : ''}
+      <div class="oc-sub" style="margin-top:3px;">Gamma concentration and IV velocity <b>multiply</b> rather than add. Either alone is manageable; together, delta runs away while vega lifts the whole surface, and premium can move far more than the spot move alone would suggest. <b>This is framed as a warning because it is asymmetric:</b> for a premium seller it is the blowup condition, and short gamma near expiry is where accounts actually die. For a buyer it is the payoff condition. If you are short and this reads high, the honest response is to reduce size rather than to widen a stop — gamma risk does not respect stops, because the loss accelerates faster than price moves.</div>`;
+  }
+
+  function _shockCheck(d) {
+    const s = _premiumShock(d);
+    if (!s) return;
+    renderPremiumShock(d);
+    const cfg = _leadCfg();
+    if (!cfg.on && !_enableAll()) return;
+    if (s.score < 60) { _shockState.prevScore = s.score; return; }
+    if (Date.now() - _shockState.firedAt < 10 * 60000) return;
+    _shockState.firedAt = Date.now();
+    const txt = `Premium shock risk on ${state.symbol || 'NIFTY'}. ${(s.conc * 100).toFixed(0)} percent of gamma sits at spot and implied volatility is rising ${s.ivVel > 0 ? 'fast' : ''}. ` +
+      `A one percent move with two volatility points would take the at-the-money straddle up ${s.shockPct ? s.shockPct.toFixed(0) : 'sharply'} percent. If you are short premium, reduce size`;
+    try {
+      if (_streamLive) _relayAlert(`shock|${state.symbol}|${Math.round(Date.now() / 600000)}`, txt, 'level', 600);
+      else _speakOnce(`shock|${state.symbol}`, txt, 600);
+    } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`⚠️ PREMIUM SHOCK RISK ${s.score} · gamma ${(s.conc * 100).toFixed(0)}% at spot · IV ${s.ivVel >= 0 ? '+' : ''}${s.ivVel.toFixed(3)}/min`);
+    try { _pushAlertHistory(`Premium shock risk ${s.score}`, d.underlying_value, 'neg', state.symbol); } catch (_) {}
   }
 
   // ══ AGGRESSOR / ORDER-FLOW READ ═══════════════════════════════════
@@ -25347,6 +25491,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'trade-stats':       '<strong>Trade Statistics</strong>A journal records what happened; these numbers tell you whether there is an edge. <b>Expectancy</b> - average rupees per trade - is the only one that decides whether the process is worth running at all, because a 70%% win rate with negative expectancy is a losing system that feels like a winning one. <b>Profit factor</b> under 1.0 is unprofitable however good the story sounds, and under about 1.2 will not survive a bad week or a rise in costs. <b>Median MAE on winners</b> is the most actionable statistic here: it shows how far underwater your winning trades typically went before working, so a stop tighter than that number is cutting trades that would have paid. <b>Median MFE on losers</b> is its mirror - how far ahead losing trades were before turning - and a large value means you are giving back open profit and need an exit rule rather than a better entry. The per-setup table shows which of your labelled setups actually pay. <b>Honest caveat:</b> statistics on fewer than about 30 trades mean very little, small samples flatter, and the panel says so rather than showing you a confident number built on five results.',
     'range-forecast':    '<strong>Expected Range — day, week, month</strong>The option market prices a move for every expiry it lists, and reading them together shows the TERM STRUCTURE of expected movement rather than one number. Each horizon uses <b>its own expiry\'s ATM implied volatility</b> instead of scaling a single figure, which is what lets a near-term event premium show up as a weekly range disproportionate to the monthly - scale one number and that signal vanishes. <b>Rest of today</b> shrinks through the session as time runs out, which is why it is the most useful line for intraday sizing. Under a lognormal assumption roughly 68%% of closes land inside 1σ and 95%% inside 2σ, but real markets have fatter tails, so treat 2σ as optimistic rather than a wall. The term-structure note below the rows reads the shape: backwardation (near IV above far) prices a near-term event and favours calendars, contango is the normal shape and makes near-dated premium comparatively cheap.',
     'eod-report':        '<strong>Session Review</strong>Scores the day against the levels the dashboard drew that morning, rebuilt from the recorded session rather than asserted. For each 9:20 line it reports one of three verdicts: <b>held</b> (touched but not broken beyond a small buffer), <b>broke</b> (price went through), or <b>never reached</b> - and that third case is information too, because a line price never approaches is neither right nor wrong, and counting it as either would flatter or damn the method unfairly. It also reports whether the day was a trend day (body at least 60%% of range) and how positioning shifted: whether the call and put walls held their strikes or migrated, and where PCR started and finished. <b>Why this matters:</b> commercial tools advertise accuracy tracking as a number you are asked to believe. This shows the working, and over enough sessions the verdicts feed Claims on Trial, where the 9:20 method becomes measurable rather than trusted.',
+    'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
     'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
     'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP position, momentum, position in the day range) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
     'leading-signals':   '<strong>Leading signals</strong>Five conditions that change before price does, because each is <b>mechanical rather than predictive</b>. None of them forecasts direction; what they mark is a moment when a move becomes more likely or more violent, which is a claim that can actually be defended. <b>Gamma flip cross</b> is the strongest of them: dealer hedging literally reverses sign at that level, from damping moves to amplifying them, so crossing it changes the character of the tape as arithmetic rather than opinion. <b>Wall abandonment</b> fires when writers pull open interest out of a level while price approaches it - the defence stops before the break, not after, which is why it leads. <b>Straddle expansion on a flat tape</b> means the market is paying up for a move that has not happened yet. <b>Volume-PCR divergence</b> catches today\'s conviction pulling away from the standing book, visible well before open interest reflects it. <b>Regime flips</b> - WTT, WTB, bull run, bloodbath - were already being computed on the OI Flow tab but never announced, so they only helped if you happened to be looking at that panel. <b>Honest limits:</b> each of these can fire and be followed by nothing. They identify conditions, not outcomes, and the wall and straddle detectors in particular will fire on ordinary repositioning in a quiet market - raise their thresholds if that happens. Everything here routes through the same voice, index filter and Enable-All controls as the rest.',
