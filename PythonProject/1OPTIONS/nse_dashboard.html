@@ -1937,11 +1937,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="trendBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain and let the chart collect a few candles.</div></div>
           </div>
 
+          <div class="level-panel" id="coilPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🪤 Coiled Spring — conditions for expansion<i class="hi" data-h="coiled">i</i></span>
+            </div>
+            <div id="coilBody" style="padding:6px 8px;"><div class="movers-loading">Needs about 20 candles.</div></div>
+          </div>
+
+          <div class="level-panel" id="scalpPanel" style="grid-column:1 / -1;border:1px solid rgba(38,166,154,0.3);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🎯 Scalp Calculator — strike, size, stop, and what it costs<i class="hi" data-h="scalp-calc">i</i></span>
+            </div>
+            <div id="scalpBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
+          </div>
+
           <div class="level-panel" id="shockPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">⚠️ Premium Shock — gamma × vega<i class="hi" data-h="premium-shock">i</i></span>
             </div>
             <div id="shockBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
+            <div class="level-panel-head" style="margin-top:4px;">
+              <span class="skew-chart-title">🎲 Hero/Zero candidates — expiry lottery, priced honestly<i class="hi" data-h="hero-zero">i</i></span>
+            </div>
+            <div id="hzBody" style="padding:4px 8px 8px;"><div class="movers-loading">Load the chain.</div></div>
           </div>
 
           <div class="level-panel" id="aggrPanel" style="grid-column:1 / -1;">
@@ -14544,7 +14562,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { _leadingCheck(data); } catch (_) {}
+    try { _coilCheck(data); } catch (_) {}
+    try { renderScalpCalc(data); } catch (_) {}
     try { _shockCheck(data); } catch (_) {}
+    try { renderHeroZero(data); } catch (_) {}
     try { renderAggressor(data); } catch (_) {}
     try { _trendCheck(data); } catch (_) {}
     try { renderFlowRange(data); } catch (_) {}
@@ -16342,7 +16363,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   // ══ Live candle chart with option-derived levels ══
-  const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false };
+  const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
     try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
@@ -16443,6 +16464,144 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     if (_chart.show.vwap) out.push({ lab: 'VWAP', col: '#00d2d3', vals: _vwapSeries(cs), vwap: true });
     return out;
+  }
+
+  // ══ COILED SPRING — conditions for expansion ══════════════════════
+  // The honest version of "the market knows something".
+  //
+  // What is real: volatility CLUSTERS. Low-vol periods are followed by
+  // high-vol periods more often than chance allows - one of the few robust
+  // findings in finance, and the reason VIX mean-reverts. So a compressing
+  // range genuinely raises the odds of an expansion.
+  //
+  // What is not real: knowing WHAT the news is, WHICH WAY it breaks, or WHEN.
+  // A genuine surprise is a surprise, and the "smart money knew" story is
+  // almost always told afterwards, which is when it is useless.
+  //
+  // So this detects a CONDITION, not an event. Four measurements:
+  //   1. range compression  - the tape delivering less than it was
+  //   2. IV vs realized     - the market CHARGING for more than it delivers,
+  //                           which is the closest honest proxy for someone
+  //                           positioning ahead of something
+  //   3. volume vs OI       - new activity rather than existing positions
+  //   4. event proximity    - scheduled things that are known in advance
+  const _coilState = { ivHist: [], fired: 0 };
+
+  function _coiledSpring(d) {
+    const cs = _chart.candles || [];
+    const spot = d?.underlying_value, iv = d?.atm_iv;
+    if (cs.length < 20 || !spot || !iv) return null;
+
+    // ── 1. range compression: recent bars vs earlier bars ──
+    const rng = cs.map(c => c.h - c.l).filter(v => v > 0);
+    if (rng.length < 16) return null;
+    const recent = rng.slice(-5).reduce((a, b) => a + b, 0) / 5;
+    const earlier = rng.slice(-20, -8).reduce((a, b) => a + b, 0) / 12;
+    const compression = earlier ? recent / earlier : 1;      // < 0.6 is a squeeze
+
+    // ── 2. IV rising while realized falls: the informative divergence ──
+    const closes = cs.map(c => c.c);
+    const barsPerYear = (385 / Math.max(1, _chart.interval)) * 252;
+    const rvNow = _realizedVol(cs.slice(-20), barsPerYear);
+    const rvPrev = cs.length >= 40 ? _realizedVol(cs.slice(-40, -20), barsPerYear) : null;
+    _coilState.ivHist.push({ t: Date.now(), iv });
+    while (_coilState.ivHist.length && Date.now() - _coilState.ivHist[0].t > 20 * 60000)
+      _coilState.ivHist.shift();
+    let ivTrend = 0;
+    if (_coilState.ivHist.length > 3) {
+      const a = _coilState.ivHist[0], b = _coilState.ivHist[_coilState.ivHist.length - 1];
+      ivTrend = b.iv - a.iv;
+    }
+    const rvFalling = (rvNow && rvPrev) ? (rvNow.vol < rvPrev.vol) : null;
+    // the tell: paying MORE for optionality while the tape delivers LESS
+    const divergence = (ivTrend > 0.15 && rvFalling) ? 1
+                     : (ivTrend > 0.05 && rvFalling) ? 0.5 : 0;
+    const vrp = (rvNow && iv) ? iv - rvNow.vol : null;
+
+    // ── 3. volume against open interest: new activity, not old positions ──
+    let volOi = null;
+    try {
+      const st = d.strikes || [];
+      let v = 0, o = 0;
+      for (const s of st) {
+        if (Math.abs(s.strike - spot) / spot > 0.02) continue;
+        v += (s.ce_volume || 0) + (s.pe_volume || 0);
+        o += (s.ce_oi || 0) + (s.pe_oi || 0);
+      }
+      volOi = o ? v / o : null;
+    } catch (_) {}
+
+    // ── 4. proximity to a scheduled event, which IS known in advance ──
+    let event = null;
+    const dte = d.dte ?? 9;
+    if (dte < 0.6) event = { label: 'expiry today', weight: 0.8 };
+    else if (dte < 1.6) event = { label: 'expiry tomorrow', weight: 0.5 };
+    // last hour and the first 30 minutes are structurally more volatile
+    const g = new Date(Date.now() + 5.5 * 3600000);
+    const mins = g.getUTCHours() * 60 + g.getUTCMinutes();
+    const window = mins < 9 * 60 + 45 ? 'opening range'
+                 : mins > 14 * 60 + 45 ? 'closing hour' : null;
+
+    const compScore = Math.max(0, Math.min(1, (0.85 - compression) / 0.35));
+    const volOiScore = volOi != null ? Math.max(0, Math.min(1, (volOi - 0.25) / 0.5)) : 0;
+    const evScore = event ? event.weight : 0;
+    // compression and divergence multiply: a quiet tape where someone is
+    // paying up is a different animal from a quiet tape where nobody is
+    const score = Math.round(Math.min(100,
+      (compScore * 0.4 + divergence * 0.3 + volOiScore * 0.15 + evScore * 0.15)
+      * 100 * (1 + compScore * divergence * 0.6)));
+    return { compression, compScore, ivTrend, rvNow: rvNow?.vol, rvPrev: rvPrev?.vol,
+             rvFalling, divergence, vrp, volOi, event, window, score, iv,
+             expected: spot * (iv / 100) * Math.sqrt(_volT(Math.max(1 / 1440, dte))) };
+  }
+
+  function renderCoiled(data) {
+    const box = document.getElementById('coilBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    const c = _coiledSpring(d);
+    if (!c) { box.innerHTML = '<div class="movers-loading">Needs about 20 candles — let the chart fill.</div>'; return; }
+    const band = c.score >= 60 ? ['COILED — expansion odds elevated', 'var(--gold,#d4af37)']
+               : c.score >= 35 ? ['TIGHTENING', '#c9b458']
+               : ['NORMAL', 'var(--muted)'];
+    const row = (lab, v, note) => `<div style="display:flex;gap:8px;align-items:center;padding:2px 4px;font-size:10px;">
+        <b style="min-width:150px;">${lab}</b>
+        <span style="display:inline-block;width:96px;height:7px;background:rgba(255,255,255,0.08);border-radius:4px;position:relative;">
+          <span style="position:absolute;left:0;top:0;height:7px;width:${Math.max(0, Math.min(100, v * 100))}%;background:${v > 0.6 ? 'var(--gold,#d4af37)' : 'var(--muted)'};border-radius:4px;"></span></span>
+        <span style="color:var(--muted);flex:1;">${note}</span></div>`;
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;">
+        <b style="font-size:12px;color:${band[1]};">${band[0]} · ${c.score}</b>
+        <span style="font-size:10px;color:var(--muted);">expected move to expiry ±${Math.round(c.expected)} pts</span>
+      </div>
+      ${row('Range compression', c.compScore, `last 5 bars are ${(c.compression * 100).toFixed(0)}% of the earlier average${c.compression < 0.6 ? ' — a genuine squeeze' : ''}`)}
+      ${row('IV vs realized', c.divergence, c.divergence ? `IV ${c.ivTrend >= 0 ? '+' : ''}${c.ivTrend.toFixed(2)} while realized ${c.rvFalling ? 'FALLS' : 'holds'} — someone is paying for movement the tape is not delivering` : `IV ${c.ivTrend >= 0 ? '+' : ''}${c.ivTrend.toFixed(2)} over 20 min${c.vrp != null ? `, IV−RV ${c.vrp.toFixed(1)}` : ''}`)}
+      ${row('Volume vs open interest', c.volOi != null ? Math.max(0, Math.min(1, (c.volOi - 0.25) / 0.5)) : 0, c.volOi != null ? `${(c.volOi * 100).toFixed(0)}% of near-ATM OI traded today — ${c.volOi > 0.6 ? 'heavy new activity' : 'ordinary'}` : 'no volume data')}
+      ${row('Scheduled proximity', c.event ? c.event.weight : 0, c.event ? c.event.label : 'nothing scheduled nearby')}
+      ${c.window ? `<div style="font-size:9.5px;color:var(--gold,#d4af37);padding:2px 4px;">Session note: ${c.window} — structurally the most volatile part of the day.</div>` : ''}
+      <div class="oc-sub" style="margin-top:4px;">
+        <b>What this is:</b> volatility clusters, so a compressing range genuinely raises the odds of an expansion — one of the few robust findings in finance, and why VIX mean-reverts. The informative combination is the second row: <b>IV rising while realized volatility falls</b> means the market is charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something.
+        <br><b>What this is not:</b> it does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise — and the "smart money knew" story is almost always told afterwards, which is when it is useless. This will fire before some large moves and before some sessions where nothing happens at all.
+        <br><b>How to use it:</b> as a reason to change how you trade rather than what you trade. High readings favour buying premium over selling it, wider stops or smaller size, and patience for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.
+      </div>`;
+  }
+
+  function _coilCheck(d) {
+    const c = _coiledSpring(d);
+    if (!c) return;
+    renderCoiled(d);
+    if (c.score < 65) return;
+    if (Date.now() - _coilState.fired < 20 * 60000) return;
+    _coilState.fired = Date.now();
+    const txt = `Coiled spring on ${state.symbol || 'NIFTY'}. Range has compressed to ${(c.compression * 100).toFixed(0)} percent of earlier` +
+      (c.divergence ? `, and implied volatility is rising while the tape delivers less` : '') +
+      `. Expansion odds are elevated. This says a move is more likely, not which way`;
+    try {
+      if (_streamLive) _relayAlert(`coil|${state.symbol}|${Math.round(Date.now() / 1200000)}`, txt, 'level', 900);
+      else _speakOnce(`coil|${state.symbol}`, txt, 900);
+    } catch (_) {}
+    if (typeof showToast === 'function') showToast(`🪤 COILED ${c.score} · range ${(c.compression * 100).toFixed(0)}% · direction unknown`);
+    try { _pushAlertHistory(`Coiled spring ${c.score}`, d.underlying_value, 'mid', state.symbol); } catch (_) {}
   }
 
   // ══ PREMIUM SHOCK — gamma concentration × vega expansion ══════════
@@ -16579,6 +16738,248 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (typeof showToast === 'function')
       showToast(`⚠️ PREMIUM SHOCK RISK ${s.score} · gamma ${(s.conc * 100).toFixed(0)}% at spot · IV ${s.ivVel >= 0 ? '+' : ''}${s.ivVel.toFixed(3)}/min`);
     try { _pushAlertHistory(`Premium shock risk ${s.score}`, d.underlying_value, 'neg', state.symbol); } catch (_) {}
+  }
+
+  // ══ SCALP CALCULATOR ══════════════════════════════════════════════
+  // The middle of the scalping decision chain, which the rest of this
+  // dashboard did not cover: given a view, WHICH strike, WHAT size, WHERE the
+  // stop and target sit in premium terms, and WHAT it all costs.
+  //
+  // The cost line is the one that matters most and is almost never shown.
+  // For a two-lot trade in an ₹80 option the statutory charges come to about
+  // ₹70, but SLIPPAGE at a 1.5-point spread is ₹225 - more than three times
+  // as much. Together they are roughly 4 Nifty points at delta 0.5, which
+  // means a 20-point scalp is really a 24-point scalp. A trader who ignores
+  // that is measuring a different business from the one he is running.
+  const _SCALP_KEY = 'scalpCalcCfg';
+  function _scalpCfg() {
+    try {
+      return Object.assign({ move: 30, mins: 20, riskRs: 3000, brokerage: 20,
+                             sttPct: 0.0625, exchPct: 0.05, gstPct: 18,
+                             stampPct: 0.003, slipTicks: 1 },
+                           JSON.parse(localStorage.getItem(_SCALP_KEY) || '{}'));
+    } catch (_) {
+      return { move: 30, mins: 20, riskRs: 3000, brokerage: 20, sttPct: 0.0625,
+               exchPct: 0.05, gstPct: 18, stampPct: 0.003, slipTicks: 1 };
+    }
+  }
+  function _scalpSave(o) { try { localStorage.setItem(_SCALP_KEY, JSON.stringify(o)); } catch (_) {} }
+
+  // Round-trip cost in rupees. Rates default to a discount-broker structure
+  // and are editable, because they change and differ by broker - verify them
+  // against an actual contract note rather than trusting a default.
+  function _tradeCost(premIn, premOut, lots, lot, spread, cfg) {
+    const tIn = premIn * lot * lots, tOut = premOut * lot * lots;
+    const brokerage = (cfg.brokerage || 0) * 2;
+    const stt = tOut * (cfg.sttPct || 0) / 100;              // sell side only
+    const exch = (tIn + tOut) * (cfg.exchPct || 0) / 100;
+    const stamp = tIn * (cfg.stampPct || 0) / 100;
+    const gst = (brokerage + exch) * (cfg.gstPct || 0) / 100;
+    const statutory = brokerage + stt + exch + stamp + gst;
+    // Slippage: you cross the spread getting in and again getting out. This is
+    // usually the largest single cost for a scalper and the one most often
+    // left out of the arithmetic entirely.
+    const slip = (spread || 0) * (cfg.slipTicks || 1) * lot * lots;
+    return { statutory, slip, total: statutory + slip, brokerage, stt, exch, gst, stamp };
+  }
+
+  function _scalpPlan(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const cfg = _scalpCfg();
+    const lot = d.lot_size || 75;
+    const dteCal = Math.max(1 / 1440, d.dte ?? 1);
+    const T = _volT(dteCal);
+    const move = Math.abs(cfg.move) || 30;
+    const bull = cfg.move >= 0;
+    const holdDays = (cfg.mins || 20) / (375 * 1);          // fraction of a session
+    const rows = [];
+    for (const s of st) {
+      const side = bull ? 'ce' : 'pe';
+      if (Math.abs(s.strike - spot) > 350) continue;
+      const prem = s[side + '_ltp'] || 0;
+      const iv = (s[side + '_iv'] || 0) / 100;
+      const bid = s[side + '_bid'] || 0, ask = s[side + '_ask'] || 0;
+      if (prem < 2 || !(iv > 0.01)) continue;
+      const g = bsGreeks(spot, s.strike, T, iv, RISK_FREE, side.toUpperCase());
+      const spread = (ask > bid && bid > 0) ? ask - bid : Math.max(0.5, prem * 0.01);
+      // premium after the move, with the clock advanced by the hold time
+      const S2 = bull ? spot + move : spot - move;
+      const T2 = _volT(Math.max(1 / 1440, dteCal - holdDays));
+      const out = bsPriceCalc(S2, s.strike, T2, iv, RISK_FREE, side.toUpperCase());
+      if (!isFinite(out)) continue;
+      const gross = (out - prem) * lot;                     // per lot
+      // stop: half the move against you, same clock
+      const S3 = bull ? spot - move * 0.5 : spot + move * 0.5;
+      const stopPrem = bsPriceCalc(S3, s.strike, T2, iv, RISK_FREE, side.toUpperCase());
+      const lossPerLot = (prem - (isFinite(stopPrem) ? stopPrem : 0)) * lot;
+      const lots = lossPerLot > 0 ? Math.max(1, Math.floor((cfg.riskRs || 3000) / lossPerLot)) : 1;
+      const cost = _tradeCost(prem, out, lots, lot, spread, cfg);
+      const netWin = gross * lots - cost.total;
+      const netLoss = -(lossPerLot * lots) - cost.total;
+      // theta bleed over the intended hold
+      const thetaCost = Math.abs(g.theta) * holdDays * lot * lots;
+      rows.push({
+        strike: s.strike, side: side.toUpperCase(), prem, out, spread, iv: iv * 100,
+        delta: g.delta, gamma: g.gamma, theta: g.theta,
+        lots, capital: prem * lot * lots,
+        gross: gross * lots, cost: cost.total, statutory: cost.statutory, slip: cost.slip,
+        netWin, netLoss, stopPrem: isFinite(stopPrem) ? stopPrem : 0,
+        rr: netLoss ? Math.abs(netWin / netLoss) : null,
+        thetaCost,
+        costPts: cost.total / (lot * lots),                 // premium points
+        costNifty: Math.abs(g.delta) > 0.02 ? cost.total / (lot * lots) / Math.abs(g.delta) : null,
+      });
+    }
+    if (!rows.length) return null;
+    rows.sort((a, b) => b.netWin - a.netWin);
+    return { rows: rows.slice(0, 6), best: rows[0], move, bull, mins: cfg.mins, spot };
+  }
+
+  function renderScalpCalc(data) {
+    const box = document.getElementById('scalpBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    const p = _scalpPlan(d);
+    if (!p) { box.innerHTML = '<div class="movers-loading">Load the chain.</div>'; return; }
+    const m = v => (v >= 0 ? '+' : '−') + '₹' + fmtInt(Math.abs(Math.round(v)));
+    const rows = p.rows.map((r, i) => `
+      <div style="display:flex;gap:8px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10px;flex-wrap:wrap;${i === 0 ? 'background:rgba(212,175,55,0.07);' : ''}">
+        <b style="min-width:88px;">${fmtInt(r.strike)} ${r.side}</b>
+        <span style="min-width:96px;">₹${r.prem.toFixed(1)} → ₹${r.out.toFixed(1)}</span>
+        <span style="min-width:44px;color:var(--muted);">Δ${r.delta.toFixed(2)}</span>
+        <span style="min-width:52px;color:var(--muted);">${r.lots} lot${r.lots > 1 ? 's' : ''}</span>
+        <span style="min-width:88px;color:var(--pos,#26a69a);">win ${m(r.netWin)}</span>
+        <span style="min-width:88px;color:var(--neg,#ef5350);">lose ${m(r.netLoss)}</span>
+        <span style="min-width:56px;">${r.rr ? r.rr.toFixed(2) + ':1' : '—'}</span>
+        <span style="color:var(--muted);font-size:9px;">cost ₹${Math.round(r.cost)} (${r.costNifty ? r.costNifty.toFixed(1) + ' Nifty pts' : '—'}) · θ ₹${Math.round(r.thetaCost)}</span>
+      </div>`).join('');
+    const b = p.best;
+    box.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:3px 4px;font-size:10px;">
+        <label>view <input type="number" id="scalp_move" class="ohlc-inp" style="width:58px;" step="5"> pts</label>
+        <label>within <input type="number" id="scalp_mins" class="ohlc-inp" style="width:48px;" step="5" min="1"> min</label>
+        <label>risk ₹<input type="number" id="scalp_risk" class="ohlc-inp" style="width:66px;" step="500" min="500"></label>
+        <label>slippage <input type="number" id="scalp_slip" class="ohlc-inp" style="width:44px;" step="0.5" min="0"> × spread</label>
+        <span style="color:var(--muted);font-size:9px;">negative move = bearish view</span>
+      </div>
+      <div style="font-size:10px;font-weight:700;margin:4px 4px 2px;">${p.bull ? '▲' : '▼'} ${Math.abs(p.move)} pts in ${p.mins} min — ranked by net rupees after costs</div>
+      ${rows}
+      <div class="oc-sub" style="margin-top:4px;">
+        <b>Best expression: ${fmtInt(b.strike)} ${b.side}</b> at ₹${b.prem.toFixed(1)}, ${b.lots} lot${b.lots > 1 ? 's' : ''} for your ₹${fmtInt(Math.round(_scalpCfg().riskRs))} risk — target ₹${b.out.toFixed(1)}, stop ₹${b.stopPrem.toFixed(1)}, reward-to-risk ${b.rr ? b.rr.toFixed(2) : '—'}:1.
+        <br><b>Costs are the part usually left out.</b> This trade costs <b>₹${Math.round(b.cost)}</b> round trip — ₹${Math.round(b.statutory)} statutory and <b>₹${Math.round(b.slip)} slippage</b>, which is normally the larger of the two and the one nobody budgets for. That equals <b>${b.costNifty ? b.costNifty.toFixed(1) : '—'} points of Nifty</b> at this delta, so your ${Math.abs(p.move)}-point view is really a ${b.costNifty ? Math.round(Math.abs(p.move) + b.costNifty) : '—'}-point view before you make a rupee.
+        <br><b>Theta while you wait: ₹${Math.round(b.thetaCost)}</b> over ${p.mins} minutes. If the move takes twice as long, that doubles — which is why a scalp that "goes nowhere" still loses money, and why holding a losing scalp hoping it turns is more expensive than it feels.
+        <br>Rates default to a discount-broker structure and are editable in the fields above; verify them against an actual contract note rather than trusting a default.
+      </div>`;
+    for (const [id, k] of [['scalp_move', 'move'], ['scalp_mins', 'mins'], ['scalp_risk', 'riskRs'], ['scalp_slip', 'slipTicks']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.value = _scalpCfg()[k];
+      el.onchange = () => { const o = _scalpCfg(); o[k] = +el.value; _scalpSave(o); renderScalpCalc(); };
+    }
+  }
+
+  // ══ HERO / ZERO CANDIDATES ════════════════════════════════════════
+  // Expiry-day lottery tickets, scored honestly.
+  //
+  // The popular filter is "cheapest option". That is the wrong one: the
+  // cheapest strike always shows the biggest multiple, because the multiple IS
+  // the compensation for the odds. A 23x payoff at a 1.4% chance of finishing
+  // in the money is not a better bet than 5x at 29% - it is the same bet with
+  // more variance, and usually a worse one after costs.
+  //
+  // What actually separates candidates is CONVEXITY PER RUPEE: how much
+  // premium you gain per point of spot move, divided by what you paid. That
+  // peaks somewhere near the money, not at the far strikes, which is why this
+  // ranks by it rather than by price. Every row also carries the probability
+  // and the breakeven move, so the trade can be judged rather than hoped over.
+  function _heroZero(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value, iv0 = d?.atm_iv;
+    if (!st.length || !spot || !iv0) return null;
+    const dteCal = Math.max(1 / 1440, d.dte ?? 1);
+    const T = _volT(dteCal);
+    const sigma = spot * (iv0 / 100) * Math.sqrt(T);      // expected move to expiry
+    const lot = d.lot_size || 75;
+    const out = [];
+    for (const s of st) {
+      for (const side of ['ce', 'pe']) {
+        const isCall = side === 'ce';
+        const otm = isCall ? s.strike > spot : s.strike < spot;
+        if (!otm) continue;
+        const prem = s[side + '_ltp'] || 0;
+        const sIv = (s[side + '_iv'] || 0) / 100;
+        const oi = s[side + '_oi'] || 0;
+        const vol = s[side + '_volume'] || 0;
+        if (prem < 0.5 || !(sIv > 0.01)) continue;        // untradeable dust
+        if (Math.abs(s.strike - spot) > sigma * 3) continue;
+        const g = bsGreeks(spot, s.strike, T, sIv, RISK_FREE, side.toUpperCase());
+        // probability of finishing in the money ~ |delta| for a vanilla option
+        const pItm = Math.abs(g.delta);
+        // premium if spot moves half an expected move in the favourable direction
+        const S2 = isCall ? spot + sigma * 0.5 : spot - sigma * 0.5;
+        const p2 = bsPriceCalc(S2, s.strike, T, sIv, RISK_FREE, side.toUpperCase());
+        const mult = (isFinite(p2) && prem > 0) ? p2 / prem : 0;
+        // breakeven at expiry
+        const be = isCall ? s.strike + prem : s.strike - prem;
+        const needPct = Math.abs(be - spot) / spot * 100;
+        // convexity per rupee: gamma exposure bought per rupee of premium
+        const convex = prem > 0 ? (g.gamma * spot * spot * 0.01) / prem : 0;
+        // honest expected value at expiry, integrating the lognormal tail
+        // rather than guessing: P(finish beyond X) x average payoff there
+        const dd = (Math.log(spot / be)) / (iv0 / 100 * Math.sqrt(T));
+        const pBe = isCall ? _nCdfLocal(dd - 0) : 1 - _nCdfLocal(dd);
+        out.push({
+          strike: s.strike, side: side.toUpperCase(), prem, iv: sIv * 100, oi, vol,
+          pItm, mult, be, needPct, convex, delta: g.delta, gamma: g.gamma,
+          theta: g.theta, cost: prem * lot,
+          // rupees gained per point of spot move, at the current spot
+          perPoint: Math.abs(g.delta) * lot,
+        });
+      }
+    }
+    if (!out.length) return null;
+    out.sort((a, b) => b.convex - a.convex);
+    return { sigma, dte: dteCal, rows: out.slice(0, 8),
+             cheapest: [...out].sort((a, b) => a.prem - b.prem)[0],
+             best: out[0] };
+  }
+  function _nCdfLocal(x) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+    const p = d * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    return x >= 0 ? 1 - p : p;
+  }
+
+  function renderHeroZero(d) {
+    const box = document.getElementById('hzBody');
+    if (!box) return;
+    const data = d || state.lastData;
+    const hz = _heroZero(data);
+    if (!hz) { box.innerHTML = '<div class="movers-loading">Load the chain.</div>'; return; }
+    const near = hz.dte <= 1.2;
+    const rows = hz.rows.map((r, i) => {
+      const hot = i === 0;
+      return `<div style="display:flex;gap:8px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10px;flex-wrap:wrap;${hot ? 'background:rgba(212,175,55,0.07);' : ''}">
+        <b style="min-width:88px;">${fmtInt(r.strike)} ${r.side}</b>
+        <span style="min-width:56px;">₹${r.prem.toFixed(1)}</span>
+        <span style="min-width:82px;color:${r.pItm > 0.2 ? 'var(--pos,#26a69a)' : r.pItm > 0.08 ? 'var(--gold,#d4af37)' : 'var(--neg,#ef5350)'};">${(r.pItm * 100).toFixed(1)}% ITM odds</span>
+        <span style="min-width:96px;color:var(--muted);">needs ${r.needPct.toFixed(2)}% move</span>
+        <span style="min-width:70px;"><b>${r.mult.toFixed(1)}×</b> at ½σ</span>
+        <span style="min-width:92px;color:var(--muted);">₹${Math.round(r.perPoint)}/pt · lot ₹${fmtInt(Math.round(r.cost))}</span>
+        <span style="color:var(--muted);font-size:9px;">OI ${fmtInt(Math.round(r.oi))}${r.vol ? ` · vol ${fmtInt(Math.round(r.vol))}` : ''}</span>
+      </div>`; }).join('');
+    const b = hz.best, ch = hz.cheapest;
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;">
+        <b style="font-size:11px;color:${near ? 'var(--gold,#d4af37)' : 'var(--muted)'};">${near ? (hz.dte < 0.6 ? 'EXPIRY DAY' : 'EXPIRY TOMORROW') : hz.dte.toFixed(1) + ' days out — this is an expiry-day pattern'}</b>
+        <span style="font-size:10px;color:var(--muted);">expected move to expiry ±${Math.round(hz.sigma)} pts</span>
+      </div>
+      <div style="font-size:10px;font-weight:700;margin:4px 4px 2px;">Ranked by convexity per rupee, not by price</div>
+      ${rows}
+      <div class="oc-sub" style="margin-top:4px;">
+        The popular filter is "cheapest option". That is the wrong one: the cheapest strike always shows the biggest multiple, because <b>the multiple IS the compensation for the odds</b>. Here the highest-convexity candidate is <b>${fmtInt(b.strike)} ${b.side}</b> at ₹${b.prem.toFixed(1)} with ${(b.pItm * 100).toFixed(1)}% ITM odds, while the cheapest is <b>${fmtInt(ch.strike)} ${ch.side}</b> at ₹${ch.prem.toFixed(1)} with just ${(ch.pItm * 100).toFixed(1)}% — the second needs roughly ${(ch.needPct / Math.max(0.01, b.needPct)).toFixed(1)}× the move to pay.
+        <br><b>What the odds column means in practice:</b> at ${(b.pItm * 100).toFixed(0)}% you need this to work about ${Math.round(1 / Math.max(0.01, b.pItm))} times out of ${Math.round(1 / Math.max(0.01, b.pItm))} attempts just to break even before costs. These are priced bets, not mispriced ones — the market sets the premium so that the payoff and the probability roughly offset, and brokerage and slippage then push the balance against you. The edge, if there is one, comes from being right about <i>direction and timing</i>, not from finding a cheap strike.
+        <br><b>Position sizing is the whole game here:</b> a hero/zero goes to zero far more often than it becomes a hero, so size it as money you have already decided to lose. Read this panel together with Premium Shock above — high gamma with rising IV is the condition where these actually multiply, and a quiet tape is where they simply decay.
+      </div>`;
   }
 
   // ══ AGGRESSOR / ORDER-FLOW READ ═══════════════════════════════════
@@ -17288,6 +17689,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function renderRenko() {
+    if (_chart.diagOpen) return;
     const box = document.getElementById('chartBody');
     const cs = _chart.candles || [];
     if (!box) return;
@@ -17890,6 +18292,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (opts && sel.innerHTML !== opts) sel.innerHTML = opts;
   }
   async function _fetchOptionCandles() {
+    if (_chart.diagOpen) return;
     const box = document.getElementById('chartBody');
     const strike = _chartStrikeSel(), side = _chartMode();
     if (!strike) { if (box) box.innerHTML = '<div class="movers-loading">Pick a strike.</div>'; return; }
@@ -17918,6 +18321,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // each source in turn and report which stage failed and with what error.
   async function _chartDiagnose() {
     const box = document.getElementById('chartBody');
+    _chart.diagOpen = true;          // freeze the container until dismissed
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const j = await (await fetch(`${base}/api/candles-debug?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`)).json();
@@ -17940,15 +18344,28 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div style="font-size:11px;font-weight:700;margin-bottom:4px;">🩺 Backfill diagnosis — ${escapeHtml(j.verdict || '')}</div>
           ${rows}
           ${hint ? `<div style="font-size:10px;color:var(--gold,#d4af37);padding:5px 4px;">→ ${hint}</div>` : ''}
-          <button class="btn" id="chartDiagBack" style="font-size:9px;padding:2px 10px;margin-top:4px;">← back to chart</button>
+          <div style="display:flex;gap:8px;margin-top:6px;align-items:center;">
+            <button class="btn" id="chartDiagBack" style="font-size:9px;padding:3px 12px;">← back to chart</button>
+            <button class="btn" id="chartDiagAgain" style="font-size:9px;padding:3px 12px;">↻ run again</button>
+            <span style="font-size:9px;color:var(--muted,#789);">the chart is paused while this is open — it will not overwrite the diagnosis</span>
+          </div>
         </div>`;
-      document.getElementById('chartDiagBack')?.addEventListener('click', () => renderPriceChart());
+      document.getElementById('chartDiagBack')?.addEventListener('click', () => {
+        _chart.diagOpen = false;
+        renderPriceChart();
+      });
+      document.getElementById('chartDiagAgain')?.addEventListener('click', () => {
+        _chart.diagOpen = false;     // allow the re-run to repaint
+        _chartDiagnose();
+      });
     } catch (e) {
+      _chart.diagOpen = false;
       showToast?.(`Diagnosis failed: ${e.message}`);
     }
   }
 
   async function _chartFillSession() {
+    _chart.diagOpen = false;      // an explicit fill request supersedes the diagnosis
     const prevCount = (_chart.candles || []).length;
     const btn = document.getElementById('chartFillBtn');
     const box = document.getElementById('chartBody');
@@ -17991,6 +18408,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   async function fetchCandles(silent) {
     const box = document.getElementById('chartBody');
     if (!box) return;
+    // never overwrite the diagnosis panel with a loading message or a chart
+    if (_chart.diagOpen) return;
     if (_chartMode() !== 'index') return _fetchOptionCandles();
     _chart.optionMeta = null;
     if (!silent && !_chart.candles.length) box.innerHTML = '<div class="movers-loading">Loading candles…</div>';
@@ -18036,6 +18455,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   window.addEventListener('blur', _dragEnd);
 
   function renderPriceChart() {
+    // The diagnosis panel writes into the same container as the chart, and the
+    // chart re-renders on the poll timer and on every live tick - so it used
+    // to be wiped within seconds of opening. Hold the container until the user
+    // dismisses it explicitly.
+    if (_chart.diagOpen) return;
     // Renko replaces the candle body entirely; levels and overlays do not
     // apply because the x-axis is no longer time.
     if ((document.getElementById('chartType')?.value || 'candle') === 'renko') {
@@ -18839,6 +19263,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
     'trendEngineCfg',      // trend engine threshold and agreement rule
+    'scalpCalcCfg',        // scalp calculator view, risk and cost rates
     'audioToggles',        // bell and voice on/off — the pair that used to drift
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
     'customAlerts',        // user-defined rules
@@ -25491,6 +25916,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'trade-stats':       '<strong>Trade Statistics</strong>A journal records what happened; these numbers tell you whether there is an edge. <b>Expectancy</b> - average rupees per trade - is the only one that decides whether the process is worth running at all, because a 70%% win rate with negative expectancy is a losing system that feels like a winning one. <b>Profit factor</b> under 1.0 is unprofitable however good the story sounds, and under about 1.2 will not survive a bad week or a rise in costs. <b>Median MAE on winners</b> is the most actionable statistic here: it shows how far underwater your winning trades typically went before working, so a stop tighter than that number is cutting trades that would have paid. <b>Median MFE on losers</b> is its mirror - how far ahead losing trades were before turning - and a large value means you are giving back open profit and need an exit rule rather than a better entry. The per-setup table shows which of your labelled setups actually pay. <b>Honest caveat:</b> statistics on fewer than about 30 trades mean very little, small samples flatter, and the panel says so rather than showing you a confident number built on five results.',
     'range-forecast':    '<strong>Expected Range — day, week, month</strong>The option market prices a move for every expiry it lists, and reading them together shows the TERM STRUCTURE of expected movement rather than one number. Each horizon uses <b>its own expiry\'s ATM implied volatility</b> instead of scaling a single figure, which is what lets a near-term event premium show up as a weekly range disproportionate to the monthly - scale one number and that signal vanishes. <b>Rest of today</b> shrinks through the session as time runs out, which is why it is the most useful line for intraday sizing. Under a lognormal assumption roughly 68%% of closes land inside 1σ and 95%% inside 2σ, but real markets have fatter tails, so treat 2σ as optimistic rather than a wall. The term-structure note below the rows reads the shape: backwardation (near IV above far) prices a near-term event and favours calendars, contango is the normal shape and makes near-dated premium comparatively cheap.',
     'eod-report':        '<strong>Session Review</strong>Scores the day against the levels the dashboard drew that morning, rebuilt from the recorded session rather than asserted. For each 9:20 line it reports one of three verdicts: <b>held</b> (touched but not broken beyond a small buffer), <b>broke</b> (price went through), or <b>never reached</b> - and that third case is information too, because a line price never approaches is neither right nor wrong, and counting it as either would flatter or damn the method unfairly. It also reports whether the day was a trend day (body at least 60%% of range) and how positioning shifted: whether the call and put walls held their strikes or migrated, and where PCR started and finished. <b>Why this matters:</b> commercial tools advertise accuracy tracking as a number you are asked to believe. This shows the working, and over enough sessions the verdicts feed Claims on Trial, where the 9:20 method becomes measurable rather than trusted.',
+    'hero-zero':         '<strong>Hero/Zero candidates</strong>Expiry-day lottery tickets, ranked by <b>convexity per rupee</b> rather than by price - because the popular filter, "cheapest option", is the wrong one. The cheapest strike always shows the biggest multiple, and that multiple IS the compensation for the odds: a 23x payoff at a 1.4%% chance of finishing in the money is not a better bet than 5x at 29%%, it is the same bet with more variance and usually a worse one after costs. Every row carries the ITM probability (approximated by delta, which is what it means for a vanilla option), the breakeven move required, the multiple at half an expected move, and what a lot actually costs - so the trade can be judged rather than hoped over. <b>These are priced bets, not mispriced ones.</b> The market sets the premium so payoff and probability roughly offset, then brokerage and slippage push the balance against you. Whatever edge exists comes from being right about direction and timing, not from finding a cheap strike. <b>Sizing is the whole game:</b> a hero/zero goes to zero far more often than it becomes a hero, so size it as money already written off. Read it with the Premium Shock panel above - high gamma concentration with rising IV is the condition where these actually multiply, and a quiet tape is where they simply decay to nothing.',
+    'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
+    'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
     'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
     'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
     'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP position, momentum, position in the day range) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
