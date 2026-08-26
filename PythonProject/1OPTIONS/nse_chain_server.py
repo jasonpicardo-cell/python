@@ -254,9 +254,28 @@ def _envbool_g(name: str, default: bool) -> bool:
     return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
 
 
+# Candidate names for the settings file, in priority order. ".env" is the
+# convention, but a plain "env" is common on machines where a leading dot makes
+# the file awkward to see or edit - and silently loading nothing because of a
+# filename is a miserable thing to debug, so accept both and say which was used.
+_ENV_NAMES = (".env", "env", ".env.local", "env.txt", ".env.txt")
+
+
+def _find_dotenv() -> str:
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    for name in _ENV_NAMES:
+        p = _os.path.join(here, name)
+        if _os.path.exists(p):
+            return p
+    return ""
+
+
 def _load_dotenv(path: str = None) -> int:
-    path = path or _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".env")
-    if not _os.path.exists(path):
+    path = path or _os.environ.get("NSE_ENV_FILE") or _find_dotenv()
+    if not path or not _os.path.exists(path):
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        print(f"[env] no settings file found in {here} "
+              f"(looked for: {', '.join(_ENV_NAMES)})")
         return 0
     n = 0
     try:
@@ -274,7 +293,7 @@ def _load_dotenv(path: str = None) -> int:
         print(f"[env] could not read {path}: {e}")
         return 0
     if n:
-        print(f"[env] loaded {n} setting(s) from {path}")
+        print(f"[env] loaded {n} setting(s) from {_os.path.basename(path)}")
     return n
 
 
@@ -1046,6 +1065,11 @@ def _trading_dte(cal_days: float) -> float:
     return cal_days * (252.0 / 365.0)
 
 
+def _ist_hm_g(ts) -> str:
+    g = time.gmtime(ts + 5 * 3600 + 1800)
+    return f"{g.tm_hour:02d}:{g.tm_min:02d}"
+
+
 def _prune_state() -> None:
     """Bound the in-memory maps so a long-running server does not creep.
 
@@ -1108,6 +1132,12 @@ def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
     not the tool.
     """
     src = RUN_DATA_SOURCE
+    if src == "fyers":
+        try:
+            import nse_adapter_fyers as _fy
+            return _fy.fetch_chain(symbol, expiry, band)
+        except Exception as e:  # noqa: BLE001
+            print(f"[adapter] fyers failed ({e}) - using NSE for this request")
     if src == "arrow":
         try:
             import nse_adapter_arrow as _arrow
@@ -1123,7 +1153,7 @@ def _adapter_streams() -> bool:
     When it does, the NSE background poller is pointless (and would keep
     scraping a source we are no longer using), so it is not started.
     """
-    return RUN_DATA_SOURCE in ("arrow",)
+    return RUN_DATA_SOURCE in ("arrow", "fyers")
 
 
 _poller_stop = threading.Event()
@@ -3898,6 +3928,38 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"[candles] could not warm a session: {e}")
                     return None
 
+            # 0 ── Fyers history: genuine OHLC with TRADED VOLUME for the whole
+            # session regardless of when this server started. That removes the
+            # backfill problem entirely rather than working around it, and it
+            # is the only source here that carries real volume - NSE gives one
+            # spot sample a minute, from which volume cannot be recovered.
+            if RUN_DATA_SOURCE == "fyers":
+                try:
+                    import nse_adapter_fyers as _fy
+                    fc = _fy.fetch_candles(symbol, interval, 1)
+                    if fc:
+                        for cd in fc:
+                            g = time.gmtime(cd["t"] + 5 * 3600 + 1800)
+                            if not _in_session(g.tm_hour * 60 + g.tm_min):
+                                continue
+                            ticks.append((float(cd["t"]), float(cd["c"])))
+                        srcs.append(f"fyers({len(fc)})")
+                        # real candles supersede reconstruction entirely
+                        out = [cd for cd in fc
+                               if _in_session((lambda g: g.tm_hour * 60 + g.tm_min)(
+                                   time.gmtime(cd["t"] + 5 * 3600 + 1800)))]
+                        if out:
+                            first = _ist_hm_g(out[0]["t"]); last = _ist_hm_g(out[-1]["t"])
+                            self._send_json({"symbol": symbol, "interval": interval,
+                                             "source": f"fyers({len(out)})",
+                                             "coverage": f"{first}-{last}",
+                                             "gaps": [], "gap_mins": 0,
+                                             "candles": out, "count": len(out),
+                                             "has_volume": True})
+                            return
+                except Exception as e:  # noqa: BLE001
+                    print(f"[fyers] candles unavailable, falling back: {e}")
+
             # 1 ── NSE intraday series (authoritative back-history for today)
             if symbol in idx_names:
                 if force:
@@ -4406,6 +4468,13 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/data-source":
             info = {"source": RUN_DATA_SOURCE, "streams": _adapter_streams(),
                     "polling": bool(_poller_symbols)}
+            if RUN_DATA_SOURCE == "fyers":
+                try:
+                    import nse_adapter_fyers as _fy
+                    info["fyers"] = _fy.status()
+                    info["configured"] = _fy.is_configured()
+                except Exception as e:  # noqa: BLE001
+                    info["fyers"] = {"last_error": str(e)}
             if RUN_DATA_SOURCE == "arrow":
                 try:
                     import nse_adapter_arrow as _arrow
@@ -6134,7 +6203,27 @@ def main():
     _start_session_rewarm_thread()
 
     # Background poller: keeps hot symbols warm so every browser hits cache.
-    if _adapter_streams():
+    if _adapter_streams() and RUN_DATA_SOURCE == "fyers":
+        print(f"[i] DATA_SOURCE=fyers: broker stream is the source - "
+              f"NSE polling and cookie warm-up are DISABLED")
+        try:
+            import nse_adapter_fyers as _fy
+            if _fy.is_configured():
+                _fy.set_tick_sink(_sse_broadcast_ticks)
+                _fy.connect()
+                for sym in [s.strip().upper() for s in
+                            _os.environ.get("FYERS_SYMBOLS", "NIFTY,BANKNIFTY").split(",") if s.strip()]:
+                    try:
+                        _fy.fetch_chain(sym, None, 12)     # prime + subscribe
+                        print(f"[fyers] {sym} chain primed and subscribed")
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[fyers] {sym} prime failed: {e}")
+            else:
+                print("[fyers] not configured - set FYERS_CLIENT_ID in .env and "
+                      "run fyers_login.py (tokens expire daily)")
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] startup failed: {e}")
+    elif _adapter_streams():
         print(f"[i] DATA_SOURCE={RUN_DATA_SOURCE}: broker stream is the source - "
               f"NSE polling and cookie warm-up are DISABLED")
         try:

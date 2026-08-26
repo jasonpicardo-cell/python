@@ -30,3 +30,6 @@ institutional_signals.html
 /1OPTIONS/nse_data_cache/bhavcopy/
 /1OPTIONS/nse_data_cache/
 /1OPTIONS/ticks/
+/1OPTIONS/fyersApi.log
+/1OPTIONS/fyersDataSocket.log
+/1OPTIONS/fyersRequests.log

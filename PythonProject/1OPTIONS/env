@@ -11,7 +11,29 @@
 #            OI, needs the cookie warm-up, polled on a timer)
 #   arrow  = Arrow / iRage broker API (real-time, WebSocket streaming,
 #            OI + Greeks + volume; polling is switched OFF automatically)
-DATA_SOURCE=nse
+
+#Set DATA_SOURCE=fyers and restart. Verified the server boots correctly on that setting: NSE polling disabled, and a clear message when unconfigured.
+DATA_SOURCE=fyers
+
+# ── Fyers API v3 ─────────────────────────────────────────────────────
+# The richest source available here: real-time WebSocket ticks, genuine OHLC
+# with TRADED VOLUME, bid/ask per strike and Level-2 market depth. Set
+# DATA_SOURCE=fyers to use it.
+#
+# Create an app at https://myapi.fyers.in to get the id and secret. Access
+# tokens expire DAILY and the login is interactive, so run:
+#     python3 fyers_login.py
+# each morning - it writes .fyers_token, which the adapter reads.
+FYERS_CLIENT_ID=X2VQ4FPOO3-100
+FYERS_SECRET_KEY=E857FEHMKY
+FYERS_REDIRECT_URI=https://trade.fyers.in/api-login/redirect-uri/index.html
+# Optional: paste a token directly instead of using the token file.
+FYERS_ACCESS_TOKEN=
+# Indices to stream, and strikes either side of ATM.
+FYERS_SYMBOLS=NIFTY,BANKNIFTY
+FYERS_STRIKE_COUNT=25
+# Tick pushes to browsers per second (coalesced; the UI cannot use more).
+FYERS_PUSH_HZ=4
 
 # ── Arrow (arrow.trade / iRage Broking) ──────────────────────────────
 # Create an app in Arrow's Trading API section to get these.

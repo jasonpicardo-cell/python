@@ -317,9 +317,22 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     strike_gap = min(gaps) if gaps else 50
     idx_ohlc = _index_ohlc(sym)
     flags = _buildup_flags(strikes, spot, strike_gap)
+    # The dashboard reads support/resistance as OBJECTS (support.strike), so
+    # omitting them throws and kills the entire render pipeline - one failure
+    # there stops every panel after it. Same shape as the NSE source: the
+    # largest put-OI and call-OI strikes inside the band.
+    _sg = strike_gap if "strike_gap" in dir() else 50
+    lo_b, hi_b = (atm or spot) - band * _sg, (atm or spot) + band * _sg
+    nearby = [s for s in strikes if lo_b <= s["strike"] <= hi_b] or strikes
+    resistance = max(nearby, key=lambda s: s.get("ce_oi", 0))
+    support = max(nearby, key=lambda s: s.get("pe_oi", 0))
+
     out = {
         "symbol": sym,
         "underlying_value": spot,
+        "support": dict(support),
+        "resistance": dict(resistance),
+        "nearby": nearby,
         "atm": atm,
         "atm_iv": round(atm_iv, 2),
         "expiry": exp,

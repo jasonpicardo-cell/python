@@ -14544,6 +14544,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function render(data) {
+    try { _ensureLevels(data); } catch (_) {}
     // ── stale-response guard ─────────────────────────────────────────
     // Switching instruments sets state.symbol immediately, but a request for
     // the PREVIOUS symbol may still be in flight. Rendering it stamps every
@@ -15550,7 +15551,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }).join('');
   }
 
+  // Some data sources omit support/resistance. They are trivially derivable
+  // from the chain, and a missing field should never be fatal - one throw in
+  // the render pipeline stops every panel after it, which is how a single
+  // absent key blanked the whole dashboard.
+  function _ensureLevels(d) {
+    if (!d || !Array.isArray(d.strikes) || !d.strikes.length) return d;
+    if (d.support?.strike != null && d.resistance?.strike != null) return d;
+    const gap = d.strike_gap || 50;
+    const atm = d.atm ?? d.underlying_value;
+    const band = 12;
+    const near = d.strikes.filter(s => Math.abs(s.strike - atm) <= band * gap);
+    const pool = near.length ? near : d.strikes;
+    if (d.support?.strike == null)
+      d.support = pool.reduce((a, b) => (b.pe_oi || 0) > (a.pe_oi || 0) ? b : a, pool[0]);
+    if (d.resistance?.strike == null)
+      d.resistance = pool.reduce((a, b) => (b.ce_oi || 0) > (a.ce_oi || 0) ? b : a, pool[0]);
+    return d;
+  }
+
   function renderStatCards(data) {
+    data = _ensureLevels(data);
     els.statGrid.innerHTML = [
       statCard('Spot', fmtPrice(data.underlying_value)),
       statCard('ATM Strike', fmtInt(data.atm)),
@@ -15608,7 +15629,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       rows.sort((a, b) => (a[state.sortCol] - b[state.sortCol]) * state.sortDir);
     }
     const maxOi = Math.max(1, ...data.strikes.map(s => Math.max(s.ce_oi, s.pe_oi)));
-    const atm = data.atm, support = data.support.strike, resistance = data.resistance.strike;
+    _ensureLevels(data);
+    const atm = data.atm, support = data.support?.strike, resistance = data.resistance?.strike;
 
     // Check whether we need a full rebuild: first render, symbol change, band change, or sort change
     const existingRows = els.chainBody.querySelectorAll('tr[data-strike]');
@@ -16444,6 +16466,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
   function _vwapSeries(cs) {
+    // With a broker feed carrying real traded volume this is a genuine VWAP.
+    // On NSE data there is no volume, so the fallback below weights every
+    // sample equally - honest, but not the same statistic, and the legend
+    // says so rather than letting them look identical.
+    if (_chart.hasVolume && cs.some(c => c.v > 0)) {
+      const out = []; let pv = 0, vv = 0;
+      for (const c of cs) {
+        const tp = (c.h + c.l + c.c) / 3, v = c.v || 0;
+        pv += tp * v; vv += v;
+        out.push(vv ? pv / vv : c.c);
+      }
+      return out;
+    }
     // Index feeds publish no traded volume, so this is weighted by TICK COUNT
     // per bar (the only activity measure available). With a steady 1-sample/min
     // feed that reduces to a typical-price running average — honest label below.
@@ -16462,7 +16497,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (cs.length < 2) continue;
       out.push({ lab: 'EMA' + e.p, col: e.col, vals: _emaSeries(closes, e.p), period: e.p, short: cs.length < e.p });
     }
-    if (_chart.show.vwap) out.push({ lab: 'VWAP', col: '#00d2d3', vals: _vwapSeries(cs), vwap: true });
+    if (_chart.show.vwap) out.push({ lab: _chart.hasVolume ? 'VWAP' : 'VWAP*', col: '#00d2d3', vals: _vwapSeries(cs), vwap: true, approx: !_chart.hasVolume });
     return out;
   }
 
@@ -18271,6 +18306,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // provisional (Yahoo-filled). Without this, a hole is invisible until you
   // happen to look at the right part of the chart.
   let _candleHealth = null;
+  // Warn once when the broker token is close to expiring, so it is noticed
+  // before the feed stops rather than after. Tokens die at about 06:00 IST,
+  // so this only matters if the server has been left running overnight.
+  let _tokenWarned = false;
+  async function _checkBrokerToken() {
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/data-source`, { signal: AbortSignal.timeout(5000) })).json();
+      const t = j?.fyers?.token;
+      if (!t) return;
+      if (!t.valid && !_tokenWarned) {
+        _tokenWarned = true;
+        showToast?.('⚠ Broker token expired — run fyers_login.py and restart. Falling back to NSE data.');
+      } else if (t.valid && t.expires_in_h != null && t.expires_in_h < 1 && !_tokenWarned) {
+        _tokenWarned = true;
+        showToast?.(`⚠ Broker token expires in ${(t.expires_in_h * 60).toFixed(0)} min`);
+      }
+    } catch (_) {}
+  }
+  _visInterval(_checkBrokerToken, 15 * 60000, 'brokerToken');
+
   async function _fetchCandleHealth() {
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
@@ -18383,6 +18439,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _chart.src = j.source;
       _chart.coverage = j.coverage || null;
       _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
+      _chart.hasVolume = !!j.has_volume;
       _chart.optionMeta = null;
       _chart.yZoom = 1; _chart.yCenter = null;      // refit to the fuller range
       renderPriceChart();
@@ -18420,6 +18477,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (j.error) { box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error)}</div>`; _chart.candles = []; return; }
       _chart.candles = j.candles || []; _chart.src = j.source; _chart.coverage = j.coverage || null;
       _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
+      _chart.hasVolume = !!j.has_volume;
       try { _emaCrossCheck(); } catch (_) {}
       renderPriceChart();
     } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
@@ -18511,6 +18569,26 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     };
     const x = i => padL + (slotOf(cs[i].t) + 0.5) / slots * (W - padL - padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+    // ── volume bars ──────────────────────────────────────────────────
+    // Only drawn when the feed carries GENUINE traded volume. NSE gives one
+    // spot sample a minute, from which volume cannot be recovered, so on that
+    // source this stays empty rather than showing a fabricated bar.
+    let volSvg = '';
+    if (_chart.hasVolume && cs.some(c => c.v > 0)) {
+      const vh = Math.round((H - padT - padB) * 0.18);
+      const vTop = H - padB - vh;
+      const vMax = Math.max(...cs.map(c => c.v || 0)) || 1;
+      cs.forEach((c, i) => {
+        if (!c.v) return;
+        const up = c.c >= c.o;
+        const h2 = (c.v / vMax) * vh;
+        const cx = x(i);
+        volSvg += `<rect x="${(cx - Math.max(1, cw / 2)).toFixed(1)}" y="${(H - padB - h2).toFixed(1)}" width="${Math.max(1, cw).toFixed(1)}" height="${h2.toFixed(1)}" fill="${up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'}" opacity="0.28"/>`;
+      });
+      volSvg += `<line x1="${padL}" y1="${vTop.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${vTop.toFixed(1)}" stroke="rgba(255,255,255,0.08)"/>`;
+      volSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(vTop + 9).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">vol ${fmtInt(Math.round(vMax))}</text>`;
+    }
+
     // ── shade recording gaps ─────────────────────────────────────────
     // A mid-session restart leaves minutes with no data. Drawing candles
     // straight across the hole would imply price traded there; a shaded band
@@ -18541,7 +18619,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const slotPx = (W - padL - padR) / slots;
     const cw = Math.max(1, Math.min(24, Math.floor(slotPx * 0.8)));
     const wickW = Math.max(1, Math.min(3, Math.round(cw * 0.3)));
-    let svg = gapSvg;
+    let svg = volSvg + gapSvg;
     cs.forEach((c, i) => {
       // colour by body; for a flat body fall back to change vs the previous close
       const prevC = i > 0 ? cs[i - 1].c : c.o;
@@ -18683,6 +18761,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         ${!_chart.optionMeta && _chart.coverage && !/^09:1[0-9]/.test(_chart.coverage) ? `<span style="color:var(--gold,#d4af37);cursor:pointer;" id="chartFillHint" title="The chart does not reach back to the open — click to pull the morning from NSE's own feed">⤢ starts ${escapeHtml(_chart.coverage.split('-')[0])} — fill from 9:15</span>` : ''}
         <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
         <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts, yahoo = Yahoo Finance backfill used only where the others left gaps">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
+        ${/fyers\(/.test(_chart.src || '') ? `<span style="color:var(--pos,#26a69a);" title="Real OHLC with traded volume from the Fyers feed — not reconstructed from spot samples">⚡ broker feed${_chart.hasVolume ? ' · real volume' : ''}</span>` : ''}
         ${/yahoo\(/.test(_chart.src || '') ? `<span style="color:var(--gold,#d4af37);" title="Part of this chart was filled from Yahoo Finance because NSE data was unavailable for those minutes. Yahoo is a derived feed: the shape is right, but prices will not match NSE tick for tick, so treat levels drawn from those minutes with that in mind.">⚠ partly Yahoo-filled</span>` : ''}
         ${_chart.coverage ? `<span title="Time span covered by the merged data">covers <b>${escapeHtml(_chart.coverage)}</b></span>` : ''}
         <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
