@@ -1937,6 +1937,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="trendBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain and let the chart collect a few candles.</div></div>
           </div>
 
+          <div class="level-panel" id="vpPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">📊 Volume Profile &amp; CVD — where it actually traded<i class="hi" data-h="volume-profile">i</i></span>
+            </div>
+            <div id="vpBody" style="padding:6px 8px;"><div class="movers-loading">Needs a broker feed with real volume.</div></div>
+          </div>
+
           <div class="level-panel" id="coilPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">🪤 Coiled Spring — conditions for expansion<i class="hi" data-h="coiled">i</i></span>
@@ -14608,6 +14615,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { _leadingCheck(data); } catch (_) {}
+    try { renderVolumeProfile(); } catch (_) {}
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _shockCheck(data); } catch (_) {}
@@ -16571,6 +16579,107 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
+  // ══ VOLUME PROFILE & CVD ══════════════════════════════════════════
+  // Both were impossible before the broker feed: NSE gave one spot sample a
+  // minute with no volume at all, and volume is the whole input here.
+  //
+  // VOLUME PROFILE answers a different question from a price chart. A chart
+  // shows where price WENT; the profile shows where it TRADED - how much
+  // business was done at each level. Those levels matter because they are
+  // where positions live, and price returns to them:
+  //   POC (point of control) - the most-traded price. The session's centre of
+  //     gravity, and the level price is most likely to revisit.
+  //   VAH / VAL (value area)  - the band containing 70% of the volume. Inside
+  //     it the market is balanced and fades work; outside it the market is
+  //     imbalanced and trends work. That distinction is the practical use.
+  //   LVN (low-volume nodes)  - prices the market passed through quickly.
+  //     Price tends to move FAST through them again, which makes them poor
+  //     targets and good breakout confirmations.
+  //
+  // CVD (cumulative volume delta) tracks buying minus selling pressure. Its
+  // value is in DIVERGENCE: price making a new high while CVD does not means
+  // the move is not being backed by aggressive buying, and that is one of the
+  // more respected short-term warnings.
+  function _volumeProfile(cs, bucketPts) {
+    if (!cs || cs.length < 5) return null;
+    const withVol = cs.filter(c => (c.v || 0) > 0);
+    if (withVol.length < 5) return null;            // no real volume: cannot build
+    const lo = Math.min(...withVol.map(c => c.l));
+    const hi = Math.max(...withVol.map(c => c.h));
+    if (!(hi > lo)) return null;
+    const bucket = bucketPts || Math.max(1, Math.round((hi - lo) / 60));
+    const rows = new Map();
+    for (const c of withVol) {
+      // spread each candle's volume across the range it actually covered,
+      // rather than dumping it all at the close - a wide bar traded at every
+      // price inside it, and pretending otherwise distorts the profile
+      const b0 = Math.floor(c.l / bucket), b1 = Math.floor(c.h / bucket);
+      const n = Math.max(1, b1 - b0 + 1);
+      const share = (c.v || 0) / n;
+      for (let b = b0; b <= b1; b++) rows.set(b, (rows.get(b) || 0) + share);
+    }
+    if (!rows.size) return null;
+    const sorted = [...rows.entries()].sort((a, b) => a[0] - b[0]);
+    const total = sorted.reduce((s, r) => s + r[1], 0);
+    let pocIdx = 0;
+    sorted.forEach((r, i) => { if (r[1] > sorted[pocIdx][1]) pocIdx = i; });
+    // value area: expand from the POC, always taking the heavier neighbour,
+    // until 70% of the session's volume is enclosed
+    let lo_i = pocIdx, hi_i = pocIdx, acc = sorted[pocIdx][1];
+    while (acc < total * 0.7 && (lo_i > 0 || hi_i < sorted.length - 1)) {
+      const up = hi_i < sorted.length - 1 ? sorted[hi_i + 1][1] : -1;
+      const dn = lo_i > 0 ? sorted[lo_i - 1][1] : -1;
+      if (up >= dn) { hi_i++; acc += up; } else { lo_i--; acc += dn; }
+    }
+    const maxVol = sorted[pocIdx][1];
+    const lvn = sorted.filter(r => r[1] < maxVol * 0.2).map(r => r[0] * bucket + bucket / 2);
+    return {
+      bucket, total,
+      poc: sorted[pocIdx][0] * bucket + bucket / 2,
+      vah: sorted[hi_i][0] * bucket + bucket,
+      val: sorted[lo_i][0] * bucket,
+      rows: sorted.map(([b, v]) => ({ price: b * bucket + bucket / 2, vol: v })),
+      maxVol, lvn: lvn.slice(0, 6),
+    };
+  }
+
+  // CVD: classify each bar's volume by where it closed within its own range.
+  // A true tick-level delta needs every print tagged against the bid and ask;
+  // this is the honest bar-level approximation, and the panel says so rather
+  // than implying a precision it does not have.
+  function _cvdSeries(cs) {
+    if (!cs?.length) return null;
+    const out = [];
+    let cum = 0;
+    for (const c of cs) {
+      const rng = c.h - c.l;
+      const pos = rng > 0 ? (c.c - c.l) / rng : 0.5;    // 1 = closed on the high
+      const delta = (c.v || 0) * (pos * 2 - 1);          // +v at the high, -v at the low
+      cum += delta;
+      out.push({ t: c.t, delta, cum, close: c.c });
+    }
+    return out;
+  }
+
+  function _cvdDivergence(cvd, cs) {
+    if (!cvd || cvd.length < 20) return null;
+    const n = Math.min(30, cvd.length);
+    const recent = cvd.slice(-n), bars = cs.slice(-n);
+    const priceHi = Math.max(...bars.map(b => b.h));
+    const priceLo = Math.min(...bars.map(b => b.l));
+    const last = bars[bars.length - 1].c;
+    const cvdNow = recent[recent.length - 1].cum;
+    const cvdHi = Math.max(...recent.map(r => r.cum));
+    const cvdLo = Math.min(...recent.map(r => r.cum));
+    const nearHigh = (last - priceLo) / Math.max(1e-9, priceHi - priceLo) > 0.82;
+    const nearLow = (last - priceLo) / Math.max(1e-9, priceHi - priceLo) < 0.18;
+    if (nearHigh && cvdNow < cvdHi * 0.85)
+      return { dir: 'bearish', note: 'price near the session high while CVD is not — the move is not being backed by aggressive buying' };
+    if (nearLow && cvdNow > cvdLo * 0.85)
+      return { dir: 'bullish', note: 'price near the session low while CVD is not — selling is not following through' };
+    return null;
+  }
+
   // ══ COILED SPRING — conditions for expansion ══════════════════════
   // The honest version of "the market knows something".
   //
@@ -16658,6 +16767,51 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return { compression, compScore, ivTrend, rvNow: rvNow?.vol, rvPrev: rvPrev?.vol,
              rvFalling, divergence, vrp, volOi, event, window, score, iv,
              expected: spot * (iv / 100) * Math.sqrt(_volT(Math.max(1 / 1440, dte))) };
+  }
+
+  function renderVolumeProfile() {
+    const box = document.getElementById('vpBody');
+    if (!box) return;
+    const cs = _chart.candles || [];
+    const vp = _volumeProfile(cs, (state.symbol === 'BANKNIFTY') ? 10 : 5);
+    if (!vp) {
+      box.innerHTML = `<div class="movers-loading">${_chart.hasVolume
+        ? 'Collecting volume — needs a few more candles.'
+        : 'No traded volume on this feed. Volume Profile needs a broker source (set DATA_SOURCE=fyers); NSE gives one spot sample a minute with no volume at all.'}</div>`;
+      return;
+    }
+    const spot = state.lastData?.underlying_value || cs[cs.length - 1].c;
+    const inVA = spot >= vp.val && spot <= vp.vah;
+    const cvd = _cvdSeries(cs);
+    const div = _cvdDivergence(cvd, cs);
+    const cvdNow = cvd ? cvd[cvd.length - 1].cum : 0;
+    // horizontal histogram
+    const bars = vp.rows.slice().reverse().map(r => {
+      const w = r.vol / vp.maxVol * 100;
+      const isPoc = Math.abs(r.price - vp.poc) < vp.bucket / 2;
+      const inArea = r.price >= vp.val && r.price <= vp.vah;
+      const nearSpot = Math.abs(r.price - spot) < vp.bucket;
+      return `<div style="display:flex;align-items:center;gap:6px;font-size:9px;line-height:1.35;">
+        <span style="min-width:52px;color:${nearSpot ? 'var(--gold,#d4af37)' : 'var(--muted)'};${nearSpot ? 'font-weight:700;' : ''}">${fmtInt(Math.round(r.price))}</span>
+        <span style="display:inline-block;height:7px;width:${w.toFixed(1)}%;background:${isPoc ? 'var(--gold,#d4af37)' : inArea ? 'rgba(38,166,154,0.55)' : 'rgba(255,255,255,0.16)'};border-radius:2px;"></span>
+        ${isPoc ? '<b style="color:var(--gold,#d4af37);font-size:9px;">POC</b>' : ''}
+      </div>`; }).join('');
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:var(--gold,#d4af37);">POC ${fmtInt(Math.round(vp.poc))}</b>
+        <span>VAH <b>${fmtInt(Math.round(vp.vah))}</b> · VAL <b>${fmtInt(Math.round(vp.val))}</b></span>
+        <span style="color:${inVA ? 'var(--muted)' : 'var(--gold,#d4af37)'};font-weight:700;">
+          ${inVA ? 'INSIDE value area — balanced, fades tend to work'
+                 : `OUTSIDE value area (${spot > vp.vah ? 'above' : 'below'}) — imbalanced, trends tend to work`}</span>
+      </div>
+      <div style="max-height:190px;overflow-y:auto;padding:3px 4px;">${bars}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:3px 4px;font-size:10px;">
+        <span>CVD <b style="color:${cvdNow >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${cvdNow >= 0 ? '+' : ''}${fmtInt(Math.round(cvdNow))}</b></span>
+        ${div ? `<span style="color:${div.dir === 'bullish' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-weight:700;">⚠ ${div.dir} divergence</span>` : '<span style="color:var(--muted);">no divergence</span>'}
+        ${vp.lvn.length ? `<span style="color:var(--muted);">low-volume nodes: ${vp.lvn.slice(0, 3).map(x => fmtInt(Math.round(x))).join(', ')}</span>` : ''}
+      </div>
+      ${div ? `<div class="oc-sub" style="color:#c9b458;">${escapeHtml(div.note)}.</div>` : ''}
+      <div class="oc-sub" style="margin-top:3px;">A price chart shows where price WENT; the profile shows where it <b>traded</b>. Those levels matter because that is where positions live, and price returns to them. <b>The practical rule:</b> inside the value area the market is balanced and fades work; outside it, it is imbalanced and trends work — which is the single most useful thing this panel tells you. <b>Low-volume nodes</b> are prices the market passed through quickly and tends to pass through quickly again, making them poor targets and good breakout confirmations. <b>CVD is a bar-level approximation</b>, classified by where each bar closed in its own range; a true tick delta needs every print tagged against the bid and ask, which this feed does not expose per trade. Divergence is the useful part, not the absolute number.</div>`;
   }
 
   function renderCoiled(data) {
@@ -26085,6 +26239,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'range-forecast':    '<strong>Expected Range — day, week, month</strong>The option market prices a move for every expiry it lists, and reading them together shows the TERM STRUCTURE of expected movement rather than one number. Each horizon uses <b>its own expiry\'s ATM implied volatility</b> instead of scaling a single figure, which is what lets a near-term event premium show up as a weekly range disproportionate to the monthly - scale one number and that signal vanishes. <b>Rest of today</b> shrinks through the session as time runs out, which is why it is the most useful line for intraday sizing. Under a lognormal assumption roughly 68%% of closes land inside 1σ and 95%% inside 2σ, but real markets have fatter tails, so treat 2σ as optimistic rather than a wall. The term-structure note below the rows reads the shape: backwardation (near IV above far) prices a near-term event and favours calendars, contango is the normal shape and makes near-dated premium comparatively cheap.',
     'eod-report':        '<strong>Session Review</strong>Scores the day against the levels the dashboard drew that morning, rebuilt from the recorded session rather than asserted. For each 9:20 line it reports one of three verdicts: <b>held</b> (touched but not broken beyond a small buffer), <b>broke</b> (price went through), or <b>never reached</b> - and that third case is information too, because a line price never approaches is neither right nor wrong, and counting it as either would flatter or damn the method unfairly. It also reports whether the day was a trend day (body at least 60%% of range) and how positioning shifted: whether the call and put walls held their strikes or migrated, and where PCR started and finished. <b>Why this matters:</b> commercial tools advertise accuracy tracking as a number you are asked to believe. This shows the working, and over enough sessions the verdicts feed Claims on Trial, where the 9:20 method becomes measurable rather than trusted.',
     'hero-zero':         '<strong>Hero/Zero candidates</strong>Expiry-day lottery tickets, ranked by <b>convexity per rupee</b> rather than by price - because the popular filter, "cheapest option", is the wrong one. The cheapest strike always shows the biggest multiple, and that multiple IS the compensation for the odds: a 23x payoff at a 1.4%% chance of finishing in the money is not a better bet than 5x at 29%%, it is the same bet with more variance and usually a worse one after costs. Every row carries the ITM probability (approximated by delta, which is what it means for a vanilla option), the breakeven move required, the multiple at half an expected move, and what a lot actually costs - so the trade can be judged rather than hoped over. <b>These are priced bets, not mispriced ones.</b> The market sets the premium so payoff and probability roughly offset, then brokerage and slippage push the balance against you. Whatever edge exists comes from being right about direction and timing, not from finding a cheap strike. <b>Sizing is the whole game:</b> a hero/zero goes to zero far more often than it becomes a hero, so size it as money already written off. Read it with the Premium Shock panel above - high gamma concentration with rising IV is the condition where these actually multiply, and a quiet tape is where they simply decay to nothing.',
+    'volume-profile':    '<strong>Volume Profile &amp; CVD</strong>Impossible before the broker feed: NSE supplied one spot sample a minute with no volume at all, and volume is the entire input here. A price chart shows where price WENT; the profile shows where it <b>traded</b> - how much business was done at each level - and those levels matter because that is where positions live, so price returns to them. <b>POC</b> is the most-traded price, the session\'s centre of gravity and the level price is most likely to revisit. <b>VAH and VAL</b> bound the value area holding 70%% of the volume, and the practical rule is the most useful thing on this panel: <b>inside the value area the market is balanced and fades work; outside it the market is imbalanced and trends work.</b> Knowing which regime you are in matters more than any single level. <b>Low-volume nodes</b> are prices the market passed through quickly and tends to pass through quickly again - poor targets, good breakout confirmations. <b>CVD</b> tracks buying minus selling pressure; its value is in DIVERGENCE, because price making a new high while CVD does not means the move is not backed by aggressive buying. <b>Honest limit:</b> this CVD is a bar-level approximation classified by where each bar closed within its own range. A true tick delta needs every print tagged against bid and ask, which the feed does not expose per trade - so read the divergence, not the absolute number.',
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
     'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
