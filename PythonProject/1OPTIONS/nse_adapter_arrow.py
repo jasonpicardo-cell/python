@@ -337,6 +337,13 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "sentiment": _infer_sentiment(nearby, atm, _max_pain(strikes),
                                       (tot_pe / tot_ce) if tot_ce else None),
         "skew_note": "",
+        # Arrow has no futures endpoint wired yet. Emitting the keys as None
+        # lets the futures inputs skip cleanly instead of reading undefined -
+        # the trend engine simply contributes nothing from them rather than
+        # throwing, and the panel shows one fewer row rather than blanking.
+        "futures_price": None, "futures_oi": None, "futures_oi_chg": None,
+        "futures_prev_close": None, "futures_far_price": None,
+        "futures_far_oi": None, "futures_volume": None,
         "expiries_data": {},
         "gainers": [],
         "symbols": [],

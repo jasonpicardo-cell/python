@@ -468,9 +468,55 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     atm_row = next((s for s in strikes if s["strike"] == atm), {})
     ivs = [v for v in (atm_row.get("ce_iv"), atm_row.get("pe_iv")) if v]
     atm_iv = sum(ivs) / len(ivs) if ivs else 0.0
+    fut = {}
+    try:
+        fut = _futures_quote(sym, exp_epochs)
+    except Exception:
+        pass
+
     tot_ce = sum(s.get("ce_oi", 0) for s in strikes)
     tot_pe = sum(s.get("pe_oi", 0) for s in strikes)
-    expiries = [str(e.get("expiry") or e) for e in (data.get("expiryData") or [])]
+    # Fyers returns expiryData as epoch seconds, not a date string. Emitting
+    # the raw epoch left every consumer to guess, and omitting dte entirely
+    # broke every panel that prices an option - Coiled Spring, Scalp
+    # Calculator, Premium Shock and Hero/Zero all read d.dte and silently fell
+    # back to a default, producing plausible-looking but wrong numbers.
+    def _exp_epoch(e):
+        v = e.get("expiry") if isinstance(e, dict) else e
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    exp_epochs = sorted(x for x in (_exp_epoch(e) for e in (data.get("expiryData") or [])) if x)
+    def _exp_str(ep):
+        g = time.gmtime(ep + 5 * 3600 + 1800)
+        return time.strftime("%d-%b-%Y", g)
+    expiries = [_exp_str(x) for x in exp_epochs]
+
+    def _dte_from(ep):
+        """Fractional days to 15:30 IST on expiry day.
+
+        Fractional, not whole days: on expiry day a whole-day figure is 0 from
+        09:15 to 15:30, which pins T to a floor and freezes every Greek for the
+        entire session - exactly when theta moves fastest.
+        """
+        if not ep:
+            return 1.0
+        g = time.gmtime(ep + 5 * 3600 + 1800)
+        day_start = ep - (g.tm_hour * 3600 + g.tm_min * 60 + g.tm_sec)
+        settle = day_start + 15 * 3600 + 30 * 60          # 15:30 IST
+        return max((settle - time.time()) / 86400.0, 1.0 / (24 * 60))
+
+    near_epoch = None
+    if expiry:
+        for ep, s in zip(exp_epochs, expiries):
+            if str(expiry) in (s, str(ep)):
+                near_epoch = ep
+                break
+    if near_epoch is None and exp_epochs:
+        near_epoch = exp_epochs[0]
+    dte_frac = _dte_from(near_epoch)
 
     gaps = sorted({round(b - a) for a, b in zip(sorted(by_strike), sorted(by_strike)[1:]) if b > a})
     strike_gap = gaps[0] if gaps else 50
@@ -504,7 +550,7 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "nearby": nearby,
         "atm": atm,
         "atm_iv": round(atm_iv, 2),
-        "expiry": expiry or (expiries[0] if expiries else None),
+        "expiry": (expiry if expiry in expiries else None) or (expiries[0] if expiries else None),
         "all_expiries": expiries,
         "far_expiry": expiries[1] if len(expiries) > 1 else None,
         "strikes": strikes,
@@ -514,6 +560,20 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "max_pain": _max_pain(strikes),
         "strike_gap": strike_gap,
         "lot_size": _lot_size(sym),
+        # every option-pricing panel reads these
+        "dte": round(dte_frac, 4),
+        "dte_days": int(dte_frac),
+        "dte_trading": round(dte_frac * (252.0 / 365.0), 4),
+        "expiry_epoch": near_epoch,
+        # futures basis and OI build-up feed the trend engine
+        "futures_price": fut.get("futures_price"),
+        "futures_oi": fut.get("futures_oi"),
+        "futures_oi_chg": fut.get("futures_oi_chg"),
+        "futures_prev_close": fut.get("futures_prev_close"),
+        "futures_volume": fut.get("futures_volume"),
+        "futures_far_price": fut.get("futures_far_price"),
+        "futures_far_oi": fut.get("futures_far_oi"),
+        "futures_dte": round(dte_frac, 4),
         "india_vix": india_vix(),
         "timestamp": time.strftime("%d-%b-%Y %H:%M:%S"),
         "_source": "fyers",
@@ -590,6 +650,53 @@ def _infer_sentiment(strikes, atm, max_pain, pcr):
     if bear - bull >= 1.5:
         return "Mildly bearish to bearish"
     return "Range-bound / no strong directional lean"
+
+FUT_SUFFIX = {"NIFTY": "NIFTY", "BANKNIFTY": "BANKNIFTY",
+              "FINNIFTY": "FINNIFTY", "MIDCPNIFTY": "MIDCPNIFTY"}
+
+
+def _futures_quote(symbol: str, exp_epochs: List[float]) -> Dict[str, Any]:
+    """Near-month futures price, OI and previous close.
+
+    The trend engine reads basis (futures minus spot) and the futures OI
+    build-up: both are among the cleanest positioning signals available, and
+    both were silently absent, so those inputs simply never contributed.
+    Fyers option-chain symbols encode the expiry, so the future for the same
+    series is derivable from the same date.
+    """
+    base = FUT_SUFFIX.get(symbol.upper())
+    if not base or not _client or not exp_epochs:
+        return {}
+    out = {}
+    for idx, ep in enumerate(exp_epochs[:2]):
+        g = time.gmtime(ep + 5 * 3600 + 1800)
+        # monthly futures symbol: NSE:NIFTY25AUGFUT
+        yy = str(g.tm_year)[2:]
+        mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+               "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][g.tm_mon - 1]
+        fsym = f"NSE:{base}{yy}{mon}FUT"
+        try:
+            r = _count_rest("quotes") or _client.quotes({"symbols": fsym})
+            for row in (r.get("d") or []):
+                v = row.get("v") or {}
+                px = _f(v, "lp", "ltp")
+                if not px:
+                    continue
+                if idx == 0:
+                    out.update({
+                        "futures_price": px,
+                        "futures_oi": _f(v, "open_interest", "oi") or None,
+                        "futures_oi_chg": _f(v, "oich", "open_interest_change") or None,
+                        "futures_prev_close": _f(v, "prev_close_price", "prev_close") or None,
+                        "futures_volume": _f(v, "volume", "vol_traded_today") or None,
+                    })
+                else:
+                    out["futures_far_price"] = px
+                    out["futures_far_oi"] = _f(v, "open_interest", "oi") or None
+        except Exception:
+            continue
+    return out
+
 
 def _max_pain(strikes: List[Dict[str, Any]]) -> Optional[float]:
     if not strikes:
