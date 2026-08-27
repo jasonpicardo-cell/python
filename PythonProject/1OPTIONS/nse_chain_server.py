@@ -955,7 +955,19 @@ def _reconcile_symbol(symbol: str) -> dict:
                 "expected": len(expected), "provisional": len(prov)}
 
     filled = upgraded = 0
-    nse = _nse_full_day(symbol)
+    # Prefer the ACTIVE data source. Under Fyers the reconciler was still
+    # asking NSE's chart feed to repair holes, which needs a warmed NSE
+    # session the server no longer maintains - so repairs silently did nothing.
+    nse = {}
+    if RUN_DATA_SOURCE == "fyers":
+        try:
+            import nse_adapter_fyers as _fy
+            for cd in _fy.fetch_candles(symbol, 1, 1):
+                nse[int(cd["t"] // 60)] = cd["c"]
+        except Exception as e:  # noqa: BLE001
+            print(f"[reconcile] fyers history unavailable: {e}")
+    if not nse:
+        nse = _nse_full_day(symbol)
     if nse:
         for m in list(missing):
             if m in nse:
@@ -989,7 +1001,8 @@ def _reconcile_symbol(symbol: str) -> dict:
            "filled": filled, "upgraded": upgraded,
            "still_missing": len(missing), "provisional": len(prov)}
     if filled or upgraded:
-        print(f"[reconcile] {symbol}: +{filled} filled, {upgraded} upgraded to NSE, "
+        _srcname = "Fyers" if RUN_DATA_SOURCE == "fyers" else "NSE"
+        print(f"[reconcile] {symbol}: +{filled} filled, {upgraded} upgraded to {_srcname}, "
               f"{len(missing)} still missing ({len(series)}/{len(expected)} minutes)")
     return rep
 
@@ -1070,7 +1083,63 @@ def _ist_hm_g(ts) -> str:
     return f"{g.tm_hour:02d}:{g.tm_min:02d}"
 
 
+def _attach_oi_rollups(symbol: str, data: dict) -> dict:
+    """Add the rolling OI-change fields the NSE path computes.
+
+    ce_oi_15m / pe_oi_15m and ce_d60 / pe_d60 are derived from the server's own
+    OI timeline, not from the source. The adapter path returned before that
+    happened, so a Fyers chain carried neither - the CSV export lost two
+    columns and the custom OI-change alert had nothing to compare against.
+    """
+    try:
+        # Its OWN store. The first version reused _oi_timeline, which already
+        # holds a completely different shape ({times, ce, pe, _prev, _last_ts})
+        # for the GEX heatmap and OI Build Map - writing per-strike lists into
+        # it destroyed those panels and threw KeyError: '_last_ts' on the next
+        # timeline write. A shared name is not a shared schema.
+        tl = _oi_rollup_hist.setdefault(symbol, {})
+        now = time.time()
+        for s in data.get("strikes") or []:
+            k = s.get("strike")
+            if k is None:
+                continue
+            hist = tl.setdefault(k, [])
+            hist.append((now, s.get("ce_oi") or 0, s.get("pe_oi") or 0))
+            # keep roughly an hour, which covers both windows
+            while hist and now - hist[0][0] > 3900:
+                hist.pop(0)
+            for mins, suffix in ((15, "oi_15m"), (60, "d60")):
+                cutoff = now - mins * 60
+                # Baseline = the most recent sample AT OR BEFORE the window
+                # start. Taking the first sample after the cutoff picked the
+                # entry just appended this tick, so the difference came out as
+                # zero whenever no older sample sat inside the window.
+                older = [h for h in hist if h[0] <= cutoff]
+                base = older[-1] if older else (hist[0] if hist else None)
+                if base:
+                    s[f"ce_{suffix}"] = (s.get("ce_oi") or 0) - base[1]
+                    s[f"pe_{suffix}"] = (s.get("pe_oi") or 0) - base[2]
+    except Exception as e:  # noqa: BLE001
+        print(f"[oi-rollup] {e}")
+    return data
+
+
 def _prune_state() -> None:
+    # the rollup history is per-strike and per-symbol; prune it with the rest
+    try:
+        cutoff = time.time() - 4200
+        for sym in list(_oi_rollup_hist):
+            for k in list(_oi_rollup_hist[sym]):
+                h = [x for x in _oi_rollup_hist[sym][k] if x[0] > cutoff]
+                if h:
+                    _oi_rollup_hist[sym][k] = h
+                else:
+                    del _oi_rollup_hist[sym][k]
+            if not _oi_rollup_hist[sym]:
+                del _oi_rollup_hist[sym]
+    except Exception:
+        pass
+
     """Bound the in-memory maps so a long-running server does not creep.
 
     None of these need history beyond the current session: caches are
@@ -1135,13 +1204,13 @@ def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
     if src == "fyers":
         try:
             import nse_adapter_fyers as _fy
-            return _fy.fetch_chain(symbol, expiry, band)
+            return _attach_oi_rollups(symbol, _fy.fetch_chain(symbol, expiry, band))
         except Exception as e:  # noqa: BLE001
             print(f"[adapter] fyers failed ({e}) - using NSE for this request")
     if src == "arrow":
         try:
             import nse_adapter_arrow as _arrow
-            return _arrow.fetch_chain(symbol, expiry, band)
+            return _attach_oi_rollups(symbol, _arrow.fetch_chain(symbol, expiry, band))
         except Exception as e:  # noqa: BLE001
             print(f"[adapter] arrow failed ({e}) - using NSE for this request")
     return _build_response(symbol, expiry, band)
@@ -1937,6 +2006,9 @@ def _fetch_results_calendar(fetcher):
 
 
 _oi_timeline: dict = {}      # sym -> {times, ce:{k:[..]}, pe:{k:[..]}, _prev:{k:(ce,pe)}, _last_ts}
+# separate from _oi_timeline above: sym -> {strike: [(ts, ce_oi, pe_oi), ...]}
+# used only for the rolling 15m/60m OI deltas attached to adapter responses
+_oi_rollup_hist: dict = {}
 _OI_TIMELINE_INTERVAL = 180  # 3 minutes
 _OI_TIMELINE_MAX_COLS = 130  # ~6.5h of samples
 
@@ -3903,6 +3975,13 @@ class Handler(BaseHTTPRequestHandler):
             def _warm_fetcher():
                 """Return a usable session, preferring the one already working.
 
+                Still used under DATA_SOURCE=fyers. Fyers supplies option-chain
+                and index data, but the stock scanner, watchlist, pivots and
+                results calendar are EQUITY endpoints with no Fyers wiring, and
+                turning the NSE warm-up off at startup silently broke all nine.
+                Warming lazily keeps them working while costing nothing on a
+                session where nothing asks for them.
+
                 The shared fetcher is what serves the option chain, so if the
                 dashboard is loading data at all, that session is good. Reuse
                 it rather than performing a fresh handshake - a new warm-up can
@@ -3956,12 +4035,51 @@ class Handler(BaseHTTPRequestHandler):
                             return (g.tm_yday == today_yday
                                     and _in_session(g.tm_hour * 60 + g.tm_min))
                         out = [cd for cd in fc if _today_session(cd)]
+                        # Measure gaps rather than assuming there are none.
+                        # Fyers history normally covers the whole session, but a
+                        # partial response would otherwise be reported as clean.
+                        fgaps = []
+                        if out:
+                            bucket = interval * 60
+                            for a, b in zip(out, out[1:]):
+                                miss = int((b["t"] - a["t"]) / bucket) - 1
+                                if miss > 0:
+                                    fgaps.append({"from": a["t"], "to": b["t"],
+                                                  "mins": miss * interval,
+                                                  "from_px": a["c"], "to_px": b["o"]})
+                        # ── keep the tick archive current under Fyers too ──
+                        # The branch used to return before the archive write, so
+                        # the on-disk history simply stopped growing - which the
+                        # reconciler, the coverage indicator and tomorrow's
+                        # restart all depend on.
+                        try:
+                            apath_f = _os.path.join(_TICK_DIR, f"{symbol}_{time.strftime('%Y-%m-%d')}.csv")
+                            _os.makedirs(_TICK_DIR, exist_ok=True)
+                            existing = {}
+                            if _os.path.exists(apath_f):
+                                for line in open(apath_f):
+                                    p = line.strip().split(",")
+                                    if len(p) >= 2:
+                                        try:
+                                            existing[int(float(p[0]) // 60)] = float(p[1])
+                                        except Exception:
+                                            pass
+                            for cd in out:
+                                existing[int(cd["t"] // 60)] = cd["c"]
+                            tmp = apath_f + ".tmp"
+                            with open(tmp, "w") as f:
+                                for m in sorted(existing):
+                                    f.write(f"{m * 60},{existing[m]}\n")
+                            _os.replace(tmp, apath_f)
+                        except Exception as e:  # noqa: BLE001
+                            print(f"[fyers] archive write failed: {e}")
                         if out:
                             first = _ist_hm_g(out[0]["t"]); last = _ist_hm_g(out[-1]["t"])
                             self._send_json({"symbol": symbol, "interval": interval,
                                              "source": f"fyers({len(out)})",
                                              "coverage": f"{first}-{last}",
-                                             "gaps": [], "gap_mins": 0,
+                                             "gaps": fgaps,
+                                             "gap_mins": sum(g["mins"] for g in fgaps),
                                              "candles": out, "count": len(out),
                                              "has_volume": True})
                             return

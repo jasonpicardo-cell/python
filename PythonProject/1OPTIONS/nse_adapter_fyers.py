@@ -58,6 +58,29 @@ FYERS_INDEX = {
 }
 INDIA_VIX = "NSE:INDIAVIX-INDEX"
 
+# ── session bounds, shared with the server ────────────────────────────
+# Under SEBI's Closing Auction Session (live since 3 August 2026) equity
+# DERIVATIVES trade until 15:40, ten minutes past the old cash close, while
+# F&O-eligible cash stocks stop continuous trading at 15:15 and go to auction.
+# These read the same override the server uses, so a future timing change is a
+# one-place edit rather than a divergence that silently truncates the last ten
+# minutes of every session on one code path but not the other.
+SESSION_OPEN_MIN = 9 * 60 + 15
+SESSION_END_MIN = int(os.environ.get("NSE_SESSION_END_MIN", 15 * 60 + 40))
+CAS_CASH_CUTOFF_MIN = 15 * 60 + 15
+
+
+def _in_session(mins: int) -> bool:
+    return SESSION_OPEN_MIN <= mins < SESSION_END_MIN
+
+
+def market_open_now() -> bool:
+    """Is the derivatives market trading right now (IST)?"""
+    g = time.gmtime(time.time() + 5 * 3600 + 1800)
+    if g.tm_wday >= 5:
+        return False
+    return _in_session(g.tm_hour * 60 + g.tm_min)
+
 _client: Optional[Any] = None
 _socket: Optional[Any] = None
 _lock = threading.Lock()
@@ -809,9 +832,9 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dic
                 dropped += 1
                 continue                 # a previous session: not today's chart
             mins = g.tm_hour * 60 + g.tm_min
-            if not (9 * 60 + 15 <= mins < 15 * 60 + 40):
+            if not _in_session(mins):
                 dropped += 1
-                continue                 # pre-open or post-close
+                continue                 # pre-open or past the 15:40 CAS close
             out.append({"t": ts, "o": float(c[1]), "h": float(c[2]),
                         "l": float(c[3]), "c": float(c[4]), "v": float(c[5]), "n": 1})
         if dropped:
