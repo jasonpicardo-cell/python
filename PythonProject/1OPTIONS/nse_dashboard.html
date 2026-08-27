@@ -6903,11 +6903,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (e.key === '+' || e.key === '=') {
       e.preventDefault();
       leg.qty_lots = (parseInt(leg.qty_lots)||1) + 1;
-      renderBuilder();
+      _safe(() => renderBuilder(), 'renderBuilder');
     } else if (e.key === '-' || e.key === '_') {
       e.preventDefault();
       leg.qty_lots = Math.max(1, (parseInt(leg.qty_lots)||1) - 1);
-      renderBuilder();
+      _safe(() => renderBuilder(), 'renderBuilder');
     }
   });
 
@@ -7647,7 +7647,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!built) { showToast('Could not resolve delta strikes — chain data too thin'); return; }
     builderState.legs = built.legs;
     resetStratLtpHistory();
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
     showToast(`⚡ Deployed: ${built.name} (${built.legs.map(l => `${l.action[0]}${l.option_type}${fmtInt(l.strike)}`).join(' / ')})`);
   });
 
@@ -8138,7 +8138,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!built) { showToast('Could not resolve strikes for this template right now'); return; }
     builderState.legs = built.legs;
     resetStratLtpHistory();
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
     showToast(`⚡ Deployed: ${built.name}`);
     document.querySelector('[data-tab="builder"]')?.dispatchEvent(new Event('click', { bubbles: true }));
   });
@@ -8305,7 +8305,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       else if (a.t === 'rollall') { for (const L of builderState.legs) { if (L.instrument_type === 'FUTURES' || L.expiry !== state.lastData?.expiry) continue;
           const np = _adjQuote(L.strike, L.option_type, a.exp); if (np != null) { L.expiry = a.exp; L.entry_price = np; L.premium = np; } } }
       if (typeof showToast === 'function') showToast('Adjustment applied — legs rewritten (the closed portion\'s P&L is yours to log in the journal)');
-      renderBuilder();
+      _safe(() => renderBuilder(), 'renderBuilder');
     }));
   }
 
@@ -8346,7 +8346,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         for (const [k, v] of Object.entries(payload.keys)) { localStorage.setItem(k, v); n++; }
         if (Array.isArray(payload.builderLegs) && payload.builderLegs.length) {
           builderState.legs = payload.builderLegs;
-          renderBuilder();
+          _safe(() => renderBuilder(), 'renderBuilder');
         }
         _loadJournal();
         showToast(`📂 Restored ${n} keys${payload.builderLegs?.length ? ` + ${payload.builderLegs.length} legs` : ''} — reload recommended`);
@@ -12059,7 +12059,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _tickRaf = 0;
       try {
         if (spot != null) {
-          renderPriceChart();                       // chart + all level lines
+          _safe(() => renderPriceChart(), 'renderPriceChart');                       // chart + all level lines
           _safe(() => renderMarketPulse(data), 'pulse');
           _safe(() => checkLevelTouches(_lastLevels || [], data.underlying_value), 'levelTouch');
         }
@@ -12092,9 +12092,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         if (d.type === 'ticks') { _applyTicks(d.t); return; }
         _sseInfo.speaker = !!d.speak;
         const line = d.text || d.kind || 'alert';
-        // everyone sees it; only the elected tab speaks
-        if (typeof showToast === 'function')
-          showToast(`${d.speak ? '🔊' : '🔇'} ${escapeHtml(line.slice(0, 90))}`);
         // per-index filter: silence indices this browser is not watching.
         // Falls back to reading the index out of the event key (our keys are
         // "type|SYMBOL|...") so an older payload without an explicit symbol
@@ -12107,9 +12104,20 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           _voiceDiag(d.type + '|' + evSym, `silenced: ${evSym} alerts are off on this browser`);
           return;
         }
+        if (!evSym) {
+          // No symbol on the payload and none derivable from the key. It is
+          // allowed through by design (failing closed would hide alerts), but
+          // it is logged because an unfilterable alert is exactly how one
+          // index leaks past the filter.
+          console.warn('[idx-filter] alert with NO symbol let through:', d.type, d.key || '');
+        }
         // Fresh-flow category filter for STREAMED events. The tick boxes only
         // gated the local detector, which stands down whenever the stream is
         // live - so unticking a category had no effect in normal use.
+        // toast only AFTER the index gate, so a muted index is fully silent
+        // rather than merely voice-silent
+        if (typeof showToast === 'function')
+          showToast(`${d.speak ? '🔊' : '🔇'} ${escapeHtml(line.slice(0, 90))}`);
         if (d.type === 'flow' && d.cat) {
           const fc = _flowCfg();
           const closing = d.cat === 'unwind' || d.cat === 'cover';
@@ -12203,13 +12211,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // The server keeps ONE fired-history and broadcasts to every system, so a
   // level touch is announced once network-wide instead of depending on each
   // browser's private cooldown map.
-  async function _relayAlert(key, text, kind, cooldownSec) {
+  async function _relayAlert(key, text, kind, cooldownSec, symOverride) {
     if (!_streamLive) return false;          // offline: caller speaks locally
+    // Gate BEFORE relaying. Relaying an alert for a muted index broadcasts it
+    // to every connected machine, and any machine with a different filter will
+    // then announce it - so filtering only on the receive side is too late.
+    const relaySym = symOverride || state.symbol || null;
+    if (relaySym && !_idxAlAllows(relaySym)) {
+      _voiceDiag(key, `not relayed: ${relaySym} is off on this browser`);
+      return true;                            // handled - do not fall through to local speech
+    }
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const q = new URLSearchParams({ key, text, kind: kind || 'level',
                                       cooldown: String(cooldownSec || 300),
-                                      symbol: state.symbol || '' });
+                                      symbol: relaySym || '' });
       const j = await (await fetch(`${base}/api/alert-emit?${q}`, { signal: AbortSignal.timeout(5000) })).json();
       _voiceDiag(key, j.broadcast ? 'relayed to all systems' : 'already announced elsewhere');
       return true;                            // handled by the stream either way
@@ -14251,7 +14267,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (destIdx !== _dragSrcIdx) {
       const [moved] = builderState.legs.splice(_dragSrcIdx, 1);
       builderState.legs.splice(destIdx, 0, moved);
-      renderBuilder();
+      _safe(() => renderBuilder(), 'renderBuilder');
     }
     _dragSrcIdx = null;
   });
@@ -14321,7 +14337,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
       if (tab.dataset.tab === 'builder') {
         if (state.builderDirty) {
-          renderBuilder();
+          _safe(() => renderBuilder(), 'renderBuilder');
           state.builderDirty = false;
         }
       }
@@ -14354,6 +14370,35 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // wipe rolling series immediately so nothing from the old instrument can
     // survive into the new one's chart, even for a single frame
     try { _resetHistoriesIfSymbolChanged(state.symbol); } catch (_) {}
+    // The chart is per-instrument too. Switching refetched the CHAIN but never
+    // the CANDLES, so the old symbol's candles stayed on screen until they were
+    // cleared by a symbol-mismatch check - leaving the chart blank until the
+    // next poll happened to refill it. Clear and refetch explicitly, and show a
+    // loading state rather than an empty panel while it arrives.
+    try {
+      _chart.candles = [];
+      _chart.coverage = null;
+      _chart.gaps = [];
+      _chart.gapMins = 0;
+      _chart.optionMeta = null;
+      _chart.liveBar = false;
+      _chart.yZoom = 1; _chart.yCenter = null;     // refit to the new range
+      // 9:20 lines are per-symbol. Assigned defensively: these are declared
+      // further down the file, and although this handler only runs on a user
+      // click - long after load - a throw here would abort the whole switch
+      // and leave the chart blank, which is the failure being fixed.
+      try { _m920Srv = null; _m920SrvTried = ''; } catch (_) {}
+      // the CE/PE strike selector lists strikes of the OLD symbol; blank it so
+      // it cannot request 24500 CE on an instrument trading near 52000
+      const ss = document.getElementById('chartStrike');
+      if (ss) ss.innerHTML = '';
+      const ci2 = document.getElementById('chartInstrument');
+      if (ci2 && ci2.value !== 'index') { ci2.value = 'index'; if (ss) ss.style.display = 'none'; }
+      const cb = document.getElementById('chartBody');
+      if (cb && !_chart.diagOpen)
+        cb.innerHTML = `<div class="movers-loading">Loading ${escapeHtml(state.symbol)} candles…</div>`;
+      fetchCandles();
+    } catch (_) {}
     state.expiry = null;
     state.shouldScrollToAtm = true;
     state.sessionHistory = [];
@@ -14544,7 +14589,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function render(data) {
-    try { _ensureLevels(data); } catch (_) {}
+    try { _normaliseChain(data); } catch (_) {}
     // ── stale-response guard ─────────────────────────────────────────
     // Switching instruments sets state.symbol immediately, but a request for
     // the PREVIOUS symbol may still be in flight. Rendering it stamps every
@@ -14580,13 +14625,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       if (_chart.candles.length) {
         _chartLiveExtend(data?.underlying_value);
-        renderPriceChart();
+        _safe(() => renderPriceChart(), 'renderPriceChart');
       }
     } catch (_) {}
     try { _populateStrikeList(); } catch (_) {}
     try { _m920TouchCheck(data); } catch (_) {}
     try {
-      renderMarketPulse(data);
+      _safe(() => renderMarketPulse(data), 'renderMarketPulse');
       const ps = document.getElementById('pulseStamp');
       if (ps) ps.textContent = '· as of ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
     } catch (_) {}
@@ -14657,9 +14702,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _safe(() => _recordStraddle(data.straddle_premium, data.symbol || state.symbol), '_recordStraddle');
     _safe(() => _renderStraddleSparkline(), '_renderStraddleSparkline');
     _safe(() => _updateIvp(data.atm_iv), '_updateIvp');
-    _checkIvMove(data.atm_iv);                 // IV spike/crush alert
+    _safe(() => _checkIvMove(data.atm_iv), '_checkIvMove');                 // IV spike/crush alert
     _updateOrb(data.underlying_value);         // opening range tracker
-    _checkVelocity(data.underlying_value);     // burst detector + nav pill
+    _safe(() => _checkVelocity(data.underlying_value), '_checkVelocity');     // burst detector + nav pill
     _safe(() => _updateLotSizeStrip(data.symbol || state.symbol, data.lot_size), '_updateLotSizeStrip');
     state._oiWalls = _getOiWalls(data);
     // Batch 4 — latest features
@@ -14763,7 +14808,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
 
     // ─── Chain tab: incremental row updates, never full innerHTML ─────────
-    renderChainTable(data, activeTab === 'chain');
+    _safe(() => renderChainTable(data, activeTab === 'chain'), 'renderChainTable');
 
     // ─── Charts: update regardless of tab (lightweight SVG replacements) ──
     _safe(() => renderSkewChart(data), 'renderSkewChart');
@@ -14783,8 +14828,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // ─── Market View: skip when not active — it has many DOM writes ───────
     if (isFirstRender || activeTab === 'market') {
-      renderMarketView(data);
-      renderGainPainChart(data);
+      _safe(() => renderMarketView(data), 'renderMarketView');
+      _safe(() => renderGainPainChart(data), 'renderGainPainChart');
       state.marketViewDirty = false;
     } else {
       state.marketViewDirty = true;
@@ -14792,7 +14837,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // ─── Strategy tab: skip full re-render when not active ────────────────
     if (isFirstRender || activeTab === 'strategy') {
-      renderStrategy(data);
+      _safe(() => renderStrategy(data), 'renderStrategy');
       state.strategyDirty = false;
     } else {
       state.strategyDirty = true;
@@ -14802,7 +14847,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // ─── Builder: only re-render when builder tab is active ───────────────
     if (isFirstRender || activeTab === 'builder') {
-      renderBuilder();
+      _safe(() => renderBuilder(), 'renderBuilder');
       state.builderDirty = false;
     } else {
       state.builderDirty = true;
@@ -15555,6 +15600,31 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // from the chain, and a missing field should never be fatal - one throw in
   // the render pipeline stops every panel after it, which is how a single
   // absent key blanked the whole dashboard.
+  // Every array and object the dashboard dereferences WITHOUT a guard. A data
+  // source that omits any one of them threw and stopped the whole render
+  // pipeline - every panel after the throw simply never ran, which is how one
+  // absent key blanked the dashboard. Filling defaults once, here, makes the
+  // pipeline tolerant of any source rather than only the one it grew up with.
+  const _ARRAY_KEYS = ['strikes', 'flags', 'gainers', 'symbols', 'ideas',
+                       'strategies', 'payout_distribution', 'all_expiries', 'nearby'];
+  // Scalars the dashboard calls string methods on (.toLowerCase, .includes)
+  // without a guard. A source that omits one throws inside whichever panel
+  // touches it first. Defaults are deliberately NEUTRAL, never invented
+  // signal: an absent sentiment reads as no directional lean rather than
+  // silently manufacturing a bullish or bearish call the data never made.
+  const _STRING_DEFAULTS = {
+    sentiment: 'Range-bound / no strong directional lean',
+    skew_note: '', timestamp: '', expiry: '', symbol: 'NIFTY',
+  };
+  function _normaliseChain(d) {
+    if (!d || typeof d !== 'object') return d;
+    for (const k of _ARRAY_KEYS) if (!Array.isArray(d[k])) d[k] = [];
+    for (const [k, v] of Object.entries(_STRING_DEFAULTS))
+      if (typeof d[k] !== 'string') d[k] = v;
+    if (!d.expiries_data || typeof d.expiries_data !== 'object') d.expiries_data = {};
+    return _ensureLevels(d);
+  }
+
   function _ensureLevels(d) {
     if (!d || !Array.isArray(d.strikes) || !d.strikes.length) return d;
     if (d.support?.strike != null && d.resistance?.strike != null) return d;
@@ -15571,7 +15641,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function renderStatCards(data) {
-    data = _ensureLevels(data);
+    data = _normaliseChain(data);
     els.statGrid.innerHTML = [
       statCard('Spot', fmtPrice(data.underlying_value)),
       statCard('ATM Strike', fmtInt(data.atm)),
@@ -15628,8 +15698,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (state.sortCol) {
       rows.sort((a, b) => (a[state.sortCol] - b[state.sortCol]) * state.sortDir);
     }
+    _normaliseChain(data);
     const maxOi = Math.max(1, ...data.strikes.map(s => Math.max(s.ce_oi, s.pe_oi)));
-    _ensureLevels(data);
     const atm = data.atm, support = data.support?.strike, resistance = data.resistance?.strike;
 
     // Check whether we need a full rebuild: first render, symbol change, band change, or sort change
@@ -16420,7 +16490,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           _m920Srv = { day: new Date().toDateString(), sym: state.symbol || 'NIFTY',
             spot920: j.spot920, sigma: j.sigma, iv: j.iv, frozenAt: 'server',
             EOR: j['EOR'], EORp1: j['EOR+1'], EOS: j['EOS'], EOSm1: j['EOS-1'] };
-          renderPriceChart();
+          _safe(() => renderPriceChart(), 'renderPriceChart');
         }
       } catch (_) {}
     })();
@@ -18408,7 +18478,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>`;
       document.getElementById('chartDiagBack')?.addEventListener('click', () => {
         _chart.diagOpen = false;
-        renderPriceChart();
+        _safe(() => renderPriceChart(), 'renderPriceChart');
       });
       document.getElementById('chartDiagAgain')?.addEventListener('click', () => {
         _chart.diagOpen = false;     // allow the re-run to repaint
@@ -18569,26 +18639,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     };
     const x = i => padL + (slotOf(cs[i].t) + 0.5) / slots * (W - padL - padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
-    // ── volume bars ──────────────────────────────────────────────────
-    // Only drawn when the feed carries GENUINE traded volume. NSE gives one
-    // spot sample a minute, from which volume cannot be recovered, so on that
-    // source this stays empty rather than showing a fabricated bar.
-    let volSvg = '';
-    if (_chart.hasVolume && cs.some(c => c.v > 0)) {
-      const vh = Math.round((H - padT - padB) * 0.18);
-      const vTop = H - padB - vh;
-      const vMax = Math.max(...cs.map(c => c.v || 0)) || 1;
-      cs.forEach((c, i) => {
-        if (!c.v) return;
-        const up = c.c >= c.o;
-        const h2 = (c.v / vMax) * vh;
-        const cx = x(i);
-        volSvg += `<rect x="${(cx - Math.max(1, cw / 2)).toFixed(1)}" y="${(H - padB - h2).toFixed(1)}" width="${Math.max(1, cw).toFixed(1)}" height="${h2.toFixed(1)}" fill="${up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'}" opacity="0.28"/>`;
-      });
-      volSvg += `<line x1="${padL}" y1="${vTop.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${vTop.toFixed(1)}" stroke="rgba(255,255,255,0.08)"/>`;
-      volSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(vTop + 9).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">vol ${fmtInt(Math.round(vMax))}</text>`;
-    }
-
     // ── shade recording gaps ─────────────────────────────────────────
     // A mid-session restart leaves minutes with no data. Drawing candles
     // straight across the hole would imply price traded there; a shaded band
@@ -18619,6 +18669,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const slotPx = (W - padL - padR) / slots;
     const cw = Math.max(1, Math.min(24, Math.floor(slotPx * 0.8)));
     const wickW = Math.max(1, Math.min(3, Math.round(cw * 0.3)));
+
+    // ── volume bars ──────────────────────────────────────────────────
+    // Only drawn when the feed carries GENUINE traded volume. NSE gives one
+    // spot sample a minute, from which volume cannot be recovered, so on that
+    // source this stays empty rather than showing a fabricated bar.
+    let volSvg = '';
+    if (_chart.hasVolume && cs.some(c => c.v > 0)) {
+      const vh = Math.round((H - padT - padB) * 0.18);
+      const vTop = H - padB - vh;
+      const vMax = Math.max(...cs.map(c => c.v || 0)) || 1;
+      cs.forEach((c, i) => {
+        if (!c.v) return;
+        const up = c.c >= c.o;
+        const h2 = (c.v / vMax) * vh;
+        const cx = x(i);
+        volSvg += `<rect x="${(cx - Math.max(1, cw / 2)).toFixed(1)}" y="${(H - padB - h2).toFixed(1)}" width="${Math.max(1, cw).toFixed(1)}" height="${h2.toFixed(1)}" fill="${up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'}" opacity="0.28"/>`;
+      });
+      volSvg += `<line x1="${padL}" y1="${vTop.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${vTop.toFixed(1)}" stroke="rgba(255,255,255,0.08)"/>`;
+      volSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(vTop + 9).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">vol ${fmtInt(Math.round(vMax))}</text>`;
+    }
+
     let svg = volSvg + gapSvg;
     cs.forEach((c, i) => {
       // colour by body; for a flat body fall back to change vs the previous close
@@ -18879,7 +18950,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const newSpan = (autoHi - autoLo) / next;
         _chart.yCenter = cursorVal + (frac - 0.5) * newSpan;
         _chart.yZoom = next;
-        renderPriceChart();
+        _safe(() => renderPriceChart(), 'renderPriceChart');
       }, { passive: false });
       // double-click anywhere = reset to auto-fit
       svgEl.addEventListener('dblclick', () => { _chart.drag = null; _chart.yZoom = 1; _chart.yCenter = null; _zoomSync?.(); renderPriceChart(); });
@@ -19257,7 +19328,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _enableAllSync);
   else setTimeout(_enableAllSync, 0);
 
+  // Print the effective filter once, and whenever it changes. Two rounds of
+  // this bug were spent theorising about which layer leaked when the saved
+  // value itself was never in evidence.
+  let _idxAlLogged = '';
+  function _idxAlLog() {
+    try {
+      const cfg = _idxAlCfg();
+      const on = _IDX_LIST.filter(s => cfg[s] !== false);
+      const sig = (cfg.activeOnly ? 'activeOnly' : on.join(',')) + '|' + (state.symbol || '');
+      if (sig === _idxAlLogged) return;
+      _idxAlLogged = sig;
+      console.log(`[idx-filter] announcing: ${cfg.activeOnly
+        ? 'only the selected index (' + (state.symbol || 'NIFTY') + ')'
+        : (on.join(', ') || 'NONE')}`);
+    } catch (_) {}
+  }
+
   function _idxAlSync() {
+    _idxAlLog();
     const cfg = _idxAlCfg();
     for (const s of _IDX_LIST) {
       const el = document.getElementById('idxal_' + s);
@@ -20752,7 +20841,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!overrides || overrides.premium === undefined) refreshLegFromChain(leg);
     builderState.legs.push(leg);
     resetStratLtpHistory();
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   }
 
   function showToast(message) {
@@ -20792,7 +20881,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const builderTabBtn = [...els.tabs].find(t => t.dataset.tab === 'builder');
     builderTabBtn.classList.add('active');
     document.getElementById('tab-builder').classList.add('active');
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   }
 
   // ====================================================================
@@ -20922,7 +21011,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           const idx = parseInt(btn.dataset.optimizerLoad, 10);
           builderState.legs = results[idx].legs.map(l => ({ ...l }));
           builderState.dateSliderDays = 0;
-          renderBuilder();
+          _safe(() => renderBuilder(), 'renderBuilder');
         });
       });
     });
@@ -21764,7 +21853,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     builderState.fanView = els.fanViewToggle.checked;
     els.chartLegendStandard.style.display = builderState.fanView ? 'none' : '';
     els.chartLegendFan.style.display = builderState.fanView ? '' : 'none';
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
 
   els.greekOverlaySelect.addEventListener('click', (e) => {
@@ -21773,7 +21862,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     [...els.greekOverlaySelect.children].forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     builderState.greekOverlay = btn.dataset.greek;
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
   els.greeksPanel = document.getElementById('greeksPanel');
   els.pnlTable = document.getElementById('pnlTable');
@@ -21785,11 +21874,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   els.manualTargetInput.addEventListener('input', () => {
     const v = parseFloat(els.manualTargetInput.value);
     builderState.manualTarget = (!isNaN(v) && v > 0) ? v : null;
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
   els.pnlIntervalSelect.addEventListener('change', () => {
     builderState.pnlInterval = parseFloat(els.pnlIntervalSelect.value);
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
   els.brokeragePerOrderInput.addEventListener('input', renderBuilder);
   els.slInput = document.getElementById('slInput');
@@ -21989,7 +22078,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           if (!draft) return;
           builderState.legs = draft.legs.map(l => ({ ...l }));
           builderState.dateSliderDays = 0;
-          renderBuilder();
+          _safe(() => renderBuilder(), 'renderBuilder');
           showToast(`Loaded draft: ${draft.name}`);
         });
       });
@@ -22114,7 +22203,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     document.getElementById('loadRolledLegsBtn')?.addEventListener('click', () => {
       builderState.legs = rollLegs.map(l => ({ ...l }));
       builderState.dateSliderDays = 0;
-      renderBuilder();
+      _safe(() => renderBuilder(), 'renderBuilder');
       els.rollPanel.style.display = 'none';
       showToast(`Loaded rolled position into ${escapeHtml(targetExpiry)}`);
     });
@@ -22124,12 +22213,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   els.slInput.addEventListener('input', () => {
     const v = parseFloat(els.slInput.value);
     builderState.slAmount = (!isNaN(v) && v > 0) ? v : null;
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
   els.targetInput.addEventListener('input', () => {
     const v = parseFloat(els.targetInput.value);
     builderState.targetAmount = (!isNaN(v) && v > 0) ? v : null;
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
   els.dateSlider = document.getElementById('dateSlider');
   els.dateSliderLabel = document.getElementById('dateSliderLabel');
@@ -22155,7 +22244,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     else if (action === 'remove') { builderState.legs.splice(idx, 1); resetStratLtpHistory(); }
     else if (action === 'ltp-chart') { leg._showSpark = !leg._showSpark; if (leg._showSpark) _loadLegLtpSpark(leg, idx); }
 
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
 
   // Real-time persistence while typing (so 5s auto-refresh re-renders never lose keystrokes)
@@ -22180,7 +22269,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const leg = builderState.legs[idx];
       leg.expiry = select.value;
       refreshLegFromChain(leg);
-      renderBuilder(); return;
+      _safe(() => renderBuilder(), 'renderBuilder'); return;
     }
     const entryInput = e.target.closest('[data-leg-entry]');
     if (entryInput) {
@@ -22200,7 +22289,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   els.dateSlider.addEventListener('input', () => {
     builderState.dateSliderDays = parseInt(els.dateSlider.value, 10);
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
 
   els.ivShiftSlider = document.getElementById('ivShiftSlider');
@@ -22208,7 +22297,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   els.ivShiftSlider.addEventListener('input', () => {
     builderState.ivShiftPct = parseInt(els.ivShiftSlider.value, 10);
     els.ivShiftLabel.textContent = (builderState.ivShiftPct >= 0 ? '+' : '') + builderState.ivShiftPct + '%';
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
   // Spot shift slider
   const _spotShiftSlider = document.getElementById('spotShiftSlider');
@@ -22216,7 +22305,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   _spotShiftSlider?.addEventListener('input', () => {
     builderState.spotShiftPts = parseInt(_spotShiftSlider.value, 10);
     if (_spotShiftLabel) _spotShiftLabel.textContent = (builderState.spotShiftPts >= 0 ? '+' : '') + builderState.spotShiftPts + 'pts';
-    renderBuilder();
+    _safe(() => renderBuilder(), 'renderBuilder');
   });
 
   els.chartInteractiveWrap = document.getElementById('chartInteractiveWrap');

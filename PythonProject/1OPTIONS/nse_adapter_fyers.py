@@ -374,7 +374,7 @@ def _spot(symbol: str) -> float:
     if live.get("ltp"):
         return float(live["ltp"])
     try:
-        r = _client.quotes({"symbols": ysym})
+        r = _count_rest("quotes") or _client.quotes({"symbols": ysym})
         for row in (r.get("d") or []):
             v = row.get("v") or {}
             return _f(v, "lp", "ltp", "last_price")
@@ -417,7 +417,7 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         req = {"symbol": ysym, "strikecount": count}
         if expiry:
             req["timestamp"] = expiry
-        raw = _client.optionchain(data=req)
+        raw = _count_rest("optionchain") or _client.optionchain(data=req)
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"optionchain call failed: {e}") from e
     if not isinstance(raw, dict) or raw.get("s") != "ok":
@@ -488,6 +488,18 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "symbol": sym,
         "underlying_value": spot,
         "support": dict(support),
+        # every field below is dereferenced by the dashboard WITHOUT a guard,
+        # so omitting any one of them throws and stops the render pipeline
+        "flags": _classify_buildups(nearby, atm, strike_gap),
+        "sentiment": _infer_sentiment(nearby, atm, _max_pain(strikes),
+                                      (tot_pe / tot_ce) if tot_ce else None),
+        "skew_note": "",
+        "expiries_data": {},
+        "gainers": [],
+        "symbols": [],
+        "ideas": [],
+        "strategies": [],
+        "payout_distribution": [],
         "resistance": dict(resistance),
         "nearby": nearby,
         "atm": atm,
@@ -514,6 +526,70 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         _status["last_chain"] = time.time()
     return out
 
+
+
+def _classify_buildups(strikes, atm, gap, threshold_pct=8.0):
+    """Same shape and rule as the NSE source's classify_buildups().
+
+    The dashboard reads data.flags without a guard, so an adapter that omits
+    it throws and takes down the whole render pipeline. Descriptive, not
+    predictive: it labels what a large OI change on each side conventionally
+    implies, nothing more.
+    """
+    flags = []
+    for s in strikes:
+        ce_oi = s.get("ce_oi") or 0
+        pe_oi = s.get("pe_oi") or 0
+        ce_chg = s.get("ce_oi_chg") or 0
+        pe_chg = s.get("pe_oi_chg") or 0
+        if ce_oi > 0 and abs(ce_chg) / max(ce_oi, 1) * 100 >= threshold_pct:
+            flags.append({"strike": s["strike"], "side": "CE", "oi_chg": ce_chg,
+                          "label": ("Fresh call writing (resistance building)"
+                                    if ce_chg > 0 else
+                                    "Call unwinding (resistance weakening)")})
+        if pe_oi > 0 and abs(pe_chg) / max(pe_oi, 1) * 100 >= threshold_pct:
+            flags.append({"strike": s["strike"], "side": "PE", "oi_chg": pe_chg,
+                          "label": ("Fresh put writing (support building)"
+                                    if pe_chg > 0 else
+                                    "Put unwinding (support weakening)")})
+    return flags
+
+
+def _infer_sentiment(strikes, atm, max_pain, pcr):
+    """Same scoring rule as the NSE source, so the two agree.
+
+    Descriptive, not predictive: it counts which side is building and which is
+    unwinding, adds a half point for where max pain sits, and needs a clear
+    margin before calling a direction at all. The dashboard reads this with
+    .toLowerCase() and no guard, so omitting it throws.
+    """
+    bull = bear = 0.0
+    for s in strikes:
+        ce_chg = s.get("ce_oi_chg") or 0
+        pe_chg = s.get("pe_oi_chg") or 0
+        if pe_chg > 0:
+            bull += 0.25          # put writing = support building
+        if ce_chg > 0:
+            bear += 0.25          # call writing = resistance building
+        if ce_chg < 0:
+            bull += 0.15          # call unwinding = resistance weakening
+        if pe_chg < 0:
+            bear += 0.15
+    if pcr:
+        if pcr > 1.2:
+            bull += 1
+        elif pcr < 0.8:
+            bear += 1
+    if max_pain and atm:
+        if max_pain > atm:
+            bull += 0.5
+        elif max_pain < atm:
+            bear += 0.5
+    if bull - bear >= 1.5:
+        return "Mildly bullish to bullish"
+    if bear - bull >= 1.5:
+        return "Mildly bearish to bearish"
+    return "Range-bound / no strong directional lean"
 
 def _max_pain(strikes: List[Dict[str, Any]]) -> Optional[float]:
     if not strikes:
@@ -547,6 +623,28 @@ def _lot_size(symbol: str) -> int:
 
 
 # ── historical candles: real OHLC with VOLUME ─────────────────────────
+_history_cache: Dict[tuple, Any] = {}
+_history_lock = threading.Lock()
+_rest_count = {"n": 0, "day": ""}
+
+
+def _count_rest(kind: str) -> None:
+    """Track REST usage so the quota is observable, not guessed at."""
+    today = time.strftime("%Y-%m-%d")
+    with _lock:
+        if _rest_count["day"] != today:
+            _rest_count.update({"n": 0, "day": today})
+        _rest_count["n"] += 1
+        n = _rest_count["n"]
+    if n in (1000, 5000, 10000, 25000, 50000, 75000, 90000):
+        print(f"[fyers] REST calls today: {n:,} (limit ~100,000)")
+
+
+def rest_usage() -> Dict[str, Any]:
+    with _lock:
+        return dict(_rest_count)
+
+
 def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dict[str, Any]]:
     """Intraday candles from Fyers history.
 
@@ -560,23 +658,60 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dic
     ysym = FYERS_INDEX.get(symbol.upper())
     if not ysym:
         return []
+    # Cache history hard. Without this, EVERY browser tab polling the chart
+    # every 5 seconds hit Fyers directly - three tabs alone burned ~14,000
+    # requests a session, and simultaneous polls could burst past the
+    # per-second limit even while the daily total looked comfortable.
+    # Completed candles never change, so re-fetching them is pure waste; the
+    # live edge of the chart comes from the WebSocket, not from here.
+    key = (ysym, interval_min, days)
+    ttl = float(os.environ.get("FYERS_HISTORY_TTL", "30"))
+    with _history_lock:
+        hit = _history_cache.get(key)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
     res = {1: "1", 3: "3", 5: "5", 15: "15", 30: "30", 60: "60"}.get(interval_min, "1")
-    today = time.strftime("%Y-%m-%d")
-    frm = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
+    # Dates must be IST, not the server's local timezone - a machine running
+    # in UTC would otherwise ask for the wrong day either side of midnight.
+    def _ist_date(offset_days=0):
+        g = time.gmtime(time.time() + 5 * 3600 + 1800 - offset_days * 86400)
+        return f"{g.tm_year:04d}-{g.tm_mon:02d}-{g.tm_mday:02d}"
+
+    today = _ist_date(0)
+    # Ask for a couple of days so a holiday or a weekend still returns the last
+    # session, then filter to the day we actually want. Requesting only today
+    # returns nothing before the open, and requesting a range without filtering
+    # drew YESTERDAY'S candles alongside today's - which is what this fixes.
+    frm = _ist_date(max(1, days))
+    want_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday
     try:
-        r = _client.history({
+        r = _count_rest("history") or _client.history({
             "symbol": ysym, "resolution": res, "date_format": "1",
             "range_from": frm, "range_to": today, "cont_flag": "1",
         })
         if not isinstance(r, dict) or r.get("s") != "ok":
             print(f"[fyers] history: {(r or {}).get('message', 'bad response')}")
             return []
-        out = []
+        out, dropped = [], 0
         for c in (r.get("candles") or []):
             if len(c) < 6:
                 continue
-            out.append({"t": int(c[0]), "o": float(c[1]), "h": float(c[2]),
+            ts = int(c[0])
+            g = time.gmtime(ts + 5 * 3600 + 1800)
+            if g.tm_yday != want_yday:
+                dropped += 1
+                continue                 # a previous session: not today's chart
+            mins = g.tm_hour * 60 + g.tm_min
+            if not (9 * 60 + 15 <= mins < 15 * 60 + 40):
+                dropped += 1
+                continue                 # pre-open or post-close
+            out.append({"t": ts, "o": float(c[1]), "h": float(c[2]),
                         "l": float(c[3]), "c": float(c[4]), "v": float(c[5]), "n": 1})
+        if dropped:
+            print(f"[fyers] history: kept {len(out)} of today's candles, "
+                  f"dropped {dropped} from other sessions or outside market hours")
+        with _history_lock:
+            _history_cache[key] = (time.time(), out)
         return out
     except Exception as e:  # noqa: BLE001
         print(f"[fyers] history failed: {e}")
@@ -589,7 +724,7 @@ def market_depth(symbol: str) -> Dict[str, Any]:
         return {}
     ysym = FYERS_INDEX.get(symbol.upper(), symbol)
     try:
-        r = _client.depth({"symbol": ysym, "ohlcv_flag": "1"})
+        r = _count_rest("depth") or _client.depth({"symbol": ysym, "ohlcv_flag": "1"})
         return r.get("d", {}) if isinstance(r, dict) else {}
     except Exception:
         return {}

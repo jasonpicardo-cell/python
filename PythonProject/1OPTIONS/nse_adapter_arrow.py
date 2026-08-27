@@ -331,6 +331,18 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "symbol": sym,
         "underlying_value": spot,
         "support": dict(support),
+        # every field below is dereferenced by the dashboard WITHOUT a guard,
+        # so omitting any one of them throws and stops the render pipeline
+        "flags": _classify_buildups(nearby, atm, strike_gap),
+        "sentiment": _infer_sentiment(nearby, atm, _max_pain(strikes),
+                                      (tot_pe / tot_ce) if tot_ce else None),
+        "skew_note": "",
+        "expiries_data": {},
+        "gainers": [],
+        "symbols": [],
+        "ideas": [],
+        "strategies": [],
+        "payout_distribution": [],
         "resistance": dict(resistance),
         "nearby": nearby,
         "atm": atm,
@@ -516,6 +528,70 @@ def _spot(symbol: str) -> float:
     except Exception:
         return 0.0
 
+
+
+def _classify_buildups(strikes, atm, gap, threshold_pct=8.0):
+    """Same shape and rule as the NSE source's classify_buildups().
+
+    The dashboard reads data.flags without a guard, so an adapter that omits
+    it throws and takes down the whole render pipeline. Descriptive, not
+    predictive: it labels what a large OI change on each side conventionally
+    implies, nothing more.
+    """
+    flags = []
+    for s in strikes:
+        ce_oi = s.get("ce_oi") or 0
+        pe_oi = s.get("pe_oi") or 0
+        ce_chg = s.get("ce_oi_chg") or 0
+        pe_chg = s.get("pe_oi_chg") or 0
+        if ce_oi > 0 and abs(ce_chg) / max(ce_oi, 1) * 100 >= threshold_pct:
+            flags.append({"strike": s["strike"], "side": "CE", "oi_chg": ce_chg,
+                          "label": ("Fresh call writing (resistance building)"
+                                    if ce_chg > 0 else
+                                    "Call unwinding (resistance weakening)")})
+        if pe_oi > 0 and abs(pe_chg) / max(pe_oi, 1) * 100 >= threshold_pct:
+            flags.append({"strike": s["strike"], "side": "PE", "oi_chg": pe_chg,
+                          "label": ("Fresh put writing (support building)"
+                                    if pe_chg > 0 else
+                                    "Put unwinding (support weakening)")})
+    return flags
+
+
+def _infer_sentiment(strikes, atm, max_pain, pcr):
+    """Same scoring rule as the NSE source, so the two agree.
+
+    Descriptive, not predictive: it counts which side is building and which is
+    unwinding, adds a half point for where max pain sits, and needs a clear
+    margin before calling a direction at all. The dashboard reads this with
+    .toLowerCase() and no guard, so omitting it throws.
+    """
+    bull = bear = 0.0
+    for s in strikes:
+        ce_chg = s.get("ce_oi_chg") or 0
+        pe_chg = s.get("pe_oi_chg") or 0
+        if pe_chg > 0:
+            bull += 0.25          # put writing = support building
+        if ce_chg > 0:
+            bear += 0.25          # call writing = resistance building
+        if ce_chg < 0:
+            bull += 0.15          # call unwinding = resistance weakening
+        if pe_chg < 0:
+            bear += 0.15
+    if pcr:
+        if pcr > 1.2:
+            bull += 1
+        elif pcr < 0.8:
+            bear += 1
+    if max_pain and atm:
+        if max_pain > atm:
+            bull += 0.5
+        elif max_pain < atm:
+            bear += 0.5
+    if bull - bear >= 1.5:
+        return "Mildly bullish to bullish"
+    if bear - bull >= 1.5:
+        return "Mildly bearish to bearish"
+    return "Range-bound / no strong directional lean"
 
 def _max_pain(strikes: List[Dict[str, Any]]) -> Optional[float]:
     """Strike where total option-writer payout is smallest."""

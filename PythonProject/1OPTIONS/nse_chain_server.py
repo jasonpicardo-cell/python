@@ -3938,16 +3938,24 @@ class Handler(BaseHTTPRequestHandler):
                     import nse_adapter_fyers as _fy
                     fc = _fy.fetch_candles(symbol, interval, 1)
                     if fc:
+                        today_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday
                         for cd in fc:
                             g = time.gmtime(cd["t"] + 5 * 3600 + 1800)
+                            # date AND session, not just session - a multi-day
+                            # history response would otherwise draw yesterday's
+                            # candles alongside today's
+                            if g.tm_yday != today_yday:
+                                continue
                             if not _in_session(g.tm_hour * 60 + g.tm_min):
                                 continue
                             ticks.append((float(cd["t"]), float(cd["c"])))
                         srcs.append(f"fyers({len(fc)})")
                         # real candles supersede reconstruction entirely
-                        out = [cd for cd in fc
-                               if _in_session((lambda g: g.tm_hour * 60 + g.tm_min)(
-                                   time.gmtime(cd["t"] + 5 * 3600 + 1800)))]
+                        def _today_session(cd):
+                            g = time.gmtime(cd["t"] + 5 * 3600 + 1800)
+                            return (g.tm_yday == today_yday
+                                    and _in_session(g.tm_hour * 60 + g.tm_min))
+                        out = [cd for cd in fc if _today_session(cd)]
                         if out:
                             first = _ist_hm_g(out[0]["t"]); last = _ist_hm_g(out[-1]["t"])
                             self._send_json({"symbol": symbol, "interval": interval,
@@ -4472,6 +4480,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     import nse_adapter_fyers as _fy
                     info["fyers"] = _fy.status()
+                    info["fyers"]["rest_today"] = _fy.rest_usage()
                     info["configured"] = _fy.is_configured()
                 except Exception as e:  # noqa: BLE001
                     info["fyers"] = {"last_error": str(e)}
@@ -6208,7 +6217,16 @@ def main():
               f"NSE polling and cookie warm-up are DISABLED")
         try:
             import nse_adapter_fyers as _fy
-            if _fy.is_configured():
+            tv = _fy.token_validity()
+            if not tv.get("valid"):
+                # Say this ONCE, clearly, at startup - rather than letting the
+                # first chain request fail with an auth error the user then has
+                # to interpret. A token lasts until ~06:00 IST tomorrow, so this
+                # is a once-a-morning step, not a once-per-restart step.
+                print(f"[fyers] TOKEN NOT USABLE: {tv.get('reason')}")
+                print(f"[fyers] Run:  python3 fyers_login.py")
+                print(f"[fyers] Falling back to NSE scraping until then.")
+            if _fy.is_configured() and tv.get("valid"):
                 _fy.set_tick_sink(_sse_broadcast_ticks)
                 _fy.connect()
                 for sym in [s.strip().upper() for s in
@@ -6218,9 +6236,9 @@ def main():
                         print(f"[fyers] {sym} chain primed and subscribed")
                     except Exception as e:  # noqa: BLE001
                         print(f"[fyers] {sym} prime failed: {e}")
-            else:
-                print("[fyers] not configured - set FYERS_CLIENT_ID in .env and "
-                      "run fyers_login.py (tokens expire daily)")
+            elif not _fy.is_configured():
+                print("[fyers] not configured - set FYERS_CLIENT_ID in your env "
+                      "file and run fyers_login.py")
         except Exception as e:  # noqa: BLE001
             print(f"[fyers] startup failed: {e}")
     elif _adapter_streams():
