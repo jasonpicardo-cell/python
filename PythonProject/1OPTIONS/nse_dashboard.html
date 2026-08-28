@@ -1937,6 +1937,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="trendBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain and let the chart collect a few candles.</div></div>
           </div>
 
+          <div class="level-panel" id="depthPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">📖 Order Book Depth — what must be consumed<i class="hi" data-h="depth-imbalance">i</i></span>
+            </div>
+            <div id="depthBody" style="padding:6px 8px;"><div class="movers-loading">Needs a broker feed.</div></div>
+          </div>
+
           <div class="level-panel" id="vpPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">📊 Volume Profile &amp; CVD — where it actually traded<i class="hi" data-h="volume-profile">i</i></span>
@@ -12384,7 +12391,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const perTick = Math.max(seenCat.size, Math.min(8, cfg.maxPerTick || 6));
     for (const e of ordered.slice(0, perTick)) {
       state._flowFired[e.fk] = now;                 // stamp ONLY what we speak
-      const txt = `${e.kind} at ${Math.round(e.k)}, open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
+      // Lead with the bias. "Fresh call selling" requires the listener to
+      // translate it to bearish mid-trade; the bias word does not.
+      const txt = `${(e.bias || 'neutral').toUpperCase()}. ${e.kind} at ${Math.round(e.k)}, open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
       _speakOnce(`flow|${state.symbol || 'NIFTY'}|${e.k}|${e.side}|${e.kind}`, txt, 300);
       if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias}`);
       _flowLog({ ts: Date.now(), k: e.k, side: e.side, kind: e.kind, bias: e.bias, oiPct: +e.oiPct.toFixed(1), prPct: +e.prPct.toFixed(1) });
@@ -14615,6 +14624,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { _leadingCheck(data); } catch (_) {}
+    try { renderDepth(data); } catch (_) {}
     try { renderVolumeProfile(); } catch (_) {}
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
@@ -15129,10 +15139,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _lvlVoiceSave(o) { try { localStorage.setItem(_LVLV_KEY, JSON.stringify(o)); } catch (_) {} }
   function _lvlPhrase(label, price) {
     const cfg = _lvlVoiceCfg();
+    // A level touch is not itself directional, but which KIND of level it is
+    // tells you what to expect: resistance from below is where rallies stall,
+    // support from above is where declines pause.
+    const spotNow = state.lastData?.underlying_value;
+    const isRes = /^R\d/.test(label) || /EOR/.test(label) || /call wall/i.test(label)
+                  || (spotNow && price > spotNow);
     let t = /^R(\d+)$/.test(label) ? `Resistance ${label.slice(1)}`
           : /^S(\d+)$/.test(label) ? `Support ${label.slice(1)}`
           : String(label).replace(/\+1/g, ' plus one').replace(/-1/g, ' minus one');
-    t += ' touched';
+    t = `${isRes ? 'RESISTANCE' : 'SUPPORT'}. ` + t + ' touched';
     if (cfg.price) t += ` at ${Math.round(price)}`;
     if (cfg.dist) {
       const spot = state.lastData?.underlying_value;
@@ -16579,6 +16595,104 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
+  // ══ L2 DEPTH IMBALANCE ════════════════════════════════════════════
+  // What the order book shows that price does not: how much has to be
+  // CONSUMED for price to move, and which side is stacked.
+  //
+  // Three readings, in increasing order of usefulness:
+  //   TOP-OF-BOOK ratio - best bid quantity against best ask quantity. The
+  //     most immediate, and the least trustworthy: the top level is exactly
+  //     where spoofing lives, because it is cheapest to place and cancel.
+  //   FULL-LADDER imbalance - all five levels each side. Harder to fake,
+  //     because sitting deep in the book means real exposure.
+  //   MICROPRICE - the mid weighted by the OPPOSITE side's size. If bids are
+  //     heavier the microprice sits above the mid, and it predicts the next
+  //     tick better than the mid does. This is the one professionals watch.
+  function _depthRead(book) {
+    if (!book?.bids?.length || !book?.asks?.length) return null;
+    const b = book.bids, a = book.asks;
+    const bidQ = b.reduce((s, x) => s + x.q, 0);
+    const askQ = a.reduce((s, x) => s + x.q, 0);
+    const bestB = b[0], bestA = a[0];
+    if (!bestB?.p || !bestA?.p) return null;
+    const spread = bestA.p - bestB.p;
+    const mid = (bestA.p + bestB.p) / 2;
+    // microprice: weight each side's PRICE by the OPPOSITE side's SIZE
+    const micro = (bestB.q + bestA.q)
+      ? (bestA.p * bestB.q + bestB.p * bestA.q) / (bestB.q + bestA.q)
+      : mid;
+    const topRatio = (bestB.q + bestA.q) ? (bestB.q - bestA.q) / (bestB.q + bestA.q) : 0;
+    const fullRatio = (bidQ + askQ) ? (bidQ - askQ) / (bidQ + askQ) : 0;
+    // order count vs quantity: many small orders behave differently from a
+    // few large ones, and a single huge order is easier to pull
+    const bidOrders = b.reduce((s, x) => s + (x.n || 0), 0);
+    const askOrders = a.reduce((s, x) => s + (x.n || 0), 0);
+    return {
+      bidQ, askQ, bestB, bestA, spread, mid, micro,
+      microTilt: mid ? (micro - mid) / Math.max(0.01, spread) : 0,   // in spreads
+      topRatio, fullRatio, bidOrders, askOrders,
+      avgBidSize: bidOrders ? bidQ / bidOrders : 0,
+      avgAskSize: askOrders ? askQ / askOrders : 0,
+      tbq: book.tbq, tsq: book.tsq,
+      age: book.ts ? (Date.now() / 1000 - book.ts) : null,
+    };
+  }
+
+  function renderDepth(data) {
+    const box = document.getElementById('depthBody');
+    if (!box) return;
+    const d = data || state.lastData;
+    const dep = d?.depth;
+    if (!dep) {
+      box.innerHTML = '<div class="movers-loading">Level-2 depth needs a broker feed — set DATA_SOURCE=fyers. NSE publishes no order book.</div>';
+      return;
+    }
+    const rows = [];
+    const idx = _depthRead(dep.index);
+    if (idx) rows.push(['Index', idx]);
+    const spot = d.underlying_value;
+    const gap = d.strike_gap || 50;
+    const atm = Math.round(spot / gap) * gap;
+    for (const k of [atm, atm + gap, atm - gap]) {
+      for (const side of ['CE', 'PE']) {
+        const r = _depthRead((dep.strikes || {})[`${k}${side}`]);
+        if (r) rows.push([`${fmtInt(k)} ${side}`, r]);
+      }
+    }
+    if (!rows.length) {
+      box.innerHTML = '<div class="movers-loading">Depth subscribed — waiting for the first book update.</div>';
+      return;
+    }
+    const bar = v => {
+      const pct = (v + 1) / 2 * 100;
+      return `<span style="display:inline-block;width:86px;height:7px;background:rgba(255,255,255,0.08);border-radius:4px;position:relative;vertical-align:middle;">
+        <span style="position:absolute;left:50%;top:-2px;width:1px;height:11px;background:rgba(255,255,255,0.22);"></span>
+        <span style="position:absolute;left:${Math.max(0, Math.min(97, pct))}%;top:-2px;width:3px;height:11px;background:${v >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};border-radius:2px;"></span></span>`;
+    };
+    const body = rows.map(([lab, r]) => `
+      <div style="display:flex;gap:8px;align-items:center;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10px;flex-wrap:wrap;">
+        <b style="min-width:82px;">${escapeHtml(lab)}</b>
+        <span style="min-width:96px;color:var(--muted);">${r.bestB.p.toFixed(1)} × ${r.bestA.p.toFixed(1)}</span>
+        ${bar(r.fullRatio)}
+        <span style="min-width:74px;color:${r.fullRatio >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-weight:700;">
+          ${r.fullRatio >= 0 ? 'bid' : 'ask'} ${Math.abs(r.fullRatio * 100).toFixed(0)}%</span>
+        <span style="min-width:112px;color:var(--muted);">micro ${r.microTilt >= 0 ? '+' : ''}${(r.microTilt * 100).toFixed(0)}% of spread</span>
+        <span style="color:var(--muted);font-size:9px;">${fmtInt(Math.round(r.bidQ))} × ${fmtInt(Math.round(r.askQ))} qty${r.avgBidSize ? ` · avg ${Math.round(r.avgBidSize)}/${Math.round(r.avgAskSize)}` : ''}</span>
+      </div>`).join('');
+    const lead = idx || rows[0][1];
+    const tilt = lead.microTilt;
+    const verdict = Math.abs(tilt) < 0.15 ? ['BALANCED', 'var(--muted)']
+      : tilt > 0 ? ['BID-HEAVY — upward pressure', 'var(--pos,#26a69a)']
+      : ['ASK-HEAVY — downward pressure', 'var(--neg,#ef5350)'];
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;">
+        <b style="font-size:11.5px;color:${verdict[1]};">${verdict[0]}</b>
+        <span style="font-size:10px;color:var(--muted);">${lead.age != null ? `book ${lead.age.toFixed(1)}s old` : ''}</span>
+      </div>
+      ${body}
+      <div class="oc-sub" style="margin-top:4px;">The book shows what price does not: how much has to be <b>consumed</b> for price to move. <b>Micro</b> is the microprice — the mid weighted by the opposite side's size — and it predicts the next tick better than the mid, which is why it leads this panel rather than the raw bid/ask ratio. <b>Read the full ladder, not the top:</b> the best level is exactly where spoofing lives, because it is cheapest to place and cancel, while size sitting five levels deep is real exposure. <b>Honest limits:</b> a book is a snapshot of INTENT, not commitment — orders are pulled constantly, and a heavy bid that vanishes as price approaches was never support. Depth works over seconds, not minutes, so it belongs to entry timing rather than direction. Subscribed for the index and five strikes either side of the money, because those are the ones actually traded.</div>`;
+  }
+
   // ══ VOLUME PROFILE & CVD ══════════════════════════════════════════
   // Both were impossible before the broker feed: NSE gave one spot sample a
   // minute with no volume at all, and volume is the whole input here.
@@ -16852,9 +16966,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (c.score < 65) return;
     if (Date.now() - _coilState.fired < 20 * 60000) return;
     _coilState.fired = Date.now();
-    const txt = `Coiled spring on ${state.symbol || 'NIFTY'}. Range has compressed to ${(c.compression * 100).toFixed(0)} percent of earlier` +
+    const txt = `NO DIRECTION. Coiled spring on ${state.symbol || 'NIFTY'}. ` +
+      `Range has compressed to ${(c.compression * 100).toFixed(0)} percent of earlier` +
       (c.divergence ? `, and implied volatility is rising while the tape delivers less` : '') +
-      `. Expansion odds are elevated. This says a move is more likely, not which way`;
+      `. A move is more likely, but this does not say which way. Favour buying premium over selling it`;
     try {
       if (_streamLive) _relayAlert(`coil|${state.symbol}|${Math.round(Date.now() / 1200000)}`, txt, 'level', 900);
       else _speakOnce(`coil|${state.symbol}`, txt, 900);
@@ -16988,7 +17103,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (s.score < 60) { _shockState.prevScore = s.score; return; }
     if (Date.now() - _shockState.firedAt < 10 * 60000) return;
     _shockState.firedAt = Date.now();
-    const txt = `Premium shock risk on ${state.symbol || 'NIFTY'}. ${(s.conc * 100).toFixed(0)} percent of gamma sits at spot and implied volatility is rising ${s.ivVel > 0 ? 'fast' : ''}. ` +
+    const txt = `RISK WARNING, no direction. Premium shock on ${state.symbol || 'NIFTY'}. ${(s.conc * 100).toFixed(0)} percent of gamma sits at spot and implied volatility is rising ${s.ivVel > 0 ? 'fast' : ''}. ` +
       `A one percent move with two volatility points would take the at-the-money straddle up ${s.shockPct ? s.shockPct.toFixed(0) : 'sharply'} percent. If you are short premium, reduce size`;
     try {
       if (_streamLive) _relayAlert(`shock|${state.symbol}|${Math.round(Date.now() / 600000)}`, txt, 'level', 600);
@@ -17260,6 +17375,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _aggressorRead(d) {
     const st = d?.strikes || [], spot = d?.underlying_value;
     if (!st.length || !spot) return null;
+    // With a real order book, use it. The bid/ask approximation below infers
+    // the aggressor from where the LAST TRADE sat in the spread, which is one
+    // snapshot and blind to size; the book gives actual resting quantity on
+    // each side, which is what has to be consumed for price to move.
+    const bookMap = d.depth?.strikes;
+    if (bookMap && Object.keys(bookMap).length) {
+      let ceB = 0, ceA = 0, peB = 0, peA = 0, n = 0;
+      const gap = d.strike_gap || 50;
+      for (const [k, book] of Object.entries(bookMap)) {
+        const m = /^(\d+)(CE|PE)$/.exec(k);
+        if (!m) continue;
+        if (Math.abs(+m[1] - spot) > gap * 6) continue;
+        const r = _depthRead(book);
+        if (!r) continue;
+        n++;
+        if (m[2] === 'CE') { ceB += r.bidQ; ceA += r.askQ; }
+        else { peB += r.bidQ; peA += r.askQ; }
+      }
+      if (n >= 2) {
+        const ceRatio = (ceB + ceA) ? ceB / (ceB + ceA) : 0.5;
+        const peRatio = (peB + peA) ? peB / (peB + peA) : 0.5;
+        // call bids and put asks are both bullish
+        const score = ((ceRatio - 0.5) + (0.5 - peRatio));
+        return { ceRatio, peRatio, ceTot: ceB + ceA, peTot: peB + peA,
+                 score: Math.max(-1, Math.min(1, score * 2)),
+                 top: [], skipped: 0, counted: n, source: 'L2 order book' };
+      }
+    }
     const gap = d.strike_gap || 50;
     const rows = [];
     let ceBuy = 0, ceSell = 0, peBuy = 0, peSell = 0, skipped = 0;
@@ -17322,7 +17465,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 4px;">
         <b style="font-size:12px;color:${label[1]};">${label[0]}</b>
         <span style="font-size:10.5px;">score ${a.score >= 0 ? '+' : ''}${(a.score * 100).toFixed(0)}</span>
-        <span style="font-size:10px;color:var(--muted);">${a.counted} strike-sides classified, ${a.skipped} skipped for wide spreads</span>
+        <span style="font-size:10px;color:var(--muted);">${a.source ? `from the <b>${escapeHtml(a.source)}</b> — ${a.counted} contracts` : `${a.counted} strike-sides inferred from the spread, ${a.skipped} skipped as illiquid`}</span>
       </div>
       <div style="display:flex;gap:16px;flex-wrap:wrap;padding:3px 4px;font-size:10.5px;">
         <span>Calls ${bar(a.ceRatio, 'var(--pos,#26a69a)')} <b>${pct(a.ceRatio)}</b> bought aggressively</span>
@@ -18185,10 +18328,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               .replace('BOTH WEAK', 'both sides weak')
               .replace('BULL RUN', 'bull run')
               .replace('BLOODBATH', 'bloodbath');
-            const tone = /BULL|WTB/.test(sig) ? 'pos' : /BLOOD|WTT/.test(sig) ? 'neg' : 'mid';
+            // Say what the regime MEANS, not only its name. "Weakness at the
+            // top" is jargon; "bearish" is what you act on.
+            const biasWord = /BULL RUN/i.test(sig) ? 'BULLISH'
+                           : /BLOODBATH/i.test(sig) ? 'BEARISH'
+                           : /WTB/i.test(sig) ? 'BULLISH'
+                           : /WTT/i.test(sig) ? 'BEARISH'
+                           : 'NEUTRAL';
+            const tone = biasWord === 'BULLISH' ? 'pos' : biasWord === 'BEARISH' ? 'neg' : 'mid';
             _leadFire(`regime|${sig}`,
-              `Regime change on ${state.symbol || 'NIFTY'}: ${spoken}`,
-              `Regime → ${sig}`, tone);
+              `${biasWord}. Regime change on ${state.symbol || 'NIFTY'}: ${spoken}`,
+              `${biasWord === 'BULLISH' ? '🟢' : biasWord === 'BEARISH' ? '🔴' : '🟡'} Regime → ${sig}`, tone);
           }
         }
       } catch (_) {}
@@ -18204,8 +18354,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           if (_leadState.prevFlip !== null && above !== _leadState.prevFlip) {
             _leadFire(`gflip|${above ? 'up' : 'dn'}`,
               above
-                ? `Spot crossed above the gamma flip at ${Math.round(flip)}. Dealer hedging now damps moves, so ranges tend to hold`
-                : `Spot crossed below the gamma flip at ${Math.round(flip)}. Dealer hedging now amplifies moves, so expect wider swings`,
+                ? `RANGE-FAVOURING, mildly bullish. Spot crossed above the gamma flip at ${Math.round(flip)}. Dealer hedging now damps moves, so ranges tend to hold and fades work better`
+                : `TREND-FAVOURING, caution. Spot crossed below the gamma flip at ${Math.round(flip)}. Dealer hedging now amplifies moves, so expect wider swings and size smaller`,
               `Gamma flip crossed ${above ? '▲' : '▼'} ${fmtInt(Math.round(flip))}`,
               above ? 'pos' : 'neg');
           }
@@ -18214,10 +18364,33 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       } catch (_) {}
     }
 
-    // ── 3. wall abandonment: OI leaving a level price is approaching ──
+    // ── 3. wall abandonment ────────────────────────────────────────
+    // The SIDE of the wall alone does not give the direction. What matters is
+    // whether price is moving TOWARD the wall or AWAY from it:
+    //   toward -> writers are covering UNDER PRESSURE. The defence is breaking
+    //             while it is being tested, and that is directional.
+    //   away   -> writers are simply taking profit on a level that no longer
+    //             matters. Nothing directional about it at all.
+    // The previous version called every call-wall decay bullish and every
+    // put-wall decay bearish, so a call wall unwinding during a SELLOFF was
+    // announced as bullish - backwards at exactly the moment it mattered.
     if (want('wallAbandon')) {
       try {
         const gap = d.strike_gap || 50;
+        // recent price direction, from the chart if it has bars, else from the
+        // spot history the alert engine already keeps
+        let drift = 0;
+        const cs3 = _chart.candles || [];
+        if (cs3.length >= 6) {
+          const n = Math.min(8, cs3.length - 1);
+          drift = cs3[cs3.length - 1].c - cs3[cs3.length - 1 - n].c;
+        } else if (_leadState.prevSpot != null) {
+          drift = spot - _leadState.prevSpot;
+        }
+        if (cs3.length < 6) _leadState.prevSpot = spot;
+        const driftPct = spot ? drift / spot * 100 : 0;
+        const MOVING = Math.abs(driftPct) > 0.05;      // ~12 pts on Nifty
+
         for (const s of (d.strikes || [])) {
           for (const side of ['ce', 'pe']) {
             const oi = s[side + '_oi'] || 0;
@@ -18227,13 +18400,45 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             const base = _leadState.wallBase[k];
             if (base === undefined || oi > base) { _leadState.wallBase[k] = oi; continue; }
             const decay = (base - oi) / base * 100;
-            if (near && decay >= (cfg.wallDecayPct || 12)) {
-              const isRes = side === 'ce';
-              _leadFire(`wall|${k}`,
-                `${isRes ? 'Call' : 'Put'} wall at ${Math.round(s.strike)} is being abandoned, open interest down ${decay.toFixed(0)} percent while price approaches. The level is losing its defence`,
-                `Wall abandoned ${fmtInt(s.strike)}${side.toUpperCase()} −${decay.toFixed(0)}%`,
-                isRes ? 'pos' : 'neg');
+            if (!near || decay < (cfg.wallDecayPct || 12)) continue;
+
+            const isCall = side === 'ce';
+            const above = s.strike >= spot;
+            // is price heading at this wall, or away from it?
+            const toward = MOVING && ((above && drift > 0) || (!above && drift < 0));
+            const away = MOVING && !toward;
+            // premium rising while OI falls = shorts buying back (covering);
+            // premium falling while OI falls = longs liquidating
+            const prevP = _leadState.wallPrem?.[k];
+            const nowP = s[side + '_ltp'] || 0;
+            if (!_leadState.wallPrem) _leadState.wallPrem = {};
+            _leadState.wallPrem[k] = nowP;
+            const covering = prevP != null && nowP > prevP;
+
+            let bias, tone, why;
+            if (toward) {
+              // the defence is breaking while under test - directional
+              bias = above ? 'bullish' : 'bearish';
+              tone = above ? 'pos' : 'neg';
+              why = `${covering ? 'writers are buying back' : 'writers are stepping away'} as price presses into it`;
+            } else if (away) {
+              bias = 'neutral';
+              tone = 'mid';
+              why = 'price is moving away, so this looks like writers taking profit on a level that no longer matters';
+            } else {
+              // flat tape: a wall thinning without a move is mildly directional
+              // in the direction the wall was defending against
+              bias = above ? 'mildly bullish' : 'mildly bearish';
+              tone = 'mid';
+              why = 'the tape is flat, so this is positioning rather than pressure';
             }
+            const label = isCall ? 'Call' : 'Put';
+            const role = above ? 'resistance' : 'support';
+            _leadFire(`wall|${k}|${bias}`,
+              `${bias.toUpperCase()}. ${label} wall at ${Math.round(s.strike)}, ${role} ${Math.abs(Math.round(s.strike - spot))} points ${above ? 'above' : 'below'}, ` +
+              `is being abandoned. Open interest down ${decay.toFixed(0)} percent and ${why}`,
+              `${bias === 'neutral' ? '⚪' : tone === 'pos' ? '🟢' : tone === 'neg' ? '🔴' : '🟡'} ${bias} · wall ${fmtInt(s.strike)}${side.toUpperCase()} −${decay.toFixed(0)}% (${above ? 'res' : 'sup'})`,
+              tone);
           }
         }
       } catch (_) {}
@@ -18253,8 +18458,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             const rise = (prem - b.prem) / b.prem * 100;
             if (rise >= (cfg.straddlePct || 8)) {
               _leadFire('straddle',
-                `Straddle premium up ${rise.toFixed(0)} percent while price has barely moved. The market is paying for a move that has not happened yet`,
-                `Straddle +${rise.toFixed(0)}% on a flat tape`, 'mid');
+                `NO DIRECTION. Straddle premium up ${rise.toFixed(0)} percent while price has barely moved. ` +
+                `The market is paying for a move that has not happened yet, but is not saying which way`,
+                `🟡 no direction · straddle +${rise.toFixed(0)}% on a flat tape`, 'mid');
               _leadState.straddleBase = { prem, spot, t: Date.now() };
             }
           }
@@ -18293,8 +18499,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           if (Math.abs(gapv) >= (cfg.pcrGap || 0.25)) {
             const puts = gapv > 0;
             _leadFire(`pcrdiv|${puts ? 'p' : 'c'}`,
-              `Volume put-call ratio is ${Math.abs(gapv).toFixed(2)} ${puts ? 'above' : 'below'} the open interest ratio. ${puts ? 'Puts' : 'Calls'} are trading far heavier than the standing book implies`,
-              `Vol-PCR ${puts ? '▲' : '▼'} ${Math.abs(gapv).toFixed(2)} vs OI-PCR`,
+              `${puts ? 'BEARISH' : 'BULLISH'}. Volume put-call ratio is ${Math.abs(gapv).toFixed(2)} ${puts ? 'above' : 'below'} the open interest ratio. ` +
+              `${puts ? 'Puts' : 'Calls'} are trading far heavier than the standing book implies`,
+              `${puts ? '🔴 bearish' : '🟢 bullish'} · vol-PCR ${puts ? '▲' : '▼'} ${Math.abs(gapv).toFixed(2)} vs OI-PCR`,
               puts ? 'neg' : 'pos');
           }
         }
@@ -26239,6 +26446,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'range-forecast':    '<strong>Expected Range — day, week, month</strong>The option market prices a move for every expiry it lists, and reading them together shows the TERM STRUCTURE of expected movement rather than one number. Each horizon uses <b>its own expiry\'s ATM implied volatility</b> instead of scaling a single figure, which is what lets a near-term event premium show up as a weekly range disproportionate to the monthly - scale one number and that signal vanishes. <b>Rest of today</b> shrinks through the session as time runs out, which is why it is the most useful line for intraday sizing. Under a lognormal assumption roughly 68%% of closes land inside 1σ and 95%% inside 2σ, but real markets have fatter tails, so treat 2σ as optimistic rather than a wall. The term-structure note below the rows reads the shape: backwardation (near IV above far) prices a near-term event and favours calendars, contango is the normal shape and makes near-dated premium comparatively cheap.',
     'eod-report':        '<strong>Session Review</strong>Scores the day against the levels the dashboard drew that morning, rebuilt from the recorded session rather than asserted. For each 9:20 line it reports one of three verdicts: <b>held</b> (touched but not broken beyond a small buffer), <b>broke</b> (price went through), or <b>never reached</b> - and that third case is information too, because a line price never approaches is neither right nor wrong, and counting it as either would flatter or damn the method unfairly. It also reports whether the day was a trend day (body at least 60%% of range) and how positioning shifted: whether the call and put walls held their strikes or migrated, and where PCR started and finished. <b>Why this matters:</b> commercial tools advertise accuracy tracking as a number you are asked to believe. This shows the working, and over enough sessions the verdicts feed Claims on Trial, where the 9:20 method becomes measurable rather than trusted.',
     'hero-zero':         '<strong>Hero/Zero candidates</strong>Expiry-day lottery tickets, ranked by <b>convexity per rupee</b> rather than by price - because the popular filter, "cheapest option", is the wrong one. The cheapest strike always shows the biggest multiple, and that multiple IS the compensation for the odds: a 23x payoff at a 1.4%% chance of finishing in the money is not a better bet than 5x at 29%%, it is the same bet with more variance and usually a worse one after costs. Every row carries the ITM probability (approximated by delta, which is what it means for a vanilla option), the breakeven move required, the multiple at half an expected move, and what a lot actually costs - so the trade can be judged rather than hoped over. <b>These are priced bets, not mispriced ones.</b> The market sets the premium so payoff and probability roughly offset, then brokerage and slippage push the balance against you. Whatever edge exists comes from being right about direction and timing, not from finding a cheap strike. <b>Sizing is the whole game:</b> a hero/zero goes to zero far more often than it becomes a hero, so size it as money already written off. Read it with the Premium Shock panel above - high gamma concentration with rising IV is the condition where these actually multiply, and a quiet tape is where they simply decay to nothing.',
+    'depth-imbalance':   '<strong>Order Book Depth</strong>Level-2 data, streamed over the same socket as prices and impossible on NSE, which publishes no order book at all. It shows what price does not: how much has to be <b>consumed</b> for price to move, and which side is stacked. <b>Micro</b> is the microprice - the mid weighted by the opposite side\'s size - and it leads this panel because it predicts the next tick better than the raw mid or the bid/ask ratio; when bids are heavier it sits above the mid. <b>Read the full ladder, not the top level.</b> The best bid and ask are exactly where spoofing lives, because those orders are cheapest to place and cancel, while quantity sitting five levels deep represents real exposure. <b>Honest limits, and they matter:</b> a book shows INTENT, not commitment. Orders are pulled constantly, and a heavy bid that evaporates as price approaches was never support - it looked like support right up until it was tested. Depth works over seconds, not minutes, so it belongs to entry timing rather than direction: use it to decide WHEN to hit a level you already decided to trade, not whether to trade it. Subscribed for the index and five strikes either side of the money, since those are what actually trade.',
     'volume-profile':    '<strong>Volume Profile &amp; CVD</strong>Impossible before the broker feed: NSE supplied one spot sample a minute with no volume at all, and volume is the entire input here. A price chart shows where price WENT; the profile shows where it <b>traded</b> - how much business was done at each level - and those levels matter because that is where positions live, so price returns to them. <b>POC</b> is the most-traded price, the session\'s centre of gravity and the level price is most likely to revisit. <b>VAH and VAL</b> bound the value area holding 70%% of the volume, and the practical rule is the most useful thing on this panel: <b>inside the value area the market is balanced and fades work; outside it the market is imbalanced and trends work.</b> Knowing which regime you are in matters more than any single level. <b>Low-volume nodes</b> are prices the market passed through quickly and tends to pass through quickly again - poor targets, good breakout confirmations. <b>CVD</b> tracks buying minus selling pressure; its value is in DIVERGENCE, because price making a new high while CVD does not means the move is not backed by aggressive buying. <b>Honest limit:</b> this CVD is a bar-level approximation classified by where each bar closed within its own range. A true tick delta needs every print tagged against bid and ask, which the feed does not expose per trade - so read the divergence, not the absolute number.',
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',

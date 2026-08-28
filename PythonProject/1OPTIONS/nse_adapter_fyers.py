@@ -85,6 +85,8 @@ _client: Optional[Any] = None
 _socket: Optional[Any] = None
 _lock = threading.Lock()
 _ticks: Dict[str, Dict[str, Any]] = {}      # fyers symbol -> latest tick
+_depth: Dict[str, Dict[str, Any]] = {}      # fyers symbol -> latest L2 book
+_depth_subs: set = set()
 _subscribed: set = set()
 _tick_sink = None
 _last_push = 0.0
@@ -320,6 +322,34 @@ def _on_message(msg) -> None:
                 d[dst] = v
         if not d:
             return
+        # ── Level-2 book, when this message carries one ─────────────
+        # DepthUpdate arrives on the same socket as price ticks. Storing the
+        # full ladder rather than just the top of book matters: the top level
+        # is where spoofing lives, and depth several levels back is what
+        # actually has to be consumed for price to move.
+        bids = msg.get("bids") or msg.get("bid") or []
+        asks = msg.get("asks") or msg.get("ask") or []
+        if bids or asks:
+            def _lvls(rows):
+                out = []
+                for r in (rows or [])[:5]:
+                    if not isinstance(r, dict):
+                        continue
+                    p = r.get("price") or r.get("prc")
+                    q = r.get("volume") or r.get("qty") or r.get("vol")
+                    n = r.get("ord") or r.get("orders") or 0
+                    if p:
+                        out.append({"p": float(p), "q": float(q or 0), "n": int(n or 0)})
+                return out
+            b, a = _lvls(bids), _lvls(asks)
+            if b or a:
+                with _lock:
+                    _depth[sym] = {
+                        "bids": b, "asks": a, "ts": time.time(),
+                        "tbq": float(msg.get("tot_buy_qty") or msg.get("totalbuyqty") or 0),
+                        "tsq": float(msg.get("tot_sell_qty") or msg.get("totalsellqty") or 0),
+                    }
+
         d["ts"] = time.time()
         with _lock:
             _ticks[sym] = {**_ticks.get(sym, {}), **d}
@@ -357,6 +387,32 @@ def _start_socket() -> None:
         print(f"[fyers] socket unavailable, REST polling only: {e}")
         with _lock:
             _status["streaming"] = False
+
+
+def _subscribe_depth(symbols: List[str]) -> None:
+    """Subscribe L2 depth for a SMALL set of contracts.
+
+    Depth is far heavier than a price tick, and subscribing the whole chain
+    would flood the socket for no benefit: the strikes anyone actually scalps
+    are the handful around the money. Restricting it there keeps the stream
+    responsive and the book meaningful.
+    """
+    if not _socket or not symbols:
+        return
+    new = [s for s in symbols if s not in _depth_subs]
+    if not new:
+        return
+    try:
+        _socket.subscribe(symbols=new[:40], data_type="DepthUpdate")
+        _depth_subs.update(new[:40])
+        print(f"[fyers] L2 depth subscribed for {len(new[:40])} contract(s)")
+    except Exception as e:  # noqa: BLE001
+        print(f"[fyers] depth subscribe failed: {e}")
+
+
+def depth_snapshot() -> Dict[str, Any]:
+    with _lock:
+        return {k: dict(v) for k, v in _depth.items()}
 
 
 def _subscribe(symbols: List[str]) -> None:
@@ -486,6 +542,15 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     # subscribe the chain plus the index itself so ticks flow for both
     if tokens:
         _subscribe(sorted(set(tokens))[:400] + [ysym, INDIA_VIX])
+        # depth only for the strikes actually traded intraday: five either side
+        near_syms = []
+        for r in strikes:
+            if abs(r["strike"] - atm) <= strike_gap * 5:
+                for p in ("ce", "pe"):
+                    fs = r.get(f"{p}_symbol")
+                    if fs:
+                        near_syms.append(fs)
+        _subscribe_depth(near_syms + [ysym])
 
     atm = min((s["strike"] for s in strikes), key=lambda k: abs(k - spot))
     atm_row = next((s for s in strikes if s["strike"] == atm), {})
@@ -601,6 +666,12 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "timestamp": time.strftime("%d-%b-%Y %H:%M:%S"),
         "_source": "fyers",
         "_live": bool(_status.get("streaming")),
+        "depth": {
+            "index": _depth.get(ysym),
+            "strikes": {f'{r["strike"]}{p.upper()}': _depth[r[f"{p}_symbol"]]
+                        for r in strikes for p in ("ce", "pe")
+                        if r.get(f"{p}_symbol") and r[f"{p}_symbol"] in _depth},
+        },
         "_tokens": {r[f"{p}_symbol"]: {"sym": sym, "k": r["strike"], "side": p.upper()}
                     for r in strikes for p in ("ce", "pe") if r.get(f"{p}_symbol")},
     }

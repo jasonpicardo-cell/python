@@ -1124,6 +1124,91 @@ def _attach_oi_rollups(symbol: str, data: dict) -> dict:
     return data
 
 
+def _fyers_token_date() -> str:
+    """IST date the saved Fyers token was generated, or '' if none."""
+    import json as _json
+    path = _os.environ.get("FYERS_TOKEN_FILE") or _os.path.join(
+        _os.path.dirname(_os.path.abspath(__file__)), ".fyers_token")
+    if not _os.path.exists(path):
+        return ""
+    try:
+        with open(path) as f:
+            ts = _json.load(f).get("ts", 0)
+        if not ts:
+            return ""
+        g = time.gmtime(ts + 5 * 3600 + 1800)
+        return f"{g.tm_year:04d}-{g.tm_mon:02d}-{g.tm_mday:02d}"
+    except Exception:
+        return ""
+
+
+def _ensure_fyers_token() -> bool:
+    """Refresh the Fyers token at startup if it was not generated today.
+
+    Fyers tokens die at about 06:00 IST, so one generated yesterday is always
+    dead by the time the market opens - there is no case where yesterday's
+    token survives into a trading session. Rather than starting, failing on the
+    first chain request and falling back to NSE silently, this checks up front
+    and runs the interactive login.
+
+    The interactive part is the constraint: the login needs an auth code pasted
+    from a browser, so it can only run where somebody is watching. If stdin is
+    not a terminal - a service, a cron job, a startup item - blocking on input
+    would hang the server forever with no visible cause, so in that case it
+    prints what to do and carries on with the NSE fallback instead.
+    """
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 3600 + 1800))
+    tok_date = _fyers_token_date()
+    if tok_date == today:
+        print(f"[fyers] token generated today ({tok_date}) - no login needed")
+        return True
+
+    reason = "no saved token" if not tok_date else f"token is from {tok_date}, not today"
+    print(f"[fyers] {reason}")
+
+    if not _envbool_g("NSE_FYERS_AUTO_LOGIN", True):
+        print("[fyers] auto-login disabled (NSE_FYERS_AUTO_LOGIN=false). "
+              "Run: python3 fyers_login.py")
+        return False
+
+    if not sys.stdin.isatty():
+        # Headless: say exactly what is wrong and what to do, rather than
+        # blocking on an input nobody can provide.
+        print("[fyers] cannot run the interactive login: stdin is not a terminal.")
+        print("[fyers] Run this from a terminal first:  python3 fyers_login.py")
+        print("[fyers] Starting with NSE as the data source for now.")
+        return False
+
+    script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "fyers_login.py")
+    if not _os.path.exists(script):
+        print(f"[fyers] fyers_login.py not found next to the server - cannot auto-login")
+        return False
+
+    print("=" * 66)
+    print("  Fyers login required (tokens expire daily, around 06:00 IST)")
+    print("  A browser will open. Log in, then paste the redirected URL below.")
+    print("=" * 66)
+    try:
+        import subprocess
+        # stdin/stdout inherited so the prompt and paste work normally
+        rc = subprocess.call([sys.executable, script])
+    except KeyboardInterrupt:
+        print("\n[fyers] login cancelled - starting with NSE instead")
+        return False
+    except Exception as e:  # noqa: BLE001
+        print(f"[fyers] login failed to run: {e}")
+        return False
+    if rc != 0:
+        print(f"[fyers] login exited with code {rc} - starting with NSE instead")
+        return False
+    if _fyers_token_date() == today:
+        print("[fyers] token refreshed - continuing startup")
+        return True
+    print("[fyers] login finished but no fresh token was written - "
+          "starting with NSE instead")
+    return False
+
+
 def _prune_state() -> None:
     # the rollup history is per-strike and per-symbol; prune it with the rest
     try:
@@ -6330,6 +6415,22 @@ def main():
     _start_session_rewarm_thread()
 
     # Background poller: keeps hot symbols warm so every browser hits cache.
+    if RUN_DATA_SOURCE == "fyers":
+        # Do this before anything else touches Fyers: connecting with a stale
+        # token just fails, and the fallback to NSE would be silent.
+        # Wrapped: a startup convenience must never be able to stop the
+        # server from starting. The first version raised NameError and took
+        # the whole process down - strictly worse than the stale token it
+        # was meant to catch.
+        try:
+            ok_tok = _ensure_fyers_token()
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] token check failed ({type(e).__name__}: {e}) - continuing")
+            ok_tok = False
+        if not ok_tok:
+            print("[fyers] proceeding without a valid token - option-chain "
+                  "requests will fall back to NSE scraping")
+
     if _adapter_streams() and RUN_DATA_SOURCE == "fyers":
         print(f"[i] DATA_SOURCE=fyers: broker stream is the source - "
               f"NSE polling and cookie warm-up are DISABLED")

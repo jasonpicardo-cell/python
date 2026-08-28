@@ -337,6 +337,9 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "sentiment": _infer_sentiment(nearby, atm, _max_pain(strikes),
                                       (tot_pe / tot_ce) if tot_ce else None),
         "skew_note": "",
+        # no L2 on this source; the client checks for null and falls back to
+        # the bid/ask approximation rather than showing an empty panel
+        "depth": None,
         # Arrow has no futures endpoint wired yet. Emitting the keys as None
         # lets the futures inputs skip cleanly instead of reading undefined -
         # the trend engine simply contributes nothing from them rather than
