@@ -32,6 +32,10 @@ FYERS_SYMBOLS=NIFTY,BANKNIFTY
 FYERS_STRIKE_COUNT=25
 # Tick pushes to browsers per second (coalesced; the UI cannot use more).
 FYERS_PUSH_HZ=4
+# Where fyers_login.py also drops a PLAIN-TEXT copy of the token, for the
+# historical-data downloader which reads a bare token rather than JSON.
+# Defaults to ../NSE_SYNC/ relative to the login script.
+FYERS_SYNC_DIR=../NSE_SYNC
 
 # ── Arrow (arrow.trade / iRage Broking) ──────────────────────────────
 # Create an app in Arrow's Trading API section to get these.

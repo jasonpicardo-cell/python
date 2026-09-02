@@ -92,15 +92,45 @@ def main():
     if not isinstance(resp, dict) or "access_token" not in resp:
         sys.exit(f"Token generation failed: {resp}")
 
+    token = resp["access_token"]
+
+    # ── 1. the dashboard's own token file (JSON, with a timestamp) ──
+    # The timestamp is what the server and adapter use to decide whether a
+    # login is needed, so this file has to stay structured.
     path = os.path.join(HERE, ".fyers_token")
     with open(path, "w") as f:
-        json.dump({"access_token": resp["access_token"], "ts": time.time(),
+        json.dump({"access_token": token, "ts": time.time(),
                    "client_id": cid}, f)
     try:
         os.chmod(path, 0o600)      # it is a credential; do not leave it readable
     except Exception:
         pass
     print(f"\n   Saved to {path} (valid until tomorrow).")
+
+    # ── 2. plain-text copy for the historical-data downloader ──
+    # NSE_SYNC reads a bare token, not JSON - writing the whole structure
+    # there would hand it a string it cannot parse. Same secret, two formats,
+    # written together so they can never drift out of step: a stale copy in
+    # one place is worse than no copy, because it fails in a way that looks
+    # like a broken API rather than an expired token.
+    sync_dir = _env("FYERS_SYNC_DIR") or os.path.join(HERE, "..", "NSE_SYNC")
+    sync_path = os.path.abspath(os.path.join(sync_dir, "fyers_token.txt"))
+    try:
+        os.makedirs(os.path.dirname(sync_path), exist_ok=True)
+        with open(sync_path, "w") as f:
+            f.write(token)          # the raw token only - no JSON, no newline
+        try:
+            os.chmod(sync_path, 0o600)
+        except Exception:
+            pass
+        print(f"   Saved to {sync_path} (plain token for NSE_SYNC).")
+    except Exception as e:
+        # Not fatal: the dashboard works without it, and saying so plainly is
+        # better than failing a login that otherwise succeeded.
+        print(f"   ! Could not write {sync_path}: {e}")
+        print(f"     The dashboard is fine; only the historical downloader "
+              f"needs this copy.")
+
     print("   Restart the server, or it will pick this up on its next connect.\n")
 
 
