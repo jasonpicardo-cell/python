@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # ".env" is the convention but a plain "env" is common, and silently reading
 # nothing because of a filename is a miserable thing to debug. Accept both.
-ENV_NAMES = (".env", "env", ".env.local", "env.txt", ".env.txt")
+ENV_NAMES = ("env", ".env", ".env.local", "env.txt", ".env.txt")
 
 
 def _env_file():

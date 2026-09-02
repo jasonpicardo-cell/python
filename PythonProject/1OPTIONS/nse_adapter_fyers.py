@@ -98,7 +98,7 @@ _status: Dict[str, Any] = {
 
 
 # ── configuration ─────────────────────────────────────────────────────
-_ENV_NAMES = (".env", "env", ".env.local", "env.txt", ".env.txt")
+_ENV_NAMES = ("env", ".env", ".env.local", "env.txt", ".env.txt")
 _env_cache: Optional[Dict[str, str]] = None
 
 
@@ -917,6 +917,58 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dic
     except Exception as e:  # noqa: BLE001
         print(f"[fyers] history failed: {e}")
         return []
+
+
+def constituent_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Live quotes for a list of NSE equity symbols.
+
+    This is what lets the index-contributors widget work on a broker feed at
+    all. Previously it could only be built by scraping NSE, so choosing a
+    broker source silently broke it - the data was right there in the feed and
+    simply was not being asked for.
+
+    Fyers accepts a comma-separated symbol list, so fifty constituents cost a
+    handful of calls rather than fifty.
+    """
+    if not connect() or not symbols:
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    syms = [f"NSE:{s.strip().upper()}-EQ" for s in symbols if s and s.strip()]
+    CHUNK = 40                      # keep each request comfortably small
+    for i in range(0, len(syms), CHUNK):
+        batch = syms[i:i + CHUNK]
+        try:
+            r = _count_rest("quotes") or _client.quotes({"symbols": ",".join(batch)})
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] constituent quotes failed: {e}")
+            continue
+        if not isinstance(r, dict) or r.get("s") != "ok":
+            print(f"[fyers] quotes: {(r or {}).get('message', 'bad response')}")
+            continue
+        for row in (r.get("d") or []):
+            v = row.get("v") or {}
+            name = (row.get("n") or v.get("symbol") or "")
+            name = name.replace("NSE:", "").replace("-EQ", "")
+            if not name:
+                continue
+            ltp = _f(v, "lp", "ltp", "last_price")
+            prev = _f(v, "prev_close_price", "prev_close", "c")
+            if not ltp:
+                continue
+            chg = ltp - prev if prev else 0.0
+            out[name] = {
+                "symbol": name,
+                "lastPrice": ltp,
+                "previousClose": prev,
+                "change": round(chg, 2),
+                "pChange": round(chg / prev * 100, 2) if prev else 0.0,
+                "totalTradedVolume": _f(v, "volume", "vol_traded_today"),
+                "totalTradedValue": _f(v, "volume", "vol_traded_today") * ltp,
+                "dayHigh": _f(v, "high_price", "h"),
+                "dayLow": _f(v, "low_price", "l"),
+                "open": _f(v, "open_price", "o"),
+            }
+    return out
 
 
 def market_depth(symbol: str) -> Dict[str, Any]:

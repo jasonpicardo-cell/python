@@ -2205,6 +2205,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <span id="breadthDecliners" style="color:var(--neg);font-weight:700;min-width:28px;text-align:right;"></span>
               <span id="breadthScore" style="font-size:9px;color:var(--muted);margin-left:4px;"></span>
             </div>
+            <!-- participation quality: what the point-contribution list cannot say -->
+            <div id="participationBox" style="margin:6px 0;"></div>
             <!-- Index relative strength vs open -->
             <div class="rs-bar-wrap" id="rsBarWrap" style="display:none;">
               <span style="font-size:9px;color:var(--muted);min-width:36px;">vs open<i class="hi" data-h="rel-strength">i</i></span>
@@ -4631,6 +4633,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           </div>
           <div class="oc-sub" style="padding:0 6px 4px;"><b style="color:var(--gold,#d4af37);">Covered by "Enable ALL alert types"</b> — while that is ticked every pair announces and these boxes are bypassed (dimmed, but your selection is kept). Crossovers are detected on the chart's current interval and instrument - switch the chart to 5m and the alerts follow. With <b>confirm on candle close</b> ticked (recommended) a cross must survive to the end of its candle before it announces; without it you hear every wiggle of the forming bar, most of which reverse.</div>
           <div id="emaxLog" style="padding:0 6px 6px;"></div>
+
+          <div class="skew-chart-head" style="margin-top:6px;"><span class="skew-chart-title">📉 Price closing above / below an EMA or VWAP<i class="hi" data-h="price-ma-cross">i</i></span></div>
+          <div style="padding:6px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:10px;">
+            <label style="font-weight:700;"><input type="checkbox" id="pxma_on" checked> Announce price crossing a moving average</label>
+            <label><input type="checkbox" id="pxma_shown" checked> only the EMAs shown on the chart</label>
+            <label><input type="checkbox" id="pxma_vwap" checked> include VWAP</label>
+            <label style="color:var(--muted,#789);"><input type="checkbox" id="pxma_close" checked> confirm on candle close</label>
+            <label style="color:var(--muted,#789);">min clear <input type="number" id="pxma_sep" class="ohlc-inp" style="width:54px;" step="0.005" min="0" title="How far past the line the candle must close. A gradual crossing sits close to the line at the crossing bar, so a large value suppresses exactly the crossings worth hearing. 0.01% is about 2.5 points on Nifty.">%</label>
+            <label style="color:var(--muted,#789);">re-fire <input type="number" id="pxma_cd" class="ohlc-inp" style="width:42px;" step="1" min="1">min</label>
+          </div>
+          <div class="oc-sub" style="padding:0 6px 4px;">Announces when a candle <b>closes</b> through EMA 5, 10, 15, 20, 50, 100, 200 or VWAP — whichever you have switched on for the chart, so the alert set follows what you are looking at. The voice says whether the average is short-term, intermediate or trend-defining, because a close through EMA 5 and a close through EMA 200 are traded very differently and the number alone does not make that obvious by ear.</div>
+          <div id="pxmaLog" style="padding:0 6px 6px;"></div>
         </div>
 
         <div class="skew-chart-wrap" style="grid-column:1 / -1;">
@@ -5003,6 +5017,33 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const dec = stocks.filter(s => s.pct_change < 0);
     const advWt = adv.reduce((s, x) => s + (x.weight_est || 0), 0);
     const decWt = dec.reduce((s, x) => s + (x.weight_est || 0), 0);
+    // participation quality — what the point-contribution list cannot tell you
+    let _partHtml = '';
+    try {
+      // this function has no response object in scope; the same figures live
+      // on niftyState, which is what populated the stock list
+      const _ns = (typeof niftyState !== 'undefined') ? niftyState : {};
+      const idxPct = _ns.index_pct ?? (state.lastData?.underlying_value && _ns.prev_close
+        ? (state.lastData.underlying_value - _ns.prev_close) / _ns.prev_close * 100
+        : null);
+      const p = _participation(stocks, idxPct);
+      if (p) {
+        const col = p.tone === 'pos' ? 'var(--pos,#26a69a)'
+                  : p.tone === 'neg' ? 'var(--neg,#ef5350)'
+                  : p.tone === 'warn' ? 'var(--gold,#d4af37)' : 'var(--muted)';
+        _partHtml = `
+          <div style="border:1px solid ${col};border-radius:6px;padding:6px 8px;margin-bottom:8px;">
+            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;">
+              <b style="font-size:12px;color:${col};">${p.verdict}</b>
+              <span style="font-size:10px;">breadth <b>${p.adv}/${p.total}</b> (${(p.breadth * 100).toFixed(0)}%)</span>
+              <span style="font-size:10px;">top-5 carry <b>${(p.top5 * 100).toFixed(0)}%</b> of the move</span>
+              <span style="font-size:10px;color:var(--muted);">net ${p.netPts >= 0 ? '+' : ''}${p.netPts.toFixed(0)} pts · ${p.upPts.toFixed(0)} up vs ${p.dnPts.toFixed(0)} down</span>
+              ${_ns.weight_source ? `<span style="font-size:9px;color:var(--muted);" title="Weights come from index_weights.json. Set NSE_REFRESH_WEIGHTS=true after a quarterly rebalance, or call /api/refresh-weights.">weights: ${escapeHtml(_ns.weight_source)}${_ns.weight_updated ? ' · ' + escapeHtml(_ns.weight_updated) : ''}</span>` : ''}
+            </div>
+            <div class="oc-sub" style="margin-top:3px;">${escapeHtml(p.action)}</div>
+          </div>`;
+      }
+    } catch (_) {}
     const total = advWt + decWt || 1;
     const advPct = (advWt / total * 100).toFixed(0);
     const bullish = advWt > decWt;
@@ -5013,6 +5054,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     document.getElementById('breadthDecliners').textContent = `${dec.length}↓`;
     document.getElementById('breadthScore').textContent =
       `wt: ${advWt.toFixed(0)}% vs ${decWt.toFixed(0)}%`;
+    const _pbox = document.getElementById('participationBox');
+    if (_pbox) _pbox.innerHTML = _partHtml;
   }
 
   // ======================================================================
@@ -16595,6 +16638,84 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
+  // ══ INDEX PARTICIPATION QUALITY ═══════════════════════════════════
+  // Replaces a metric that could not help: point-contribution per stock is
+  // pchg × weight × index, and summing it reconstructs the index change you
+  // can already read off the price. It is arithmetic, not information.
+  //
+  // What DOES distinguish a move worth trading is HOW it was made. Two rallies
+  // of identical size have opposite implications:
+  //   broad  - most constituents participating. Durable; pullbacks get bought.
+  //   narrow - a handful of heavyweights carrying it while the rest lag.
+  //            Fragile; fades often, because it is positioning rather than
+  //            a market-wide repricing.
+  //
+  // Three measurements, then a verdict that says what to DO rather than what
+  // was observed.
+  function _participation(rows, indexPct, opts) {
+    if (!rows?.length) return null;
+    const o = opts || {};
+    const adv = rows.filter(r => (r.pct_change || 0) > 0.05);
+    const dec = rows.filter(r => (r.pct_change || 0) < -0.05);
+    const advW = adv.reduce((s, r) => s + (r.weight_est || 0), 0);
+    const decW = dec.reduce((s, r) => s + (r.weight_est || 0), 0);
+    const breadth = rows.length ? adv.length / rows.length : 0;
+    // how much of the index MOVE came from the five largest contributors?
+    const byAbs = rows.slice().sort((a, b) =>
+      Math.abs(b.pts_contributed || 0) - Math.abs(a.pts_contributed || 0));
+    const totalAbs = byAbs.reduce((s, r) => s + Math.abs(r.pts_contributed || 0), 0) || 1;
+    const top5 = byAbs.slice(0, 5).reduce((s, r) => s + Math.abs(r.pts_contributed || 0), 0) / totalAbs;
+    // net points, and how much of the move is one-directional
+    const netPts = rows.reduce((s, r) => s + (r.pts_contributed || 0), 0);
+    const upPts = rows.filter(r => (r.pts_contributed || 0) > 0)
+                      .reduce((s, r) => s + r.pts_contributed, 0);
+    const dnPts = Math.abs(rows.filter(r => (r.pts_contributed || 0) < 0)
+                      .reduce((s, r) => s + r.pts_contributed, 0));
+    // tug-of-war: how much gross movement cancelled out. High churn with a
+    // small net means the index is masking a fight, not drifting quietly.
+    const churn = (upPts + dnPts) ? Math.abs(netPts) / (upPts + dnPts) : 0;
+
+    const rising = (indexPct ?? netPts) >= 0;
+    const narrow = top5 > 0.55;
+    // does BREADTH agree with the index direction?
+    const breadthAgrees = rising ? breadth > 0.55 : breadth < 0.45;
+    const divergence = !breadthAgrees && Math.abs(indexPct ?? 0) > 0.08;
+
+    let verdict, tone, action;
+    if (divergence && narrow) {
+      verdict = rising ? 'NARROW RALLY — fragile' : 'NARROW SELLOFF — fragile';
+      tone = 'warn';
+      action = rising
+        ? 'A handful of heavyweights are carrying this while most names lag. Moves like this fade more often than they extend — be quicker to take profit and slower to chase a breakout.'
+        : 'A few heavyweights are dragging while most names hold. Bounces from here are more likely than continuation.';
+    } else if (divergence) {
+      verdict = 'BREADTH DIVERGENCE';
+      tone = 'warn';
+      action = `The index is ${rising ? 'up' : 'down'} but only ${(breadth * 100).toFixed(0)}% of names are ${rising ? 'advancing' : 'declining'}. Participation is not confirming the move.`;
+    } else if (!narrow && Math.abs(indexPct ?? 0) > 0.15) {
+      verdict = rising ? 'BROAD RALLY — durable' : 'BROAD SELLOFF — durable';
+      tone = rising ? 'pos' : 'neg';
+      action = `Participation confirms the move: ${(breadth * 100).toFixed(0)}% of names ${rising ? 'advancing' : 'declining'} and no single name dominating. Trend-following works better than fading in this regime; pullbacks are more likely to be bought than to reverse.`;
+    } else if (churn < 0.25) {
+      verdict = 'TUG OF WAR';
+      tone = 'mid';
+      action = `Gross movement is large but it cancels out — only ${(churn * 100).toFixed(0)}% of it reaches the index. Sector rotation rather than direction; index scalps have poor odds here, and the move is in the constituents, not the index.`;
+    } else {
+      verdict = 'BALANCED';
+      tone = 'mid';
+      action = 'Nothing unusual in participation. Trade the levels rather than the breadth.';
+    }
+    return {
+      adv: adv.length, dec: dec.length, total: rows.length,
+      breadth, advW, decW, top5, netPts, upPts, dnPts, churn,
+      narrow, divergence, verdict, tone, action,
+      leaders: byAbs.slice(0, 5).map(r => ({
+        sym: r.symbol, pts: r.pts_contributed, pct: r.pct_change, w: r.weight_est })),
+      laggards: byAbs.slice().reverse().filter(r => Math.abs(r.pts_contributed || 0) > 0.01).slice(0, 3)
+        .map(r => ({ sym: r.symbol, pts: r.pts_contributed, pct: r.pct_change })),
+    };
+  }
+
   // ══ L2 DEPTH IMBALANCE ════════════════════════════════════════════
   // What the order book shows that price does not: how much has to be
   // CONSUMED for price to move, and which side is stacked.
@@ -18568,6 +18689,137 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
   }
 
+  // ══ PRICE vs EMA / VWAP CROSSINGS ═════════════════════════════════
+  // Distinct from the EMA-crossover alerts above, which watch one EMA crossing
+  // ANOTHER. This watches PRICE crossing a moving average - the more common
+  // scalping trigger, and the one you actually see on the chart.
+  //
+  // Two rules make it usable rather than maddening:
+  //   CLOSE ONLY. Price wanders across a nearby EMA constantly inside a bar,
+  //     so alerting on the forming candle produces a stream of reversals that
+  //     all undo themselves. Waiting for the close costs one interval and
+  //     removes nearly all of it.
+  //   MINIMUM SEPARATION. A close half a point past an EMA is not a crossing,
+  //     it is noise. The bar must close clear of it by a set share of price.
+  //
+  // Only the averages currently SHOWN on the chart are announced, so the alert
+  // set follows what you are actually looking at rather than a separate list
+  // you have to remember to keep in sync.
+  const _PXMA_KEY = 'priceMaCrossCfg';
+  function _pxmaCfg() {
+    try {
+      return Object.assign({ on: true, confirmClose: true, minSepPct: 0,
+                             cooldownMin: 5, vwap: true, onlyShown: true },
+                           JSON.parse(localStorage.getItem(_PXMA_KEY) || '{}'));
+    } catch (_) {
+      return { on: true, confirmClose: true, minSepPct: 0, cooldownMin: 5,
+               vwap: true, onlyShown: true };
+    }
+  }
+  function _pxmaSave(o) { try { localStorage.setItem(_PXMA_KEY, JSON.stringify(o)); } catch (_) {} }
+  const _pxmaState = { side: {}, firedAt: {}, log: [] };
+
+  function _priceMaCheck() {
+    const cfg = _pxmaCfg();
+    const all = _enableAll();
+    if (!cfg.on && !all) return;
+    const cs = _chart.candles || [];
+    if (cs.length < 6) return;
+    // ignore the forming bar unless confirmation is switched off
+    const bars = (cfg.confirmClose !== false && _chart.liveBar) ? cs.slice(0, -1) : cs;
+    if (bars.length < 6) return;
+    const closes = bars.map(b => b.c);
+    const last = bars[bars.length - 1];
+    const prevBar = bars[bars.length - 2];
+    const spot = last.c;
+    const minSep = spot * (cfg.minSepPct || 0.03) / 100;
+
+    const lines = [];
+    for (const e of _EMA_DEFS) {
+      if (cfg.onlyShown !== false && !_chart.show[e.k]) continue;
+      if (bars.length < e.p + 2) continue;        // not enough history to mean anything
+      const s = _emaSeries(closes, e.p);
+      const now = s[s.length - 1], before = s[s.length - 2];
+      if (now == null || before == null) continue;
+      lines.push({ name: `EMA ${e.p}`, key: e.k, now, before, period: e.p });
+    }
+    if (cfg.vwap !== false && _chart.show.vwap) {
+      const vw = _vwapSeries(bars);
+      const now = vw[vw.length - 1], before = vw[vw.length - 2];
+      if (now != null && before != null)
+        lines.push({ name: _chart.hasVolume ? 'VWAP' : 'VWAP (unweighted)',
+                     key: 'vwap', now, before, period: 0 });
+    }
+
+    for (const L of lines) {
+      const above = last.c > L.now;
+      const wasAbove = prevBar.c > L.before;
+      const prevSide = _pxmaState.side[L.key];
+      _pxmaState.side[L.key] = above;
+      if (prevSide === undefined) continue;        // first observation: just seed
+      if (above === wasAbove || above === prevSide) continue;
+      // Clearance is OFF by default and deliberately so. A GRADUAL crossing
+      // sits within a point or two of the line at the crossing bar - that is
+      // what gradual means - so a distance filter suppresses exactly the
+      // crossings worth hearing. The real protection against a poke-and-
+      // return is elsewhere: the bar must CLOSE on the new side, the side has
+      // to actually change, and a cooldown stops it oscillating. Raise this
+      // only if a fast EMA on a 1-minute chart proves too chatty for you.
+      if (minSep > 0 && Math.abs(last.c - L.now) < minSep) continue;
+      const fk = `${L.key}|${above ? 'up' : 'dn'}`;
+      const cdMs = (cfg.cooldownMin || 5) * 60000;
+      if (_pxmaState.firedAt[fk] && Date.now() - _pxmaState.firedAt[fk] < cdMs) continue;
+      _pxmaState.firedAt[fk] = Date.now();
+
+      const sym = state.symbol || 'NIFTY';
+      const bias = above ? 'BULLISH' : 'BEARISH';
+      // A close through a SHORT average is a momentum event; through a long
+      // one it is a trend event. Say which, because they are traded very
+      // differently and the period alone does not make that obvious by ear.
+      const weight = L.period >= 100 ? 'a trend-defining average'
+                   : L.period >= 50 ? 'an intermediate average'
+                   : L.period === 0 ? 'the session volume-weighted average price'
+                   : 'a short-term average';
+      const txt = `${bias}. ${sym} closed ${above ? 'above' : 'below'} ${L.name} at ${Math.round(L.now)}, ` +
+                  `${weight}. Close ${Math.round(last.c)}, ${Math.abs(Math.round(last.c - L.now))} points ${above ? 'above' : 'below'} the line`;
+      const akey = `pxma|${sym}|${fk}|${last.t}`;
+      try {
+        if (_streamLive) _relayAlert(akey, txt, 'level', 300);
+        else _speakOnce(akey, txt, 300);
+      } catch (_) {}
+      if (typeof showToast === 'function')
+        showToast(`${above ? '🟢' : '🔴'} ${bias.toLowerCase()} · close ${above ? '▲' : '▼'} ${L.name} ${fmtInt(Math.round(L.now))}`);
+      try { _pushAlertHistory(`Close ${above ? '▲' : '▼'} ${L.name}`, last.c, above ? 'pos' : 'neg', sym); } catch (_) {}
+      _pxmaState.log.push({ t: Date.now(), name: L.name, above, px: last.c, line: L.now, sym });
+      while (_pxmaState.log.length > 20) _pxmaState.log.shift();
+      const box = document.getElementById('pxmaLog');
+      if (box) box.innerHTML = _pxmaState.log.slice(-8).reverse().map(x =>
+        `<div style="display:flex;gap:8px;font-size:9.5px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);">
+           <span style="color:var(--muted);min-width:52px;">${new Date(x.t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+           <b style="min-width:96px;">${escapeHtml(x.name)}</b>
+           <span style="color:${x.above ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-weight:700;">${x.above ? '▲ above' : '▼ below'}</span>
+           <span style="color:var(--muted);">${escapeHtml(x.sym)} @ ${fmtInt(Math.round(x.px))}</span>
+         </div>`).join('');
+    }
+  }
+
+  function _pxmaWire() {
+    const cfg = _pxmaCfg();
+    for (const [id, k] of [['pxma_on', 'on'], ['pxma_close', 'confirmClose'],
+                           ['pxma_vwap', 'vwap'], ['pxma_shown', 'onlyShown']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.checked = cfg[k] !== false;
+      el.addEventListener('change', () => { const o = _pxmaCfg(); o[k] = el.checked; _pxmaSave(o); });
+    }
+    for (const [id, k] of [['pxma_sep', 'minSepPct'], ['pxma_cd', 'cooldownMin']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.value = cfg[k];
+      el.addEventListener('change', () => { const o = _pxmaCfg(); o[k] = +el.value || o[k]; _pxmaSave(o); });
+    }
+  }
+
   // ══ EMA crossover detection ═══════════════════════════════════════
   // Fires when a faster EMA crosses a slower one on the CLOSED candle, not
   // the forming one. That distinction matters: the live bar wiggles across
@@ -18578,9 +18830,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _EMAX_KEY = 'emaCrossCfg';
   function _emaxCfg() {
     try {
-      return Object.assign({ on: true, pairs: ['20x50', '50x200'], confirmClose: true, minSep: 0.03 },
+      return Object.assign({ on: true, pairs: ['9x21', '20x50', '50x200'], confirmClose: true, minSep: 0.03 },
                            JSON.parse(localStorage.getItem(_EMAX_KEY) || '{}'));
-    } catch (_) { return { on: true, pairs: ['20x50', '50x200'], confirmClose: true, minSep: 0.03 }; }
+    } catch (_) { return { on: true, pairs: ['9x21', '20x50', '50x200'], confirmClose: true, minSep: 0.03 }; }
   }
   function _emaxSave(o) { try { localStorage.setItem(_EMAX_KEY, JSON.stringify(o)); } catch (_) {} }
   const _EMAX_PAIRS = [
@@ -18835,6 +19087,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _chart.optionMeta = { strike: j.strike, side: j.side, oi: j.oi || [], iv: j.iv_last };
       renderPriceChart();
       try { _emaCrossCheck(); } catch (_) {}
+      try { _priceMaCheck(); } catch (_) {}
     } catch (e) { if (box) box.innerHTML = `<div class="movers-loading">Failed: ${escapeHtml(e.message)}</div>`; }
   }
 
@@ -18926,6 +19179,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         ? `✅ Filled from 09:15 — ${j.candles.length} candles, ${gm} min still missing (shaded on the chart)`
         : `Filled from ${first} — ${j.candles.length} candles. NSE's chart feed returned nothing earlier, so the morning cannot be recovered; the archive begins when the server first ran today.`);
       try { _emaCrossCheck(); } catch (_) {}
+      try { _priceMaCheck(); } catch (_) {}
     } catch (e) {
       showToast?.(`⚠ Backfill failed: ${e.message}`);
     } finally {
@@ -18950,6 +19204,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
       _chart.hasVolume = !!j.has_volume;
       try { _emaCrossCheck(); } catch (_) {}
+      try { _priceMaCheck(); } catch (_) {}
       renderPriceChart();
     } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
   }
@@ -19600,6 +19855,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _alertStatus();
     step(_csrcWire, 'csrcWire');
     step(_emaxWire, 'emaxWire');
+    step(_pxmaWire, 'pxmaWire');
     step(_leadWire, 'leadWire');
     step(_trendWire, 'trendWire');
     step(_lvlVoiceWire, 'lvlVoiceWire');
@@ -19716,6 +19972,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                       'cat_ceBuy', 'cat_peBuy', 'cat_ceSell', 'cat_peSell',
                       'cat_cover', 'cat_unwind',
                       'trend_on', 'trend_both',
+                      'pxma_on', 'pxma_shown', 'pxma_vwap', 'pxma_close',
                       'lead_on', 'lead_regime', 'lead_gflip', 'lead_wall',
                       'lead_straddle', 'lead_pcr',
                       'emaxOn', 'emax_5x20', 'emax_9x21', 'emax_20x50', 'emax_50x200']) {
@@ -19829,11 +20086,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'indexAlertFilter',    // which indices announce
     'alertsEnableAll',     // the master enable-all switch
     'emaCrossCfg',         // EMA crossover pairs and filters
+    'priceMaCrossCfg',     // price crossing an EMA or VWAP
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
     'trendEngineCfg',      // trend engine threshold and agreement rule
     'scalpCalcCfg',        // scalp calculator view, risk and cost rates
     'audioToggles',        // bell and voice on/off — the pair that used to drift
+    'priceMaCrossCfg',     // price crossing an EMA or VWAP
+    'scalpCalcCfg',        // scalp calculator view, risk and cost rates
+    'alertSettings',       // legacy alert configuration
+    'nse_dash_v2_settings',// dashboard layout and display options
+    'nse_hidden_panels_v1',// which panels are collapsed or hidden
+    'compactEsoteric',     // compact display toggle
+    'dashZoom',            // page zoom level
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
     'customAlerts',        // user-defined rules
     'customAlertsFired',
@@ -19841,8 +20106,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'm920Levels',          // today's frozen 9:20 lines (recomputed next tick)
     'sq9Conv', 'tvWlOpen',
   ];
-  const _KEEP_KEYS = ['tradeJournal', 'sugScorecard', 'esoStockWatchlist',
-                      'astroLabHistory', 'oiFlowFirstSeen', 'freshFlowLog', 'paperTrades'];
+  // Never cleared. These are YOUR DATA, not settings - losing them to a
+  // settings reset would be unrecoverable. Both journal key names are listed
+  // because the app has written under each, and naming only one meant the
+  // protection documented an intent it did not actually cover.
+  const _KEEP_KEYS = ['tradeJournal', 'nse_journal_v1', 'sugScorecard',
+                      'esoStockWatchlist', 'astroLabHistory', 'oiFlowFirstSeen',
+                      'freshFlowLog', 'paperTrades', 'nse_alert_log_v1',
+                      'nse_checklist_v1', 'regimeHistory', 'lastBackupTs',
+                      // connection detail, not a preference: clearing it would
+                      // point the dashboard at nothing and look like a crash
+                      'serverUrl'];
+  // Deliberately in NEITHER list: nse_theme and nse_active_tab. Resetting a
+  // theme or jumping the user to a different tab is a surprise, not a fix -
+  // a "restore alert defaults" button should not change how the app looks or
+  // where you were standing. They are listed here so the omission is a
+  // decision on record rather than something that looks overlooked.
   function _resetSettings() {
     const found = _SETTINGS_KEYS.filter(k => { try { return localStorage.getItem(k) !== null; } catch (_) { return false; } });
     const kept = _KEEP_KEYS.filter(k => { try { return localStorage.getItem(k) !== null; } catch (_) { return false; } });
@@ -23158,6 +23437,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         return;
       }
       niftyState.stocks = data.stocks || [];
+      // Carry the provenance fields the participation panel reports, so a
+      // stale weight table is visible rather than silently assumed correct.
+      // (These read `data` — the response variable in THIS function. An
+      // earlier version used `j`, copied from a different function, which
+      // threw ReferenceError and took the whole widget down.)
+      niftyState.weight_source = data.weight_source || null;
+      niftyState.weight_updated = data.weight_updated || null;
+      niftyState.index_pct = data.index_pct ?? null;
+      niftyState.prev_close = data.prev_close ?? null;
+      niftyState.source = data.source || null;
       niftyState.niftyValue = data.index_value || data.nifty_value || 0;
       if (timeEl) timeEl.textContent = data.as_of ? `· ${data.as_of}` : '';
       if (noteEl) {
@@ -23165,12 +23454,28 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // Pre-open/fallback data means prices are frozen, not live — warn clearly.
         noteEl.style.color = (data.data_quality === 'pre_open') ? 'var(--gold)' : '';
       }
+      // A server-side error arrives as a normal 200 with an error field, so
+      // it has to be checked explicitly or the widget renders an empty list
+      // and looks broken for no stated reason.
+      if (data && data.error && !(data.stocks || []).length) {
+        bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${escapeHtml(data.error)}</div>`;
+        return;
+      }
       // Update widget title
       const titleEl = document.getElementById('niftyWidgetTitle');
       if (titleEl) titleEl.textContent = (NIFTY_INDEX_TITLES[niftyState.indexSymbol] || niftyState.indexSymbol) + ' Constituents';
       renderNiftyWidget();
     } catch (e) {
-      bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">Server not reachable. Start nse_chain_server.py first.</div>`;
+      // "Server not reachable" was shown for EVERY failure, including ones
+      // where the server answered perfectly well and explained the problem.
+      // Distinguish a dead server from a server reporting an error, and show
+      // what it actually said - guessing wastes the reader's time.
+      const msg = String(e && e.message || e || '');
+      const dead = /Failed to fetch|NetworkError|ERR_CONNECTION|Load failed/i.test(msg);
+      bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${
+        dead ? 'Server not reachable — start nse_chain_server.py first.'
+             : escapeHtml(msg || 'Constituent data unavailable.')
+      }</div>`;
     }
   }
 
@@ -26494,6 +26799,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
     'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP position, momentum, position in the day range) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
     'leading-signals':   '<strong>Leading signals</strong>Five conditions that change before price does, because each is <b>mechanical rather than predictive</b>. None of them forecasts direction; what they mark is a moment when a move becomes more likely or more violent, which is a claim that can actually be defended. <b>Gamma flip cross</b> is the strongest of them: dealer hedging literally reverses sign at that level, from damping moves to amplifying them, so crossing it changes the character of the tape as arithmetic rather than opinion. <b>Wall abandonment</b> fires when writers pull open interest out of a level while price approaches it - the defence stops before the break, not after, which is why it leads. <b>Straddle expansion on a flat tape</b> means the market is paying up for a move that has not happened yet. <b>Volume-PCR divergence</b> catches today\'s conviction pulling away from the standing book, visible well before open interest reflects it. <b>Regime flips</b> - WTT, WTB, bull run, bloodbath - were already being computed on the OI Flow tab but never announced, so they only helped if you happened to be looking at that panel. <b>Honest limits:</b> each of these can fire and be followed by nothing. They identify conditions, not outcomes, and the wall and straddle detectors in particular will fire on ordinary repositioning in a quiet market - raise their thresholds if that happens. Everything here routes through the same voice, index filter and Enable-All controls as the rest.',
+    'price-ma-cross':    '<strong>Price crossing an EMA or VWAP</strong>Distinct from the EMA crossover alerts above, which watch one average crossing ANOTHER. This watches <b>price</b> crossing a moving average - the more common scalping trigger, and the one you actually see happening on the chart. It covers EMA 5, 10, 15, 20, 50, 100 and 200 plus VWAP, announcing only the ones you have switched on for the chart, so the alert set follows what you are looking at rather than a separate list you have to remember to keep in sync. <b>Two rules make it usable rather than maddening.</b> <b>Close only:</b> price wanders across a nearby average constantly inside a bar, so alerting on the forming candle produces a stream of reversals that all undo themselves - waiting for the close costs one interval and removes nearly all of it. <b>Minimum clearance:</b> a close half a point past an EMA is not a crossing, it is noise, so the bar must close clear of the line by a set share of price. The spoken alert names whether the average is short-term, intermediate or trend-defining, because a close through EMA 5 and a close through EMA 200 mean very different things and the number alone does not make that obvious by ear. <b>Honest note:</b> on a 1-minute chart with EMA 5 switched on, this will fire often - that is the nature of a fast average, not a fault. Raise the clearance or switch the fast EMAs off the chart if it chatters.',
     'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',
     'chart-alerts':      '<strong>Live-chart level alerts</strong>Which of the lines drawn on the chart are allowed to SPEAK when price reaches them. Drawing and announcing used to be the same decision - any line the chart drew could announce - so turning a level on to look at it also turned on its voice. They are separate switches now: the chart\'s own checkboxes control what you see, these control what you hear, which lets you watch six levels while being told about only the two that matter. <b>Defaults</b> are the levels with real positioning behind them: 9:20 lines, OI walls, CPR and pivots announce; max pain and the sigma bands stay quiet because they move constantly and would chatter. <b>Tolerance</b> is how close price must come before a line counts as touched, in points - too tight and a fast move skips straight past it, too loose and you get told about levels price never really reached; 15 points suits Nifty, more for BankNifty. Muting a source here affects this browser only, so a second machine can stay fully armed.',
     'alerts-tab':        '<strong>Alerts tab</strong>Every audio and notification control the dashboard has, gathered in one place. These are the SAME controls that used to sit in the topbar, on Home and on Today — they were moved here rather than copied, so there is exactly one switch per setting and nothing can drift out of sync. <b>Master control</b> holds the voice toggle, the volume slider and a mute switch that silences this browser without clearing any of your individual settings, so unmuting restores exactly what you had. The status line summarises the whole chain at a glance: voice state, whether audio is unlocked in this browser, whether the server stream is connected, how many tabs this computer has open, whether THIS tab is its machine\'s elected speaker, and how many flow and custom rules are armed. <b>Voice &amp; routing</b> controls who speaks when several computers are open. <b>Fresh option flow</b> and <b>custom alerts</b> hold their detection thresholds. <b>Diagnostics</b> shows what fired and why, plus per-machine audio readiness. If a machine is silent, work down the status line left to right — muted, voice off, audio not unlocked, no stream — the first thing that reads wrong is the cause.',

@@ -11,8 +11,6 @@
 #            OI, needs the cookie warm-up, polled on a timer)
 #   arrow  = Arrow / iRage broker API (real-time, WebSocket streaming,
 #            OI + Greeks + volume; polling is switched OFF automatically)
-
-#Set DATA_SOURCE=fyers and restart. Verified the server boots correctly on that setting: NSE polling disabled, and a clear message when unconfigured.
 DATA_SOURCE=fyers
 
 # ── Fyers API v3 ─────────────────────────────────────────────────────
@@ -80,3 +78,20 @@ NSE_ALERT_WINDOW=90
 NSE_ALERT_COOLDOWN=300
 NSE_ALERT_MAX=6
 NSE_ALERT_MIN_OI=4000
+
+# ── Index constituent weights ────────────────────────────────────────
+# The Nifty/BankNifty contribution widget needs each stock's index weight.
+# These live in index_weights.json next to the server, NOT in this file.
+#
+# NSE rebalances quarterly (Mar/Jun/Sep/Dec) and occasionally swaps a
+# constituent outright. A stale table drifts silently - every point figure
+# stays plausible while being wrong - so refresh after each rebalance:
+#
+#   set this to true, restart once, then set it back to false
+#   (leaving it on costs an NSE round trip on every single boot)
+#
+# Or refresh without restarting:  curl localhost:8765/api/refresh-weights
+#
+# The dashboard shows the source and date next to the breadth reading, so
+# you can see at a glance whether the table is current.
+NSE_REFRESH_WEIGHTS=false

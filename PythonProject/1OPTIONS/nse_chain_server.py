@@ -258,16 +258,19 @@ def _envbool_g(name: str, default: bool) -> bool:
 # convention, but a plain "env" is common on machines where a leading dot makes
 # the file awkward to see or edit - and silently loading nothing because of a
 # filename is a miserable thing to debug, so accept both and say which was used.
-_ENV_NAMES = (".env", "env", ".env.local", "env.txt", ".env.txt")
+_ENV_NAMES = ("env", ".env", ".env.local", "env.txt", ".env.txt")
 
 
 def _find_dotenv() -> str:
     here = _os.path.dirname(_os.path.abspath(__file__))
-    for name in _ENV_NAMES:
-        p = _os.path.join(here, name)
-        if _os.path.exists(p):
-            return p
-    return ""
+    found = [n for n in _ENV_NAMES if _os.path.exists(_os.path.join(here, n))]
+    if len(found) > 1:
+        # A silent trap: edit the wrong one and your change simply never takes
+        # effect, with nothing to indicate why. Say which is being used.
+        print(f"[env] WARNING: multiple settings files present ({', '.join(found)}). "
+              f"Using '{found[0]}' - edits to the others are IGNORED. "
+              f"Delete or rename the spares to avoid confusion.")
+    return _os.path.join(here, found[0]) if found else ""
 
 
 def _load_dotenv(path: str = None) -> int:
@@ -320,6 +323,11 @@ RUN_POLL = "NIFTY,BANKNIFTY"   # symbols kept warm in the background; "" to disa
                                # per cycle no matter how many browsers are open.
 RUN_POLL_INTERVAL = 5.0   # seconds between background polls per symbol
 RUN_TTL = 8.0             # seconds a cached chain counts as fresh
+RUN_REFRESH_WEIGHTS = False  # fetch live index constituent weights at startup.
+                             # Off by default because it costs an NSE round
+                             # trip on every boot; turn it on after a quarterly
+                             # rebalance (Mar/Jun/Sep/Dec) or when a
+                             # constituent changes, then turn it back off.
 RUN_RECONCILE = True       # periodically re-check today's candles for holes,
                            # fill them, and upgrade Yahoo-filled minutes to NSE
                            # data once the authoritative feed recovers
@@ -1207,6 +1215,150 @@ def _ensure_fyers_token() -> bool:
     print("[fyers] login finished but no fresh token was written - "
           "starting with NSE instead")
     return False
+
+
+# ══════════════════════════════════════════════════════════════════════
+# INDEX CONSTITUENT WEIGHTS
+# These were hardcoded in the server. NSE rebalances quarterly and changes
+# constituents outright, so a hardcoded table silently drifts from reality -
+# and every point-contribution figure derived from it drifts with it, without
+# anything looking wrong. They now live in index_weights.json, refreshable on
+# demand, with the hardcoded table kept only as a last-resort fallback.
+# ══════════════════════════════════════════════════════════════════════
+_WEIGHTS_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                              "index_weights.json")
+_weights_cache: dict = {}
+
+
+def _load_index_weights() -> dict:
+    """Read the weights file, or {} if absent/unreadable."""
+    global _weights_cache
+    if _weights_cache:
+        return _weights_cache
+    try:
+        if _os.path.exists(_WEIGHTS_FILE):
+            with open(_WEIGHTS_FILE) as f:
+                data = json.load(f)
+            _weights_cache = data
+            upd = data.get("_updated", "?")
+            n = sum(len(v.get("weights", {})) for k, v in data.items() if not k.startswith("_"))
+            print(f"[weights] loaded {n} constituent weights from "
+                  f"{_os.path.basename(_WEIGHTS_FILE)} (updated {upd})")
+            return data
+    except Exception as e:  # noqa: BLE001
+        print(f"[weights] could not read {_WEIGHTS_FILE}: {e}")
+    return {}
+
+
+def _save_index_weights(data: dict) -> bool:
+    try:
+        data["_updated"] = time.strftime("%Y-%m-%d %H:%M")
+        tmp = _WEIGHTS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2)
+        _os.replace(tmp, _WEIGHTS_FILE)          # atomic
+        global _weights_cache
+        _weights_cache = data
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[weights] write failed: {e}")
+        return False
+
+
+def _fetch_index_weights(symbol: str, fetcher=None) -> dict:
+    """Derive live weights from NSE's index constituent feed.
+
+    NSE does not publish the free-float weight directly on this endpoint, but
+    it does publish each constituent's index point contribution and the index
+    level - and weight is recoverable from those. Where that is unavailable we
+    fall back to relative traded value, which tracks weight loosely enough to
+    rank contributors but is NOT a substitute for the real figure, so the file
+    records which method produced it.
+    """
+    idx_name = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
+                "FINNIFTY": "NIFTY FIN SERVICE",
+                "MIDCPNIFTY": "NIFTY MID SELECT"}.get(symbol.upper())
+    if not idx_name:
+        return {}
+    f = fetcher or _shared_fetcher
+    if f is None:
+        print(f"[weights] no NSE session - load an option chain first")
+        return {}
+    try:
+        from nse_options_strategy import API_HEADERS
+        from urllib.parse import quote_plus as _qp
+        h = dict(API_HEADERS)
+        h["Referer"] = "https://www.nseindia.com/market-data/live-equity-market"
+        r = f.session.get(
+            "https://www.nseindia.com/api/equity-stockIndices?index=" + _qp(idx_name),
+            headers=h, timeout=15)
+        if r.status_code != 200:
+            print(f"[weights] {idx_name}: HTTP {r.status_code}")
+            return {}
+        rows = (r.json() or {}).get("data") or []
+    except Exception as e:  # noqa: BLE001
+        print(f"[weights] fetch failed: {e}")
+        return {}
+    if len(rows) < 5:
+        print(f"[weights] {idx_name}: only {len(rows)} rows returned")
+        return {}
+
+    idx_row = next((x for x in rows if x.get("symbol") in (idx_name, symbol.upper())), None)
+    members = [x for x in rows if x is not idx_row and x.get("symbol")]
+    weights, method = {}, "traded-value proxy"
+    # preferred: recover weight from each name's point contribution
+    idx_val = float((idx_row or {}).get("lastPrice") or 0)
+    got_pts = 0
+    if idx_val:
+        for m in members:
+            try:
+                pchg = float(m.get("pChange") or 0)
+                pts = m.get("indexPoints") or m.get("pointchange")
+                if pts is None or not pchg:
+                    continue
+                # pts = pchg/100 * weight/100 * index  ->  weight follows
+                w = float(pts) / (pchg / 100.0) / idx_val * 100.0
+                if 0 < w < 40:
+                    weights[m["symbol"]] = round(w, 3)
+                    got_pts += 1
+            except Exception:
+                continue
+    if got_pts >= len(members) * 0.6:
+        method = "point-contribution"
+    else:
+        weights = {}
+        total = sum(float(m.get("totalTradedValue") or 0) for m in members) or 1.0
+        for m in members:
+            tv = float(m.get("totalTradedValue") or 0)
+            if tv > 0:
+                weights[m["symbol"]] = round(tv / total * 100, 3)
+    if not weights:
+        return {}
+    # normalise to 100
+    s = sum(weights.values()) or 1.0
+    weights = {k: round(v / s * 100, 3) for k, v in weights.items()}
+    print(f"[weights] {symbol}: {len(weights)} constituents via {method}")
+    return {"weights": weights, "method": method, "count": len(weights),
+            "fetched": time.strftime("%Y-%m-%d %H:%M")}
+
+
+def _refresh_all_weights(symbols=("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")) -> dict:
+    data = dict(_load_index_weights())
+    changed = 0
+    for sym in symbols:
+        got = _fetch_index_weights(sym)
+        if got.get("weights"):
+            old = set((data.get(sym) or {}).get("weights", {}))
+            new = set(got["weights"])
+            if old and old != new:
+                added, gone = new - old, old - new
+                print(f"[weights] {sym} membership changed: "
+                      f"+{sorted(added)[:5]} -{sorted(gone)[:5]}")
+            data[sym] = got
+            changed += 1
+    if changed:
+        _save_index_weights(data)
+    return data
 
 
 def _prune_state() -> None:
@@ -3243,6 +3395,119 @@ def _fetch_prev_week_ohlc(symbol: str) -> dict | None:
     }
 
 
+def _build_constituents_result(sym: str, raw_stocks: list, source: str = "nse",
+                               data_quality: str = "live") -> dict:
+    """Shared result builder.
+
+    Extracted so the broker path and the NSE paths produce IDENTICAL
+    output - same weights, same normalisation, same fields. Two
+    separate builders would drift, and the drift would show up as
+    contribution figures that quietly disagree depending on which
+    source happened to answer.
+    """
+    cfg = _INDEX_CONFIG.get(sym.upper()) or _INDEX_CONFIG["NIFTY"]
+    # Index level: prefer a live spot, then the session cache, then derive it
+    # from the constituents themselves. Needed because point contributions are
+    # scaled by it, and a zero here would silently zero every figure.
+    index_value = 0.0
+    try:
+        se = _session_ohlc.get(sym.upper()) or {}
+        index_value = float(se.get("close") or se.get("last") or 0)
+    except Exception:
+        pass
+    if not index_value:
+        try:
+            ld = globals().get("_last_chain") or {}
+            if isinstance(ld, dict) and ld.get("symbol", "").upper() == sym.upper():
+                index_value = float(ld.get("underlying_value") or 0)
+        except Exception:
+            pass
+    if not index_value:
+        index_value = {"NIFTY": 24500.0, "BANKNIFTY": 52000.0,
+                       "FINNIFTY": 23500.0, "MIDCPNIFTY": 12500.0}.get(sym.upper(), 24500.0)
+    # ── Build result ─────────────────────────────────────────────────
+    # Prefer live weights from index_weights.json; the hardcoded table is a
+    # last resort, and the response says which was used so a stale figure is
+    # visible rather than assumed correct.
+    _wf = _load_index_weights().get(sym.upper()) or {}
+    _weight_map = dict(_wf.get("weights") or {}) or dict(cfg["fallback_weights"])
+    _weight_src = ("file:" + (_wf.get("method") or "?")) if _wf.get("weights") else "hardcoded fallback"
+    stocks = [
+        s for s in raw_stocks
+        if s.get("symbol") not in (cfg["nse_names"] + [sym, "NIFTY 50", "NIFTY BANK", "NIFTY FIN SERVICE", "NIFTY MID SELECT"])
+        and float(s.get("lastPrice") or 0) > 0
+    ]
+    stocks.sort(key=lambda s: float(s.get("totalTradedValue") or 0), reverse=True)
+
+    total_tv = sum(float(s.get("totalTradedValue") or 0) for s in stocks) or 1.0
+    # Prefer the WEIGHT TABLE whenever we have one. Traded value is only a
+    # proxy for weight and a poor one intraday - a heavily traded mid-cap can
+    # out-turnover a larger constituent for a session without being anywhere
+    # near it in index weight. The table (recovered from point contributions)
+    # is the real figure, so it wins; traded value is the fallback for when
+    # there is no table, not the other way round.
+    use_fixed = bool(_weight_map) or total_tv < 100
+
+    # Pre-compute raw weights, then NORMALISE to sum to exactly 100%.
+    # This is the critical fix: hardcoded fallback_weights are approximate
+    # and almost never sum to exactly 100 (e.g. NIFTY hardcoded weights
+    # summed to 105.1%, inflating every pts_contributed by 5%). Normalising
+    # ensures the sum of all pts_contributed ≈ actual index point change.
+    raw_weights: dict[str, float] = {}
+    for s in stocks:
+        stock_sym = s.get("symbol", "")
+        if use_fixed:
+            raw_weights[stock_sym] = _weight_map.get(stock_sym, 0.5)
+        else:
+            raw_weights[stock_sym] = float(s.get("totalTradedValue") or 0) / total_tv * 100
+
+    weight_total = sum(raw_weights.values()) or 1.0
+    norm_weights = {k: v / weight_total * 100 for k, v in raw_weights.items()}
+
+    result = []
+    for rank, s in enumerate(stocks, 1):
+        stock_sym = s.get("symbol", "")
+        wt  = norm_weights.get(stock_sym, 0.0)
+        pct = float(s.get("pChange") or 0)
+        pts = round(pct / 100 * wt / 100 * index_value, 2)
+        result.append({
+            "rank": rank,
+            "symbol": stock_sym,
+            "ltp":        round(float(s.get("lastPrice") or 0), 2),
+            "prev_close": round(float(s.get("previousClose") or 0), 2),
+            "change":     round(float(s.get("change") or 0), 2),
+            "pct_change": round(pct, 2),
+            "volume":     int(float(s.get("totalTradedVolume") or 0)),
+            "weight_est": round(wt, 2),
+            "pts_contributed": pts,
+            "pts_abs": abs(pts),
+        })
+
+    data = {
+        "stocks": result,
+        "index_value": index_value,
+        "nifty_value": index_value,   # keep compat field
+        "index_symbol": sym,
+        "source": source,
+        "weight_source": _weight_src,
+        "weight_updated": (_wf.get("fetched") if _wf else None),
+        "index_title": cfg["title"],
+        "as_of": time.strftime("%H:%M:%S"),
+        "data_quality": data_quality,   # "live" | "pre_open" | "fallback_quote"
+        "note": (
+            f"Weight from {'hardcoded approx' if use_fixed else 'session traded value'}. "
+            f"Points contributed ≈ pChange × weight × {cfg['title']} value."
+            + (" ⚠️ PRE-OPEN DATA — prices frozen at day's open, not live."
+               if data_quality == "pre_open" else "")
+        ),
+    }
+    _nifty_cache[sym] = {"ts": time.time(), "data": data}
+    return data
+
+
+_stock_symbols_cache: dict = {"ts": 0, "symbols": []}
+
+
 def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
     """
     Fetch constituents for NIFTY, BANKNIFTY, FINNIFTY, or MIDCPNIFTY.
@@ -3264,6 +3529,34 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
 
     Results are cached per index symbol for 60 s.
     """
+    # ── strategy 0: the active BROKER feed ────────────────────────────
+    # Tried first, before any NSE scraping, when a broker source is selected.
+    # The constituent list comes from index_weights.json and the broker quotes
+    # every name in it, so this works when NSE is unreachable, unwarmed or
+    # rate-limiting - which is exactly when the NSE strategies below fail and
+    # the widget used to show "Server not reachable" despite the server being
+    # perfectly healthy and the data sitting in the feed.
+    if RUN_DATA_SOURCE == "fyers":
+        try:
+            import nse_adapter_fyers as _fy
+            if _fy.is_configured():
+                _cfg0 = _INDEX_CONFIG.get(symbol.upper()) if "_INDEX_CONFIG" in globals() else None
+                _names = list((_load_index_weights().get(symbol.upper()) or {}).get("weights") or {})
+                if not _names and _cfg0:
+                    _names = [n for n, _w in _cfg0.get("fallback_weights", [])]
+                if _names:
+                    _q = _fy.constituent_quotes(_names)
+                    if len(_q) >= max(3, len(_names) // 3):
+                        print(f"[constituents] {symbol}: {len(_q)} names from the Fyers feed")
+                        return _build_constituents_result(symbol, list(_q.values()),
+                                                          source="fyers",
+                                                          data_quality="live")
+                    if _q:
+                        print(f"[constituents] fyers returned only {len(_q)}/{len(_names)} "
+                              f"- falling through to NSE")
+        except Exception as e:  # noqa: BLE001
+            print(f"[constituents] fyers path failed ({e}) - falling through to NSE")
+
     from nse_options_strategy import API_HEADERS, NSE_OC_PAGE, NSE_ALL_INDICES_API
 
     sym = symbol.upper()
@@ -3449,76 +3742,34 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
                 print(f"[constituents:{sym}] strategy3 exception: {e}")
 
 
+    # ── broker feed fallback ──────────────────────────────────────────
+    # Under DATA_SOURCE=fyers the NSE session may be unwarmed or blocked, but
+    # the constituent list is already known from index_weights.json and the
+    # broker can quote every name in it. Previously choosing a broker source
+    # silently broke this widget, even though the data was in the feed.
+    if not raw_stocks and RUN_DATA_SOURCE == "fyers":
+        try:
+            import nse_adapter_fyers as _fy
+            names = list((_load_index_weights().get(sym.upper()) or {}).get("weights") or {})
+            if not names:
+                names = [n for n, _w in cfg["fallback_weights"]]
+            q = _fy.constituent_quotes(names)
+            if q:
+                raw_stocks = list(q.values())
+                print(f"[constituents] {sym}: {len(raw_stocks)} names from the Fyers feed")
+        except Exception as e:  # noqa: BLE001
+            print(f"[constituents] fyers fallback failed: {e}")
+
     if not raw_stocks:
-        raise RuntimeError(f"All data sources failed for {sym}. Warm the session by loading the option chain first.")
+        raise RuntimeError(
+            f"No constituent data for {sym}. "
+            + ("Fyers returned nothing - check the token with /api/data-source."
+               if RUN_DATA_SOURCE == "fyers"
+               else "Load an option chain first to warm the NSE session."))
 
-    # ── Build result ─────────────────────────────────────────────────
-    _weight_map = dict(cfg["fallback_weights"])
-    stocks = [
-        s for s in raw_stocks
-        if s.get("symbol") not in (cfg["nse_names"] + [sym, "NIFTY 50", "NIFTY BANK", "NIFTY FIN SERVICE", "NIFTY MID SELECT"])
-        and float(s.get("lastPrice") or 0) > 0
-    ]
-    stocks.sort(key=lambda s: float(s.get("totalTradedValue") or 0), reverse=True)
+    return _build_constituents_result(sym, raw_stocks, source="nse",
+                                     data_quality=locals().get("data_quality", "live"))
 
-    total_tv = sum(float(s.get("totalTradedValue") or 0) for s in stocks) or 1.0
-    use_fixed = total_tv < 100   # individual fetch fallback
-
-    # Pre-compute raw weights, then NORMALISE to sum to exactly 100%.
-    # This is the critical fix: hardcoded fallback_weights are approximate
-    # and almost never sum to exactly 100 (e.g. NIFTY hardcoded weights
-    # summed to 105.1%, inflating every pts_contributed by 5%). Normalising
-    # ensures the sum of all pts_contributed ≈ actual index point change.
-    raw_weights: dict[str, float] = {}
-    for s in stocks:
-        stock_sym = s.get("symbol", "")
-        if use_fixed:
-            raw_weights[stock_sym] = _weight_map.get(stock_sym, 0.5)
-        else:
-            raw_weights[stock_sym] = float(s.get("totalTradedValue") or 0) / total_tv * 100
-
-    weight_total = sum(raw_weights.values()) or 1.0
-    norm_weights = {k: v / weight_total * 100 for k, v in raw_weights.items()}
-
-    result = []
-    for rank, s in enumerate(stocks, 1):
-        stock_sym = s.get("symbol", "")
-        wt  = norm_weights.get(stock_sym, 0.0)
-        pct = float(s.get("pChange") or 0)
-        pts = round(pct / 100 * wt / 100 * index_value, 2)
-        result.append({
-            "rank": rank,
-            "symbol": stock_sym,
-            "ltp":        round(float(s.get("lastPrice") or 0), 2),
-            "prev_close": round(float(s.get("previousClose") or 0), 2),
-            "change":     round(float(s.get("change") or 0), 2),
-            "pct_change": round(pct, 2),
-            "volume":     int(float(s.get("totalTradedVolume") or 0)),
-            "weight_est": round(wt, 2),
-            "pts_contributed": pts,
-            "pts_abs": abs(pts),
-        })
-
-    data = {
-        "stocks": result,
-        "index_value": index_value,
-        "nifty_value": index_value,   # keep compat field
-        "index_symbol": sym,
-        "index_title": cfg["title"],
-        "as_of": time.strftime("%H:%M:%S"),
-        "data_quality": data_quality,   # "live" | "pre_open" | "fallback_quote"
-        "note": (
-            f"Weight from {'hardcoded approx' if use_fixed else 'session traded value'}. "
-            f"Points contributed ≈ pChange × weight × {cfg['title']} value."
-            + (" ⚠️ PRE-OPEN DATA — prices frozen at day's open, not live."
-               if data_quality == "pre_open" else "")
-        ),
-    }
-    _nifty_cache[sym] = {"ts": time.time(), "data": data}
-    return data
-
-
-_stock_symbols_cache: dict = {"ts": 0, "symbols": []}
 
 def _stock_search(q: str) -> dict:
     """
@@ -3898,6 +4149,20 @@ class Handler(BaseHTTPRequestHandler):
                                               "Bhavcopy files may not be cached yet."})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": str(e)})
+            return
+
+        if parsed.path == "/api/refresh-weights":
+            try:
+                _weights_cache.clear()
+                data = _refresh_all_weights()
+                self._send_json({"ok": True,
+                                 "updated": data.get("_updated"),
+                                 "indices": {k: {"count": v.get("count"),
+                                                 "method": v.get("method")}
+                                             for k, v in data.items()
+                                             if not k.startswith("_")}})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"ok": False, "error": str(e)})
             return
 
         if parsed.path == "/api/candle-health":
@@ -6499,6 +6764,25 @@ def main():
         print("[i] Note: this prevents IDLE sleep. If you close a laptop lid or "
               "choose Sleep from the menu, the machine still sleeps - "
               "connect power and set the display to sleep rather than the system.")
+    if _envbool("NSE_REFRESH_WEIGHTS", RUN_REFRESH_WEIGHTS):
+        print("[weights] NSE_REFRESH_WEIGHTS is on - fetching live constituent weights")
+        try:
+            # The refresh needs a live NSE session. Build one here rather than
+            # assuming a helper exists: an undefined name in a startup path is
+            # a crash, and a startup convenience must never stop the server.
+            global _shared_fetcher
+            if _shared_fetcher is None:
+                from nse_options_strategy import NSESession
+                _f = NSESession()
+                if hasattr(_f, "warm_up"):
+                    _f.warm_up()
+                _shared_fetcher = _f
+            _refresh_all_weights()
+        except Exception as e:  # noqa: BLE001
+            print(f"[weights] refresh failed ({type(e).__name__}: {e}) "
+                  f"- using whatever is on disk")
+    else:
+        _load_index_weights()
     _start_janitor()
     if _envbool("NSE_RECONCILE", RUN_RECONCILE):
         _start_reconciler([s.strip() for s in (args.poll or "NIFTY").split(",")],
