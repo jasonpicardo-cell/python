@@ -10015,16 +10015,16 @@ def build_html(stocks, data_dir):
 
 def main():
     ap = argparse.ArgumentParser(description="NSE Strategy Scanner")
-    ap.add_argument("--data", default=DATA_DIR)
-    ap.add_argument("--out",  default=HTML_OUT)
-    ap.add_argument("--n50",  default=N50_FILE)
-    ap.add_argument("--n100", default=N100_FILE)
-    ap.add_argument("--n200", default=N200_FILE)
-    ap.add_argument("--n500", default=N500_FILE)
-    ap.add_argument("--n750", default=N750_FILE)
-    ap.add_argument("--nifty",default=NIFTY_FILE)
-    ap.add_argument("--fno",  default=FNO_FILE)
-    ap.add_argument("--sector",default=SECTOR_FILE)
+    ap.add_argument("--data",   default=DATA_DIR)
+    ap.add_argument("--out",    default=OUTPUT_HTML)
+    ap.add_argument("--n50",    default=N50_FILE)
+    ap.add_argument("--n100",   default=N100_FILE)
+    ap.add_argument("--n200",   default=N200_FILE)
+    ap.add_argument("--n500",   default=N500_FILE)
+    ap.add_argument("--n750",   default=N750_FILE)
+    ap.add_argument("--nifty",  default=None)
+    ap.add_argument("--fno",    default=NFNO_FILE)
+    ap.add_argument("--sector", default=None)
     a = ap.parse_args()
     index_files = {50:a.n50, 100:a.n100, 200:a.n200, 500:a.n500, 750:a.n750}
     stocks = build_dataset(a.data, index_files,
