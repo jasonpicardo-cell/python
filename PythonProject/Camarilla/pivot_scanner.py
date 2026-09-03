@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-NSE Strategy Scanner — Pivot Points · Price Action/SMC · Volume · Multi-Indicator
-All 4 strategies computed from daily OHLC CSV data and embedded in a single HTML file.
-"""
-
 import os, glob, json, argparse, math
 from datetime import datetime
 from pathlib import Path
@@ -3440,6 +3434,8 @@ def precompute(fp, idx_map, nifty_df=None):
     except: pass
     # 🏅 India Pro strategies — Weekly / Monthly (Timeframe dropdown)
     ti_w = _ti_for(_wdf) if _wdf is not None and len(_wdf)>=20 else {}
+    # Add weekly RSI to t1 now that _wdf is available
+    t1['rsi_w'] = compute_rsi_div(_wdf) if _wdf is not None and len(_wdf)>=20 else {}
     ti_m = _ti_for(_mdf) if _mdf is not None and len(_mdf)>=20 else {}
     # 🎨 Patterns (Harmonic + Chart Patterns)
     patt = dict(
@@ -3608,7 +3604,9 @@ def build_dataset(data_dir, index_files, nifty_path=None, fno_path=None, sector_
     assign_rs(stocks); assign_smart_ranks(stocks); assign_breadth(stocks); assign_sector_rotation(stocks); return stocks
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
-HTML = r"""<!DOCTYPE html>
+HTML = r"""
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -4217,7 +4215,12 @@ th.dv,td.dv{background:rgba(59,158,255,.03);border-left:1px solid rgba(59,158,25
         <option value="rsi_bull_div">RSI Bullish Divergence — hidden accumulation</option>
         <option value="rsi_bear_div">RSI Bearish Divergence — hidden distribution</option>
         <option value="rsi_oversold">RSI Oversold ≤ 30 — extreme selling exhaustion</option>
-        <option value="rsi_overbought">RSI Overbought ≥ 70 — extreme buying exhaustion</option>
+        <option value="rsi_overbought">RSI Overbought ≥ 70 — extreme buying exhaustion (Daily)</option>
+        <option value="rsi_os25">RSI Extreme Oversold ≤ 25 — deep selling exhaustion (Daily)</option>
+      </optgroup>
+      <optgroup label="── 📅 Weekly RSI ──">
+        <option value="rsi_w_ob70">Weekly RSI ≥ 70 — overbought on weekly timeframe</option>
+        <option value="rsi_w_os25">Weekly RSI ≤ 25 — extreme oversold on weekly timeframe</option>
       </optgroup>
       <optgroup label="── 📊 RSI Trend Filter ──">
         <option value="rsi_above50">RSI Above 50 — bull momentum zone</option>
@@ -5834,6 +5837,9 @@ const T1_INFO = {
   rsi_bear_div:     '<b>RSI Bearish Divergence</b> · Price higher high, RSI lower high · Hidden distribution — exit or short signal',
   rsi_oversold:     '<b>RSI Oversold ≤ 30</b> · Extreme selling exhaustion · Combine with support for high-conviction long',
   rsi_overbought:   '<b>RSI Overbought ≥ 70</b> · Extreme buying exhaustion · Combine with resistance for exit or short',
+  rsi_os25:        '<b>RSI Extreme Oversold ≤ 25 (Daily)</b> · RSI(14) at or below 25 — deeper than the standard ≤30 level · Severe selling exhaustion; high reversal probability especially when combined with price support or bullish divergence',
+  rsi_w_ob70:      '<b>Weekly RSI ≥ 70 (Overbought)</b> · RSI(14) on weekly candles at or above 70 · Sustained multi-week buying at an extreme — elevated risk of multi-week correction; best used for profit-booking or stop-tightening',
+  rsi_w_os25:      '<b>Weekly RSI ≤ 25 (Extreme Oversold)</b> · Weekly RSI(14) at or below 25 — rare multi-week selling extreme · NSE stocks at weekly RSI ≤ 25 have elevated probability of a sustained multi-week reversal rally; combined with divergence this is one of the strongest available reversal setups',
   bb_squeeze_bull:  '<b>BB Squeeze + Bull Momentum</b> · Bands at tightest 25% + positive 12-bar momentum · Upside explosion imminent',
   bb_squeeze_bear:  '<b>BB Squeeze + Bear Momentum</b> · Bands tight + negative momentum · Downside explosion imminent',
   bb_squeeze_any:   '<b>BB Squeeze (any direction)</b> · Volatility historically low · Big directional move imminent — wait for break with volume',
@@ -5892,6 +5898,10 @@ function scanT1(){
     if(strat==='rsi_bear_div')   { matched=!!ri.bear_div;   sig='📕 RSI Bear Div'; extra={rsi:ri.rsi}; }
     if(strat==='rsi_oversold')   { matched=!!ri.oversold;   sig='🟢 RSI OS ≤30';   extra={rsi:ri.rsi}; }
     if(strat==='rsi_overbought') { matched=!!ri.overbought; sig='🔴 RSI OB ≥70';   extra={rsi:ri.rsi}; }
+    if(strat==='rsi_os25')   { matched=!!(ri.rsi!==undefined&&ri.rsi<=25);   sig='🟢 RSI ≤25';    extra={rsi:ri.rsi};}
+    const riw=t.rsi_w||{};
+    if(strat==='rsi_w_ob70') { matched=!!riw.overbought;                       sig='🔴 W-RSI ≥70';  extra={rsi:riw.rsi};}
+    if(strat==='rsi_w_os25') { matched=!!(riw.rsi!==undefined&&riw.rsi<=25);  sig='🟢 W-RSI ≤25';  extra={rsi:riw.rsi};}
     if(strat==='rsi_above50')    {matched=!!ri.above50;      sig='📊 RSI>50 '+ri.rsi; extra={rsi:ri.rsi};}
     if(strat==='rsi_below50')    {matched=!!ri.below50;      sig='📉 RSI<50 '+ri.rsi; extra={rsi:ri.rsi};}
     if(strat==='rsi_cross50_bull'){matched=!!ri.cross50_bull;sig='⚡ RSI↑50';          extra={rsi:ri.rsi};}
@@ -6465,7 +6475,7 @@ const STRAT_HELP_KEY={
   vol:{near_poc:0,above_vah:0,below_val:0,vol_spike:1,obv_div_bull:1,obv_div_bear:1,ad_up:1,all:0},
   mi:{both:0,minervini:0,weinstein:1,any:0},
   adv:{darvas:0,vcp:1,wyckoff_acc:2,wyckoff_markup:2,wyckoff_spring:2,turtle20:3,turtle55:3,ichi_above:4,ichi_tk_bull:4,ichi_kbo:4,td_buy9:5,td_sell9:5,st_up:5,st_flip_up:5,elder_buy:5,elder_sell:5},
-  t1:{gc_fresh_golden:0,gc_fresh_death:0,gc_bull_zone:0,gc_near_golden:0,above_50sma:0,below_50sma:0,above_200sma:0,below_200sma:0,rsi_bull_div:1,rsi_bear_div:1,rsi_oversold:1,rsi_overbought:1,bb_squeeze_bull:2,bb_squeeze_bear:2,bb_squeeze_any:2,bb_cross_upper:2,bb_cross_lower:2,bb_above_upper:2,bb_below_lower:2,w52_breakout:3,w52_close_above:3,w52_near:3,w52_consol_near:3,h30_bo:3,h90_bo:3,h30_near:3,nr7_bull:4,nr7_bear:4,nr4:4,inside_bar:4,nr7_inside:4,st_bull:5,st_bear:5,st_flip_bull:5,st_flip_bear:5,st_consec5:5,st_tight:5},
+  t1:{gc_fresh_golden:0,gc_fresh_death:0,gc_bull_zone:0,gc_near_golden:0,above_50sma:0,below_50sma:0,above_200sma:0,below_200sma:0,rsi_bull_div:1,rsi_bear_div:1,rsi_oversold:1,rsi_overbought:1,rsi_os25:1,rsi_w_ob70:1,rsi_w_os25:1,bb_squeeze_bull:2,bb_squeeze_bear:2,bb_squeeze_any:2,bb_cross_upper:2,bb_cross_lower:2,bb_above_upper:2,bb_below_lower:2,w52_breakout:3,w52_close_above:3,w52_near:3,w52_consol_near:3,h30_bo:3,h90_bo:3,h30_near:3,nr7_bull:4,nr7_bear:4,nr4:4,inside_bar:4,nr7_inside:4,st_bull:5,st_bear:5,st_flip_bull:5,st_flip_bear:5,st_consec5:5,st_tight:5},
   t2:{ch_breakout:0,ch_near:0,ch_handle:0,macd_bull_div:1,macd_bear_div:1,macd_flip_bull:1,macd_flip_bear:1,macd_bull_trend:1,zs_oversold:2,zs_overbought:2,zs_extreme_os:2,zs_extreme_ob:2,zs_reverting:2,rsn_outperform:2,rsn_new_hi:2,rsn_underperform:2},
   t3:{fib_near_382:0,fib_near_500:0,fib_near_618:0,fib_near_786:0,fib_any:0,ce_bull:0,ce_bear:0,ce_flip_bull:0,ce_flip_bear:0,psar_bull:0,psar_bear:0,psar_flip_bull:0,psar_flip_bear:0,adx_strong_bull:1,adx_strong_bear:1,adx_di_cross_bull:1,adx_di_cross_bear:1,adx_extreme:1,stoch_bull_cross:2,stoch_bear_cross:2,stoch_oversold:2,stoch_overbought:2,wr_oversold:3,wr_overbought:3,wr_bull_exit:3,wr_bear_exit:3},
   ti:{
@@ -9975,24 +9985,24 @@ document.addEventListener('DOMContentLoaded',async ()=>{
 </div>
 </body>
 </html>
+
+
 """
 
+
 class _NpEnc(json.JSONEncoder):
-    """Serialize numpy scalars that json.dumps can't handle natively."""
     def default(self, o):
-        if isinstance(o, np.bool_):    return bool(o)
-        if isinstance(o, np.integer):  return int(o)
-        if isinstance(o, np.floating): return float(o)
-        if isinstance(o, np.ndarray):  return o.tolist()
+        if isinstance(o,(np.integer,)): return int(o)
+        if isinstance(o,(np.floating,)): return float(o)
+        if isinstance(o,(np.ndarray,)): return o.tolist()
+        if isinstance(o,(np.bool_,)): return bool(o)
         return super().default(o)
 
 def build_html(stocks, data_dir):
     import json as _json, gzip as _gz, base64 as _b64
     gt = datetime.now().strftime("%d %b %Y  %H:%M")
-    # Extract breadth data
     breadth_data = stocks[0].get('_breadth', {}) if stocks else {}
     clean_stocks = [{k:v for k,v in s.items() if k not in ('_breadth','_breadth_ref')} for s in stocks]
-    # Gzip-compress + base64-encode both JSON payloads (typically 88%+ size reduction)
     def _pack(obj):
         raw = _json.dumps(obj, separators=(",",":"), cls=_NpEnc).encode('utf-8')
         return _b64.b64encode(_gz.compress(raw, compresslevel=9)).decode('ascii')
@@ -10002,23 +10012,23 @@ def build_html(stocks, data_dir):
             .replace("__STOCK_COUNT__", str(len(stocks)))
             .replace("__GT__", gt).replace("__DD__", data_dir))
 
+
 def main():
     ap = argparse.ArgumentParser(description="NSE Strategy Scanner")
-    ap.add_argument("--data",  default=DATA_DIR)
-    ap.add_argument("--n50",   default=N50_FILE); ap.add_argument("--n100", default=N100_FILE)
-    ap.add_argument("--n200",  default=N200_FILE); ap.add_argument("--n500", default=N500_FILE)
-    ap.add_argument("--n750",  default=N750_FILE); ap.add_argument("--out",  default=OUTPUT_HTML)
-    ap.add_argument("--nifty", default=None,
-                    help="Path to Nifty50 index CSV (enables RS vs Nifty strategy)")
-    ap.add_argument("--nfno",  default=NFNO_FILE,
-                    help="Path to Nifty F&O eligible symbols file (default: ../niftyfno.txt)")
+    ap.add_argument("--data", default=DATA_DIR)
+    ap.add_argument("--out",  default=HTML_OUT)
+    ap.add_argument("--n50",  default=N50_FILE)
+    ap.add_argument("--n100", default=N100_FILE)
+    ap.add_argument("--n200", default=N200_FILE)
+    ap.add_argument("--n500", default=N500_FILE)
+    ap.add_argument("--n750", default=N750_FILE)
+    ap.add_argument("--nifty",default=NIFTY_FILE)
+    ap.add_argument("--fno",  default=FNO_FILE)
+    ap.add_argument("--sector",default=SECTOR_FILE)
     a = ap.parse_args()
-    print(f"[*] Data: {a.data}")
-    idx = {50:a.n50, 100:a.n100, 200:a.n200, 500:a.n500, 750:a.n750}
-    ap.add_argument('--sector',   default=None, help='Path to sector map CSV (Symbol,Sector)')
-    ap.add_argument('--delivery', default=None, help='Path to NSE bhav copy CSV with delivery volume (columns: Symbol, Deliverable_Vol, Total_Vol)')
-    stocks = build_dataset(a.data, idx, nifty_path=a.nifty, fno_path=a.nfno, sector_path=getattr(a,'sector',None))
-    if not stocks: print("[!] No stocks loaded"); return
+    index_files = {50:a.n50, 100:a.n100, 200:a.n200, 500:a.n500, 750:a.n750}
+    stocks = build_dataset(a.data, index_files,
+                           nifty_path=a.nifty, fno_path=a.fno, sector_path=a.sector)
     html = build_html(stocks, a.data)
     with open(a.out, "w", encoding="utf-8") as f: f.write(html)
     print(f"[+] Output: {a.out}  ({len(html)//1024} KB)")

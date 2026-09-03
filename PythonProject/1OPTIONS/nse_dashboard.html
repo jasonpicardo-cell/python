@@ -36,7 +36,24 @@
   }
   .num, .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
-  .app { max-width: 1280px; margin: 0 auto; padding: 18px 20px 60px; }
+  .app {
+      /* Was a flat 1280px, which threw away 640px - a third of the screen - on
+         a 1080p display. Now scales with the viewport, with a ceiling so the
+         layout does not become unreadable on an ultrawide. The ceiling is a
+         readability limit, not a technical one: past roughly 2560px a
+         full-width row means tracking your eye across half a metre to connect
+         a label to its value, which is worse than a margin.
+
+         On a 4K panel at 100% OS scaling this still leaves wide margins. That
+         is deliberate - at native 4K the text would be too small to read
+         anyway, and the fix is the dashboard's own zoom control rather than
+         more width. Most 4K users run 150-200% scaling, which reports a
+         1920-2560px viewport, and at those sizes this fills the screen. */
+      max-width: min(2560px, 96vw);
+      margin: 0 auto;
+      padding: 18px clamp(12px, 2vw, 28px) 60px;
+    }
+
 
   /* ---------- Top bar ---------- */
   .topbar {
@@ -516,7 +533,15 @@
                        vertical-align:middle; position:relative; }
   .wk-range-bar-fill{ display:block; height:6px; border-radius:3px; }
   .home-layout {
-    display: grid; grid-template-columns: 1fr 420px; gap: 16px; align-items: start;
+    display: grid;
+    /* The sidebar was pinned at 420px, so all the extra width recovered by
+       widening the container went to the main column alone - which just made
+       every chart wider rather than showing more. Letting the sidebar grow a
+       little on a large screen keeps the two columns in proportion, while the
+       clamp stops it eating the chart on a laptop. */
+    grid-template-columns: minmax(0, 1fr) clamp(380px, 26vw, 560px);
+    gap: 16px;
+    align-items: start;
   }
   @media (max-width: 1100px) { .home-layout { grid-template-columns: 1fr; } }
   .home-left { display: flex; flex-direction: column; gap: 12px; }
@@ -5574,7 +5599,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       set('volSpikeMultiplier', s.volSpikeMult);
       if (s.autoRefresh !== undefined && els.autoToggle) els.autoToggle.checked = s.autoRefresh;
       set('niftyAutoRefresh', s.niftyAutoRef, 'checked');
-      if (s.serverUrl && els.serverUrl) els.serverUrl.value = s.serverUrl;
+      // serverUrl deliberately NOT restored here. It lived in two places -
+      // this settings blob and its own localStorage key - and the two could
+      // disagree, with this one running later and winning. That is how a
+      // dashboard opened at 192.168.1.6 silently reverted to 127.0.0.1: the
+      // blob still held an old localhost value from a previous session.
+      // The address is now resolved in exactly one place, below.
       if (s.deltaMode) window._setDeltaMode?.(s.deltaMode);
       if (s.symbol) {
         state.symbol = s.symbol;
@@ -12117,7 +12147,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       try {
         if (spot != null) {
           _safe(() => renderPriceChart(), 'renderPriceChart');                       // chart + all level lines
-          _safe(() => renderMarketPulse(data), 'pulse');
+          _paint('home', () => renderMarketPulse(data), 'pulse');
           _safe(() => checkLevelTouches(_lastLevels || [], data.underlying_value), 'levelTouch');
         }
         if (touchedChain) {
@@ -14342,6 +14372,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       els.panels.forEach(p => p.classList.remove('active'));
       tab.classList.add('active');
       document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+      // Panels on a hidden tab are no longer painted every poll, so a tab you
+      // switch TO would otherwise show whatever was there when you last left
+      // it. Repaint once from the cached response - no network call, just the
+      // DOM work that was skipped while the tab was out of view.
+      _atCache = { t: null, at: 0 };          // invalidate the cached tab name
+      if (state.lastData) {
+        setTimeout(() => { try { render(state.lastData); } catch (_) {} }, 0);
+      }
       localStorage.setItem('nse_active_tab', tab.dataset.tab);
       if (tab.dataset.tab === 'chain') {
         // If we have un-fired ATM scroll (data loaded while on a different tab), fire now
@@ -14600,7 +14638,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // A render bug must NEVER masquerade as a network error or kill alerts.
         console.error('[pipeline] render() fatal:', renderErr);
         showToast(`⚠ Render error: ${renderErr.message} — alerts still active`);
-        _safe(() => renderPivotLevels(), 'alerts-guarantee');
+        _paint('home', () => renderPivotLevels(), 'alerts-guarantee');
       }
     } catch (err) {
       setStatus('bad');
@@ -14632,6 +14670,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // (and with it the level monitor → alerts → voice). Errors surface as a
   // console line + one toast per panel per session instead of silent death.
   const _safeWarned = new Set();
+  // ══ paint only what is on screen ══════════════════════════════════
+  // 62 render functions ran on EVERY poll, and 21 of them painted the chain
+  // tab while you were looking at Home. Their DOM writes were invisible and
+  // their array work pure waste - at a 5-second poll with 60+ strikes that is
+  // a meaningful share of the frame budget, and it is the reason the UI feels
+  // heavier than the data rate justifies.
+  //
+  // Only PURE renderers are skipped. Anything that records history, fires an
+  // alert or writes settings still runs every poll regardless of what is
+  // visible, because an alert you miss because you were on another tab is a
+  // bug, not an optimisation.
+  function _activeTabNow() {
+    const now = Date.now();
+    if (now - _atCache.at < 250) return _atCache.t;
+    const t = document.querySelector('.tab.active')?.dataset.tab || null;
+    _atCache = { t, at: now };
+    return t;
+  }
+  function _paint(tab, fn, name) {
+    try {
+      if (tab && _activeTabNow() && _activeTabNow() !== tab) return;
+      fn();
+    } catch (e) {
+      console.warn(`[pipeline] ${name || 'paint'} failed:`, e);
+    }
+  }
+
+
   function _safe(fn, tag) {
     try { fn(); } catch (e) {
       console.error(`[pipeline] ${tag} failed:`, e);
@@ -14692,7 +14758,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _populateStrikeList(); } catch (_) {}
     try { _m920TouchCheck(data); } catch (_) {}
     try {
-      _safe(() => renderMarketPulse(data), 'renderMarketPulse');
+      _paint('home', () => renderMarketPulse(data), 'renderMarketPulse');
       const ps = document.getElementById('pulseStamp');
       if (ps) ps.textContent = '· as of ' + new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
     } catch (_) {}
@@ -14742,26 +14808,26 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     state.expiry = data.expiry;
 
     _safe(() => renderStatCards(data), 'renderStatCards');
-    _safe(() => renderPivotLevels(), 'renderPivotLevels');
-    _safe(() => _updateSessionOhlcDisplay(), '_updateSessionOhlcDisplay');
-    _safe(() => _renderGreeksCard(data), '_renderGreeksCard');
+    _paint('home', () => renderPivotLevels(), 'renderPivotLevels');
+    _paint('home', () => _updateSessionOhlcDisplay(), '_updateSessionOhlcDisplay');
+    _paint('chain', () => _renderGreeksCard(data), '_renderGreeksCard');
     _safe(() => _renderStraddleBreakeven(), '_renderStraddleBreakeven');
-    _safe(() => _renderOiConcentrationChart(data), '_renderOiConcentrationChart');
-    _safe(() => _checkPcrAlerts(data.pcr), '_checkPcrAlerts');
-    _safe(() => _syncPosSizerLotSize(data.lot_size || 75), '_syncPosSizerLotSize');
+    _paint('chain', () => _renderOiConcentrationChart(data), '_renderOiConcentrationChart');
+    _paint('chain', () => _checkPcrAlerts(data.pcr), '_checkPcrAlerts');
+    _paint('home', () => _syncPosSizerLotSize(data.lot_size || 75), '_syncPosSizerLotSize');
     // New features
-    _safe(() => _checkIvSpikeAlert(data.atm_iv), '_checkIvSpikeAlert');
-    _safe(() => _checkVolumeSpikes(data.strikes || []), '_checkVolumeSpikes');
+    _paint('home', () => _checkIvSpikeAlert(data.atm_iv), '_checkIvSpikeAlert');
+    _paint('home', () => _checkVolumeSpikes(data.strikes || []), '_checkVolumeSpikes');
     _safe(() => _checkPcrTrend(data.pcr), '_checkPcrTrend');
-    _safe(() => _renderThetaDecay(data), '_renderThetaDecay');
+    _paint('chain', () => _renderThetaDecay(data), '_renderThetaDecay');
     _safe(() => _updateExpectedMoves(data), '_updateExpectedMoves');
-    _safe(() => _renderMultiExpiryComparison(data), '_renderMultiExpiryComparison');
-    _safe(() => _fetchAndRenderRelativeStrength(), '_fetchAndRenderRelativeStrength');
+    _paint('chain', () => _renderMultiExpiryComparison(data), '_renderMultiExpiryComparison');
+    _paint('home', () => _fetchAndRenderRelativeStrength(), '_fetchAndRenderRelativeStrength');
     _safe(() => _updateMiniHud(), '_updateMiniHud');
     _safe(() => _saveSettings(), '_saveSettings');
     // Batch 3 new features
     _safe(() => _recordStraddle(data.straddle_premium, data.symbol || state.symbol), '_recordStraddle');
-    _safe(() => _renderStraddleSparkline(), '_renderStraddleSparkline');
+    _paint('chain', () => _renderStraddleSparkline(), '_renderStraddleSparkline');
     _safe(() => _updateIvp(data.atm_iv), '_updateIvp');
     _safe(() => _checkIvMove(data.atm_iv), '_checkIvMove');                 // IV spike/crush alert
     _updateOrb(data.underlying_value);         // opening range tracker
@@ -14772,24 +14838,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _lastFetchTime = Date.now();
     _safe(() => _saveOfflineCache(data), '_saveOfflineCache');
     _safe(() => _updateOiVelocity(data.strikes || []), '_updateOiVelocity');
-    _safe(() => _renderExpiryCal(data), '_renderExpiryCal');
+    _paint('chain', () => _renderExpiryCal(data), '_renderExpiryCal');
     _safe(() => _checkWatchlistAlerts(), '_checkWatchlistAlerts');
-    _safe(() => _showStaleBanner(-1), '_showStaleBanner');
+    _paint('chain', () => _showStaleBanner(-1), '_showStaleBanner');
     state._circuitBreakers = _getCircuitBreakers();
     // Batch 5 — newest features
     _safe(() => _recordSpot(data.underlying_value), '_recordSpot');
-    _safe(() => _renderSpotSparkline(), '_renderSpotSparkline');
+    _paint('chain', () => _renderSpotSparkline(), '_renderSpotSparkline');
     _safe(() => _recordFlow(data), '_recordFlow');
-    _safe(() => _renderFlowTimeline(), '_renderFlowTimeline');
+    _paint('chain', () => _renderFlowTimeline(), '_renderFlowTimeline');
     _safe(() => _recordSessionLog(data), '_recordSessionLog');
     _safe(() => _checkWatchlistSrCrossings(), '_checkWatchlistSrCrossings');
     // Batch 6 — latest additions
-    _safe(() => _renderIvSkew(data), '_renderIvSkew');
-    _safe(() => _renderMpainSparkline(), '_renderMpainSparkline');
+    _paint('chain', () => _renderIvSkew(data), '_renderIvSkew');
+    _paint('chain', () => _renderMpainSparkline(), '_renderMpainSparkline');
     _prevSpotForScenario = data.underlying_value;
     state._sessionVwap = _computeSessionVwap();
     // Batch 7 — newest
-    _safe(() => _renderHlDist(data), '_renderHlDist');
+    _paint('chain', () => _renderHlDist(data), '_renderHlDist');
     _safe(() => _checkPcrDivergence(data), '_checkPcrDivergence');
     _safe(() => _clearRetry(), '_clearRetry');
     const eScore = _computeEntryScore(data);
@@ -14873,16 +14939,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // ─── Charts: update regardless of tab (lightweight SVG replacements) ──
     _safe(() => renderSkewChart(data), 'renderSkewChart');
-    _safe(() => renderOcLevels(data), 'renderOcLevels');
-    _safe(() => renderGexChart(data), 'renderGexChart');
-    _safe(() => renderTermStructure(data), 'renderTermStructure');
+    _paint('chain', () => renderOcLevels(data), 'renderOcLevels');
+    _paint('chain', () => renderGexChart(data), 'renderGexChart');
+    _paint('chain', () => renderTermStructure(data), 'renderTermStructure');
     _safe(() => _trackMultiStraddle(data), '_trackMultiStraddle');
-    _safe(() => renderMultiStraddle(), 'renderMultiStraddle');
-    _safe(() => renderVolSurface(data), 'renderVolSurface');
-    _safe(() => renderVolSurfaceSkew(data), 'renderVolSurfaceSkew');
-    _safe(() => _renderFuturesBasis(data), '_renderFuturesBasis');
-    _safe(() => _renderIvRank(data), '_renderIvRank');
-    _safe(() => renderVolSurface(data), 'renderVolSurface');
+    _paint('chain', () => renderMultiStraddle(), 'renderMultiStraddle');
+    _paint('chain', () => renderVolSurface(data), 'renderVolSurface');
+    _paint('chain', () => renderVolSurfaceSkew(data), 'renderVolSurfaceSkew');
+    _paint('chain', () => _renderFuturesBasis(data), '_renderFuturesBasis');
+    _paint('chain', () => _renderIvRank(data), '_renderIvRank');
+    _paint('chain', () => renderVolSurface(data), 'renderVolSurface');
     _safe(() => renderPcrTrend(data), 'renderPcrTrend');
     _safe(() => renderStraddleChart(data), 'renderStraddleChart');
     _safe(() => renderStratLtpChart(), 'renderStratLtpChart');
@@ -19641,17 +19707,41 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // When the dashboard is served BY the server (LAN mode), default the API
   // address to wherever the page came from — so other computers work with
   // zero configuration instead of pointing at their own localhost.
-  (() => {
+  // ══ server address: ONE resolver, page origin wins ════════════════
+  // If the page was SERVED over http, the API is on that same host - you
+  // literally just downloaded this file from it. Anything saved from an
+  // earlier session is stale by comparison, so the origin is authoritative
+  // rather than a fallback. Only a file:// open falls back to the saved
+  // value, because then there is no origin to learn from.
+  function _resolveServerUrl() {
+    if (!els.serverUrl) return;
     try {
-      if (!/^https?:/.test(location.protocol)) return;         // opened as file:// -> keep saved value
-      const origin = location.origin;
-      const saved = localStorage.getItem('serverUrl');
-      if (els.serverUrl && (!saved || /127\.0\.0\.1|localhost/.test(saved)) && !/127\.0\.0\.1|localhost/.test(origin)) {
+      if (/^https?:/.test(location.protocol)) {
+        const origin = location.origin;
+        if (els.serverUrl.value !== origin) {
+          console.log(`[server] using the page origin ${origin}` +
+            (els.serverUrl.value ? ` (was ${els.serverUrl.value})` : ''));
+        }
         els.serverUrl.value = origin;
         localStorage.setItem('serverUrl', origin);
+        return;
       }
+      // file:// — no origin to learn from, so use whatever was saved
+      const saved = localStorage.getItem('serverUrl');
+      if (saved) els.serverUrl.value = saved;
     } catch (_) {}
-  })();
+  }
+  _resolveServerUrl();
+
+  // A manual edit is the user overriding the origin on purpose - honour it and
+  // persist it, so a typed LAN address survives a refresh.
+  els.serverUrl?.addEventListener('change', () => {
+    const v = (els.serverUrl.value || '').trim().replace(/\/+$/, '');
+    if (!v) return;
+    els.serverUrl.value = v;
+    try { localStorage.setItem('serverUrl', v); } catch (_) {}
+    console.log(`[server] address set manually to ${v}`);
+  });
 
   (() => {
     const sel = document.getElementById('voiceMode');
@@ -26759,6 +26849,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 <!-- ── Help tooltip ── -->
 <div id="helpTip"></div>
 <script>
+  // activeTab is a local const inside render(), invisible from here - reading
+  // it as a free variable silently made this guard a no-op. Read the DOM
+  // instead, cached for a moment so 30 calls in one pass cost one query.
+  let _atCache = { t: null, at: 0 };
+
 (function() {
   // ── Help text library ────────────────────────────────────────────────────
   const H = {
