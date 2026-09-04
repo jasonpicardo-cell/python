@@ -1928,6 +1928,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_maxpain"> Max pain</label>
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
+                <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
                 <select id="chartPivotType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Pivot formula drawn on the chart (independent of the Pivot Levels panel)">
                   <option value="classic">Classic</option>
                   <option value="fibonacci">Fibonacci</option>
@@ -16620,8 +16621,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
@@ -17395,10 +17396,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Each series is normalised to its own range, because they share no units:
   // PCR near 1, VIX in the teens, IV in percent. Plotting them on one absolute
   // axis would flatten two of the three into a straight line.
+  // Two PCR bands rather than one. The near band reacts to what is trading
+  // now; the one-day band is steadier. Watching them together is the useful
+  // part - when the near line pulls away from the day line, positioning is
+  // shifting at the strikes price can actually reach, and the wider measure
+  // will not show it for a while yet.
+  //
+  // Straddle premium and skew are the two option series that lead rather than
+  // confirm: the straddle is the market's live price of movement, and skew is
+  // what protection costs. Both move before the candles do, which is exactly
+  // what a co-timed pane is for. Off by default so the pane stays readable.
   const _CTX_SERIES = [
-    { k: 'pcr', lab: 'PCR', col: '#d4af37', get: h => h.pcr },
-    { k: 'vix', lab: 'VIX', col: '#45aaf2', get: h => h.vix },
-    { k: 'iv',  lab: 'ATM IV', col: '#26de81', get: h => h.iv },
+    { k: 'pcr',      lab: 'PCR now',   col: '#d4af37', get: h => h.pcr,
+      tip: 'Put-call ratio across the strikes price can reach in the hours left' },
+    { k: 'pcr1d',    lab: 'PCR 1-day', col: '#f7b731', get: h => h.pcr1d,
+      tip: 'Same ratio over a full session-sigma band — steadier, and the line the near one diverges from' },
+    { k: 'vix',      lab: 'VIX',       col: '#45aaf2', get: h => h.vix,
+      tip: 'India VIX' },
+    { k: 'iv',       lab: 'ATM IV',    col: '#26de81', get: h => h.iv,
+      tip: 'At-the-money implied volatility for the selected expiry' },
+    { k: 'straddle', lab: 'Straddle',  col: '#a55eea', get: h => h.straddle,
+      tip: 'ATM call + put premium: what the market currently charges for a move. Rising while price is flat means someone is paying for something that has not happened yet.' },
+    { k: 'skew',     lab: 'Skew',      col: '#fd9644', get: h => h.skew,
+      tip: 'OTM put IV minus OTM call IV. Rising skew is protection being bid, which usually precedes the selling it protects against.' },
   ];
   // History must span the whole session, 09:15 to 15:40. A flat point cap
   // could not do that: 400ms spacing over 385 minutes is nearly 58,000 points,
@@ -17483,13 +17503,30 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // Drop foreign-symbol points at write time rather than filtering later:
     // a series that silently blends two instruments is worse than an empty one.
     if (_ctxHist.length && _ctxHist[_ctxHist.length - 1].sym !== sym) _ctxHist.length = 0;
-    let pcr = null;
+    let pcr = null, pcr1d = null;
     try {
       const b = _pcrByBand(d);
       pcr = b?.bands?.find(x => x.k === 'rod')?.pcr ?? d.pcr ?? null;
+      pcr1d = b?.bands?.find(x => x.k === 'd1')?.pcr ?? null;
     } catch (_) { pcr = d.pcr ?? null; }
-    const row = { ts: Date.now(), sym, pcr, vix: d.india_vix ?? null, iv: d.atm_iv ?? null };
-    if (row.pcr == null && row.vix == null && row.iv == null) return;
+    // ATM straddle: the market's own price of a move
+    let straddle = null, skew = null;
+    try {
+      const spot = d.underlying_value, gap = d.strike_gap || 50;
+      const atmRow = (d.strikes || []).reduce((a, b2) =>
+        Math.abs(b2.strike - spot) < Math.abs(a.strike - spot) ? b2 : a, (d.strikes || [])[0]);
+      if (atmRow) {
+        const s = (atmRow.ce_ltp || 0) + (atmRow.pe_ltp || 0);
+        if (s > 0) straddle = s;
+      }
+      // skew: four strikes out either side, which is roughly one day's sigma
+      const near = k => (d.strikes || []).find(x => Math.abs(x.strike - k) < gap / 2);
+      const p = near(spot - gap * 4), cc2 = near(spot + gap * 4);
+      if (p?.pe_iv && cc2?.ce_iv) skew = p.pe_iv - cc2.ce_iv;
+    } catch (_) {}
+    const row = { ts: Date.now(), sym, pcr, pcr1d, vix: d.india_vix ?? null,
+                  iv: d.atm_iv ?? null, straddle, skew };
+    if (row.pcr == null && row.vix == null && row.iv == null && row.straddle == null) return;
     const last = _ctxHist[_ctxHist.length - 1];
     // Coalesce inside 400ms rather than 3s: with tick-driven updates a 3s
     // window would throw away most of the new resolution, which is the whole
@@ -17513,7 +17550,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // PCR is the one that moves on positioning rather than on price - VIX and
     // IV largely restate what the candles already show. They stay one tick
     // away for when the question is specifically about volatility.
-    const CTX_DEFAULT = { pcr: true, vix: false, iv: false };
+    const CTX_DEFAULT = { pcr: true, pcr1d: true, vix: false, iv: false,
+                          straddle: false, skew: false };
     const cfg = (() => {
       try {
         const raw = localStorage.getItem('ctxChartCfg');
@@ -17528,7 +17566,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // anything back on short of clearing storage. A control that can remove
     // itself is a trap, not a feature.
     const ctrls = `<span style="display:flex;gap:8px;font-size:9px;color:var(--muted,#789);">
-        ${_CTX_SERIES.map(s => `<label><input type="checkbox" data-ctxs="${s.k}" ${cfg[s.k] !== false ? 'checked' : ''}> ${s.lab}</label>`).join('')}
+        ${_CTX_SERIES.map(s => `<label title="${escapeHtml(s.tip || '')}"><input type="checkbox" data-ctxs="${s.k}" ${cfg[s.k] !== false ? 'checked' : ''}> ${s.lab}</label>`).join('')}
       </span>`;
     if (pts.length < 3 || !shown.length) {
       box.innerHTML = `<div style="display:flex;gap:12px;align-items:center;padding:6px 8px;font-size:9.5px;color:var(--muted,#789);">
@@ -19793,6 +19831,30 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       L.push({ v: state._cpr.P,  lab: 'Pivot',  col: '#7aa2f7', dash: '' });
       L.push({ v: state._cpr.BC, lab: 'CPR BC', col: '#7aa2f7', dash: '4,3' });
     }
+    // ── gamma flip ────────────────────────────────────────────────
+    // Not a target like max pain, which price gravitates toward. This is a
+    // REGIME BOUNDARY: above it dealer hedging damps moves, below it hedging
+    // amplifies them, so the same setup should be traded differently on
+    // either side. Drawn distinctly for that reason - it is not another
+    // support or resistance and reading it as one would be a mistake.
+    //
+    // It also MOVES during the session as open interest shifts, which a
+    // static line cannot convey; watching it drift toward price is itself
+    // information, because the regime can change without price doing anything.
+    if (_chart.show.gflip !== false) {
+      try {
+        const gx = _computeGex(d);
+        if (gx?.flip) {
+          const above = spot >= gx.flip;
+          L.push({
+            v: gx.flip,
+            lab: `γ flip ${above ? '(damping above)' : '(amplifying below)'}`,
+            col: above ? '#26de81' : '#fd9644',
+            dash: '9,4', wide: true,
+          });
+        }
+      } catch (_) {}
+    }
     if (_chart.show.walls) {
       try { const w = _flowWalls(d);
         if (w?.callWall) L.push({ v: w.callWall, lab: 'Call wall', col: 'var(--neg,#ef5350)', dash: '6,3', wide: true });
@@ -21159,7 +21221,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       el.checked = !!_chart.show[k];
@@ -27779,7 +27841,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'volume-profile':    '<strong>Volume Profile &amp; CVD</strong>Impossible before the broker feed: NSE supplied one spot sample a minute with no volume at all, and volume is the entire input here. A price chart shows where price WENT; the profile shows where it <b>traded</b> - how much business was done at each level - and those levels matter because that is where positions live, so price returns to them. <b>POC</b> is the most-traded price, the session\'s centre of gravity and the level price is most likely to revisit. <b>VAH and VAL</b> bound the value area holding 70%% of the volume, and the practical rule is the most useful thing on this panel: <b>inside the value area the market is balanced and fades work; outside it the market is imbalanced and trends work.</b> Knowing which regime you are in matters more than any single level. <b>Low-volume nodes</b> are prices the market passed through quickly and tends to pass through quickly again - poor targets, good breakout confirmations. <b>CVD</b> tracks buying minus selling pressure; its value is in DIVERGENCE, because price making a new high while CVD does not means the move is not backed by aggressive buying. <b>Honest limit:</b> this CVD is a bar-level approximation classified by where each bar closed within its own range. A true tick delta needs every print tagged against bid and ask, which the feed does not expose per trade - so read the divergence, not the absolute number.',
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
-    'ctx-chart':         '<strong>Context pane</strong>PCR, India VIX and ATM implied volatility drawn against the <b>same time axis as the candles above</b>. Sharing that axis is the entire point: reading the three as numbers tells you where they are, but seeing them co-timed with price tells you which one moved FIRST - and that ordering is where the information sits. Implied volatility lifting while price is flat, or the put-call ratio turning ten minutes before the candles do, is invisible in a set of readouts and obvious here. <b>Each line is scaled to its own range</b>, because they share no units - PCR sits near 1, VIX in the teens, IV in percent - and plotting them on one absolute axis would flatten two of the three into a straight line. The span beside each legend entry tells you what that series has actually covered, so a line that looks dramatic can be checked against a range that may be trivial. The PCR line is the near-band figure, the same one the voice alert watches, so what you hear and what you see are the same number. Untick a series to remove it; the choice persists.',
+    'ctx-chart':         '<strong>Context pane</strong>PCR, India VIX and ATM implied volatility drawn against the <b>same time axis as the candles above</b>. Sharing that axis is the entire point: reading the three as numbers tells you where they are, but seeing them co-timed with price tells you which one moved FIRST - and that ordering is where the information sits. Implied volatility lifting while price is flat, or the put-call ratio turning ten minutes before the candles do, is invisible in a set of readouts and obvious here. <b>Each line is scaled to its own range</b>, because they share no units - PCR sits near 1, VIX in the teens, IV in percent - and plotting them on one absolute axis would flatten two of the three into a straight line. The span beside each legend entry tells you what that series has actually covered, so a line that looks dramatic can be checked against a range that may be trivial. <b>Two PCR lines by default.</b> The near band reacts to what is trading now; the one-day band is steadier. Watching them together is the useful part - when the near line pulls away from the day line, positioning is shifting at the strikes price can actually reach, and the wider measure will not show it for a while yet. The near line is the same figure the voice alert watches, so what you hear and what you see are the same number. <b>Two further series lead rather than confirm,</b> and are one tick away: <b>Straddle</b> is the market\'s live price of a move - rising while price is flat means someone is paying for something that has not happened yet - and <b>Skew</b> is OTM put IV minus OTM call IV, so a rising line is protection being bid, which usually precedes the selling it protects against. Both are off by default because six lines on one small pane is unreadable, not because they matter less. Untick anything to remove it; the choice persists.',
     'pcr-bands':         '<strong>PCR by horizon</strong>One put-call ratio hides which strikes produced it. Computed over the whole chain it includes strikes price cannot reach this week - that open interest is positional and barely moves intraday, so it dilutes a genuine shift near the money into something that looks like nothing happened. The bands here are defined in <b>sigma</b> - the expected move - rather than in strike counts, and that distinction matters more than it sounds. Nifty uses 50-point steps near the money and 100-point steps further out, so a fixed count like \'±12 strikes\' covers ±600 points in one part of the chain and ±1200 in another: the band silently changes meaning depending on where the money is. A fixed count also means different risk on different instruments, because BankNifty\'s higher volatility needs a wider net for the same reachability. Measuring in sigma removes both problems - each band self-adjusts to strike spacing, to the instrument and to today\'s volatility, and the strike COUNT becomes an output worth reading rather than a number to guess at. On a quiet Nifty day the rest-of-day band might be ±111 points and five strikes; on a high-volatility day the same band widens to ±195 points and seven. <b>The divergence between the near and wide bands is the actionable part:</b> when they disagree, positioning is shifting where price actually is, and the wide ratio will not reflect it for some time. The three columns are the same ratio computed on open interest, traded volume, and CHANGE in open interest - and ΔOI is the most immediate of the three, because it counts only what was added or removed today rather than the standing book. <b>Only the ±3 band is announced.</b> The wider ones move slowly by design, so alerting on them would mostly report the passage of time; the near band is the one that can change what you do in the next few minutes. Rising PCR means puts building relative to calls, which is support being written and conventionally bullish - but above 1.6 or below 0.6 the reading inverts and is called out as contrarian, because when everyone is positioned one way there is nobody left to push it further.',
     'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
     'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
