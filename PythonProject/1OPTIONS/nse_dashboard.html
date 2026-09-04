@@ -1893,6 +1893,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <button class="btn" id="panDnBtn" style="font-size:10px;padding:0 6px;line-height:16px;" title="Pan view down">&#9660;</button>
               </span>
               <span style="display:flex;gap:4px;align-items:center;">
+                <label style="font-size:9px;color:var(--muted,#789);margin-right:4px;" title="Colour candles by volume relative to the last 10 bars, not just by direction. Needs real traded volume, so it works on a broker feed and not on NSE data.">
+                  <input type="checkbox" id="pvsraToggle"> PVSRA
+                </label>
                 <select id="chartType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Candles show time honestly; Renko strips it out to filter noise">
                   <option value="candle" selected>Candles</option>
                   <option value="renko">Renko</option>
@@ -17298,6 +17301,87 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   setInterval(_ctxScheduleDraw, 100);      // at most 10 repaints a second
 
+  // ══ PVSRA CANDLE COLOURING ════════════════════════════════════════
+  // Price-Volume-Spread-Range Analysis: colour each candle by how much volume
+  // it took relative to recent candles, not just by direction. The premise is
+  // that a move on ordinary volume and the same move on triple volume are
+  // different events, and a two-colour chart cannot tell them apart.
+  //
+  //   ≥200% of average volume   bright green / bright red   climax
+  //   ≥150%                     blue / magenta              above average
+  //   below that                light green / light pink    ordinary
+  //
+  // The classic definition also treats a candle as climax when its
+  // VOLUME × SPREAD is the largest of the last ten, which catches a wide bar
+  // on merely high volume - the effort and the result together. Both tests are
+  // applied, because either alone misses cases the other finds.
+  //
+  // This needs REAL traded volume, so it works on the broker feed and not on
+  // NSE data, which supplies one spot sample a minute and no volume at all.
+  // Rather than colour everything "ordinary" and let that look like a reading,
+  // the toggle reports that volume is unavailable.
+  const _PVSRA_COLS = {
+    climaxUp:  '#00E676',   // bright green
+    climaxDn:  '#FF1744',   // bright red
+    risingUp:  '#2979FF',   // blue
+    risingDn:  '#E040FB',   // magenta
+    normalUp:  '#A5D6A7',   // light green
+    normalDn:  '#F48FB1',   // light pink
+  };
+
+  function _pvsraClass(cs, i) {
+    const c = cs[i];
+    if (!c || !(c.v > 0)) return null;
+    const from = Math.max(0, i - 10);
+    const prev = cs.slice(from, i).filter(x => x.v > 0);
+    if (prev.length < 5) return null;                 // not enough to compare against
+    const avg = prev.reduce((s, x) => s + x.v, 0) / prev.length;
+    if (!avg) return null;
+    const prevC = i > 0 ? cs[i - 1].c : c.o;
+    const up = c.c > c.o ? true : c.c < c.o ? false : (c.c >= prevC);
+    const ratio = c.v / avg;
+    // effort against result: a wide bar on high volume counts as climax even
+    // when the raw volume ratio alone would not reach 200%
+    const vs = c.v * Math.max(1e-9, c.h - c.l);
+    const maxVs = Math.max(...prev.map(x => x.v * Math.max(1e-9, x.h - x.l)));
+    // The thresholds are the volume ratio, exactly as specified: 200% climax,
+    // 150% above-average, below that ordinary.
+    //
+    // Classic PVSRA adds a second climax route - volume × spread exceeding the
+    // last ten bars - which catches a wide bar on merely high volume. It is
+    // off by default because it OVERRODE the stated thresholds: a 155% bar
+    // that happened to be wide came out bright instead of blue, which makes
+    // the legend a lie. Enable it with pvsraSpread if you want the fuller
+    // definition; the ratio bands then become a floor rather than the rule.
+    let climax = ratio >= 2;
+    if (!climax && _pvsraSpreadOn()) {
+      climax = vs > maxVs && ratio >= 1.5;      // never below the 150% band
+    }
+    const rising = ratio >= 1.5;
+    const kind = climax ? 'climax' : rising ? 'rising' : 'normal';
+    return {
+      kind, up, ratio,
+      col: _PVSRA_COLS[kind + (up ? 'Up' : 'Dn')],
+      label: `${kind === 'climax' ? 'CLIMAX' : kind === 'rising' ? 'above average' : 'ordinary'} · ${(ratio * 100).toFixed(0)}% of 10-bar average volume`,
+    };
+  }
+
+  function _pvsraSpreadOn() {
+    try { return localStorage.getItem('pvsraSpread') === '1'; } catch (_) { return false; }
+  }
+
+  function _pvsraOn() {
+    // ON by default. Reading volume relative to recent bars is more useful
+    // than a two-colour chart in almost every case, and where volume is
+    // absent (NSE) the colouring falls back on its own rather than misleading.
+    // An explicit '0' turns it off; an absent key means never chosen, so the
+    // default applies.
+    try {
+      const v = localStorage.getItem('pvsraOn');
+      return v === null ? true : v === '1';
+    } catch (_) { return true; }
+  }
+
   // ══ CONTEXT CHART ═════════════════════════════════════════════════
   // A second pane under the candles showing PCR, VIX and ATM IV as lines.
   //
@@ -17425,8 +17509,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const box = document.getElementById('ctxChartBody');
     if (!box) return;
     if (_chart.diagOpen) return;
-    const cfg = (() => { try { return JSON.parse(localStorage.getItem('ctxChartCfg') || '{}'); }
-                         catch (_) { return {}; } })();
+    // Default: PCR only. Three lines on one pane compete for attention, and
+    // PCR is the one that moves on positioning rather than on price - VIX and
+    // IV largely restate what the candles already show. They stay one tick
+    // away for when the question is specifically about volatility.
+    const CTX_DEFAULT = { pcr: true, vix: false, iv: false };
+    const cfg = (() => {
+      try {
+        const raw = localStorage.getItem('ctxChartCfg');
+        return raw ? Object.assign({}, CTX_DEFAULT, JSON.parse(raw)) : { ...CTX_DEFAULT };
+      } catch (_) { return { ...CTX_DEFAULT }; }
+    })();
     const shown = _CTX_SERIES.filter(s => cfg[s.k] !== false);
     const pts = _ctxHist.filter(h => h.sym === state.symbol);
     // The tick boxes are built here, ONCE, and rendered in every branch.
@@ -20104,7 +20197,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const up = c.c >= c.o;
         const h2 = (c.v / vMax) * vh;
         const cx = x(i);
-        volSvg += `<rect x="${(cx - Math.max(1, cw / 2)).toFixed(1)}" y="${(H - padB - h2).toFixed(1)}" width="${Math.max(1, cw).toFixed(1)}" height="${h2.toFixed(1)}" fill="${up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'}" opacity="0.28"/>`;
+        // Volume bars take the same colour as their candle. A climax bar
+        // showing bright green above a bright green candle reads as one event;
+        // two different colour schemes on the same bar reads as two.
+        const pvv = _pvsraOn() ? _pvsraClass(cs, i) : null;
+        const vcol = pvv ? pvv.col : (up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)');
+        volSvg += `<rect x="${(cx - Math.max(1, cw / 2)).toFixed(1)}" y="${(H - padB - h2).toFixed(1)}" width="${Math.max(1, cw).toFixed(1)}" height="${h2.toFixed(1)}" fill="${vcol}" opacity="${pvv && pvv.kind !== 'normal' ? 0.5 : 0.28}"/>`;
       });
       volSvg += `<line x1="${padL}" y1="${vTop.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${vTop.toFixed(1)}" stroke="rgba(255,255,255,0.08)"/>`;
       volSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(vTop + 9).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">vol ${fmtInt(Math.round(vMax))}</text>`;
@@ -20115,17 +20213,59 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // colour by body; for a flat body fall back to change vs the previous close
       const prevC = i > 0 ? cs[i - 1].c : c.o;
       const up = c.c > c.o ? true : c.c < c.o ? false : (c.c >= prevC);
-      const col = up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+      // PVSRA replaces the two-colour scheme when it is on AND the feed
+      // carries volume. A null result means not enough history or no volume,
+      // and falling back to the plain colours is correct there - a candle
+      // coloured "ordinary" because volume is missing would be a lie.
+      const pv = (_pvsraOn() && _chart.hasVolume) ? _pvsraClass(cs, i) : null;
+      const col = pv ? pv.col : (up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)');
+      // Colour alone is not enough to pick a climax bar out of 300 candles.
+      // Contrast comes from making the ORDINARY recede, not only from making
+      // the exceptional brighter: on a 1-minute chart most bars are ordinary,
+      // and if they are all fully opaque the eye has nothing to lock onto.
+      // Three levers move together - opacity, outline weight, and a marker -
+      // so a climax bar is findable at a glance and in peripheral vision.
+      // Opacity alone cannot solve this, and the numbers say why: light green
+      // at 40% still has HIGHER effective luminance than blue at 92%, because
+      // the pastels are high-luminance colours to begin with. Dimming them
+      // enough to recede would make them invisible rather than quiet.
+      //
+      // WIDTH is the answer. It is the strongest visual cue available, it is
+      // independent of colour perception, and it survives a colour-blind eye,
+      // a dim monitor and peripheral vision alike. A 200% bar is drawn 1.8x
+      // wider than an ordinary one and a 150% bar 1.35x, so the significant
+      // bars are physically bigger objects rather than merely different ones.
+      const pvOp = pv ? (pv.kind === 'climax' ? 1 : pv.kind === 'rising' ? 1 : 0.34) : 1;
+      const pvStroke = pv ? (pv.kind === 'climax' ? 1.8 : pv.kind === 'rising' ? 1.2 : 0.3) : 0.6;
+      const pvW = pv ? (pv.kind === 'climax' ? 1.8 : pv.kind === 'rising' ? 1.35 : 1) : 1;
+      const cwP = Math.max(1, cw * pvW);
       const cx = x(i);
       const yo = y(c.o), yc = y(c.c), yh = y(c.h), yl = y(c.l);
       const bodyTop = Math.min(yo, yc), bodyBot = Math.max(yo, yc);
       // upper wick: high -> top of body; lower wick: bottom of body -> low
       if (yh < bodyTop - 0.2)
-        svg += `<rect x="${(cx - wickW / 2).toFixed(2)}" y="${yh.toFixed(2)}" width="${wickW}" height="${(bodyTop - yh).toFixed(2)}" fill="${col}"/>`;
+        svg += `<rect x="${(cx - (wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)) / 2).toFixed(2)}" y="${yh.toFixed(2)}" width="${(wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)).toFixed(2)}" height="${(bodyTop - yh).toFixed(2)}" fill="${col}" opacity="${pvOp}"/>`;
       if (yl > bodyBot + 0.2)
-        svg += `<rect x="${(cx - wickW / 2).toFixed(2)}" y="${bodyBot.toFixed(2)}" width="${wickW}" height="${(yl - bodyBot).toFixed(2)}" fill="${col}"/>`;
+        svg += `<rect x="${(cx - (wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)) / 2).toFixed(2)}" y="${bodyBot.toFixed(2)}" width="${(wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)).toFixed(2)}" height="${(yl - bodyBot).toFixed(2)}" fill="${col}" opacity="${pvOp}"/>`;
       const bodyH = Math.max(1, bodyBot - bodyTop);
-      svg += `<rect x="${(cx - cw / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${cw}" height="${bodyH.toFixed(2)}" fill="${col}" stroke="${col}" stroke-width="0.6" shape-rendering="crispEdges"/>`;
+      svg += `<rect x="${(cx - cwP / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${cwP.toFixed(2)}" height="${bodyH.toFixed(2)}" fill="${col}" stroke="${col}" stroke-width="${pvStroke}" opacity="${pvOp}" shape-rendering="crispEdges"><title>${
+        pv ? `${pv.label}\n${up ? 'up' : 'down'} bar` : ''}</title></rect>`;
+      // A climax bar also gets a marker in the margin above the wick. A colour
+      // difference is invisible in peripheral vision; a shape is not, and it
+      // survives being scrolled past at speed.
+      // Both significant classes get a marker, in different shapes. Shape is
+      // readable in peripheral vision where colour is not, and two distinct
+      // shapes let you tell 200% from 150% without stopping to compare hues.
+      if (pv && pv.kind !== 'normal') {
+        const my = Math.max(padT + 4, yh - 5);
+        if (pv.kind === 'climax') {
+          // solid triangle: the loudest mark, for 200%+
+          svg += `<path d="M${(cx - 3).toFixed(1)},${(my - 3.4).toFixed(1)} L${(cx + 3).toFixed(1)},${(my - 3.4).toFixed(1)} L${cx.toFixed(1)},${my.toFixed(1)} Z" fill="${col}"/>`;
+        } else {
+          // small hollow square: present but quieter, for 150%
+          svg += `<rect x="${(cx - 1.8).toFixed(1)}" y="${(my - 3.6).toFixed(1)}" width="3.6" height="3.6" fill="none" stroke="${col}" stroke-width="1.1"/>`;
+        }
+      }
       // live bar: outline it so the forming candle is obvious
       if (i === cs.length - 1 && _chart.liveBar)
         svg += `<rect x="${(cx - cw / 2 - 1).toFixed(2)}" y="${(bodyTop - 1).toFixed(2)}" width="${cw + 2}" height="${(bodyH + 2).toFixed(2)}" fill="none" stroke="#fff" stroke-width="0.7" opacity="0.55"/>`;
@@ -20262,6 +20402,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         ${_chart.gapMins ? `<span style="color:var(--gold,#d4af37);" title="Shaded bands mark minutes with no recorded data — the server was not running then. NSE's own feed fills these when reachable; press ⤢ fill from 9:15 to retry.">⚠ ${_chart.gapMins} min not recorded</span>` : ''}
         ${!_chart.optionMeta && _chart.coverage && !/^09:1[0-9]/.test(_chart.coverage) ? `<span style="color:var(--gold,#d4af37);cursor:pointer;" id="chartFillHint" title="The chart does not reach back to the open — click to pull the morning from NSE's own feed">⤢ starts ${escapeHtml(_chart.coverage.split('-')[0])} — fill from 9:15</span>` : ''}
         <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
+        ${_pvsraOn() && _chart.hasVolume ? `<span style="display:inline-flex;gap:7px;align-items:center;" title="PVSRA: candle colour by volume against the 10-bar average. Ordinary bars are dimmed so the exceptional ones stand out; climax bars carry a triangle above the wick.">
+          <b style="color:#00E676;">▼200%</b><b style="color:#FF1744;">▼</b>
+          <b style="color:#2979FF;">□150%</b><b style="color:#E040FB;">□</b>
+          <span style="color:#A5D6A7;opacity:.4;">▏</span><span style="color:#F48FB1;opacity:.4;">▏ord</span>
+        </span>` : ''}
         <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts, yahoo = Yahoo Finance backfill used only where the others left gaps">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
         ${/fyers\(/.test(_chart.src || '') ? `<span style="color:var(--pos,#26a69a);" title="Real OHLC with traded volume from the Fyers feed — not reconstructed from spot samples">⚡ broker feed${_chart.hasVolume ? ' · real volume' : ''}</span>` : ''}
         ${/yahoo\(/.test(_chart.src || '') ? `<span style="color:var(--gold,#d4af37);" title="Part of this chart was filled from Yahoo Finance because NSE data was unavailable for those minutes. Yahoo is a derived feed: the shape is right, but prices will not match NSE tick for tick, so treat levels drawn from those minutes with that in mind.">⚠ partly Yahoo-filled</span>` : ''}
@@ -20899,6 +21044,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'priceMaCrossCfg',     // price crossing an EMA or VWAP
     'pcrAlertCfg',         // near-band PCR change alert
     'ctxChartCfg',         // which context series are drawn
+    'pvsraOn',             // PVSRA candle colouring
+    'pvsraSpread',         // optional vol×spread climax rule
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
     'trendEngineCfg',      // trend engine threshold and agreement rule
@@ -20925,6 +21072,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _KEEP_KEYS = ['tradeJournal', 'nse_journal_v1', 'sugScorecard',
                       'esoStockWatchlist', 'astroLabHistory', 'oiFlowFirstSeen',
                       'freshFlowLog', 'paperTrades', 'nse_alert_log_v1',
+                      // today's PCR/VIX/IV series: RECORDED data, not a
+                      // setting. It survived a reset only because nobody had
+                      // listed it either way, which is not protection - it is
+                      // an oversight that happens to work. Losing the morning
+                      // to a settings reset is unrecoverable, so it is named.
+                      'ctxHistV1',
                       'nse_checklist_v1', 'regimeHistory', 'lastBackupTs',
                       // connection detail, not a preference: clearing it would
                       // point the dashboard at nothing and look like a crash
@@ -21074,6 +21227,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (ev.key === 'Escape' && _chart.maxed) { ev.preventDefault(); _chartSetMax(false); }
     });
 
+    const pvT = document.getElementById('pvsraToggle');
+    if (pvT) {
+      pvT.checked = _pvsraOn();
+      pvT.addEventListener('change', () => {
+        try { localStorage.setItem('pvsraOn', pvT.checked ? '1' : '0'); } catch (_) {}
+        if (pvT.checked && !_chart.hasVolume)
+          showToast?.('PVSRA needs traded volume — switch DATA_SOURCE to fyers. NSE gives one spot sample a minute with no volume.');
+        renderPriceChart();
+      });
+    }
     document.getElementById('chartFillBtn')?.addEventListener('click', _chartFillSession);
     document.getElementById('chartDiagBtn')?.addEventListener('click', _chartDiagnose);
     const ct = document.getElementById('chartType');
