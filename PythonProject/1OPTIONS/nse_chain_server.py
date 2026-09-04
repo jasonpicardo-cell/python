@@ -1361,6 +1361,144 @@ def _refresh_all_weights(symbols=("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"
     return data
 
 
+# ══════════════════════════════════════════════════════════════════════
+# DISK RETENTION
+# Nothing deleted files before this: the janitor pruned memory only, so the
+# archives grew without limit. replay/ is ~32 MB a day for two symbols, which
+# is 7.8 GB a year - the only folder where that matters.
+#
+# The retention differs per folder because the DATA differs:
+#   replay/   the only record of what the chain looked like minute by minute,
+#             and unreconstructable once gone. Claims on Trial reads across
+#             dates, so this needs weeks, not days. Deleted last and kept
+#             longest, because NSE will not sell it back to you.
+#   ticks/    20 KB a day. Deleting it saves nothing and costs restart
+#             recovery, so it is kept far longer than it needs to be.
+#   bhavcopy/ only yesterday's file is ever read, and every file is
+#             re-downloadable from NSE. The cheapest thing here to lose.
+#
+# Runs weekly rather than on the 5-minute janitor cycle: walking three
+# directories is wasted work at that frequency, and a retention policy that
+# fires 2,000 times a day is a policy nobody can reason about.
+# ══════════════════════════════════════════════════════════════════════
+RUN_CLEANUP = True                 # enable the weekly disk pass
+RUN_CLEANUP_REPLAY_DAYS = 60       # option-chain snapshots (Claims on Trial)
+RUN_CLEANUP_TICKS_DAYS = 365       # spot samples - tiny, kept generously
+RUN_CLEANUP_BHAV_DAYS = 30         # end-of-day files, re-downloadable
+RUN_CLEANUP_DRY_RUN = False        # log what WOULD go, delete nothing
+
+
+def _file_day(name: str):
+    """Extract a YYYY-MM-DD date from an archive filename, or None.
+
+    Imports locally because this file has NO module-level datetime or re
+    import - every one of the eight datetime imports here sits inside a
+    function. Reaching for a name another function imported works until that
+    function is not the one running, which is exactly how this failed the
+    first time it was called from the endpoint rather than from the loop.
+    """
+    import re as _re
+    from datetime import datetime as _dtc
+    m = _re.search(r"(\d{4})-(\d{2})-(\d{2})", name)
+    if not m:
+        return None
+    try:
+        return _dtc(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except Exception:
+        return None
+
+
+def _cleanup_dir(path: str, keep_days: int, pattern: str, dry: bool) -> dict:
+    """Delete files in one directory older than keep_days.
+
+    Dates come from the FILENAME, not the modification time: a file touched by
+    a backup or a copy would otherwise look new and survive forever, and one
+    restored from an archive would look old and be deleted immediately.
+    """
+    import glob as _glob
+    from datetime import datetime as _dtc, timedelta as _td
+    out = {"dir": _os.path.basename(path), "kept": 0, "removed": 0, "bytes": 0, "errors": 0}
+    if not _os.path.isdir(path):
+        return out
+    cutoff = _dtc.today() - _td(days=keep_days)
+    for f in _glob.glob(_os.path.join(path, pattern)):
+        day = _file_day(_os.path.basename(f))
+        if day is None or day.date() >= cutoff.date():
+            out["kept"] += 1
+            continue
+        try:
+            sz = _os.path.getsize(f)
+            if not dry:
+                _os.remove(f)
+            out["removed"] += 1
+            out["bytes"] += sz
+        except Exception as e:  # noqa: BLE001
+            out["errors"] += 1
+            print(f"[cleanup] could not remove {f}: {e}")
+    return out
+
+
+def _run_cleanup(dry: bool = None) -> dict:
+    dry = RUN_CLEANUP_DRY_RUN if dry is None else dry
+    jobs = [
+        (_REPLAY_DIR, int(_os.environ.get("NSE_KEEP_REPLAY_DAYS", RUN_CLEANUP_REPLAY_DAYS)), "*.jsonl"),
+        (_TICK_DIR, int(_os.environ.get("NSE_KEEP_TICKS_DAYS", RUN_CLEANUP_TICKS_DAYS)), "*.csv"),
+        (_BHAVCOPY_DIR, int(_os.environ.get("NSE_KEEP_BHAV_DAYS", RUN_CLEANUP_BHAV_DAYS)), "*"),
+    ]
+    res, freed, removed = [], 0, 0
+    for path, days, pat in jobs:
+        r = _cleanup_dir(path, days, pat, dry)
+        r["keep_days"] = days
+        res.append(r)
+        freed += r["bytes"]
+        removed += r["removed"]
+    if removed:
+        print(f"[cleanup]{' DRY RUN -' if dry else ''} removed {removed} file(s), "
+              f"freed {freed / 1048576:.1f} MB")
+        for r in res:
+            if r["removed"]:
+                print(f"[cleanup]   {r['dir']}: {r['removed']} older than "
+                      f"{r['keep_days']}d ({r['bytes'] / 1048576:.1f} MB)")
+    else:
+        print(f"[cleanup] nothing older than the retention window")
+    return {"dry_run": dry, "removed": removed, "freed_mb": round(freed / 1048576, 1),
+            "detail": res, "ran": time.strftime("%Y-%m-%d %H:%M")}
+
+
+_cleanup_state = {"last": 0.0, "result": None}
+
+
+def _cleanup_loop():
+    """Weekly, and once shortly after startup if a week has passed."""
+    stamp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".last_cleanup")
+    try:
+        if _os.path.exists(stamp):
+            _cleanup_state["last"] = _os.path.getmtime(stamp)
+    except Exception:
+        pass
+    WEEK = 7 * 86400
+    while not _poller_stop.is_set():
+        due = time.time() - _cleanup_state["last"] >= WEEK
+        if due:
+            try:
+                _cleanup_state["result"] = _run_cleanup()
+                _cleanup_state["last"] = time.time()
+                with open(stamp, "w") as f:
+                    f.write(time.strftime("%Y-%m-%d %H:%M"))
+            except Exception as e:  # noqa: BLE001
+                print(f"[cleanup] failed: {e}")
+        _poller_stop.wait(3600)          # check hourly, act weekly
+
+
+def _start_cleanup():
+    if not _envbool_g("NSE_CLEANUP", RUN_CLEANUP):
+        print("[i] Weekly disk cleanup DISABLED (NSE_CLEANUP=false)")
+        return
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
+    print(f"[i] Weekly disk cleanup: replay {RUN_CLEANUP_REPLAY_DAYS}d, "
+          f"ticks {RUN_CLEANUP_TICKS_DAYS}d, bhavcopy {RUN_CLEANUP_BHAV_DAYS}d")
+
+
 def _prune_state() -> None:
     # the rollup history is per-strike and per-symbol; prune it with the rest
     try:
@@ -4165,6 +4303,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(e)})
             return
 
+        if parsed.path == "/api/cleanup":
+            # ?dry=1 to see what would go without removing anything
+            dry = qs.get("dry", ["0"])[0] in ("1", "true", "yes")
+            try:
+                self._send_json(_run_cleanup(dry=dry))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)}, status=500)
+            return
+
         if parsed.path == "/api/candle-health":
             out = {"runs": _recon_state["runs"],
                    "last_run": _recon_state["last"],
@@ -6784,6 +6931,7 @@ def main():
     else:
         _load_index_weights()
     _start_janitor()
+    _start_cleanup()
     if _envbool("NSE_RECONCILE", RUN_RECONCILE):
         _start_reconciler([s.strip() for s in (args.poll or "NIFTY").split(",")],
                           float(_os.environ.get("NSE_RECONCILE_INTERVAL", RUN_RECONCILE_INTERVAL)))

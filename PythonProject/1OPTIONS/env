@@ -31,7 +31,7 @@ FYERS_ACCESS_TOKEN=
 FYERS_SYMBOLS=NIFTY,BANKNIFTY
 FYERS_STRIKE_COUNT=25
 # Tick pushes to browsers per second (coalesced; the UI cannot use more).
-FYERS_PUSH_HZ=4
+FYERS_PUSH_HZ=10
 # Where fyers_login.py also drops a PLAIN-TEXT copy of the token, for the
 # historical-data downloader which reads a bare token rather than JSON.
 # Defaults to ../NSE_SYNC/ relative to the login script.
@@ -99,3 +99,22 @@ NSE_ALERT_MIN_OI=4000
 # The dashboard shows the source and date next to the breadth reading, so
 # you can see at a glance whether the table is current.
 NSE_REFRESH_WEIGHTS=false
+
+# ── Weekly disk cleanup ──────────────────────────────────────────────
+# Nothing deleted archive files before this, so replay/ grew without limit -
+# about 32 MB a day for two symbols, which is 7.8 GB a year.
+#
+# Retention differs per folder because the data differs:
+#   replay/   the only record of what the chain looked like minute by minute,
+#             and unreconstructable once gone. Claims on Trial reads across
+#             dates, so 60 days keeps roughly two months of verdicts.
+#   ticks/    20 KB a day. Kept a full year because deleting it saves nothing
+#             and costs restart recovery.
+#   bhavcopy/ only yesterday's file is read, and every file is re-downloadable
+#             from NSE - the cheapest thing here to lose.
+#
+# Runs weekly. Preview without deleting:  curl localhost:8765/api/cleanup?dry=1
+NSE_CLEANUP=true
+NSE_KEEP_REPLAY_DAYS=60
+NSE_KEEP_TICKS_DAYS=365
+NSE_KEEP_BHAV_DAYS=30

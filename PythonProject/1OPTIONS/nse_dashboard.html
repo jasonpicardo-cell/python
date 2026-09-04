@@ -1945,6 +1945,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_vwap"> VWAP</label>
               </span>
             </div>
+            <!-- Context strip: the four numbers that decide how to trade what
+                 the chart is showing. Kept next to the price rather than in a
+                 separate panel because reading a level without knowing the
+                 volatility regime is how a range trade gets taken in a
+                 trending market. -->
+            <div id="chartCtx" style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 8px 5px;font-size:10px;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:4px;"></div>
             <div id="chartBody" style="padding:4px 6px;">
               <div class="movers-loading">Loading candles…</div>
             </div>
@@ -1988,6 +1994,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <span class="skew-chart-title">🎯 Scalp Calculator — strike, size, stop, and what it costs<i class="hi" data-h="scalp-calc">i</i></span>
             </div>
             <div id="scalpBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
+          </div>
+
+          <div class="level-panel" id="pcrBandPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">⚖️ PCR by horizon — near strikes vs the whole chain<i class="hi" data-h="pcr-bands">i</i></span>
+            </div>
+            <div id="pcrBandBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
           </div>
 
           <div class="level-panel" id="shockPanel" style="grid-column:1 / -1;">
@@ -12127,6 +12140,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _tickStats.n++;
       const meta = _tokMap[tok];
       if (!meta) continue;
+      if (meta.vix) { if (data && v.ltp != null) data.india_vix = v.ltp; continue; }
       if (meta.spot) { spot = v.ltp ?? spot; continue; }
       if (!data?.strikes) continue;
       const row = data.strikes.find(s => s.strike === meta.k);
@@ -12139,6 +12153,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (spot != null && data) {
       data.underlying_value = spot;
       _chartLiveExtend(spot);          // grow the forming candle from the tick
+    }
+    // Ticks already carry per-strike OI, so PCR and IV can be recomputed from
+    // live data instead of waiting for the next chain poll. That is a genuine
+    // increase in resolution - roughly 4-10 real updates a second against 0.2
+    // from polling - rather than sampling a stale value more often.
+    if (touchedChain && data) {
+      try { _recordCtx(data); } catch (_) {}
+      window._ctxDirty = true;
     }
     _tickStats.last = Date.now();
     if (_tickRaf) return;
@@ -12426,7 +12448,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const oiPct = (oiNow - oiOld) / oiOld * 100;
         const prPct = (lNow - lOld) / lOld * 100;
         if (Math.abs(oiPct) < cfg.oiPct) continue;
-        if (Math.abs(oiNow - oiOld) < cfg.minLots) continue;
+        if (Math.abs(oiNow - oiOld) < cfg.minLots * _instScale(d).oi) continue;   // floor scaled: BankNifty
+        // carries far less OI per strike, so a fixed contract floor is three
+        // times stricter there than on Nifty
         if (Math.abs(prPct) < cfg.premPct) continue;
         const oiUp = oiPct > 0, prUp = prPct > 0;
         let kind, bias;
@@ -14737,6 +14761,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { renderVolumeProfile(); } catch (_) {}
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
+    try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
+    try { _pcrBandCheck(data); } catch (_) {}
     try { _shockCheck(data); } catch (_) {}
     try { renderHeroZero(data); } catch (_) {}
     try { renderAggressor(data); } catch (_) {}
@@ -15498,7 +15524,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // sits there. The old rule demanded a 0.3% move - 74 pts on Nifty,
         // 156 on BankNifty - which an oscillation around the level never
         // travels, leaving the level permanently disarmed after one fire.
-        const tolR = Math.max(1, (_csrcCfg().tol || 15));
+        const tolR = Math.max(1, _tolScaled());          // scaled to the instrument
         const firedAt = _touchedLevelsAt.get(key) || 0;
         const away = Math.abs(spot - price) > tolR * 2;
         const stale = Date.now() - firedAt > 10 * 60 * 1000;
@@ -15516,7 +15542,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // approaches a level and turns away without any sample landing across
       // it, so a strict crossing test silently misses real tests. Treat
       // "came within the configured tolerance" as a touch too.
-      const tol = Math.max(1, (_csrcCfg().tol || 15));
+      const tol = Math.max(1, _tolScaled());           // scaled to the instrument
       const near = Math.abs(spot - price) <= tol;
       if (crossed || near) {
         console.log(`[touch] ${label}=${price} ${crossed ? `crossed by ${prev}→${spot}` : `approached within ${Math.abs(spot - price).toFixed(0)} pts (tol ${tol})`}`);
@@ -17070,6 +17096,96 @@ body.compact-esoteric .lore-decorative { display: none !important; }
              expected: spot * (iv / 100) * Math.sqrt(_volT(Math.max(1 / 1440, dte))) };
   }
 
+  // ══ chart context strip ═══════════════════════════════════════════
+  // Four numbers, chosen because each changes how you trade the SAME chart:
+  //   near PCR - which way positioning leans at the strikes price can reach
+  //   VIX      - the market-wide fear level, and its direction today
+  //   ATM IV   - what this instrument's options are charging right now
+  //   IV rank  - where that IV sits in its own recent range, which is the
+  //              only way to know whether "12%" is cheap or dear
+  // IV without rank is the common trap: the level alone says nothing, because
+  // 12% is expensive for one instrument and a bargain for another.
+  function renderChartContext(d) {
+    const box = document.getElementById('chartCtx');
+    if (!box) return;
+    const data = d || state.lastData;
+    if (!data?.underlying_value) { box.innerHTML = ''; return; }
+    const cell = (lab, val, col, tip, sub) =>
+      `<span title="${escapeHtml(tip || '')}" style="display:inline-flex;gap:5px;align-items:baseline;">
+         <span style="color:var(--muted,#789);font-size:9px;text-transform:uppercase;letter-spacing:.4px;">${lab}</span>
+         <b style="color:${col || 'inherit'};font-size:11.5px;">${val}</b>
+         ${sub ? `<span style="color:var(--muted,#789);font-size:9px;">${sub}</span>` : ''}
+       </span>`;
+    const out = [];
+
+    // 0. projected move — first, because it frames everything after it
+    try {
+      const pm = _projectedMove(data);
+      if (pm) {
+        const tip = `How far price can travel in the ${pm.minsLeft} minutes left, from ATM implied ` +
+          `volatility scaled by the U-shaped intraday variance curve` +
+          (pm.adj.length ? `, then adjusted for: ${pm.adj.join('; ')}` : '') +
+          `. Centred on spot — it says how FAR, never which way. ` +
+          `2σ ${fmtInt(Math.round(pm.low2))}-${fmtInt(Math.round(pm.high2))}.`;
+        out.push(cell('MOVE', '±' + Math.round(pm.sigma),
+          pm.adj.length ? 'var(--gold,#d4af37)' : 'inherit', tip,
+          `${fmtInt(Math.round(pm.low))}–${fmtInt(Math.round(pm.high))}`));
+      }
+    } catch (_) {}
+
+    // 1. near-band PCR — the same ±3 band the alert watches
+    try {
+      const bands = _pcrByBand(data);
+      const near = bands?.bands?.find(b => b.k === 'rod');
+      if (near) {
+        const extreme = near.pcr > 1.6 || near.pcr < 0.6;
+        const col = extreme ? 'var(--gold,#d4af37)'
+                  : near.pcr >= 1.1 ? 'var(--pos,#26a69a)'
+                  : near.pcr <= 0.9 ? 'var(--neg,#ef5350)' : 'inherit';
+        out.push(cell('PCR ±3', near.pcr.toFixed(2), col,
+          `Put-call ratio across the ${near.strikes} strikes price can reach in the ${bands.minsLeft} minutes left (${near.lo}-${near.hi}, ±${near.width} pts = one sigma). ` +
+          (extreme ? 'Extreme — read contrarian.'
+                   : near.pcr >= 1.1 ? 'Put-heavy: support being written.'
+                   : near.pcr <= 0.9 ? 'Call-heavy: resistance being written.' : 'Balanced.'),
+          extreme ? 'extreme' : ''));
+      }
+    } catch (_) {}
+
+    // 2. India VIX, with its direction since the session started
+    if (data.india_vix) {
+      const v = data.india_vix;
+      // Held on window rather than a module const: this function lives in a
+      // different <script> block from where that const was declared, and
+      // relying on block evaluation order for a variable is the kind of thing
+      // that works until someone reorders the file.
+      window._ctxVixOpen = window._ctxVixOpen ?? v;
+      const prev = window._ctxVixOpen;
+      const dv = v - prev;
+      const col = v > 18 ? 'var(--neg,#ef5350)' : v < 11 ? 'var(--pos,#26a69a)' : 'inherit';
+      out.push(cell('VIX', v.toFixed(2), col,
+        `India VIX. Above ~18 the market is pricing real stress; below ~11 it is complacent, ` +
+        `and complacency is where a shock hurts most. ${dv >= 0 ? 'Up' : 'Down'} ${Math.abs(dv).toFixed(2)} since this browser opened.`,
+        `${dv >= 0 ? '+' : ''}${dv.toFixed(2)}`));
+    }
+
+    // 3. ATM IV for this instrument
+    if (data.atm_iv) {
+      out.push(cell('ATM IV', data.atm_iv.toFixed(1) + '%', 'inherit',
+        'Implied volatility at the money for the selected expiry. On its own this number means little — the rank beside it is what says whether it is cheap or dear.'));
+    }
+
+    // 4. IV rank — the number that gives ATM IV meaning
+    const ivr = data.iv_rank ?? data.atm_iv_rank?.rank_pct;
+    if (ivr != null) {
+      const col = ivr > 70 ? 'var(--neg,#ef5350)' : ivr < 30 ? 'var(--pos,#26a69a)' : 'inherit';
+      out.push(cell('IV RANK', Math.round(ivr) + '%', col,
+        `Where today's IV sits in its own recent range. Above 70 options are dear relative to their own history, which favours selling premium; below 30 they are cheap, which favours buying it. This is what makes the IV number actionable.`,
+        ivr > 70 ? 'dear' : ivr < 30 ? 'cheap' : ''));
+    }
+
+    box.innerHTML = out.join('');
+  }
+
   function renderVolumeProfile() {
     const box = document.getElementById('vpBody');
     if (!box) return;
@@ -17163,6 +17279,570 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
     if (typeof showToast === 'function') showToast(`🪤 COILED ${c.score} · range ${(c.compression * 100).toFixed(0)}% · direction unknown`);
     try { _pushAlertHistory(`Coiled spring ${c.score}`, d.underlying_value, 'mid', state.symbol); } catch (_) {}
+  }
+
+  // Redraw is decoupled from data arrival. Recomputing on every tick is
+  // right - that is real new information - but REPAINTING on every tick is
+  // not: the screen refreshes 60 times a second and cannot show more, so the
+  // extra passes are pure cost. One rAF-scheduled redraw coalesces however
+  // many ticks landed since the last frame.
+  function _ctxScheduleDraw() {
+    if (_ctxRaf) return;
+    _ctxRaf = requestAnimationFrame(() => {
+      _ctxRaf = 0;
+      if (!window._ctxDirty) return;
+      window._ctxDirty = false;
+      try { renderCtxChart(); } catch (_) {}
+      try { renderChartContext(state.lastData); } catch (_) {}
+    });
+  }
+  setInterval(_ctxScheduleDraw, 100);      // at most 10 repaints a second
+
+  // ══ CONTEXT CHART ═════════════════════════════════════════════════
+  // A second pane under the candles showing PCR, VIX and ATM IV as lines.
+  //
+  // The point is co-timing. Reading "PCR 1.10, VIX 13.4, IV 12.7" as three
+  // numbers tells you where they are; seeing them drawn against the same
+  // x-axis as price tells you which one moved FIRST - and that ordering is
+  // where the information is. IV lifting while price is flat, or PCR turning
+  // ten minutes before the candles do, is invisible in a set of readouts and
+  // obvious in a chart.
+  //
+  // Each series is normalised to its own range, because they share no units:
+  // PCR near 1, VIX in the teens, IV in percent. Plotting them on one absolute
+  // axis would flatten two of the three into a straight line.
+  const _CTX_SERIES = [
+    { k: 'pcr', lab: 'PCR', col: '#d4af37', get: h => h.pcr },
+    { k: 'vix', lab: 'VIX', col: '#45aaf2', get: h => h.vix },
+    { k: 'iv',  lab: 'ATM IV', col: '#26de81', get: h => h.iv },
+  ];
+  // History must span the whole session, 09:15 to 15:40. A flat point cap
+  // could not do that: 400ms spacing over 385 minutes is nearly 58,000 points,
+  // so a 4,000 cap silently held only the last 27 minutes and the morning
+  // simply vanished - which looks like a bug in the chart rather than in the
+  // retention policy.
+  //
+  // Two changes make a full session fit comfortably. Old points are DOWNSAMPLED
+  // rather than dropped: fine 400ms detail is worth having for the last twenty
+  // minutes and worth nothing for something that happened at 09:40, where one
+  // point every five seconds tells the same story. And the array is persisted,
+  // because losing the morning to an accidental refresh is the same outcome as
+  // never recording it.
+  const _ctxHist = [];                 // {ts, pcr, vix, iv, sym}
+  const _CTX_FINE_MS = 20 * 60000;     // keep 400ms detail for the last 20 min
+  const _CTX_COARSE_MS = 5000;         // older than that: one point per 5s
+  const _CTX_MAX = 12000;              // ~5,000 needed for a session; headroom
+  const _CTX_KEY = 'ctxHistV1';
+
+  function _ctxSessionStart() {
+    const now = new Date();
+    const ist = new Date(now.getTime() + (5.5 * 60 + now.getTimezoneOffset()) * 60000);
+    ist.setHours(9, 15, 0, 0);
+    return ist.getTime() - (5.5 * 60 + now.getTimezoneOffset()) * 60000;
+  }
+
+  function _ctxPrune() {
+    const now = Date.now();
+    const open = _ctxSessionStart();
+    // drop anything before today's open - a stale point from yesterday drawn
+    // on today's axis is worse than a gap
+    let i = 0;
+    while (i < _ctxHist.length && _ctxHist[i].ts < open) i++;
+    if (i) _ctxHist.splice(0, i);
+    // downsample everything older than the fine window
+    const cut = now - _CTX_FINE_MS;
+    let lastKept = 0, out = [];
+    for (const p of _ctxHist) {
+      if (p.ts >= cut) { out.push(p); continue; }
+      if (p.ts - lastKept >= _CTX_COARSE_MS) { out.push(p); lastKept = p.ts; }
+    }
+    if (out.length !== _ctxHist.length) _ctxHist.splice(0, _ctxHist.length, ...out);
+    while (_ctxHist.length > _CTX_MAX) _ctxHist.shift();
+  }
+
+  function _ctxSave() {
+    try {
+      const open = _ctxSessionStart();
+      // persist the COARSE version only: it is for surviving a refresh, not
+      // for storing every tick, and a 5-second grid over a session is small
+      const slim = _ctxHist.filter((p, i, a) =>
+        i === 0 || p.ts - a[i - 1].ts >= _CTX_COARSE_MS || i === a.length - 1);
+      localStorage.setItem(_CTX_KEY, JSON.stringify({
+        d: new Date(open).toDateString(), sym: state.symbol, pts: slim,
+      }));
+    } catch (_) {}
+  }
+
+  function _ctxLoad() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(_CTX_KEY) || 'null');
+      if (!raw?.pts?.length) return;
+      // only restore TODAY'S session for the CURRENT symbol - anything else
+      // would draw one instrument's history under another's price
+      if (raw.d !== new Date(_ctxSessionStart()).toDateString()) return;
+      if (raw.sym && state.symbol && raw.sym !== state.symbol) return;
+      const open = _ctxSessionStart();
+      const pts = raw.pts.filter(p => p.ts >= open);
+      if (pts.length) {
+        _ctxHist.splice(0, _ctxHist.length, ...pts);
+        console.log(`[ctx] restored ${pts.length} points from this session`);
+      }
+    } catch (_) {}
+  }
+  setTimeout(_ctxLoad, 1200);            // after state.symbol is settled
+  setInterval(_ctxSave, 30000);          // cheap, and bounded by the coarse grid
+  window.addEventListener('beforeunload', _ctxSave);
+
+  function _recordCtx(d) {
+    if (!d?.underlying_value) return;
+    const sym = state.symbol;
+    // Drop foreign-symbol points at write time rather than filtering later:
+    // a series that silently blends two instruments is worse than an empty one.
+    if (_ctxHist.length && _ctxHist[_ctxHist.length - 1].sym !== sym) _ctxHist.length = 0;
+    let pcr = null;
+    try {
+      const b = _pcrByBand(d);
+      pcr = b?.bands?.find(x => x.k === 'rod')?.pcr ?? d.pcr ?? null;
+    } catch (_) { pcr = d.pcr ?? null; }
+    const row = { ts: Date.now(), sym, pcr, vix: d.india_vix ?? null, iv: d.atm_iv ?? null };
+    if (row.pcr == null && row.vix == null && row.iv == null) return;
+    const last = _ctxHist[_ctxHist.length - 1];
+    // Coalesce inside 400ms rather than 3s: with tick-driven updates a 3s
+    // window would throw away most of the new resolution, which is the whole
+    // point of computing from ticks.
+    if (last && row.ts - last.ts < 400) {
+      Object.assign(last, row);
+    } else {
+      _ctxHist.push(row);
+      // prune on a cadence rather than every push: the downsample walks the
+      // whole array, and doing that ten times a second would cost more than
+      // the history is worth
+      if (_ctxHist.length % 50 === 0) _ctxPrune();
+    }
+  }
+
+  function renderCtxChart() {
+    const box = document.getElementById('ctxChartBody');
+    if (!box) return;
+    if (_chart.diagOpen) return;
+    const cfg = (() => { try { return JSON.parse(localStorage.getItem('ctxChartCfg') || '{}'); }
+                         catch (_) { return {}; } })();
+    const shown = _CTX_SERIES.filter(s => cfg[s.k] !== false);
+    const pts = _ctxHist.filter(h => h.sym === state.symbol);
+    // The tick boxes are built here, ONCE, and rendered in every branch.
+    // They used to be inside the success path only, so unticking all three
+    // blanked the pane along with its own controls - leaving no way to turn
+    // anything back on short of clearing storage. A control that can remove
+    // itself is a trap, not a feature.
+    const ctrls = `<span style="display:flex;gap:8px;font-size:9px;color:var(--muted,#789);">
+        ${_CTX_SERIES.map(s => `<label><input type="checkbox" data-ctxs="${s.k}" ${cfg[s.k] !== false ? 'checked' : ''}> ${s.lab}</label>`).join('')}
+      </span>`;
+    if (pts.length < 3 || !shown.length) {
+      box.innerHTML = `<div style="display:flex;gap:12px;align-items:center;padding:6px 8px;font-size:9.5px;color:var(--muted,#789);">
+          <span>${pts.length < 3 ? 'Collecting — a few more polls.' : 'No series selected — tick one to draw it.'}</span>
+          <span style="margin-left:auto;">${ctrls}</span>
+        </div>`;
+      return;
+    }
+    // Share the candle chart's x-axis so the two panes line up. Without this
+    // the whole point is lost: you cannot compare timing across two charts
+    // that scale their time axis differently.
+    const W = 900, H = 150, padL = 8, padR = 74, padT = 8, padB = 18;
+    const SESSION_MIN = 385;
+    const slots = Math.max(1, Math.ceil(SESSION_MIN / _chart.interval));
+    // Same slot arithmetic the candle pane uses, so the two line up exactly.
+    // Computed in IST explicitly rather than via local time, because a machine
+    // in another timezone would otherwise draw this pane offset from the
+    // candles above it - which would make the co-timing actively misleading.
+    const slotOf = ts => {
+      const g = new Date(ts);
+      const ist = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+      const m = ist.getHours() * 60 + ist.getMinutes() - (9 * 60 + 15);
+      return Math.max(0, Math.min(slots - 1, Math.floor(m / _chart.interval)));
+    };
+    const x = ts => padL + (slotOf(ts) + 0.5) / slots * (W - padL - padR);
+
+    let svg = '';
+    const legend = [];
+    for (const s of shown) {
+      const vals = pts.map(p => ({ t: p.ts, v: s.get(p) })).filter(p => p.v != null);
+      if (vals.length < 2) continue;
+      const lo = Math.min(...vals.map(v => v.v)), hi = Math.max(...vals.map(v => v.v));
+      const span = (hi - lo) || Math.abs(hi) * 0.02 || 1;
+      // each series normalised to its OWN range - they share no units
+      const y = v => padT + (1 - (v - lo) / span) * (H - padT - padB);
+      // A smooth path is what makes a line LOOK smooth - not more samples of
+      // the same value. Catmull-Rom through the real points: no invented data,
+      // just a curve instead of a polyline between the points that exist.
+      const P = vals.map(v => [x(v.t), y(v.v)]);
+      let dpath = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+      for (let i = 0; i < P.length - 1; i++) {
+        const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || P[i + 1];
+        const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+        const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+        dpath += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+      }
+      svg += `<path d="${dpath}" fill="none" stroke="${s.col}" stroke-width="1.4" opacity="0.9"/>`;
+      const lastV = vals[vals.length - 1];
+      svg += `<circle cx="${x(lastV.t).toFixed(1)}" cy="${y(lastV.v).toFixed(1)}" r="2.2" fill="${s.col}"/>`;
+      svg += `<text x="${(W - padR + 4).toFixed(1)}" y="${(y(lastV.v) + 3).toFixed(1)}" style="font-size:9px;fill:${s.col};">${
+        s.k === 'pcr' ? lastV.v.toFixed(2) : lastV.v.toFixed(1)}</text>`;
+      const first = vals[0].v, chg = lastV.v - first;
+      legend.push(`<span style="color:${s.col};font-size:9.5px;">● ${s.lab} ${
+        s.k === 'pcr' ? lastV.v.toFixed(2) : lastV.v.toFixed(1)} <span style="opacity:.7;">${
+        chg >= 0 ? '+' : ''}${s.k === 'pcr' ? chg.toFixed(2) : chg.toFixed(1)}</span> <span style="opacity:.55;">${
+        lo.toFixed(s.k === 'pcr' ? 2 : 1)}–${hi.toFixed(s.k === 'pcr' ? 2 : 1)}</span></span>`);
+    }
+    // half-hour gridlines, matching the candle pane
+    for (let m = 0; m <= SESSION_MIN; m += 30) {
+      const cx = padL + (m / _chart.interval) / slots * (W - padL - padR);
+      if (cx > W - padR) break;
+      svg = `<line x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${H - padB}" stroke="rgba(255,255,255,0.05)"/>` + svg;
+    }
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${svg}</svg>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:2px 8px 4px;align-items:center;">
+        ${legend.join('')}
+        <span style="margin-left:auto;">${ctrls}</span>
+      </div>
+      <div class="oc-sub" style="padding:0 8px 4px;font-size:9px;">Each line is scaled to its own range — they share no units, and one absolute axis would flatten two of the three. The range beside each legend entry is that series' span so far. <b>What to look for is ORDER, not level:</b> IV lifting while price is flat, or PCR turning before the candles do, is what a set of readouts cannot show you.</div>`;
+  }
+
+  // Delegated so it survives the panel being re-rendered.
+  document.addEventListener('change', ev => {
+    const k = ev.target?.dataset?.ctxs;
+    if (!k) return;
+    let cfg = {};
+    try { cfg = JSON.parse(localStorage.getItem('ctxChartCfg') || '{}'); } catch (_) {}
+    cfg[k] = ev.target.checked;
+    try { localStorage.setItem('ctxChartCfg', JSON.stringify(cfg)); } catch (_) {}
+    renderCtxChart();
+  });
+
+  // ══ PROJECTED MOVE ════════════════════════════════════════════════
+  // How far price can travel in the hours left, from the options market's own
+  // estimate, adjusted for four things it does not price by itself.
+  //
+  // The base is the ATM implied volatility scaled to the remaining session.
+  // That is the market's forecast, made with real money, and it is the right
+  // anchor. The adjustments are each mechanical rather than opinion:
+  //
+  //   U-SHAPED CLOCK  Intraday variance is not flat. The open and the close
+  //     carry far more of it than midday, so scaling by clock time alone
+  //     overstates a lunchtime hour and understates 15:00.
+  //   VOL RISK PREMIUM  Implied usually sits above realized. When today's
+  //     realized is running well below implied, the raw IV band overstates.
+  //   GAMMA REGIME  Above the flip, dealer hedging damps moves; below it,
+  //     hedging amplifies them. Arithmetic about hedging flow, not a view.
+  //   RANGE USED  Daily range mean-reverts: a day that has already covered
+  //     1.5 sigma has less left than one that has covered 0.3.
+  //
+  // Deliberately NOT adjusted by PCR or any positioning measure. Those say
+  // where people are placed, not which way price goes, and skewing a band by
+  // them would dress a guess up as arithmetic. The band is centred on spot -
+  // it says how FAR, never which way.
+  const _VOL_CLOCK = [
+    [555, 600, 2.2],    // 09:15-10:00  the open
+    [600, 690, 1.2],    // 10:00-11:30
+    [690, 810, 0.65],   // 11:30-13:30  the lull
+    [810, 885, 1.0],    // 13:30-14:45
+    [885, 940, 1.9],    // 14:45-15:40  the close, plus the CAS window
+  ];
+
+  function _sessionVarianceLeft(nowMin) {
+    // share of the day's variance still ahead, using the U-shaped weights
+    let left = 0, total = 0;
+    for (const [a, b, w] of _VOL_CLOCK) {
+      total += (b - a) * w;
+      if (nowMin < b) left += (b - Math.max(a, nowMin)) * w;
+    }
+    return total ? Math.max(0, left / total) : 0;
+  }
+
+  function _projectedMove(d) {
+    const spot = d?.underlying_value, iv = d?.atm_iv;
+    if (!spot || !iv) return null;
+    const g = new Date(Date.now() + 5.5 * 3600000);
+    const nowMin = g.getUTCHours() * 60 + g.getUTCMinutes();
+    if (nowMin >= 940 || nowMin < 555) return null;        // outside the session
+
+    // base: one full session sigma, then the U-shaped share still ahead
+    const dayS = spot * (iv / 100) * Math.sqrt(_volT(1));
+    const share = _sessionVarianceLeft(nowMin);
+    let sigma = dayS * Math.sqrt(share);          // variance adds, so sqrt
+    const adj = [];
+
+    // 1. realized against implied
+    try {
+      const cs = _chart.candles || [];
+      if (cs.length >= 20) {
+        const bpy = (385 / Math.max(1, _chart.interval)) * 252;
+        const rv = _realizedVol(cs.slice(-40), bpy);
+        if (rv?.vol) {
+          const ratio = rv.vol / iv;
+          if (ratio < 0.75) { sigma *= 0.85; adj.push(`realized ${rv.vol.toFixed(1)}% well under implied`); }
+          else if (ratio > 1.25) { sigma *= 1.15; adj.push(`realized ${rv.vol.toFixed(1)}% above implied`); }
+        }
+      }
+    } catch (_) {}
+
+    // 2. gamma regime
+    try {
+      const gx = _computeGex(d);
+      if (gx?.flip) {
+        if (spot >= gx.flip) { sigma *= 0.88; adj.push('above the gamma flip, hedging damps'); }
+        else { sigma *= 1.18; adj.push('below the gamma flip, hedging amplifies'); }
+      }
+    } catch (_) {}
+
+    // 3. range already used today
+    let usedNote = null;
+    try {
+      const cs = _chart.candles || [];
+      if (cs.length > 10) {
+        const hi = Math.max(...cs.map(c => c.h)), lo = Math.min(...cs.map(c => c.l));
+        const used = (hi - lo) / Math.max(1, dayS);        // in sigmas
+        usedNote = used;
+        if (used > 1.4) { sigma *= 0.82; adj.push(`${used.toFixed(1)}σ of range already covered`); }
+        else if (used < 0.5 && share < 0.6) { sigma *= 1.12; adj.push('range still coiled this late'); }
+      }
+    } catch (_) {}
+
+    return {
+      sigma, low: spot - sigma, high: spot + sigma,
+      low2: spot - 2 * sigma, high2: spot + 2 * sigma,
+      share, dayS, adj, used: usedNote, minsLeft: 940 - nowMin,
+    };
+  }
+
+  // ══ INSTRUMENT SCALING ════════════════════════════════════════════
+  // BankNifty moves two to three times as far as Nifty in points, and carries
+  // far less open interest per strike because its strikes are wider apart.
+  // Settings expressed as a PERCENTAGE already handle this - 6% of premium is
+  // 6% whatever the premium is. Settings in absolute POINTS or CONTRACTS do
+  // not, and silently mean something different on each instrument:
+  //   a 20-point level tolerance is 0.08% of Nifty but 0.04% of BankNifty
+  //   a 4,000-contract floor is 1% of a Nifty strike but 3.3% of a BankNifty one
+  //
+  // Rather than keep a per-symbol table that goes stale, scale from the
+  // instrument's OWN expected move and its OWN typical strike OI. That adapts
+  // to a new index, and to a volatile day on a familiar one, without anyone
+  // maintaining a lookup.
+  function _instScale(d) {
+    const spot = d?.underlying_value;
+    if (!spot) return { pts: 1, oi: 1, ref: null };
+    // points scale: this instrument's 1-sigma day move against Nifty's typical
+    const iv = (d.atm_iv || 12.5) / 100;
+    const sigDay = spot * iv * Math.sqrt(_volT(1));
+    const NIFTY_REF_SIGMA = 160;                 // 24,500 at 12.5% IV
+    const pts = Math.max(0.5, Math.min(5, sigDay / NIFTY_REF_SIGMA));
+    // OI scale: median OI across near strikes, against a Nifty reference
+    let oi = 1;
+    try {
+      const st = (d.strikes || [])
+        .filter(s => Math.abs(s.strike - spot) <= (d.strike_gap || 50) * 6)
+        .map(s => Math.max(s.ce_oi || 0, s.pe_oi || 0))
+        .filter(v => v > 0).sort((a, b) => a - b);
+      if (st.length > 4) {
+        const med = st[Math.floor(st.length / 2)];
+        oi = Math.max(0.15, Math.min(4, med / 400000));   // 400k = Nifty reference
+      }
+    } catch (_) {}
+    return { pts, oi, sigDay: Math.round(sigDay) };
+  }
+
+  // ══ PCR BY HORIZON ════════════════════════════════════════════════
+  // One PCR number hides which strikes produced it. A ratio computed over the
+  // whole chain includes strikes price cannot reach this week - their open
+  // interest is positional and barely moves intraday, so it dilutes a genuine
+  // shift near the money into something that looks like nothing happened.
+  //
+  // The bands are chosen by REACHABILITY rather than round numbers: each is
+  // the range price can realistically cover over that horizon, so each ratio
+  // answers a different question.
+  //   ±3  rest of today   - the only one that can change your next trade
+  //   ±4  one day
+  //   ±6  to weekly expiry (1 sigma)
+  //   ±12 2 sigma to weekly - the widest band that still moves intraday
+  //
+  // Watching them together is the point: when the near band diverges from the
+  // wide one, positioning is shifting where price actually is, which the wide
+  // ratio will not show for some time.
+  // Bands are defined in SIGMA - the expected move - not in strike counts.
+  //
+  // Counting strikes looks simpler but is the wrong unit twice over. Nifty
+  // uses 50-point steps near the money and 100-point steps further out, so
+  // "±12 strikes" covers ±600 points in one part of the chain and ±1200 in
+  // another: the band silently changes meaning depending on where ATM sits.
+  // And a fixed count means different risk on different instruments, because
+  // BankNifty's higher volatility needs a wider net for the same reachability.
+  //
+  // Measuring in sigma removes both problems. Each band is a range price can
+  // actually cover over that horizon, so it self-adjusts to strike spacing,
+  // to the instrument, and to today's volatility - and the strike COUNT
+  // becomes an output worth reading rather than an input to guess at.
+  const _PCR_BANDS = [
+    { k: 'rod',  sig: 1.0, horizon: 'rod',  lab: 'Rest of day' },
+    { k: 'd1',   sig: 1.0, horizon: 1,      lab: 'One day' },
+    { k: 'wk',   sig: 1.0, horizon: 'exp',  lab: 'Weekly' },
+    { k: 'wide', sig: 2.0, horizon: 'exp',  lab: 'Wide (2σ)' },
+  ];
+
+  function _pcrByBand(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value, iv = d?.atm_iv;
+    if (!st.length || !spot) return null;
+    const gap = d.strike_gap || 50;
+    const atm = st.reduce((a, b) =>
+      Math.abs(b.strike - spot) < Math.abs(a.strike - spot) ? b : a).strike;
+    // minutes left in the session, for the rest-of-day horizon
+    const g = new Date(Date.now() + 5.5 * 3600000);
+    const minsLeft = Math.max(5, (15 * 60 + 40) - (g.getUTCHours() * 60 + g.getUTCMinutes()));
+    const dteCal = Math.max(1 / 1440, d.dte ?? 1);
+    const ivF = (iv || 12) / 100;
+    const sigmaFor = (h) => {
+      const days = h === 'rod' ? minsLeft / 375 : h === 'exp' ? dteCal : h;
+      return spot * ivF * Math.sqrt(_volT(days));
+    };
+    const out = [];
+    for (const b of _PCR_BANDS) {
+      const width = Math.max(gap, sigmaFor(b.horizon) * b.sig);   // never narrower than one strike
+      const sel = st.filter(s => Math.abs(s.strike - atm) <= width);
+      if (sel.length < 3) continue;
+      const ce = sel.reduce((s, x) => s + (x.ce_oi || 0), 0);
+      const pe = sel.reduce((s, x) => s + (x.pe_oi || 0), 0);
+      const ceV = sel.reduce((s, x) => s + (x.ce_volume || 0), 0);
+      const peV = sel.reduce((s, x) => s + (x.pe_volume || 0), 0);
+      const ceC = sel.reduce((s, x) => s + (x.ce_oi_chg || 0), 0);
+      const peC = sel.reduce((s, x) => s + (x.pe_oi_chg || 0), 0);
+      if (!ce) continue;
+      out.push({
+        ...b, strikes: sel.length, width: Math.round(width),
+        pcr: pe / ce,
+        volPcr: ceV ? peV / ceV : null,
+        chgPcr: Math.abs(ceC) > 1 ? peC / ceC : null,
+        ce, pe,
+        lo: Math.round(atm - width), hi: Math.round(atm + width),
+      });
+    }
+    return out.length ? { atm, gap, minsLeft, bands: out } : null;
+  }
+
+  // ── 5-minute change tracking on the near band ─────────────────────
+  // Only the ±3 band is announced. The wider ones move slowly by design, so
+  // alerting on them would mostly report the passage of time; the near band
+  // is the one that can change what you do in the next few minutes.
+  const _PCRA_KEY = 'pcrAlertCfg';
+  function _pcrAlertCfg() {
+    try {
+      return Object.assign({ on: true, windowMin: 5, minChangePct: 8, cooldownMin: 5 },
+                           JSON.parse(localStorage.getItem(_PCRA_KEY) || '{}'));
+    } catch (_) { return { on: true, windowMin: 5, minChangePct: 8, cooldownMin: 5 }; }
+  }
+  function _pcrAlertSave(o) { try { localStorage.setItem(_PCRA_KEY, JSON.stringify(o)); } catch (_) {} }
+  const _pcrBandHist = { pts: [], firedAt: 0 };   // renamed: _pcrHist is taken
+
+  function _pcrBandCheck(d) {
+    const res = _pcrByBand(d);
+    if (!res) return;
+    renderPcrBands(res, d);
+    const cfg = _pcrAlertCfg();
+    if (!cfg.on && !_enableAll()) return;
+    const near = res.bands.find(b => b.k === 'rod');
+    if (!near) return;
+
+    const now = Date.now();
+    _pcrBandHist.pts.push({ t: now, pcr: near.pcr, sym: state.symbol });
+    // keep a little more than the window so the baseline is always available
+    const keepMs = (cfg.windowMin || 5) * 60000 * 2.5;
+    while (_pcrBandHist.pts.length && now - _pcrBandHist.pts[0].t > keepMs) _pcrBandHist.pts.shift();
+    // drop points from a different instrument rather than comparing across them
+    if (_pcrBandHist.pts.some(p => p.sym !== state.symbol)) {
+      _pcrBandHist.pts = _pcrBandHist.pts.filter(p => p.sym === state.symbol);
+      return;
+    }
+    const winMs = (cfg.windowMin || 5) * 60000;
+    const older = _pcrBandHist.pts.filter(p => now - p.t >= winMs);
+    if (!older.length) return;                       // not enough history yet
+    const base = older[older.length - 1];            // closest point at/beyond the window
+    if (!base.pcr) return;
+    const chgPct = (near.pcr - base.pcr) / base.pcr * 100;
+    if (Math.abs(chgPct) < (cfg.minChangePct || 8)) return;
+    if (now - _pcrBandHist.firedAt < (cfg.cooldownMin || 5) * 60000) return;
+    _pcrBandHist.firedAt = now;
+
+    // Rising PCR = puts building relative to calls = support being written,
+    // conventionally bullish. Falling = calls building = resistance. The
+    // extremes invert, which is why they are called out separately.
+    const rising = chgPct > 0;
+    const extreme = near.pcr > 1.6 || near.pcr < 0.6;
+    const bias = extreme ? (near.pcr > 1.6 ? 'BEARISH' : 'BULLISH')   // contrarian
+                         : (rising ? 'BULLISH' : 'BEARISH');
+    const sym = state.symbol || 'NIFTY';
+    const txt = `${bias}. Near-strike put-call ratio ${rising ? 'rose' : 'fell'} ` +
+      `${Math.abs(chgPct).toFixed(0)} percent in ${cfg.windowMin} minutes, ` +
+      `${base.pcr.toFixed(2)} to ${near.pcr.toFixed(2)}, on ${sym} within ${Math.round(near.width)} points of ${Math.round(res.atm)}. ` +
+      (extreme
+        ? `That is an extreme reading, so it is read contrarian: positioning is crowded ${near.pcr > 1.6 ? 'on the put side' : 'on the call side'}`
+        : rising ? 'Puts are building relative to calls, which is support being written'
+                 : 'Calls are building relative to puts, which is resistance being written');
+    try {
+      if (_streamLive) _relayAlert(`pcrband|${sym}|${Math.round(now / 300000)}`, txt, 'level', 300);
+      else _speakOnce(`pcrband|${sym}`, txt, 300);
+    } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`${bias === 'BULLISH' ? '🟢' : '🔴'} ${bias.toLowerCase()} · near PCR ${base.pcr.toFixed(2)}→${near.pcr.toFixed(2)} (${chgPct >= 0 ? '+' : ''}${chgPct.toFixed(0)}%)`);
+    try { _pushAlertHistory(`Near PCR ${chgPct >= 0 ? '▲' : '▼'}${Math.abs(chgPct).toFixed(0)}%`,
+                            d.underlying_value, rising ? 'pos' : 'neg', sym); } catch (_) {}
+  }
+
+  function renderPcrBands(res, d) {
+    const box = document.getElementById('pcrBandBody');
+    if (!box) return;
+    if (!res) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
+    const cfg = _pcrAlertCfg();
+    const near = res.bands.find(b => b.k === 'rod');
+    const wide = res.bands.find(b => b.k === 'wide');
+    const rows = res.bands.map(b => {
+      const col = b.pcr > 1.6 || b.pcr < 0.6 ? 'var(--gold,#d4af37)'
+                : b.pcr >= 1 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+      const read = b.pcr > 1.6 ? 'extreme — read contrarian'
+                 : b.pcr < 0.6 ? 'extreme — read contrarian'
+                 : b.pcr >= 1.1 ? 'put-heavy, support building'
+                 : b.pcr <= 0.9 ? 'call-heavy, resistance building' : 'balanced';
+      return `<div style="display:flex;gap:10px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10.5px;flex-wrap:wrap;${b.k === 'rod' ? 'background:rgba(212,175,55,0.07);' : ''}">
+        <b style="min-width:96px;">${escapeHtml(b.lab)}</b>
+        <span style="min-width:34px;color:var(--muted);font-size:9px;">${b.sig}σ</span>
+        <span style="min-width:112px;color:var(--muted);">±${fmtInt(b.width)} pts · ${b.strikes} strikes</span>
+        <span style="min-width:70px;color:${col};font-weight:700;font-size:12px;">${b.pcr.toFixed(2)}</span>
+        <span style="min-width:92px;color:var(--muted);">vol ${b.volPcr != null ? b.volPcr.toFixed(2) : '—'}</span>
+        <span style="min-width:96px;color:var(--muted);">ΔOI ${b.chgPcr != null ? b.chgPcr.toFixed(2) : '—'}</span>
+        <span style="color:var(--muted);font-size:9.5px;">${fmtInt(b.lo)}–${fmtInt(b.hi)} · ${escapeHtml(read)}</span>
+      </div>`; }).join('');
+    // divergence between the near and wide bands is the actionable part
+    let note = '';
+    if (near && wide) {
+      const gapv = near.pcr - wide.pcr;
+      note = Math.abs(gapv) < 0.12
+        ? 'The near and wide bands agree, so positioning is uniform across the chain.'
+        : `<b>Near band is ${gapv > 0 ? 'more put-heavy' : 'more call-heavy'} than the wide one by ${Math.abs(gapv).toFixed(2)}.</b> ` +
+          `Positioning is shifting where price actually is — the wide ratio will not show this for some time, which is the whole reason for splitting them.`;
+    }
+    box.innerHTML = rows + `
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:4px;font-size:10px;">
+        <label style="font-weight:700;"><input type="checkbox" id="pcra_on" ${cfg.on !== false ? 'checked' : ''}> Announce near-band changes</label>
+        <label style="color:var(--muted,#789);">every <input type="number" id="pcra_win" class="ohlc-inp" style="width:42px;" step="1" min="1" value="${cfg.windowMin}">min</label>
+        <label style="color:var(--muted,#789);">if it moves <input type="number" id="pcra_min" class="ohlc-inp" style="width:44px;" step="1" min="1" value="${cfg.minChangePct}">%</label>
+      </div>
+      <div class="oc-sub">${note} <b>Only the ±3 band is announced</b> — the wider ones move slowly by design, so alerting on them would mostly report the passage of time. The three columns are the same ratio computed on open interest, traded volume and change in open interest: <b>ΔOI is the most immediate</b>, because it counts only what was added or removed today rather than the standing book.</div>`;
+    for (const [id, k] of [['pcra_on', 'on'], ['pcra_win', 'windowMin'], ['pcra_min', 'minChangePct']]) {
+      const el = document.getElementById(id);
+      if (!el || el._wired) continue;
+      el._wired = true;
+      el.addEventListener('change', () => {
+        const o = _pcrAlertCfg();
+        o[k] = (el.type === 'checkbox') ? el.checked : (+el.value || o[k]);
+        _pcrAlertSave(o);
+      });
+    }
   }
 
   // ══ PREMIUM SHOCK — gamma concentration × vega expansion ══════════
@@ -17351,7 +18031,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const lot = d.lot_size || 75;
     const dteCal = Math.max(1 / 1440, d.dte ?? 1);
     const T = _volT(dteCal);
-    const move = Math.abs(cfg.move) || 30;
+    // The saved move is a NIFTY figure. Scaling it means '30 points' expresses
+    // the same INTENT on BankNifty (~78 points) rather than a move so small it
+    // is inside the spread. The field still shows what you typed; only the
+    // interpretation adapts.
+    const moveRaw = Math.abs(cfg.move) || 30;
+    const move = Math.round(moveRaw * _instScale(d).pts);
     const bull = cfg.move >= 0;
     const holdDays = (cfg.mins || 20) / (375 * 1);          // fraction of a session
     const rows = [];
@@ -17394,7 +18079,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     if (!rows.length) return null;
     rows.sort((a, b) => b.netWin - a.netWin);
-    return { rows: rows.slice(0, 6), best: rows[0], move, bull, mins: cfg.mins, spot };
+    const _sc = _instScale(d).pts;
+    return { rows: rows.slice(0, 6), best: rows[0], move, bull, mins: cfg.mins, spot,
+             moveRaw, scale: _sc, scaled: Math.abs(_sc - 1) > 0.15 };
   }
 
   function renderScalpCalc(data) {
@@ -17424,7 +18111,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <label>slippage <input type="number" id="scalp_slip" class="ohlc-inp" style="width:44px;" step="0.5" min="0"> × spread</label>
         <span style="color:var(--muted);font-size:9px;">negative move = bearish view</span>
       </div>
-      <div style="font-size:10px;font-weight:700;margin:4px 4px 2px;">${p.bull ? '▲' : '▼'} ${Math.abs(p.move)} pts in ${p.mins} min — ranked by net rupees after costs</div>
+      <div style="font-size:10px;font-weight:700;margin:4px 4px 2px;">${p.bull ? '▲' : '▼'} ${Math.abs(p.move)} pts in ${p.mins} min${p.scaled ? ` <span style="font-weight:400;color:var(--muted);">(${p.moveRaw} scaled ×${p.scale.toFixed(1)} for ${escapeHtml(state.symbol || '')})</span>` : ''} — ranked by net rupees after costs</div>
       ${rows}
       <div class="oc-sub" style="margin-top:4px;">
         <b>Best expression: ${fmtInt(b.strike)} ${b.side}</b> at ₹${b.prem.toFixed(1)}, ${b.lots} lot${b.lots > 1 ? 's' : ''} for your ₹${fmtInt(Math.round(_scalpCfg().riskRs))} risk — target ₹${b.out.toFixed(1)}, stop ₹${b.stopPrem.toFixed(1)}, reward-to-risk ${b.rr ? b.rr.toFixed(2) : '—'}:1.
@@ -19304,7 +19991,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   window.addEventListener('mouseup', _dragEnd);
   window.addEventListener('blur', _dragEnd);
 
-  function renderPriceChart() {
+  // The context pane lives inside chartBody, which renderPriceChart rewrites
+  // in full - and the live candle re-renders on every tick, so the pane is
+  // destroyed several times a second. Wrapping the function means every
+  // caller refills it, without threading a call through 400 lines of render
+  // code where an insertion can land inside a nested callback.
+  function renderPriceChart(...a) {
+    const r = _renderPriceChartInner(...a);
+    try { renderCtxChart(); } catch (_) {}
+    return r;
+  }
+
+  function _renderPriceChartInner() {
     // The diagnosis panel writes into the same container as the chart, and the
     // chart re-renders on the poll timer and on every live tick - so it used
     // to be wiped within seconds of opening. Hold the container until the user
@@ -19325,7 +20023,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // viewBox grows when maximised so the extra screen height is real detail,
     // not a stretched 680px canvas
     const maxed = document.getElementById('chartPanel')?.classList.contains('chart-maxed');
-    const W = maxed ? 1600 : 900, H = maxed ? 1000 : 680;
+    const W = maxed ? 1600 : 900, H = maxed ? 600 : 408;
     const padL = 8, padR = maxed ? 84 : 72, padT = 12, padB = 34;
     let lo = Math.min(...cs.map(c => c.l)), hi = Math.max(...cs.map(c => c.h));
     for (const L of levels) { if (L.v < lo * 0.985 || L.v > hi * 1.015) continue; lo = Math.min(lo, L.v); hi = Math.max(hi, L.v); }
@@ -19501,7 +20199,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>`;
       }
     } catch (_) {}
-    box.innerHTML = regBar + `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}
+    // The context pane sits between the regime bar and the candles: reading
+    // "SHIFTING" and then immediately seeing PCR, VIX and IV over the same
+    // period is the pairing that makes the label mean something.
+    box.innerHTML = regBar + `<div id="ctxChartBody" style="padding:0 2px 2px;"></div>` +
+      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
         <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
@@ -19525,6 +20227,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             ${rel ? `<span style="font-size:8.5px;color:${rel === 'above' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${rel}</span>` : ''}
             ${s.short ? '<span style="font-size:8px;color:var(--gold,#d4af37);" title="fewer candles loaded than the EMA period — the line is seeded from what exists and will settle as the session fills">short</span>' : ''}
           </span>`;
+
+    // The container above is recreated on EVERY render of this chart, and the
+    // live candle re-renders on every tick - so anything drawn into it is
+    // destroyed within a fraction of a second. Refilling it here, immediately
+    // after it is rebuilt, is the only place that holds: doing it from the
+    // poll pipeline meant the pane existed for one frame in twenty.
+    try { renderCtxChart(); } catch (_) {}
         }).join('') || '<span style="font-size:9px;color:var(--muted);">No overlays selected.</span>'}
       </div>
       ${_chart.optionMeta && (_chart.optionMeta.oi || []).length > 1 ? (() => {
@@ -19688,7 +20397,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const m = _m920Load();
     const spot = d?.underlying_value;
     if (!m || !spot) return;
-    const tol = Math.max(4, _csrcCfg().tol || 15);   // points, set on the Alerts tab
+    const tol = Math.max(4, _tolScaled());   // Alerts-tab value, scaled per instrument
     state._m920Fired = state._m920Fired || {};
     const lines = [['EOR+1', m.EORp1, 'resistance extension'], ['EOR', m.EOR, 'resistance'],
                    ['EOS', m.EOS, 'support'], ['EOS-1', m.EOSm1, 'support extension']];
@@ -20131,6 +20840,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (/^(CLA|FIB|TRA|CAM|WOO|DEM)\s|^[RS]\d|Pivot/i.test(L)) return 'pivots';
     return null;                     // unknown source: allow, do not silently drop
   }
+  // The configured tolerance is a NIFTY figure; scale it to whatever is
+  // loaded so 20 points on Nifty behaves like ~42 on BankNifty rather than
+  // like a tolerance four times tighter.
+  function _tolScaled() {
+    const base = _csrcCfg().tol ?? 20;
+    try {
+      const s = _instScale(state.lastData);
+      return Math.max(2, Math.round(base * s.pts));
+    } catch (_) { return base; }
+  }
+
   function _csrcAllows(label) {
     if (_enableAll()) return true;               // master switch: hear everything
     const k = _csrcKeyFor(label);
@@ -20177,6 +20897,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'alertsEnableAll',     // the master enable-all switch
     'emaCrossCfg',         // EMA crossover pairs and filters
     'priceMaCrossCfg',     // price crossing an EMA or VWAP
+    'pcrAlertCfg',         // near-band PCR change alert
+    'ctxChartCfg',         // which context series are drawn
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
     'trendEngineCfg',      // trend engine threshold and agreement rule
@@ -26853,6 +27575,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // it as a free variable silently made this guard a no-op. Read the DOM
   // instead, cached for a moment so 30 calls in one pass cost one query.
   let _atCache = { t: null, at: 0 };
+  // Held on window: _applyTicks lives in a different <script> block from the
+  // context-chart code, and relying on block evaluation order for a shared
+  // flag is the kind of thing that works until someone reorders the file.
+  let _ctxRaf = 0;
 
 (function() {
   // ── Help text library ────────────────────────────────────────────────────
@@ -26890,6 +27616,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     'volume-profile':    '<strong>Volume Profile &amp; CVD</strong>Impossible before the broker feed: NSE supplied one spot sample a minute with no volume at all, and volume is the entire input here. A price chart shows where price WENT; the profile shows where it <b>traded</b> - how much business was done at each level - and those levels matter because that is where positions live, so price returns to them. <b>POC</b> is the most-traded price, the session\'s centre of gravity and the level price is most likely to revisit. <b>VAH and VAL</b> bound the value area holding 70%% of the volume, and the practical rule is the most useful thing on this panel: <b>inside the value area the market is balanced and fades work; outside it the market is imbalanced and trends work.</b> Knowing which regime you are in matters more than any single level. <b>Low-volume nodes</b> are prices the market passed through quickly and tends to pass through quickly again - poor targets, good breakout confirmations. <b>CVD</b> tracks buying minus selling pressure; its value is in DIVERGENCE, because price making a new high while CVD does not means the move is not backed by aggressive buying. <b>Honest limit:</b> this CVD is a bar-level approximation classified by where each bar closed within its own range. A true tick delta needs every print tagged against bid and ask, which the feed does not expose per trade - so read the divergence, not the absolute number.',
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
+    'ctx-chart':         '<strong>Context pane</strong>PCR, India VIX and ATM implied volatility drawn against the <b>same time axis as the candles above</b>. Sharing that axis is the entire point: reading the three as numbers tells you where they are, but seeing them co-timed with price tells you which one moved FIRST - and that ordering is where the information sits. Implied volatility lifting while price is flat, or the put-call ratio turning ten minutes before the candles do, is invisible in a set of readouts and obvious here. <b>Each line is scaled to its own range</b>, because they share no units - PCR sits near 1, VIX in the teens, IV in percent - and plotting them on one absolute axis would flatten two of the three into a straight line. The span beside each legend entry tells you what that series has actually covered, so a line that looks dramatic can be checked against a range that may be trivial. The PCR line is the near-band figure, the same one the voice alert watches, so what you hear and what you see are the same number. Untick a series to remove it; the choice persists.',
+    'pcr-bands':         '<strong>PCR by horizon</strong>One put-call ratio hides which strikes produced it. Computed over the whole chain it includes strikes price cannot reach this week - that open interest is positional and barely moves intraday, so it dilutes a genuine shift near the money into something that looks like nothing happened. The bands here are defined in <b>sigma</b> - the expected move - rather than in strike counts, and that distinction matters more than it sounds. Nifty uses 50-point steps near the money and 100-point steps further out, so a fixed count like \'±12 strikes\' covers ±600 points in one part of the chain and ±1200 in another: the band silently changes meaning depending on where the money is. A fixed count also means different risk on different instruments, because BankNifty\'s higher volatility needs a wider net for the same reachability. Measuring in sigma removes both problems - each band self-adjusts to strike spacing, to the instrument and to today\'s volatility, and the strike COUNT becomes an output worth reading rather than a number to guess at. On a quiet Nifty day the rest-of-day band might be ±111 points and five strikes; on a high-volatility day the same band widens to ±195 points and seven. <b>The divergence between the near and wide bands is the actionable part:</b> when they disagree, positioning is shifting where price actually is, and the wide ratio will not reflect it for some time. The three columns are the same ratio computed on open interest, traded volume, and CHANGE in open interest - and ΔOI is the most immediate of the three, because it counts only what was added or removed today rather than the standing book. <b>Only the ±3 band is announced.</b> The wider ones move slowly by design, so alerting on them would mostly report the passage of time; the near band is the one that can change what you do in the next few minutes. Rising PCR means puts building relative to calls, which is support being written and conventionally bullish - but above 1.6 or below 0.6 the reading inverts and is called out as contrarian, because when everyone is positioned one way there is nobody left to push it further.',
     'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
     'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
     'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP position, momentum, position in the day range) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
