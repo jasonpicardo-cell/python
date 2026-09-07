@@ -20270,7 +20270,63 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       volSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(vTop + 9).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">vol ${fmtInt(Math.round(vMax))}</text>`;
     }
 
-    let svg = volSvg + gapSvg;
+    // ── 09:15-09:20 opening range box ─────────────────────────────
+    // The first five minutes set the reference the 9:20 method is built on,
+    // so the range they covered is worth seeing all day rather than being
+    // scrolled past at 09:21.
+    //
+    // BODIES ONLY, no wicks. A wick is a price that was rejected - it traded
+    // and was pushed back - while a body is where the five minutes actually
+    // closed out. For a reference level the second is the honest measure, and
+    // including wicks would widen the box on a single spike that nobody
+    // defended.
+    //
+    // It grows live from 09:15 and freezes when the 09:20 candle completes,
+    // so the box is usable while it forms rather than appearing after the
+    // fact. It then persists for the rest of the session.
+    let orbSvg = '';
+    if (!_chart.optionMeta) {
+      try {
+        const istMin = ts => {
+          const g2 = new Date(ts * 1000);
+          const ist = new Date(g2.getTime() + (5.5 * 60 + g2.getTimezoneOffset()) * 60000);
+          return ist.getHours() * 60 + ist.getMinutes();
+        };
+        const OPEN = 9 * 60 + 15, CLOSE_OR = 9 * 60 + 20;
+        const inOr = cs.filter(k => {
+          const m = istMin(k.t);
+          return m >= OPEN && m < CLOSE_OR;
+        });
+        if (inOr.length) {
+          // body extremes: the close-out range, not the rejected extremes
+          const hi = Math.max(...inOr.map(k => Math.max(k.o, k.c)));
+          const lo = Math.min(...inOr.map(k => Math.min(k.o, k.c)));
+          if (hi > lo || inOr.length) {
+            const slotFor = m => Math.max(0, Math.min(slots - 1, Math.floor((m - OPEN) / _chart.interval)));
+            const x0 = padL + slotFor(OPEN) / slots * (W - padL - padR);
+            // right edge: the end of the slot containing 09:19, so a 1-minute
+            // chart spans five candles and a 5-minute chart spans one
+            const x1 = padL + (slotFor(CLOSE_OR - 1) + 1) / slots * (W - padL - padR);
+            const yTop = y(hi), yBot = y(lo);
+            const done = istMin(cs[cs.length - 1].t) >= CLOSE_OR;
+            const bw2 = Math.max(2, x1 - x0);
+            const h2 = Math.max(2, yBot - yTop);
+            orbSvg = `<rect x="${x0.toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw2.toFixed(1)}" height="${h2.toFixed(1)}"
+                fill="rgba(212,175,55,0.13)" stroke="rgba(212,175,55,0.55)" stroke-width="0.9"
+                stroke-dasharray="${done ? '' : '4,3'}"><title>09:15-09:20 opening range (bodies only)
+${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? '' : '  ·  still forming'}</title></rect>`;
+            // extend the two edges across the session: the box is a reference
+            // for the whole day, and a five-minute rectangle at the far left
+            // is easy to lose once price has travelled
+            orbSvg += `<line x1="${x1.toFixed(1)}" y1="${yTop.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yTop.toFixed(1)}" stroke="rgba(212,175,55,0.30)" stroke-width="0.8" stroke-dasharray="2,5"/>`;
+            orbSvg += `<line x1="${x1.toFixed(1)}" y1="${yBot.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yBot.toFixed(1)}" stroke="rgba(212,175,55,0.30)" stroke-width="0.8" stroke-dasharray="2,5"/>`;
+            orbSvg += `<text x="${(x0 + 2).toFixed(1)}" y="${(yTop - 2.5).toFixed(1)}" style="font-size:8px;fill:rgba(212,175,55,0.8);">9:15-9:20 ${Math.round(hi - lo)}pt${done ? '' : ' …'}</text>`;
+          }
+        }
+      } catch (_) {}
+    }
+
+    let svg = orbSvg + volSvg + gapSvg;
     cs.forEach((c, i) => {
       // colour by body; for a flat body fall back to change vs the previous close
       const prevC = i > 0 ? cs[i - 1].c : c.o;
