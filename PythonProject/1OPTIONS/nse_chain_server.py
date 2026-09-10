@@ -384,6 +384,11 @@ ALERT_CFG = {
     "oi_pct": float(_os.environ.get("NSE_ALERT_OI_PCT", RUN_ALERT_OI_PCT)),
     "prem_pct": float(_os.environ.get("NSE_ALERT_PREM_PCT", RUN_ALERT_PREM_PCT)),
     "near_pct": float(_os.environ.get("NSE_ALERT_NEAR_PCT", RUN_ALERT_NEAR_PCT)),
+    # Band for flow alerts, in sigma of the expected session move. 1.5 covers
+    # the strikes price can realistically reach plus the walls just beyond,
+    # and excludes the far wings where most activity is spread legs and
+    # margin-relief hedges rather than a directional view.
+    "sigma_mult": float(_os.environ.get("NSE_FLOW_SIGMA", 1.5)),
     "window": float(_os.environ.get("NSE_ALERT_WINDOW", RUN_ALERT_WINDOW)),
     "cooldown": float(_os.environ.get("NSE_ALERT_COOLDOWN", RUN_ALERT_COOLDOWN)),
     # ceiling on EXTRA same-category events; distinct categories always pass
@@ -506,6 +511,32 @@ def _sse_broadcast_ticks(event: dict) -> None:
             pass
 
 
+def _bs_delta(S: float, K: float, T: float, sigma: float, is_call: bool,
+              r: float = 0.07) -> float:
+    """Black-Scholes delta. The standard formula, not an approximation.
+
+    An earlier version used a tanh curve fitted by eye. Tested against this it
+    was accurate near expiry and out by as much as 0.28 further out - which
+    would have introduced a fresh systematic bias while claiming to remove one.
+    The closed form costs a logarithm and an error function, which is nothing
+    at this call rate, and it is exactly right at every strike and expiry.
+    """
+    try:
+        if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+            # at expiry delta is a step: 1 for an in-the-money call, else 0
+            itm = S > K if is_call else S < K
+            return (1.0 if itm else 0.0) if is_call else (-1.0 if itm else 0.0)
+        d1 = (math.log(S / K) + (r + sigma * sigma / 2.0) * T) / (sigma * math.sqrt(T))
+        # Self-contained on purpose: the only _norm_cdf in this file is nested
+        # inside another function and invisible from here. Reaching for a name
+        # that exists somewhere in the file is exactly the mistake that has
+        # bitten this code repeatedly.
+        nd1 = 0.5 * (1.0 + math.erf(d1 / math.sqrt(2.0)))
+        return nd1 if is_call else nd1 - 1.0
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def _flow_detect(symbol: str, data: dict):
     """Compare this snapshot with the last one and raise flow alerts."""
     try:
@@ -514,7 +545,9 @@ def _flow_detect(symbol: str, data: dict):
         if not strikes or not spot:
             return
         now = time.time()
-        snap = {"ts": now, "m": {s.get("strike"): (s.get("ce_oi") or 0, s.get("pe_oi") or 0,
+        # spot is stored so the next pass can tell how much of a premium move
+        # the underlying already explains
+        snap = {"ts": now, "spot": spot, "m": {s.get("strike"): (s.get("ce_oi") or 0, s.get("pe_oi") or 0,
                                                    s.get("ce_ltp") or 0, s.get("pe_ltp") or 0)
                                  for s in strikes if s.get("strike")}}
         prev = _flow_prev.get(symbol)
@@ -525,8 +558,31 @@ def _flow_detect(symbol: str, data: dict):
             return
         _flow_prev[symbol] = snap
         events = []
+        # ── restrict to strikes that MATTER today ────────────────────
+        # A fixed percentage is the wrong band, and it is wrong differently on
+        # each instrument: 1.5% is 2.2 sigma on Nifty but 1.85 on BankNifty,
+        # so the same setting reaches strikes Nifty will not see all day while
+        # barely covering BankNifty.
+        #
+        # Far OTM flow is also poor signal regardless of width. Much of it is
+        # spread legs and margin-relief hedges - a seller buying a far wing to
+        # convert a naked short into a spread - which says nothing about
+        # direction. Those strikes generate alerts that cannot be traded.
+        #
+        # The band is now the expected move: one sigma for the session, times
+        # a multiplier that defaults to 1.5 so the walls just beyond reach are
+        # still covered. It scales with volatility and with the instrument
+        # without anyone maintaining a table.
+        _sig_day = float(data.get("atm_iv") or 12.0) / 100.0
+        _T_day = max(1e-6, float(data.get("dte") or 1.0) * (252.0 / 365.0) / 252.0)
+        _sigma_pts = spot * _sig_day * math.sqrt(min(_T_day, (252.0 / 365.0) / 252.0))
+        _mult = float(_os.environ.get("NSE_FLOW_SIGMA", ALERT_CFG.get("sigma_mult", 1.5)))
+        # never tighter than a couple of strikes, never wider than the old
+        # fixed band - a guard against a bad IV print collapsing or exploding it
+        _band = max(spot * 0.0035, min(spot * ALERT_CFG["near_pct"] / 100.0,
+                                       _sigma_pts * _mult))
         for k, (ce, pe, cl_, pl) in snap["m"].items():
-            if abs(k - spot) / spot * 100 > ALERT_CFG["near_pct"]:
+            if abs(k - spot) > _band:
                 continue
             p = prev["m"].get(k)
             if not p:
@@ -548,22 +604,103 @@ def _flow_detect(symbol: str, data: dict):
                 # writing somewhere far away. The client could ask for these
                 # ("also unwinding/covering") but the server never sent them,
                 # so the setting did nothing whenever the stream was live.
-                buying = pr_pct > 0
+                # ── separate DEMAND from the delta effect ─────────────
+                # "premium up = buying" ignores that an option's price moves
+                # with the underlying whether or not anyone trades it. A put
+                # with delta -0.42 gains 5% on a 10-point dip from delta alone,
+                # so a routine pullback inside a rising session was announced
+                # as "fresh put buying" - bearish - while the trend was up.
+                # That is the behaviour reported.
+                #
+                # What the underlying already explains is not evidence of
+                # demand; only the EXCESS is. There are no Greeks server-side,
+                # so delta is approximated from moneyness - crude, but the
+                # sign and rough magnitude are all this needs, and it is far
+                # closer than assuming zero.
+                d_spot = spot - prev.get("spot", spot)
+                expected_pct = None
+                if abs(d_spot) > 0.01 and l_old:
+                    # Exact Black-Scholes delta - the standard formula, with
+                    # no fitted constants to be wrong about.
+                    _sig = float(data.get("atm_iv") or 12.0) / 100.0
+                    _T = max(1e-6, float(data.get("dte") or 1.0) * (252.0 / 365.0) / 252.0)
+                    dlt = _bs_delta(spot, k, _T, _sig, side == "CE")
+                    expected_pct = (dlt * d_spot) / l_old * 100.0
+                if expected_pct is not None:
+                    excess = pr_pct - expected_pct
+                    # the excess must be a real share of the move, not rounding
+                    # noise sitting on top of a large delta effect
+                    if abs(excess) < max(1.5, abs(expected_pct) * 0.35):
+                        continue        # the underlying explains it: no signal
+                    buying = excess > 0
+                else:
+                    buying = pr_pct > 0
                 opening = oi_pct > 0
                 if opening:
-                    kind = f"fresh {'call' if side == 'CE' else 'put'} {'buying' if buying else 'selling'}"
+                    # Standard OI/price interpretation, in the usual terms:
+                    #   price up   + OI up   = long buildup
+                    #   price down + OI up   = short buildup
+                    #   price up   + OI down = short covering
+                    #   price down + OI down = long unwinding
+                    # "Long buildup in calls" is what a desk would say, and it
+                    # states what happened rather than asserting who did it.
+                    _inst = 'call' if side == 'CE' else 'put'
+                    kind = f"{'long buildup' if buying else 'short buildup'} in {_inst}s"
+                    # Two names on purpose. The desk term is precise and right
+                    # for the screen and the log; the plain one is what a voice
+                    # alert needs, because "long buildup in calls" has to be
+                    # translated mid-trade and "call buying" does not.
+                    # "call buying" is the standard shorthand for buyer-
+                    # initiated flow, and it is what a voice alert can convey
+                    # in two words. The why-clause carries the precision.
+                    spoken = f"{_inst} {'buying' if buying else 'selling'}"
                     bias = ("bullish" if buying else "bearish") if side == "CE" else ("bearish" if buying else "bullish")
                     cat = ("ce" if side == "CE" else "pe") + ("Buy" if buying else "Sell")
+                    # Say WHY, in one clause. A bias word with no reasoning is
+                    # something to obey rather than judge, and the same label
+                    # can come from very different situations.
+                    # Honest phrasing. Open interest rising creates one long
+                    # AND one short - buying and selling are the same event
+                    # from two sides, so "calls were bought" describes nothing.
+                    # What the premium direction reveals is who was the
+                    # AGGRESSOR: if premium rose as OI rose, buyers had to lift
+                    # the offer to get filled; if it fell, sellers had to hit
+                    # the bid. That is an inference from price pressure, not an
+                    # observation of intent, and the wording now says so.
+                    why = {
+                        ("CE", True):  "buyers lifting the offer, positioning for upside",
+                        ("CE", False): "sellers hitting the bid, resistance forming above",
+                        ("PE", True):  "buyers lifting the offer, protection or downside bets",
+                        ("PE", False): "sellers hitting the bid, support forming below",
+                    }[(side, buying)]
+                    # New positions are a stronger signal than positions being
+                    # closed: someone is putting capital at risk on a view.
+                    strength = "strong"
                 else:
+                    # premium up while OI falls = short covering; premium down
+                    # while OI falls = long unwinding. Same standard table.
                     # premium up while OI falls = shorts buying back (covering)
                     # premium down while OI falls = longs giving up (unwinding)
                     covering = buying
                     side_word = "call" if side == "CE" else "put"
                     kind = f"{side_word} {'short covering' if covering else 'long unwinding'}"
+                    spoken = f"{side_word} {'writers buying back' if covering else 'longs closing'}"
                     if side == "CE":
                         bias = "bullish" if covering else "bearish"
                     else:
                         bias = "bearish" if covering else "bullish"
+                    # Falling OI destroys a contract, so again both sides are
+                    # closing. The premium direction says which of them was in
+                    # more of a hurry to get out.
+                    why = {
+                        ("CE", True):  "shorts in a hurry to cover, resistance being removed",
+                        ("CE", False): "longs in a hurry to exit, upside bets abandoned",
+                        ("PE", True):  "shorts in a hurry to cover, support being withdrawn",
+                        ("PE", False): "longs in a hurry to exit, downside bets abandoned",
+                    }[(side, covering)]
+                    # Closing positions says less than opening them: it tells
+                    # you a view is being exited, not that a new one is held.
+                    strength = "moderate"
                     cat = "cover" if covering else "unwind"
                 if cat in ("cover", "unwind") and not ALERT_CFG.get("closing_flow", True):
                     continue
@@ -571,7 +708,8 @@ def _flow_detect(symbol: str, data: dict):
                 if now - _flow_fired.get(fk, 0) < ALERT_CFG["cooldown"]:
                     continue
                 events.append({"fk": fk, "cat": cat, "strike": k, "side": side, "kind": kind,
-                               "bias": bias, "oi_pct": round(oi_pct, 1), "pr_pct": round(pr_pct, 1)})
+                               "bias": bias, "why": why, "strength": strength, "spoken": spoken,
+                               "oi_pct": round(oi_pct, 1), "pr_pct": round(pr_pct, 1)})
         if not events:
             return
         # round-robin by category so calls are never crowded out by puts

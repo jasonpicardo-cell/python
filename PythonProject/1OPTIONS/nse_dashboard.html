@@ -12499,7 +12499,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       state._flowFired[e.fk] = now;                 // stamp ONLY what we speak
       // Lead with the bias. "Fresh call selling" requires the listener to
       // translate it to bearish mid-trade; the bias word does not.
-      const txt = `${(e.bias || 'neutral').toUpperCase()}. ${e.kind} at ${Math.round(e.k)}, open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
+      // Bias, then the standard name, then WHY in one clause. The reasoning
+      // matters because the same bias word arrives from very different
+      // situations - "bullish" from puts being written is support forming,
+      // while "bullish" from call short-covering is resistance being removed,
+      // and those are traded differently.
+      // Speak the PLAIN action; keep the desk term for the toast and log.
+      // "Put selling at 23400" is parsed instantly; "short buildup in puts"
+      // has to be translated, and mid-trade that is a cost with no benefit.
+      const txt = `${(e.bias || 'neutral').toUpperCase()}${e.strength === 'strong' ? '' : ', moderate'}. ` +
+        `${e.spoken || e.kind} at ${Math.round(e.k)}${e.why ? `, ${e.why}` : ''}. Open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
       _speakOnce(`flow|${state.symbol || 'NIFTY'}|${e.k}|${e.side}|${e.kind}`, txt, 300);
       if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias}`);
       _flowLog({ ts: Date.now(), k: e.k, side: e.side, kind: e.kind, bias: e.bias, oiPct: +e.oiPct.toFixed(1), prPct: +e.prPct.toFixed(1) });

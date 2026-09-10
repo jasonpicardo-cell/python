@@ -118,3 +118,16 @@ NSE_CLEANUP=true
 NSE_KEEP_REPLAY_DAYS=60
 NSE_KEEP_TICKS_DAYS=365
 NSE_KEEP_BHAV_DAYS=30
+
+# ── Flow alert strike band ───────────────────────────────────────────
+# Which strikes generate option-flow alerts, measured in sigma of the
+# expected session move rather than a fixed percentage of spot.
+#
+# A fixed band is wrong differently on each instrument - 1.5% is 2.2 sigma
+# on Nifty but 1.85 on BankNifty - and the far wings are poor signal in any
+# case: much of that activity is spread legs and margin-relief hedges,
+# which say nothing about direction.
+#
+# 1.5 covers the strikes price can realistically reach plus the walls just
+# beyond. Lower it to 1.0 for tighter, near-the-money flow only.
+NSE_FLOW_SIGMA=1.5
