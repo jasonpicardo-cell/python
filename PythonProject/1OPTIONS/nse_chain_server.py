@@ -526,12 +526,12 @@ def _bs_delta(S: float, K: float, T: float, sigma: float, is_call: bool,
             # at expiry delta is a step: 1 for an in-the-money call, else 0
             itm = S > K if is_call else S < K
             return (1.0 if itm else 0.0) if is_call else (-1.0 if itm else 0.0)
-        d1 = (math.log(S / K) + (r + sigma * sigma / 2.0) * T) / (sigma * math.sqrt(T))
+        d1 = (_math.log(S / K) + (r + sigma * sigma / 2.0) * T) / (sigma * _math.sqrt(T))
         # Self-contained on purpose: the only _norm_cdf in this file is nested
         # inside another function and invisible from here. Reaching for a name
         # that exists somewhere in the file is exactly the mistake that has
         # bitten this code repeatedly.
-        nd1 = 0.5 * (1.0 + math.erf(d1 / math.sqrt(2.0)))
+        nd1 = 0.5 * (1.0 + _math.erf(d1 / _math.sqrt(2.0)))
         return nd1 if is_call else nd1 - 1.0
     except Exception:  # noqa: BLE001
         return 0.0
@@ -547,7 +547,15 @@ def _flow_detect(symbol: str, data: dict):
         now = time.time()
         # spot is stored so the next pass can tell how much of a premium move
         # the underlying already explains
-        snap = {"ts": now, "spot": spot, "m": {s.get("strike"): (s.get("ce_oi") or 0, s.get("pe_oi") or 0,
+        # Bid and ask are stored so the classifier can ask WHERE the premium
+        # settled rather than only which way it moved. A print at the offer and
+        # a print at the bid are the same premium change from opposite
+        # initiators, and premium direction alone cannot separate them.
+        snap = {"ts": now, "spot": spot,
+                "q": {s.get("strike"): (s.get("ce_bid") or 0, s.get("ce_ask") or 0,
+                                        s.get("pe_bid") or 0, s.get("pe_ask") or 0)
+                      for s in strikes if s.get("strike")},
+                "m": {s.get("strike"): (s.get("ce_oi") or 0, s.get("pe_oi") or 0,
                                                    s.get("ce_ltp") or 0, s.get("pe_ltp") or 0)
                                  for s in strikes if s.get("strike")}}
         prev = _flow_prev.get(symbol)
@@ -575,7 +583,7 @@ def _flow_detect(symbol: str, data: dict):
         # without anyone maintaining a table.
         _sig_day = float(data.get("atm_iv") or 12.0) / 100.0
         _T_day = max(1e-6, float(data.get("dte") or 1.0) * (252.0 / 365.0) / 252.0)
-        _sigma_pts = spot * _sig_day * math.sqrt(min(_T_day, (252.0 / 365.0) / 252.0))
+        _sigma_pts = spot * _sig_day * _math.sqrt(min(_T_day, (252.0 / 365.0) / 252.0))
         _mult = float(_os.environ.get("NSE_FLOW_SIGMA", ALERT_CFG.get("sigma_mult", 1.5)))
         # never tighter than a couple of strikes, never wider than the old
         # fixed band - a guard against a bad IV print collapsing or exploding it
@@ -626,15 +634,40 @@ def _flow_detect(symbol: str, data: dict):
                     _T = max(1e-6, float(data.get("dte") or 1.0) * (252.0 / 365.0) / 252.0)
                     dlt = _bs_delta(spot, k, _T, _sig, side == "CE")
                     expected_pct = (dlt * d_spot) / l_old * 100.0
-                if expected_pct is not None:
+                # ── direct read, when the book is available ───────────
+                # Premium direction is an INFERENCE about who initiated. Where
+                # the trade actually settled in the spread is an OBSERVATION of
+                # it: near the ask means the buyer paid up, near the bid means
+                # the seller accepted less. This replaces the inference rather
+                # than supplementing it, and marks the event so the difference
+                # is visible rather than assumed.
+                aggressor = None
+                _q = (snap.get("q") or {}).get(k)
+                if _q:
+                    _bid, _ask = (_q[0], _q[1]) if side == "CE" else (_q[2], _q[3])
+                    if _ask > _bid > 0:
+                        # position in the spread: 0 at the bid, 1 at the offer
+                        pos = (l_now - _bid) / (_ask - _bid)
+                        # only call it when the print is decisively one side;
+                        # mid-market says nobody was in a hurry
+                        if pos >= 0.65:
+                            aggressor = "buy"
+                        elif pos <= 0.35:
+                            aggressor = "sell"
+                if aggressor is not None:
+                    buying = aggressor == "buy"
+                    source = "book"
+                elif expected_pct is not None:
                     excess = pr_pct - expected_pct
                     # the excess must be a real share of the move, not rounding
                     # noise sitting on top of a large delta effect
                     if abs(excess) < max(1.5, abs(expected_pct) * 0.35):
                         continue        # the underlying explains it: no signal
                     buying = excess > 0
+                    source = "delta-adjusted premium"
                 else:
                     buying = pr_pct > 0
+                    source = "raw premium"
                 opening = oi_pct > 0
                 if opening:
                     # Standard OI/price interpretation, in the usual terms:
@@ -709,6 +742,7 @@ def _flow_detect(symbol: str, data: dict):
                     continue
                 events.append({"fk": fk, "cat": cat, "strike": k, "side": side, "kind": kind,
                                "bias": bias, "why": why, "strength": strength, "spoken": spoken,
+                               "source": source,
                                "oi_pct": round(oi_pct, 1), "pr_pct": round(pr_pct, 1)})
         if not events:
             return
