@@ -5029,7 +5029,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
              ce_theta: +ce_theta.toFixed(2), pe_theta: +pe_theta.toFixed(2) };
   }
 
-  function _renderGreeksCard(data) {
+  // SUPERSEDED. A second _renderGreeksCard was defined later in the same
+  // scope and silently replaced this one - the later definition wins, so
+  // this body has never run. It is renamed rather than deleted so the
+  // difference stays visible: the live version also renders futures basis,
+  // which this one does not.
+  function _renderGreeksCard_superseded(data) {
     const card = document.getElementById('greeksCard');
     if (!card) return;
     const { atm_iv, dte, underlying_value, atm } = data;
@@ -14404,7 +14409,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // switch TO would otherwise show whatever was there when you last left
       // it. Repaint once from the cached response - no network call, just the
       // DOM work that was skipped while the tab was out of view.
-      _atCache = { t: null, at: 0 };          // invalidate the cached tab name
+      window._atCache = { t: null, at: 0 };   // invalidate the cached tab name
       if (state.lastData) {
         setTimeout(() => { try { render(state.lastData); } catch (_) {} }, 0);
       }
@@ -14711,9 +14716,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // bug, not an optimisation.
   function _activeTabNow() {
     const now = Date.now();
-    if (now - _atCache.at < 250) return _atCache.t;
+    if (now - window._atCache.at < 250) return window._atCache.t;
     const t = document.querySelector('.tab.active')?.dataset.tab || null;
-    _atCache = { t, at: now };
+    window._atCache = { t, at: now };
     return t;
   }
   function _paint(tab, fn, name) {
@@ -15282,6 +15287,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // tells you what to expect: resistance from below is where rallies stall,
     // support from above is where declines pause.
     const spotNow = state.lastData?.underlying_value;
+    // Not everything routed through here is a price LEVEL. PCR, IV and volume
+    // alerts share this path, and a put-call ratio of 0.62 was being announced
+    // as "SUPPORT ... touched at 0" - the support/resistance framing is
+    // meaningless for a metric, and "touched" implies price reached something
+    // it never went near.
+    //
+    // Detect it by distance: a genuine level sits within a few percent of
+    // spot, while a ratio or a percentage does not. Cheap, and it needs no
+    // change at the twelve call sites.
+    const isLevel = !spotNow || (price > 0 && Math.abs(price - spotNow) / spotNow < 0.15);
+    if (!isLevel) {
+      // a metric crossing a threshold: say what it is, not where price is
+      let t2 = String(label).replace(/\+1/g, ' plus one').replace(/-1/g, ' minus one');
+      t2 = t2.replace(/≥/g, 'at or above').replace(/≤/g, 'at or below')
+             .replace(/=/g, ' ').replace(/\s+/g, ' ').trim();
+      return `${t2}${cfg.price && price ? `, now ${price.toFixed(2)}` : ''}`;
+    }
     const isRes = /^R\d/.test(label) || /EOR/.test(label) || /call wall/i.test(label)
                   || (spotNow && price > spotNow);
     let t = /^R(\d+)$/.test(label) ? `Resistance ${label.slice(1)}`
@@ -16293,8 +16315,26 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let score = 0;
     const reasons = [];
 
-    if (data.pcr >= 1.2) { score += 1; reasons.push(`PCR ${data.pcr} (bullish-leaning positioning)`); }
-    else if (data.pcr <= 0.75) { score -= 1; reasons.push(`PCR ${data.pcr} (bearish-leaning positioning)`); }
+    // PCR needs price direction to mean anything. Puts building while price
+    // falls are BOUGHT for protection, not written for income - scoring that
+    // as bullish inverts the signal exactly when it matters.
+    if (data.pcr >= 1.2 || data.pcr <= 0.75) {
+      let pUp = null;
+      try {
+        const cs5 = _chart.candles || [];
+        if (cs5.length >= 6) {
+          const n5 = Math.min(10, cs5.length - 1);
+          pUp = cs5[cs5.length - 1].c >= cs5[cs5.length - 1 - n5].c;
+        }
+      } catch (_) {}
+      const putHeavy = data.pcr >= 1.2;
+      if (pUp === null) {
+        reasons.push(`PCR ${data.pcr} (${putHeavy ? 'put' : 'call'}-heavy — direction needs price context)`);
+      } else if (putHeavy && pUp) { score += 1; reasons.push(`PCR ${data.pcr}: puts building as price rises — written, so support`); }
+      else if (putHeavy && !pUp) { score -= 1; reasons.push(`PCR ${data.pcr}: puts building as price falls — bought for protection, not support`); }
+      else if (!putHeavy && !pUp) { score -= 1; reasons.push(`PCR ${data.pcr}: calls building as price falls — resistance above`); }
+      else { score += 1; reasons.push(`PCR ${data.pcr}: calls building as price rises — extending`); }
+    }
 
     const freshCallWriting = data.flags.some(f => f.side === 'CE' && f.oi_chg > 0);
     const freshPutWriting = data.flags.some(f => f.side === 'PE' && f.oi_chg > 0);
@@ -16722,6 +16762,82 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return vol ? pv / vol : null;
     });
   }
+  // ── keep the candle array to ONE session ──────────────────────────
+  // x() maps a candle's TIME to a slot in the 09:15-15:40 axis, so any candle
+  // from another day lands on top of today's. The candles overlap and look
+  // merely dense, but a CUMULATIVE series like VWAP restarts on each pass and
+  // sits at a different level - which is why one VWAP polyline drew three
+  // parallel curves fanning to the right, with only one label.
+  //
+  // The server already filters, so reaching this means something upstream let
+  // a stale file through. Guarding here as well is worth it: a silent wrong
+  // chart is far more expensive than a redundant check, and every indicator
+  // built on these candles inherits the error.
+  // ── candle array diagnostic ───────────────────────────────────────
+  // Three attempts at explaining three VWAP curves from code alone have not
+  // settled it, so this reports what is actually in the array rather than
+  // inferring it. One reload prints the facts: how many candles, how many
+  // distinct timestamps, whether any repeat, whether time ever runs backward,
+  // and how many days are represented. Whichever of those is wrong names the
+  // cause immediately.
+  let _candleDiagOnce = '';
+  function _diagCandles(cs, where) {
+    try {
+      if (!Array.isArray(cs) || !cs.length) return;
+      const ts = cs.map(c => c.t);
+      const uniq = new Set(ts);
+      let back = 0;
+      for (let i = 1; i < ts.length; i++) if (ts[i] <= ts[i - 1]) back++;
+      const days = new Set(cs.map(c => {
+        const d = new Date(c.t * 1000);
+        const ist = new Date(d.getTime() + (5.5 * 60 + d.getTimezoneOffset()) * 60000);
+        return `${ist.getFullYear()}-${ist.getMonth() + 1}-${ist.getDate()}`;
+      }));
+      const withVol = cs.filter(c => c.v > 0).length;
+      const sig = `${cs.length}|${uniq.size}|${back}|${days.size}`;
+      if (sig === _candleDiagOnce) return;        // only report when it changes
+      _candleDiagOnce = sig;
+      const bad = uniq.size !== cs.length || back > 0 || days.size > 1;
+      console[bad ? 'warn' : 'log'](
+        `[chart:${where}] ${cs.length} candles · ${uniq.size} distinct timestamps` +
+        (uniq.size !== cs.length ? ` (${cs.length - uniq.size} DUPLICATES)` : '') +
+        ` · ${back} backward step(s)` +
+        ` · ${days.size} day(s): ${[...days].join(', ')}` +
+        ` · ${withVol} with volume`);
+      if (bad) console.warn('[chart] ^ this is why an anchored series like VWAP can draw more than one curve');
+    } catch (_) {}
+  }
+
+  // De-duplicate and sort. Correct regardless of what is causing the extra
+  // curves: an anchored, cumulative series depends on each bar appearing once
+  // and in order, and nothing upstream guarantees either.
+  function _dedupeSortCandles(cs) {
+    if (!Array.isArray(cs) || cs.length < 2) return cs || [];
+    const byT = new Map();
+    for (const c of cs) if (c && isFinite(c.t)) byT.set(c.t, c);   // last wins
+    return [...byT.values()].sort((a, b) => a.t - b.t);
+  }
+
+  function _todaySessionOnly(cs) {
+    if (!Array.isArray(cs) || !cs.length) return cs || [];
+    const now = new Date();
+    const istNow = new Date(now.getTime() + (5.5 * 60 + now.getTimezoneOffset()) * 60000);
+    const key = d => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const today = key(istNow);
+    const out = cs.filter(c => {
+      const d = new Date(c.t * 1000);
+      const ist = new Date(d.getTime() + (5.5 * 60 + d.getTimezoneOffset()) * 60000);
+      return key(ist) === today;
+    });
+    if (out.length !== cs.length) {
+      console.warn(`[chart] dropped ${cs.length - out.length} candle(s) from other days ` +
+                   `- they were being drawn on top of today's session`);
+    }
+    const cleaned = _dedupeSortCandles(out.length ? out : cs);
+    _diagCandles(cleaned, 'after-clean');
+    return cleaned;
+  }
+
   function _chartSeries(cs) {
     const closes = cs.map(c => c.c);
     const out = [];
@@ -17148,9 +17264,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   : near.pcr <= 0.9 ? 'var(--neg,#ef5350)' : 'inherit';
         out.push(cell('PCR ±3', near.pcr.toFixed(2), col,
           `Put-call ratio across the ${near.strikes} strikes price can reach in the ${bands.minsLeft} minutes left (${near.lo}-${near.hi}, ±${near.width} pts = one sigma). ` +
-          (extreme ? 'Extreme — read contrarian.'
-                   : near.pcr >= 1.1 ? 'Put-heavy: support being written.'
-                   : near.pcr <= 0.9 ? 'Call-heavy: resistance being written.' : 'Balanced.'),
+          ((() => {
+            let pu = null;
+            try {
+              const cs6 = _chart.candles || [];
+              if (cs6.length >= 6) {
+                const n6 = Math.min(10, cs6.length - 1);
+                pu = cs6[cs6.length - 1].c >= cs6[cs6.length - 1 - n6].c;
+              }
+            } catch (_) {}
+            const rr = _pcrRead(near.pcr, near.chgPcr, pu);
+            return rr ? rr.note : '';
+          })()),
           extreme ? 'extreme' : ''));
       }
     } catch (_) {}
@@ -17291,9 +17416,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // extra passes are pure cost. One rAF-scheduled redraw coalesces however
   // many ticks landed since the last frame.
   function _ctxScheduleDraw() {
-    if (_ctxRaf) return;
-    _ctxRaf = requestAnimationFrame(() => {
-      _ctxRaf = 0;
+    if (window._ctxRaf) return;
+    window._ctxRaf = requestAnimationFrame(() => {
+      window._ctxRaf = 0;
       if (!window._ctxDirty) return;
       window._ctxDirty = false;
       try { renderCtxChart(); } catch (_) {}
@@ -17818,6 +17943,53 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     { k: 'wide', sig: 2.0, horizon: 'exp',  lab: 'Wide (2σ)' },
   ];
 
+  // ── how to READ a put-call ratio ──────────────────────────────────
+  // The arithmetic was never wrong; the interpretation was. "Put-heavy means
+  // support is building" assumes those puts were WRITTEN by someone confident
+  // price holds. But open interest counts contracts, not who took which side,
+  // and puts BOUGHT for protection raise the ratio identically. In a falling
+  // market it is overwhelmingly the second - so a rising PCR during a selloff
+  // was being announced as bullish, which is backwards at the worst moment.
+  //
+  // Price direction is what separates them. Rising OI on one side means
+  // something different depending on which way price is going:
+  //   price UP   + put OI rising  -> puts being written -> bullish
+  //   price DOWN + put OI rising  -> puts being bought  -> BEARISH
+  // The same pairing applies to calls with the signs reversed.
+  //
+  // Two further corrections. LEVEL PCR is the standing book - months of
+  // institutional hedging - so it moves slowly and says little about today;
+  // the CHANGE in open interest is the intraday signal. And the neutral point
+  // for Indian index options sits nearer 1.1-1.3 than 1.0, because persistent
+  // put hedging is structural, so calling 1.35 bullish compares against the
+  // wrong zero.
+  const _PCR_NEUTRAL = 1.15;
+
+  function _pcrRead(pcr, chgPcr, priceUp) {
+    if (pcr == null) return null;
+    // prefer what changed TODAY when it is available
+    const useChg = chgPcr != null && isFinite(chgPcr) && chgPcr > 0;
+    const v = useChg ? chgPcr : pcr;
+    const src = useChg ? 'today\'s OI change' : 'the standing book';
+    if (pcr > 1.9) return { bias: 'stretched', tone: 'warn',
+      note: `PCR ${pcr.toFixed(2)} is extreme. Crowded positioning cuts both ways and is a poor directional signal on its own.` };
+    if (pcr < 0.55) return { bias: 'stretched', tone: 'warn',
+      note: `PCR ${pcr.toFixed(2)} is extreme on the call side. Crowded, and a poor directional signal on its own.` };
+    if (priceUp === null || priceUp === undefined) {
+      return { bias: 'unclear', tone: 'mid',
+        note: `${v.toFixed(2)} on ${src}. Direction needs price context: the same ratio means opposite things depending on whether price is rising or falling.` };
+    }
+    const putHeavy = v > _PCR_NEUTRAL;
+    if (putHeavy && priceUp) return { bias: 'bullish', tone: 'pos',
+      note: `Puts building while price rises: they are being WRITTEN, which is support.` };
+    if (putHeavy && !priceUp) return { bias: 'bearish', tone: 'neg',
+      note: `Puts building while price falls: they are being BOUGHT for protection, not written. This is fear, not support.` };
+    if (!putHeavy && !priceUp) return { bias: 'bearish', tone: 'neg',
+      note: `Calls building while price falls: resistance being written above.` };
+    return { bias: 'bullish', tone: 'pos',
+      note: `Calls building while price rises: they are being bought, which extends the move.` };
+  }
+
   function _pcrByBand(d) {
     const st = d?.strikes || [], spot = d?.underlying_value, iv = d?.atm_iv;
     if (!st.length || !spot) return null;
@@ -17904,17 +18076,30 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // conventionally bullish. Falling = calls building = resistance. The
     // extremes invert, which is why they are called out separately.
     const rising = chgPct > 0;
-    const extreme = near.pcr > 1.6 || near.pcr < 0.6;
-    const bias = extreme ? (near.pcr > 1.6 ? 'BEARISH' : 'BULLISH')   // contrarian
-                         : (rising ? 'BULLISH' : 'BEARISH');
+    // Price direction decides what a PCR move MEANS. Without it this said
+    // "rising PCR = BULLISH" unconditionally, so a selloff with puts being
+    // bought for protection was announced as bullish - the worst possible
+    // moment to be wrong about direction.
+    let priceUp = null;
+    try {
+      const cs4 = _chart.candles || [];
+      if (cs4.length >= 6) {
+        const n4 = Math.min(10, cs4.length - 1);
+        priceUp = cs4[cs4.length - 1].c >= cs4[cs4.length - 1 - n4].c;
+      }
+    } catch (_) {}
+    const rd = _pcrRead(near.pcr, near.chgPcr, priceUp);
+    const bias = (rd?.bias === 'bullish' ? 'BULLISH'
+                : rd?.bias === 'bearish' ? 'BEARISH'
+                : rd?.bias === 'stretched' ? 'STRETCHED, no clear direction'
+                : 'NO CLEAR DIRECTION');
     const sym = state.symbol || 'NIFTY';
     const txt = `${bias}. Near-strike put-call ratio ${rising ? 'rose' : 'fell'} ` +
       `${Math.abs(chgPct).toFixed(0)} percent in ${cfg.windowMin} minutes, ` +
       `${base.pcr.toFixed(2)} to ${near.pcr.toFixed(2)}, on ${sym} within ${Math.round(near.width)} points of ${Math.round(res.atm)}. ` +
-      (extreme
-        ? `That is an extreme reading, so it is read contrarian: positioning is crowded ${near.pcr > 1.6 ? 'on the put side' : 'on the call side'}`
-        : rising ? 'Puts are building relative to calls, which is support being written'
-                 : 'Calls are building relative to puts, which is resistance being written');
+      (rd?.note || 'Direction is unclear without price context.') +
+      (priceUp === null ? ' Price direction is not yet known from the chart.'
+                        : ` Price has been ${priceUp ? 'rising' : 'falling'} over the last few bars.`);
     try {
       if (_streamLive) _relayAlert(`pcrband|${sym}|${Math.round(now / 300000)}`, txt, 'level', 300);
       else _speakOnce(`pcrband|${sym}`, txt, 300);
@@ -17935,10 +18120,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const rows = res.bands.map(b => {
       const col = b.pcr > 1.6 || b.pcr < 0.6 ? 'var(--gold,#d4af37)'
                 : b.pcr >= 1 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
-      const read = b.pcr > 1.6 ? 'extreme — read contrarian'
-                 : b.pcr < 0.6 ? 'extreme — read contrarian'
-                 : b.pcr >= 1.1 ? 'put-heavy, support building'
-                 : b.pcr <= 0.9 ? 'call-heavy, resistance building' : 'balanced';
+      // Describe WHAT IS THERE, not what it supposedly means - the meaning
+      // needs price direction, and it is stated once below rather than
+      // repeated as a claim on every row.
+      const read = b.pcr > 1.9 ? 'stretched on the put side'
+                 : b.pcr < 0.55 ? 'stretched on the call side'
+                 : b.pcr >= 1.3 ? 'put-heavy'
+                 : b.pcr <= 0.95 ? 'call-heavy' : 'near neutral';
       return `<div style="display:flex;gap:10px;align-items:baseline;padding:3px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10.5px;flex-wrap:wrap;${b.k === 'rod' ? 'background:rgba(212,175,55,0.07);' : ''}">
         <b style="min-width:96px;">${escapeHtml(b.lab)}</b>
         <span style="min-width:34px;color:var(--muted);font-size:9px;">${b.sig}σ</span>
@@ -19991,7 +20179,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         if (box) box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error || 'no data')} — option candles are rebuilt from the recorded chain, so they fill in as the session records.</div>`;
         _chart.candles = []; return;
       }
-      _chart.candles = j.candles; _chart.src = 'replay-chain';
+      _chart.candles = _todaySessionOnly(j.candles); _chart.src = 'replay-chain';
       _chart.optionMeta = { strike: j.strike, side: j.side, oi: j.oi || [], iv: j.iv_last };
       renderPriceChart();
       try { _emaCrossCheck(); } catch (_) {}
@@ -20067,7 +20255,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         showToast?.(`⚠ ${j.error || 'no candles returned'}`);
         return;
       }
-      _chart.candles = j.candles;
+      _chart.candles = _todaySessionOnly(j.candles);
       _chart.src = j.source;
       _chart.coverage = j.coverage || null;
       _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
@@ -20108,7 +20296,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const r = await fetch(`${base}/api/intraday-candles?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&interval=${_chart.interval}`);
       const j = await r.json();
       if (j.error) { box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error)}</div>`; _chart.candles = []; return; }
-      _chart.candles = j.candles || []; _chart.src = j.source; _chart.coverage = j.coverage || null;
+      _chart.candles = _todaySessionOnly(j.candles || []); _chart.src = j.source; _chart.coverage = j.coverage || null;
       _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
       _chart.hasVolume = !!j.has_volume;
       try { _emaCrossCheck(); } catch (_) {}
@@ -20154,6 +20342,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function renderPriceChart(...a) {
     const r = _renderPriceChartInner(...a);
     try { renderCtxChart(); } catch (_) {}
+    // The series array holds exactly one VWAP, so if more than one is on
+    // SCREEN the extras are stale DOM rather than anything this render
+    // produced. Counting the live elements is the only way to tell those
+    // apart, and it is the question three rounds of code reading could not
+    // answer.
+    try {
+      const n = document.querySelectorAll('#chartBody polyline[stroke="#00d2d3"]').length;
+      const svgs = document.querySelectorAll('#chartBody svg').length;
+      const sig = `${n}|${svgs}`;
+      if (sig !== window._domDiagLast) {
+        window._domDiagLast = sig;
+        const bad = n > 1 || svgs > 2;
+        console[bad ? 'warn' : 'log'](
+          `[chart:dom] ${n} VWAP polyline(s) on screen · ${svgs} svg element(s) in chartBody` +
+          (bad ? '  <-- STALE ELEMENTS: the render is not replacing cleanly' : ''));
+      }
+    } catch (_) {}
     return r;
   }
 
@@ -20389,12 +20594,43 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         svg += `<rect x="${(cx - cw / 2 - 1).toFixed(2)}" y="${(bodyTop - 1).toFixed(2)}" width="${cw + 2}" height="${(bodyH + 2).toFixed(2)}" fill="none" stroke="#fff" stroke-width="0.7" opacity="0.55"/>`;
     });
     // EMA / VWAP polylines
+    // The candle data checked out clean, so the next question is whether the
+    // SERIES array holds one VWAP or several. This reports it once per change
+    // rather than every frame.
+    try {
+      const sig = series.map(s => s.lab).join('|');
+      if (sig !== window._serDiagLast) {
+        window._serDiagLast = sig;
+        const vw = series.filter(s => s.vwap);
+        console.log(`[chart:series] ${series.length} overlay(s): ${sig}` +
+          (vw.length !== 1 ? `  <-- ${vw.length} VWAP entries` : ''));
+        if (vw.length === 1) {
+          const v = vw[0].vals.filter(x2 => x2 != null);
+          if (v.length) {
+            console.log(`[chart:series] VWAP has ${v.length} points, ` +
+              `range ${Math.min(...v).toFixed(1)}-${Math.max(...v).toFixed(1)}, ` +
+              `cs length ${cs.length}` +
+              (v.length !== cs.length ? '  <-- LENGTH MISMATCH with candles' : ''));
+          }
+        }
+      }
+    } catch (_) {}
     let serSvg = '';
     for (const s of series) {
       const pts = [];
       s.vals.forEach((v, i) => { if (v != null && v >= lo && v <= hi) pts.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); });
-      if (pts.length > 1)
-        serSvg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${s.col}" stroke-width="${s.vwap ? 1.8 : 1.3}" stroke-dasharray="${s.vwap ? '5,3' : ''}" opacity="0.95"/>`;
+      if (pts.length > 1) {
+        serSvg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${s.col}" stroke-width="${s.vwap ? 2.2 : 1.3}" stroke-dasharray="${s.vwap ? '5,3' : ''}" opacity="0.95"><title>${escapeHtml(s.lab)}</title></polyline>`;
+        // Label every overlay at its right edge. The level lines already carry
+        // labels; the EMA and VWAP curves did not, so a chart with seven
+        // overlays gave no way to tell which line was which - and identifying
+        // one by colour alone fails the moment two are close in hue.
+        const lastPt = pts[pts.length - 1].split(',');
+        const lx = parseFloat(lastPt[0]), ly = parseFloat(lastPt[1]);
+        if (isFinite(lx) && isFinite(ly) && lx > W - padR - 60) {
+          serSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(ly + 3).toFixed(1)}" style="font-size:8.5px;fill:${s.col};font-weight:600;">${escapeHtml(s.lab)}</text>`;
+        }
+      }
     }
 
     // level lines + right-edge labels (stagger to avoid overlap)
@@ -27855,11 +28091,11 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // activeTab is a local const inside render(), invisible from here - reading
   // it as a free variable silently made this guard a no-op. Read the DOM
   // instead, cached for a moment so 30 calls in one pass cost one query.
-  let _atCache = { t: null, at: 0 };
+  window._atCache = window._atCache || { t: null, at: 0 };
   // Held on window: _applyTicks lives in a different <script> block from the
   // context-chart code, and relying on block evaluation order for a shared
   // flag is the kind of thing that works until someone reorders the file.
-  let _ctxRaf = 0;
+  window._ctxRaf = window._ctxRaf || 0;
 
 (function() {
   // ── Help text library ────────────────────────────────────────────────────
