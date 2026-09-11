@@ -1764,7 +1764,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <button class="tab" data-tab="flow">OI Flow</button>
     <button class="tab" data-tab="gann">Gann</button>
     <button class="tab" data-tab="levels">Levels</button>
-        <button class="tab" data-tab="scanners" title="Stock scanners across the F&amp;O universe — moved here from the home tab">Scanners</button>
     <button class="tab" data-tab="numerology">Numerology</button>
     <button class="tab" data-tab="astro">Astrology</button>
     <button class="tab" data-tab="vedic">Vedic</button>
@@ -1944,6 +1943,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <span class="skew-chart-title">🎯 Scalp Calculator — strike, size, stop, and what it costs<i class="hi" data-h="scalp-calc">i</i></span>
             </div>
             <div id="scalpBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
+          </div>
+
+          <div class="level-panel" id="driftPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🧲 Level Drift — is the level coming to price?<i class="hi" data-h="level-drift">i</i></span>
+            </div>
+            <div id="driftBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
           </div>
 
           <div class="level-panel" id="sigScorePanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.3);">
@@ -2381,859 +2387,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
       </section><!-- #tab-home -->
 
-    <!-- ══ SCANNERS ══════════════════════════════════════════════════
-         Moved off the home tab rather than deleted. Forty-one stock
-         scanners plus the pivot lookup made up 69% of the home markup, and
-         none of them serve index scalping - which is what the home tab is
-         for. They still work; they are simply no longer between you and the
-         chart. -->
-    <section id="tab-scanners" class="tab-section">
-      <div class="oc-sub" style="margin:6px 0 10px;">Stock scanners across the F&amp;O universe. These were on the home tab and pushed the index tools far down the page — nothing has been removed, only moved.</div>
-<!-- ACTIVE SCANNER CONTAINER -->
-      <div id="scannerContainer">
-<div class="pivot-scanner-panel scanner-panel" id="pivotScannerPanel">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📊 Pivot Scanner — F&amp;O Stocks</span>
-            <select id="scanPivotType" class="level-select">
-              <option value="fibonacci" selected>Fibonacci</option>
-              <option value="traditional">Traditional</option>
-              <option value="classic">Classic</option>
-              <option value="woodie">Woodie</option>
-              <option value="camarilla">Camarilla</option>
-              <option value="demark">DeMark</option>
-            </select>
-            <label class="scanner-controls">
-              <input type="radio" name="scanMode" id="scanModeDaily"     value="daily"     checked> Daily
-            </label>
-            <label class="scanner-controls">
-              <input type="radio" name="scanMode" id="scanModeWeekly"    value="weekly">    Weekly
-            </label>
-            <label class="scanner-controls">
-              <input type="radio" name="scanMode" id="scanModeMonthly"   value="monthly">   Monthly
-            </label>
-            <label class="scanner-controls">
-              <input type="radio" name="scanMode" id="scanModeQuarterly" value="quarterly"> Quarterly
-            </label>
-            <label class="scanner-controls">
-              <input type="radio" name="scanMode" id="scanModeYearly"    value="yearly">    Yearly
-            </label>
-            <label class="scanner-controls" title="Show daily + weekly pivots side-by-side">
-              <input type="radio" name="scanMode" id="scanModeBoth"      value="both">      D+W
-            </label>
-          </div>
-          <div class="scanner-controls">
-            <select id="scanSymbolList" class="level-select" title="Symbol universe to scan">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option>
-              <option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option>
-              <option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option>
-              <option value="all">All (CSV folder)</option>
-            </select>
-            <label title="±% to consider a price 'near' a level">
-              <span style="font-size:10px;color:var(--muted-2);">Near ±</span>
-              <input type="number" id="scanNearPct" value="2" min="0.1" max="10" step="0.1"
-                     class="ohlc-inp" style="width:38px;text-align:center;">
-              <span style="font-size:10px;color:var(--muted-2);">%</span>
-            </label>
-            <label class="scanner-controls" title="Fetch live NSE prices (market hours only)">
-              <input type="checkbox" id="scanLive"> 🟢 Live
-            </label>
-            <div id="scanSearchWrapper">
-              <input type="text" id="scanSearch" placeholder="Search symbol…"
-                     class="ohlc-inp" style="width:140px;" title="Type a symbol name — select from dropdown to see pivot points"
-                     autocomplete="off">
-            </div>
-            <label title="Auto-refresh">
-              <input type="checkbox" id="scanAutoRefresh"> Auto
-            </label>
-            <input type="number" id="scanIntervalMins" value="5" min="1" max="60"
-                   class="ohlc-inp" style="width:40px;text-align:center;" title="Interval (minutes)">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="scanRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-
-        <!-- Level filter buttons -->
-        <div class="level-filter-btns" id="levelFilterBtns">
-          <button class="lvl-filter-btn active" data-level="">All</button>
-          <button class="lvl-filter-btn" data-level="R5">R5</button>
-          <button class="lvl-filter-btn" data-level="R4">R4</button>
-          <button class="lvl-filter-btn" data-level="R3">R3</button>
-          <button class="lvl-filter-btn" data-level="R2">R2</button>
-          <button class="lvl-filter-btn" data-level="R1">R1</button>
-          <button class="lvl-filter-btn" data-level="P">Pivot</button>
-          <button class="lvl-filter-btn" data-level="S1">S1</button>
-          <button class="lvl-filter-btn" data-level="S2">S2</button>
-          <button class="lvl-filter-btn" data-level="S3">S3</button>
-          <button class="lvl-filter-btn" data-level="S4">S4</button>
-          <button class="lvl-filter-btn" data-level="S5">S5</button>
-        </div>
-
-        <div class="scan-status-row">
-          <span class="level-source" id="scanStatus">Click ▶ Run to load pivot data.</span>
-        </div>
-        <div id="scanTableWrap" class="scan-table-wrap"></div>
-      </div><!-- /.pivot-scanner-panel -->
-
-      <!-- ══════════════════════════════════════════════════════════════ -->
-      <!-- TREND SCANNER                                                  -->
-      <!-- ══════════════════════════════════════════════════════════════ -->
-      <div class="pivot-scanner-panel scanner-panel" id="trendScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📈 Supertrend / EMA Crossover Scanner</span>
-            <select id="trendSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option>
-              <option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option>
-              <option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option>
-              <option value="all">All (CSV folder)</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="trendSearchWrapper">
-              <input type="text" id="trendSearch" placeholder="Search symbol…"
-                     class="ohlc-inp" style="width:140px;"
-                     title="Type a symbol — select from dropdown to see trend signals"
-                     autocomplete="off">
-            </div>
-            <label title="Auto-refresh"><input type="checkbox" id="trendAutoRefresh"> Auto</label>
-            <input type="number" id="trendIntervalMins" value="5" min="1" max="60"
-                   class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="trendRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-
-        <!-- Signal filter buttons -->
-        <div class="level-filter-btns" id="trendFilterBtns">
-          <button class="lvl-filter-btn active"      data-sig="">All</button>
-          <button class="lvl-filter-btn"             data-sig="Strong Buy"
-                  style="--fc:#2ed648;">💪 Strong Buy</button>
-          <button class="lvl-filter-btn"             data-sig="Buy"
-                  style="--fc:#51cf66;">🟢 Buy</button>
-          <button class="lvl-filter-btn"             data-sig="Neutral"
-                  style="--fc:#888;">⚪ Neutral</button>
-          <button class="lvl-filter-btn"             data-sig="Sell"
-                  style="--fc:#ff8080;">🔴 Sell</button>
-          <button class="lvl-filter-btn"             data-sig="Strong Sell"
-                  style="--fc:#ff3c3c;">🆘 Strong Sell</button>
-        </div>
-
-        <div class="scan-status-row">
-          <span class="level-source" id="trendStatus">Click ▶ Run to load trend data.</span>
-        </div>
-        <div id="trendTableWrap" class="scan-table-wrap"></div>
-      </div><!-- /.trendScannerPanel -->
-
-      <!-- ══════════════════════════════════════════════════════════════ -->
-      <!-- VOLUME ANOMALY SCANNER                                         -->
-      <!-- ══════════════════════════════════════════════════════════════ -->
-      <div class="pivot-scanner-panel scanner-panel" id="volScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🔊 Volume Anomaly Scanner</span>
-            <select id="volSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option>
-              <option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option>
-              <option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option>
-              <option value="all">All (CSV folder)</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="volSearchWrapper">
-              <input type="text" id="volSearch" placeholder="Search symbol…"
-                     class="ohlc-inp" style="width:140px;" autocomplete="off"
-                     title="Type a symbol — select from dropdown to see volume data">
-            </div>
-            <label title="Auto-refresh"><input type="checkbox" id="volAutoRefresh"> Auto</label>
-            <input type="number" id="volIntervalMins" value="5" min="1" max="60"
-                   class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="volRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="volFilterBtns">
-          <button class="lvl-filter-btn active" data-alert="">All</button>
-          <button class="lvl-filter-btn" data-alert="Surge"  style="--fc:#ff9f43;">🚀 Surge ≥3×</button>
-          <button class="lvl-filter-btn" data-alert="Spike"  style="--fc:#ffa94d;">🔥 Spike ≥2×</button>
-          <button class="lvl-filter-btn" data-alert="Active" style="--fc:#74c0fc;">⚡ Active ≥1.5×</button>
-          <button class="lvl-filter-btn" data-alert="Normal" style="--fc:#888;">Normal</button>
-          <button class="lvl-filter-btn" data-alert="Dry"    style="--fc:#868e96;">💀 Dry &lt;0.5×</button>
-        </div>
-        <div class="scan-status-row">
-          <span class="level-source" id="volStatus">Click ▶ Run to load volume data.</span>
-        </div>
-        <div id="volTableWrap" class="scan-table-wrap"></div>
-      </div><!-- /.volScannerPanel -->
-
-      <!-- ══════════════════════════════════════════════════════════════ -->
-      <!-- 52-WEEK HIGH / LOW SCANNER                                     -->
-      <!-- ══════════════════════════════════════════════════════════════ -->
-      <div class="pivot-scanner-panel scanner-panel" id="wkScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📅 52-Week High / Low Scanner</span>
-            <select id="wkSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option>
-              <option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option>
-              <option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option>
-              <option value="all">All (CSV folder)</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="wkSearchWrapper">
-              <input type="text" id="wkSearch" placeholder="Search symbol…"
-                     class="ohlc-inp" style="width:140px;" autocomplete="off"
-                     title="Type a symbol — select from dropdown to see 52W data">
-            </div>
-            <label title="Auto-refresh"><input type="checkbox" id="wkAutoRefresh"> Auto</label>
-            <input type="number" id="wkIntervalMins" value="5" min="1" max="60"
-                   class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="wkRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="wkFilterBtns">
-          <button class="lvl-filter-btn active" data-pos="">All</button>
-          <button class="lvl-filter-btn" data-pos="Near High"  style="--fc:#51cf66;">📈 Near High ≤3%</button>
-          <button class="lvl-filter-btn" data-pos="Near Low"   style="--fc:#ff6b6b;">📉 Near Low ≤5%</button>
-          <button class="lvl-filter-btn" data-pos="Mid Range"  style="--fc:#888;">Mid Range</button>
-        </div>
-        <div class="scan-status-row">
-          <span class="level-source" id="wkStatus">Click ▶ Run to load 52-week data.</span>
-        </div>
-        <div id="wkTableWrap" class="scan-table-wrap"></div>
-      </div><!-- /.wkScannerPanel -->
-
-      <!-- RSI SCANNER -->
-      <div class="pivot-scanner-panel scanner-panel" id="rsiScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📊 RSI Scanner (14)</span>
-            <select id="rsiSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option><option value="all">All (CSV)</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="rsiSearchWrapper"><input type="text" id="rsiSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="rsiAutoRefresh"> Auto</label>
-            <input type="number" id="rsiIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="rsiRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="rsiFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Overbought" style="--fc:#ff3c3c;">🔴 Overbought ≥70</button>
-          <button class="lvl-filter-btn" data-sig="Bullish"    style="--fc:#51cf66;">🟢 Bullish 55–70</button>
-          <button class="lvl-filter-btn" data-sig="Neutral"    style="--fc:#888;">⚪ Neutral 45–55</button>
-          <button class="lvl-filter-btn" data-sig="Bearish"    style="--fc:#ff8080;">🟠 Bearish 30–45</button>
-          <button class="lvl-filter-btn" data-sig="Oversold"   style="--fc:#74c0fc;">🔵 Oversold ≤30</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="rsiStatus">Click ▶ Run to load RSI data.</span></div>
-        <div id="rsiTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- GAP SCANNER -->
-      <div class="pivot-scanner-panel scanner-panel" id="gapScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🕳️ Gap Scanner</span>
-            <select id="gapSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option><option value="all">All (CSV)</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="gapSearchWrapper"><input type="text" id="gapSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="gapAutoRefresh"> Auto</label>
-            <input type="number" id="gapIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="gapRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="gapFilterBtns">
-          <button class="lvl-filter-btn active" data-gap="">All</button>
-          <button class="lvl-filter-btn" data-gap="Gap Up"   style="--fc:#51cf66;">⬆ Gap Up ≥0.5%</button>
-          <button class="lvl-filter-btn" data-gap="Gap Down" style="--fc:#ff6b6b;">⬇ Gap Down ≤-0.5%</button>
-          <button class="lvl-filter-btn" data-gap="Flat"     style="--fc:#888;">↔ Flat</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="gapStatus">Click ▶ Run to load gap data.</span></div>
-        <div id="gapTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- MOMENTUM / ROC SCANNER -->
-      <div class="pivot-scanner-panel scanner-panel" id="momScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🚀 Momentum / ROC Scanner</span>
-            <select id="momSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option><option value="all">All (CSV)</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="momSearchWrapper"><input type="text" id="momSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="momAutoRefresh"> Auto</label>
-            <input type="number" id="momIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="momRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="momFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Strong Up"   style="--fc:#1fc93b;">💪 Strong Up</button>
-          <button class="lvl-filter-btn" data-sig="Up"          style="--fc:#51cf66;">↑ Up</button>
-          <button class="lvl-filter-btn" data-sig="Flat"        style="--fc:#888;">↔ Flat</button>
-          <button class="lvl-filter-btn" data-sig="Down"        style="--fc:#ff8080;">↓ Down</button>
-          <button class="lvl-filter-btn" data-sig="Strong Down" style="--fc:#ff3c3c;">💀 Strong Down</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="momStatus">Click ▶ Run to load momentum data.</span></div>
-        <div id="momTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- CANDLESTICK PATTERN SCANNER -->
-      <div class="pivot-scanner-panel scanner-panel" id="candleScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🕯️ Candlestick Pattern Scanner</span>
-            <select id="candleSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option><option value="all">All (CSV)</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="candleSearchWrapper"><input type="text" id="candleSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="candleAutoRefresh"> Auto</label>
-            <input type="number" id="candleIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="candleRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="candleFilterBtns">
-          <button class="lvl-filter-btn active" data-bias="">All</button>
-          <button class="lvl-filter-btn" data-bias="Bullish" style="--fc:#51cf66;">🟢 Bullish</button>
-          <button class="lvl-filter-btn" data-bias="Bearish" style="--fc:#ff6b6b;">🔴 Bearish</button>
-          <button class="lvl-filter-btn" data-bias="Neutral" style="--fc:#888;">⚪ Neutral</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="candleStatus">Click ▶ Run to load pattern data.</span></div>
-        <div id="candleTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- CAMARILLA BREAKOUT SCANNER -->
-      <div class="pivot-scanner-panel scanner-panel" id="camScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🎯 Camarilla Breakout Scanner</span>
-            <select id="camSymbolList" class="level-select">
-              <option value="niftyfno" selected>F&amp;O Stocks</option>
-              <option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option>
-              <option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option>
-              <option value="nifty750">Nifty 750</option><option value="all">All (CSV)</option>
-            </select>
-            <select id="camMode" class="level-select">
-              <option value="daily" selected>Daily</option>
-              <option value="weekly">Weekly</option>
-            </select>
-          </div>
-          <div class="scanner-controls">
-            <div id="camSearchWrapper"><input type="text" id="camSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="camAutoRefresh"> Auto</label>
-            <input type="number" id="camIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;">
-            <span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="camRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="camFilterBtns">
-          <button class="lvl-filter-btn active" data-zone="">All</button>
-          <button class="lvl-filter-btn" data-zone="crossed_r4" style="--fc:#1fc93b;">🚀 Crossed R4</button>
-          <button class="lvl-filter-btn" data-zone="near_r4"    style="--fc:#51cf66;">↑ Near R4</button>
-          <button class="lvl-filter-btn" data-zone="near_r3"    style="--fc:#74c0fc;">⬆ Near R3</button>
-          <button class="lvl-filter-btn" data-zone="near_s3"    style="--fc:#ffa94d;">⬇ Near S3</button>
-          <button class="lvl-filter-btn" data-zone="near_s4"    style="--fc:#ff6b6b;">↓ Near S4</button>
-          <button class="lvl-filter-btn" data-zone="crossed_s4" style="--fc:#ff3c3c;">💀 Crossed S4</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="camStatus">Click ▶ Run to load Camarilla data.</span></div>
-        <div id="camTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- BOLLINGER BANDS -->
-      <div class="pivot-scanner-panel scanner-panel" id="bbScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🎯 Bollinger Band Scanner (20,2)</span>
-            <select id="bbSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="bbSearchWrapper"><input type="text" id="bbSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="bbAutoRefresh"> Auto</label>
-            <input type="number" id="bbIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="bbRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="bbFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Squeeze"       style="--fc:#ffd43b;">⚡ Squeeze</button>
-          <button class="lvl-filter-btn" data-sig="Outside Upper" style="--fc:#ff3c3c;">⬆ Outside Upper</button>
-          <button class="lvl-filter-btn" data-sig="Upper Touch"   style="--fc:#ff8080;">↑ Upper Touch</button>
-          <button class="lvl-filter-btn" data-sig="Lower Touch"   style="--fc:#74c0fc;">↓ Lower Touch</button>
-          <button class="lvl-filter-btn" data-sig="Outside Lower" style="--fc:#339af0;">⬇ Outside Lower</button>
-          <button class="lvl-filter-btn" data-sig="Normal"        style="--fc:#888;">Normal</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="bbStatus">Click ▶ Run to load Bollinger data.</span></div>
-        <div id="bbTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- MACD -->
-      <div class="pivot-scanner-panel scanner-panel" id="macdScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📉 MACD Scanner (12/26/9)</span>
-            <select id="macdSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="macdSearchWrapper"><input type="text" id="macdSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="macdAutoRefresh"> Auto</label>
-            <input type="number" id="macdIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="macdRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="macdFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Bullish Crossover" style="--fc:#1fc93b;">🟢 Bull Cross</button>
-          <button class="lvl-filter-btn" data-sig="Zero Cross Up"     style="--fc:#51cf66;">↑ Zero Cross Up</button>
-          <button class="lvl-filter-btn" data-sig="Above Zero"        style="--fc:#74c0fc;">+ Above Zero</button>
-          <button class="lvl-filter-btn" data-sig="Bearish Crossover" style="--fc:#ff3c3c;">🔴 Bear Cross</button>
-          <button class="lvl-filter-btn" data-sig="Zero Cross Down"   style="--fc:#ff6b6b;">↓ Zero Cross Down</button>
-          <button class="lvl-filter-btn" data-sig="Below Zero"        style="--fc:#ff8080;">- Below Zero</button>
-          <button class="lvl-filter-btn" data-sig="Neutral"           style="--fc:#888;">Neutral</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="macdStatus">Click ▶ Run to load MACD data.</span></div>
-        <div id="macdTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- ADX -->
-      <div class="pivot-scanner-panel scanner-panel" id="adxScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📏 ADX Trend Strength (14)</span>
-            <select id="adxSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="adxSearchWrapper"><input type="text" id="adxSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="adxAutoRefresh"> Auto</label>
-            <input type="number" id="adxIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="adxRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="adxFilterBtns">
-          <button class="lvl-filter-btn active" data-str="">All</button>
-          <button class="lvl-filter-btn" data-str="Strong Trend" style="--fc:#1fc93b;">💪 Strong ≥40</button>
-          <button class="lvl-filter-btn" data-str="Trending"     style="--fc:#51cf66;">↗ Trending 25–40</button>
-          <button class="lvl-filter-btn" data-str="Weak Trend"   style="--fc:#888;">~ Weak 15–25</button>
-          <button class="lvl-filter-btn" data-str="Ranging"      style="--fc:#aaa;">↔ Ranging &lt;15</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="adxStatus">Click ▶ Run to load ADX data.</span></div>
-        <div id="adxTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- BREAKOUT -->
-      <div class="pivot-scanner-panel scanner-panel" id="bkoScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🚀 N-Day Breakout Scanner</span>
-            <select id="bkoSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="bkoSearchWrapper"><input type="text" id="bkoSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="bkoAutoRefresh"> Auto</label>
-            <input type="number" id="bkoIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="bkoRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="bkoFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="52W Breakout"  style="--fc:#1fc93b;">🌟 52W Breakout</button>
-          <button class="lvl-filter-btn" data-sig="20D Breakout"  style="--fc:#51cf66;">⬆ 20D Breakout</button>
-          <button class="lvl-filter-btn" data-sig="10D Breakout"  style="--fc:#74c0fc;">↑ 10D Breakout</button>
-          <button class="lvl-filter-btn" data-sig="52W Breakdown" style="--fc:#ff3c3c;">💥 52W Breakdown</button>
-          <button class="lvl-filter-btn" data-sig="20D Breakdown" style="--fc:#ff6b6b;">⬇ 20D Breakdown</button>
-          <button class="lvl-filter-btn" data-sig="10D Breakdown" style="--fc:#ffa94d;">↓ 10D Breakdown</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="bkoStatus">Click ▶ Run to load breakout data.</span></div>
-        <div id="bkoTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- S/R CLUSTER -->
-      <div class="pivot-scanner-panel scanner-panel" id="srScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🧱 S/R Cluster Scanner</span>
-            <select id="srSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="srSearchWrapper"><input type="text" id="srSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="srAutoRefresh"> Auto</label>
-            <input type="number" id="srIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="srRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="srFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Near Resistance" style="--fc:#ff6b6b;">🟥 Near Resistance</button>
-          <button class="lvl-filter-btn" data-sig="Near Support"    style="--fc:#51cf66;">🟩 Near Support</button>
-          <button class="lvl-filter-btn" data-sig="At Cluster"      style="--fc:#ffd43b;">🟨 At Cluster</button>
-          <button class="lvl-filter-btn" data-sig="Mid Range"       style="--fc:#888;">Mid Range</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="srStatus">Click ▶ Run to load S/R data.</span></div>
-        <div id="srTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- PRICE PATTERNS -->
-      <div class="pivot-scanner-panel scanner-panel" id="patScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🔷 Price Pattern Scanner</span>
-            <select id="patSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="patSearchWrapper"><input type="text" id="patSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="patAutoRefresh"> Auto</label>
-            <input type="number" id="patIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="patRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="patFilterBtns">
-          <button class="lvl-filter-btn active" data-bias="">All</button>
-          <button class="lvl-filter-btn" data-bias="Bullish" style="--fc:#51cf66;">🟢 Bullish</button>
-          <button class="lvl-filter-btn" data-bias="Bearish" style="--fc:#ff6b6b;">🔴 Bearish</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="patStatus">Click ▶ Run to load pattern data.</span></div>
-        <div id="patTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- NIFTY CORRELATION -->
-      <div class="pivot-scanner-panel scanner-panel" id="corrScannerPanel" style="margin-top:0;display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🔗 Nifty Correlation Scanner (20D)</span>
-            <select id="corrSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="corrSearchWrapper"><input type="text" id="corrSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="corrAutoRefresh"> Auto</label>
-            <input type="number" id="corrIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="corrRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="corrFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="High"        style="--fc:#ff9f43;">🔴 High ≥0.8</button>
-          <button class="lvl-filter-btn" data-sig="Moderate"    style="--fc:#ffd43b;">🟡 Moderate</button>
-          <button class="lvl-filter-btn" data-sig="Low"         style="--fc:#51cf66;">🟢 Low</button>
-          <button class="lvl-filter-btn" data-sig="Independent" style="--fc:#74c0fc;">🔵 Independent</button>
-          <button class="lvl-filter-btn" data-sig="Negative"    style="--fc:#cc5de8;">🟣 Negative</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="corrStatus">Click ▶ Run to load correlation data.</span></div>
-        <div id="corrTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      
-      <!-- RS Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="rsScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">⭐ Relative Strength vs Nifty (20D)</span>
-            <select id="rsSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="rsSearchWrapper"><input type="text" id="rsSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="rsAutoRefresh"> Auto</label>
-            <input type="number" id="rsIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="rsRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="rsFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Strong Outperform" style="--fc:#1fc93b;">💪 Strong Out</button>
-          <button class="lvl-filter-btn" data-sig="Outperform"        style="--fc:#51cf66;">↑ Outperform</button>
-          <button class="lvl-filter-btn" data-sig="In-line"           style="--fc:#888;">↔ In-line</button>
-          <button class="lvl-filter-btn" data-sig="Underperform"      style="--fc:#ff8080;">↓ Underperform</button>
-          <button class="lvl-filter-btn" data-sig="Negative Diverge"  style="--fc:#ff3c3c;">📉 Neg Diverge</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="rsStatus">Click ▶ Run to load RS data.</span></div>
-        <div id="rsTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- CPR Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="cprScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">⚡ CPR Scanner</span>
-            <select id="cprSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="cprSearchWrapper"><input type="text" id="cprSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="cprAutoRefresh"> Auto</label>
-            <input type="number" id="cprIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="cprRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="cprFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Narrow (Trend Day)" style="--fc:#ffd43b;">⚡ Narrow</button>
-          <button class="lvl-filter-btn" data-sig="Normal"             style="--fc:#888;">Normal</button>
-          <button class="lvl-filter-btn" data-sig="Wide"               style="--fc:#74c0fc;">↔ Wide</button>
-          <button class="lvl-filter-btn" data-sig="Very Wide (Sideways)" style="--fc:#339af0;">⇔ Very Wide</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="cprStatus">Click ▶ Run to load CPR data.</span></div>
-        <div id="cprTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- Stochastic Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="stochScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">〰 Stochastic Scanner (14,3,3)</span>
-            <select id="stochSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="stochSearchWrapper"><input type="text" id="stochSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="stochAutoRefresh"> Auto</label>
-            <input type="number" id="stochIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="stochRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="stochFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Oversold"  style="--fc:#74c0fc;">🔵 Oversold ≤20</button>
-          <button class="lvl-filter-btn" data-sig="Bull Cross" style="--fc:#51cf66;">↑ Bull Cross</button>
-          <button class="lvl-filter-btn" data-sig="Bullish"   style="--fc:#888;">Bullish</button>
-          <button class="lvl-filter-btn" data-sig="Overbought" style="--fc:#ff3c3c;">🔴 Overbought ≥80</button>
-          <button class="lvl-filter-btn" data-sig="Bear Cross" style="--fc:#ff6b6b;">↓ Bear Cross</button>
-          <button class="lvl-filter-btn" data-sig="Bearish"   style="--fc:#ff8080;">Bearish</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="stochStatus">Click ▶ Run to load Stochastic data.</span></div>
-        <div id="stochTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- Williams %R Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="williamsrScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">⚖️ Williams %R Scanner (14)</span>
-            <select id="williamsrSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="williamsrSearchWrapper"><input type="text" id="williamsrSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="williamsrAutoRefresh"> Auto</label>
-            <input type="number" id="williamsrIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="williamsrRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="williamsrFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Oversold"    style="--fc:#74c0fc;">🔵 Oversold &lt;-80</button>
-          <button class="lvl-filter-btn" data-sig="Turning Up"  style="--fc:#51cf66;">↑ Turning Up</button>
-          <button class="lvl-filter-btn" data-sig="Bullish"     style="--fc:#888;">Bullish</button>
-          <button class="lvl-filter-btn" data-sig="Overbought"  style="--fc:#ff3c3c;">🔴 Overbought &gt;-20</button>
-          <button class="lvl-filter-btn" data-sig="Turning Down" style="--fc:#ff6b6b;">↓ Turning Down</button>
-          <button class="lvl-filter-btn" data-sig="Bearish"     style="--fc:#ff8080;">Bearish</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="williamsrStatus">Click ▶ Run to load Williams %R data.</span></div>
-        <div id="williamsrTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- CCI Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="cciScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📡 CCI Scanner (20)</span>
-            <select id="cciSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="cciSearchWrapper"><input type="text" id="cciSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="cciAutoRefresh"> Auto</label>
-            <input type="number" id="cciIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="cciRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="cciFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Extreme Oversold" style="--fc:#339af0;">⬇ Ext. Oversold</button>
-          <button class="lvl-filter-btn" data-sig="Oversold"         style="--fc:#74c0fc;">🔵 Oversold &lt;-100</button>
-          <button class="lvl-filter-btn" data-sig="Zero Cross Up"    style="--fc:#51cf66;">↑ Zero Cross Up</button>
-          <button class="lvl-filter-btn" data-sig="Extreme Overbought" style="--fc:#ff3c3c;">⬆ Ext. Overbought</button>
-          <button class="lvl-filter-btn" data-sig="Overbought"       style="--fc:#ff6b6b;">🔴 Overbought &gt;100</button>
-          <button class="lvl-filter-btn" data-sig="Zero Cross Down"  style="--fc:#ff8080;">↓ Zero Cross Down</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="cciStatus">Click ▶ Run to load CCI data.</span></div>
-        <div id="cciTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- Ichimoku Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="ichimokuScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">☁️ Ichimoku Cloud Scanner</span>
-            <select id="ichimokuSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="ichimokuSearchWrapper"><input type="text" id="ichimokuSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="ichimokuAutoRefresh"> Auto</label>
-            <input type="number" id="ichimokuIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="ichimokuRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="ichimokuFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Strong Bullish" style="--fc:#1fc93b;">💪 Strong Bull</button>
-          <button class="lvl-filter-btn" data-sig="Bullish"        style="--fc:#51cf66;">🟢 Bullish</button>
-          <button class="lvl-filter-btn" data-sig="Weak Bullish"   style="--fc:#74c0fc;">↑ Weak Bull</button>
-          <button class="lvl-filter-btn" data-sig="In Cloud"       style="--fc:#888;">☁️ In Cloud</button>
-          <button class="lvl-filter-btn" data-sig="Weak Bearish"   style="--fc:#ffa94d;">↓ Weak Bear</button>
-          <button class="lvl-filter-btn" data-sig="Bearish"        style="--fc:#ff6b6b;">🔴 Bearish</button>
-          <button class="lvl-filter-btn" data-sig="Strong Bearish" style="--fc:#ff3c3c;">💀 Strong Bear</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="ichimokuStatus">Click ▶ Run to load Ichimoku data.</span></div>
-        <div id="ichimokuTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- Darvas Box Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="darvasScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">📦 Darvas Box Scanner</span>
-            <select id="darvasSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="darvasSearchWrapper"><input type="text" id="darvasSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <label><input type="checkbox" id="darvasAutoRefresh"> Auto</label>
-            <input type="number" id="darvasIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span>
-            <button class="btn" id="darvasRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="darvasFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Breakout"    style="--fc:#1fc93b;">🚀 Breakout</button>
-          <button class="lvl-filter-btn" data-sig="In Box"      style="--fc:#74c0fc;">📦 In Box</button>
-          <button class="lvl-filter-btn" data-sig="Box Broken"  style="--fc:#ff6b6b;">💥 Box Broken</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="darvasStatus">Click ▶ Run to load Darvas data.</span></div>
-        <div id="darvasTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- Confluence Scanner -->
-      <div class="pivot-scanner-panel scanner-panel" id="confluenceScannerPanel" style="display:none;">
-        <div class="scanner-head">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="skew-chart-title">🎯 Multi-Signal Confluence Scanner</span>
-            <select id="confluenceSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select>
-          </div>
-          <div class="scanner-controls">
-            <div id="confluenceSearchWrapper"><input type="text" id="confluenceSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div>
-            <button class="btn" id="confluenceRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button>
-          </div>
-        </div>
-        <div class="level-filter-btns" id="confluenceFilterBtns">
-          <button class="lvl-filter-btn active" data-sig="">All</button>
-          <button class="lvl-filter-btn" data-sig="Strong Bull" style="--fc:#1fc93b;">💪 Strong Bull</button>
-          <button class="lvl-filter-btn" data-sig="Bull"        style="--fc:#51cf66;">🟢 Bull</button>
-          <button class="lvl-filter-btn" data-sig="Neutral"     style="--fc:#888;">⚪ Neutral</button>
-          <button class="lvl-filter-btn" data-sig="Bear"        style="--fc:#ff6b6b;">🔴 Bear</button>
-          <button class="lvl-filter-btn" data-sig="Strong Bear" style="--fc:#ff3c3c;">💀 Strong Bear</button>
-        </div>
-        <div class="scan-status-row"><span class="level-source" id="confluenceStatus">Run other scanners first, then click ▶ Run.</span></div>
-        <div id="confluenceTableWrap" class="scan-table-wrap"></div>
-      </div>
-
-      <!-- ── 17 new scanner panels (Tier 1/2/3) ── -->
-      <div class="pivot-scanner-panel scanner-panel" id="nr7ScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🌀 NR7 / NR4 Volatility Squeeze</span><select id="nr7SymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="nr7SearchWrapper"><input type="text" id="nr7Search" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="nr7AutoRefresh"> Auto</label><input type="number" id="nr7IntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="nr7RunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="nr7FilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="NR7">NR7</button><button class="lvl-filter-btn" data-fv="NR4">NR4</button></div><div class="scan-status-row"><span class="level-source" id="nr7Status">Click ▶ Run.</span></div><div id="nr7TableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="insidebarScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📦 Inside Bar Scanner</span><select id="insidebarSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="insidebarSearchWrapper"><input type="text" id="insidebarSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="insidebarAutoRefresh"> Auto</label><input type="number" id="insidebarIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="insidebarRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="insidebarFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Inside Bar">IB</button><button class="lvl-filter-btn" data-fv="IB+NR7">IB+NR7</button><button class="lvl-filter-btn" data-fv="Double IB">Double IB</button><button class="lvl-filter-btn" data-fv="Double IB+NR7">Dbl+NR7</button></div><div class="scan-status-row"><span class="level-source" id="insidebarStatus">Click ▶ Run.</span></div><div id="insidebarTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="atrpctScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📉 ATR% Volatility Rank</span><select id="atrpctSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="atrpctSearchWrapper"><input type="text" id="atrpctSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="atrpctAutoRefresh"> Auto</label><input type="number" id="atrpctIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="atrpctRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="atrpctFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Compressed">⬇ Compressed</button><button class="lvl-filter-btn" data-fv="Low Vol">Low Vol</button><button class="lvl-filter-btn" data-fv="Normal">Normal</button><button class="lvl-filter-btn" data-fv="High Vol">↑ High Vol</button></div><div class="scan-status-row"><span class="level-source" id="atrpctStatus">Click ▶ Run.</span></div><div id="atrpctTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="zscoreScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📐 Z-Score / Mean Reversion (SMA20)</span><select id="zscoreSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="zscoreSearchWrapper"><input type="text" id="zscoreSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="zscoreAutoRefresh"> Auto</label><input type="number" id="zscoreIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="zscoreRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="zscoreFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Extreme Overbought">⬆ Ext OB</button><button class="lvl-filter-btn" data-fv="Overbought">OB</button><button class="lvl-filter-btn" data-fv="Mean Reversion Range">Range</button><button class="lvl-filter-btn" data-fv="Oversold">OS</button><button class="lvl-filter-btn" data-fv="Extreme Oversold">⬇ Ext OS</button></div><div class="scan-status-row"><span class="level-source" id="zscoreStatus">Click ▶ Run.</span></div><div id="zscoreTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="consecScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📅 Consecutive Days Streak</span><select id="consecSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="consecSearchWrapper"><input type="text" id="consecSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="consecAutoRefresh"> Auto</label><input type="number" id="consecIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="consecRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="consecFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="bull">🟢 Bull</button><button class="lvl-filter-btn" data-fv="bear">🔴 Bear</button></div><div class="scan-status-row"><span class="level-source" id="consecStatus">Click ▶ Run.</span></div><div id="consecTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="madistScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📍 MA Distance (20/50/200)</span><select id="madistSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="madistSearchWrapper"><input type="text" id="madistSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="madistAutoRefresh"> Auto</label><input type="number" id="madistIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="madistRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="madistFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Extended Above">↑↑ Extended</button><button class="lvl-filter-btn" data-fv="Above MA">Above</button><button class="lvl-filter-btn" data-fv="At MA Zone">At MA</button><button class="lvl-filter-btn" data-fv="Below MA">Below</button><button class="lvl-filter-btn" data-fv="Extended Below">↓↓ Extended</button></div><div class="scan-status-row"><span class="level-source" id="madistStatus">Click ▶ Run.</span></div><div id="madistTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="roundnumScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔢 Round Number Proximity</span><select id="roundnumSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="roundnumSearchWrapper"><input type="text" id="roundnumSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="roundnumAutoRefresh"> Auto</label><input type="number" id="roundnumIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="roundnumRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="roundnumFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="true">Above Round#</button><button class="lvl-filter-btn" data-fv="false">Below Round#</button></div><div class="scan-status-row"><span class="level-source" id="roundnumStatus">Click ▶ Run.</span></div><div id="roundnumTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="sarScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔵 Parabolic SAR (0.02, 0.2)</span><select id="sarSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="sarSearchWrapper"><input type="text" id="sarSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="sarAutoRefresh"> Auto</label><input type="number" id="sarIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="sarRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="sarFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="1">🟢 Bullish</button><button class="lvl-filter-btn" data-fv="fresh_bull">🟢 Fresh Flip Up</button><button class="lvl-filter-btn" data-fv="-1">🔴 Bearish</button><button class="lvl-filter-btn" data-fv="fresh_bear">🔴 Fresh Flip Dn</button></div><div class="scan-status-row"><span class="level-source" id="sarStatus">Click ▶ Run.</span></div><div id="sarTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="donchianScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">📐 Donchian Channel (20D/55D)</span><select id="donchianSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="donchianSearchWrapper"><input type="text" id="donchianSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="donchianAutoRefresh"> Auto</label><input type="number" id="donchianIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="donchianRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="donchianFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="20D Breakout">⬆ 20D BO</button><button class="lvl-filter-btn" data-fv="55D Breakout">⬆ 55D BO</button><button class="lvl-filter-btn" data-fv="Upper Half">Upper</button><button class="lvl-filter-btn" data-fv="Lower Half">Lower</button><button class="lvl-filter-btn" data-fv="20D Breakdown">⬇ 20D BD</button><button class="lvl-filter-btn" data-fv="55D Breakdown">⬇ 55D BD</button></div><div class="scan-status-row"><span class="level-source" id="donchianStatus">Click ▶ Run.</span></div><div id="donchianTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="aroonScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔄 Aroon Oscillator (25)</span><select id="aroonSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="aroonSearchWrapper"><input type="text" id="aroonSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="aroonAutoRefresh"> Auto</label><input type="number" id="aroonIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="aroonRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="aroonFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Strong Uptrend">💪 Strong Up</button><button class="lvl-filter-btn" data-fv="Bullish">🟢 Bull</button><button class="lvl-filter-btn" data-fv="Weak Bullish">Weak Bull</button><button class="lvl-filter-btn" data-fv="Weak Bearish">Weak Bear</button><button class="lvl-filter-btn" data-fv="Bearish">🔴 Bear</button><button class="lvl-filter-btn" data-fv="Strong Downtrend">💀 Strong Dn</button></div><div class="scan-status-row"><span class="level-source" id="aroonStatus">Click ▶ Run.</span></div><div id="aroonTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="hvScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🌡️ Historical Volatility (20D ann.)</span><select id="hvSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="hvSearchWrapper"><input type="text" id="hvSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="hvAutoRefresh"> Auto</label><input type="number" id="hvIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="hvRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="hvFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Very High Vol">🔴 Very High</button><button class="lvl-filter-btn" data-fv="High Vol">High</button><button class="lvl-filter-btn" data-fv="Normal">Normal</button><button class="lvl-filter-btn" data-fv="Low Vol">Low</button><button class="lvl-filter-btn" data-fv="Very Low Vol">🔵 Very Low</button></div><div class="scan-status-row"><span class="level-source" id="hvStatus">Click ▶ Run.</span></div><div id="hvTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="stageScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🏗️ Weinstein Stage Analysis (150D)</span><select id="stageSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="stageSearchWrapper"><input type="text" id="stageSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="stageAutoRefresh"> Auto</label><input type="number" id="stageIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="stageRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="stageFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="2">Stage 2 Advancing</button><button class="lvl-filter-btn" data-fv="1">Stage 1 Basing</button><button class="lvl-filter-btn" data-fv="3">Stage 3 Topping</button><button class="lvl-filter-btn" data-fv="4">Stage 4 Declining</button></div><div class="scan-status-row"><span class="level-source" id="stageStatus">Click ▶ Run.</span></div><div id="stageTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="betaScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">⚡ Beta vs Nifty (60D)</span><select id="betaSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="betaSearchWrapper"><input type="text" id="betaSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="betaAutoRefresh"> Auto</label><input type="number" id="betaIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="betaRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="betaFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Very High Beta">💥 Very High</button><button class="lvl-filter-btn" data-fv="High Beta">High</button><button class="lvl-filter-btn" data-fv="Market">Market</button><button class="lvl-filter-btn" data-fv="Low Beta">Low</button><button class="lvl-filter-btn" data-fv="Very Low Beta">Very Low</button><button class="lvl-filter-btn" data-fv="Negative Beta">Neg</button></div><div class="scan-status-row"><span class="level-source" id="betaStatus">Click ▶ Run.</span></div><div id="betaTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="squeezeScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🗜️ BB+KC Squeeze (John Carter)</span><select id="squeezeSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="squeezeSearchWrapper"><input type="text" id="squeezeSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="squeezeAutoRefresh"> Auto</label><input type="number" id="squeezeIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="squeezeRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="squeezeFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Squeeze — Bullish Build">🟢 SQ Bull</button><button class="lvl-filter-btn" data-fv="Squeeze — Bearish Build">🔴 SQ Bear</button><button class="lvl-filter-btn" data-fv="Squeeze">⚡ Squeeze</button><button class="lvl-filter-btn" data-fv="Squeeze Released">Released</button><button class="lvl-filter-btn" data-fv="No Squeeze">No SQ</button></div><div class="scan-status-row"><span class="level-source" id="squeezeStatus">Click ▶ Run.</span></div><div id="squeezeTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="elderScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">⚡ Elder Impulse System (EMA13+MACD)</span><select id="elderSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="elderSearchWrapper"><input type="text" id="elderSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="elderAutoRefresh"> Auto</label><input type="number" id="elderIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="elderRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="elderFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Buy Impulse">🟢 Green</button><button class="lvl-filter-btn" data-fv="No Impulse">🔵 Blue</button><button class="lvl-filter-btn" data-fv="Sell Impulse">🔴 Red</button></div><div class="scan-status-row"><span class="level-source" id="elderStatus">Click ▶ Run.</span></div><div id="elderTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="swingScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🔀 Swing Quality Counter (HH/HL/LH/LL)</span><select id="swingSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="swingSearchWrapper"><input type="text" id="swingSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="swingAutoRefresh"> Auto</label><input type="number" id="swingIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="swingRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="swingFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Strong Uptrend">💪 Strong Up</button><button class="lvl-filter-btn" data-fv="Uptrend">↑ Uptrend</button><button class="lvl-filter-btn" data-fv="Choppy">↔ Choppy</button><button class="lvl-filter-btn" data-fv="Downtrend">↓ Downtrend</button><button class="lvl-filter-btn" data-fv="Strong Downtrend">💀 Strong Dn</button></div><div class="scan-status-row"><span class="level-source" id="swingStatus">Click ▶ Run.</span></div><div id="swingTableWrap" class="scan-table-wrap"></div></div>
-
-      <div class="pivot-scanner-panel scanner-panel" id="momrankScannerPanel" style="display:none;"><div class="scanner-head"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;"><span class="skew-chart-title">🏆 Momentum Percentile Rank (20D)</span><select id="momrankSymbolList" class="level-select"><option value="niftyfno" selected>F&amp;O Stocks</option><option value="nifty50">Nifty 50</option><option value="nifty100">Nifty 100</option><option value="nifty200">Nifty 200</option><option value="nifty500">Nifty 500</option><option value="nifty750">Nifty 750</option><option value="all">All</option></select></div><div class="scanner-controls"><div id="momrankSearchWrapper"><input type="text" id="momrankSearch" placeholder="Search symbol…" class="ohlc-inp" style="width:140px;" autocomplete="off"></div><label><input type="checkbox" id="momrankAutoRefresh"> Auto</label><input type="number" id="momrankIntervalMins" value="5" min="1" max="60" class="ohlc-inp" style="width:40px;text-align:center;"><span style="font-size:10px;color:var(--muted-2);">min</span><button class="btn" id="momrankRunBtn" style="font-size:10px;padding:4px 14px;">▶ Run</button></div></div><div class="level-filter-btns" id="momrankFilterBtns"><button class="lvl-filter-btn active" data-fv="">All</button><button class="lvl-filter-btn" data-fv="Top Decile">🥇 Top 10%</button><button class="lvl-filter-btn" data-fv="Top Quartile">Top 25%</button><button class="lvl-filter-btn" data-fv="Above Median">Above Med</button><button class="lvl-filter-btn" data-fv="Below Median">Below Med</button><button class="lvl-filter-btn" data-fv="Bottom Quartile">Bottom 25%</button><button class="lvl-filter-btn" data-fv="Bottom Decile">Bottom 10%</button></div><div class="scan-status-row"><span class="level-source" id="momrankStatus">Click ▶ Run.</span></div><div id="momrankTableWrap" class="scan-table-wrap"></div></div>
-
-      </div><!-- /#scannerContainer -->
-
-      <!-- ── Stock Pivot Lookup ────────────────────────────────────── -->
-      <div class="stock-lookup-panel" id="stockLookupPanel">
-        <div class="lookup-head">
-          <span class="skew-chart-title">🔎 Stock Pivot Lookup</span>
-          <div class="lookup-input-wrap">
-            <input type="text" id="stockLookupInput" class="lookup-input"
-                   placeholder="Type symbol or name… (e.g. RELI, Infosys)"
-                   autocomplete="off" spellcheck="false">
-            <div class="lookup-dropdown" id="lookupDropdown" style="display:none;"></div>
-          </div>
-          <select id="lookupPivotType" class="level-select">
-            <option value="fibonacci" selected>Fibonacci</option>
-            <option value="traditional">Traditional</option>
-            <option value="classic">Classic</option>
-            <option value="woodie">Woodie</option>
-            <option value="camarilla">Camarilla</option>
-            <option value="demark">DeMark</option>
-          </select>
-          <label style="display:flex;align-items:center;gap:4px;font-size:11px;">
-            <input type="radio" name="lookupMode" value="daily" checked> Daily
-          </label>
-          <label style="display:flex;align-items:center;gap:4px;font-size:11px;">
-            <input type="radio" name="lookupMode" value="weekly"> Weekly
-          </label>
-        </div>
-        <div id="lookupResult" style="min-height:40px;"></div>
-      </div>
     
-    </section><!-- #tab-scanners -->
 
 
     <section id="tab-today" class="tab-panel">
@@ -14823,6 +13977,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
+    try { _driftRecord(data); renderDrift(data); } catch (_) {}
     try {
       _scoreResolve(data?.underlying_value, state.symbol, data?.atm_iv, data?.dte);
       _confluence(data);          // records each vote for scoring
@@ -17485,6 +16640,106 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     });
   }
   setInterval(_ctxScheduleDraw, 100);      // at most 10 repaints a second
+
+  // ══ LEVEL DRIFT ═══════════════════════════════════════════════════
+  // Half the lines on the chart move during the session, and a moving level
+  // reached is not the same event as a fixed one broken.
+  //
+  //   price goes to the level   - price did something
+  //   LEVEL COMES TO PRICE      - positioning did something, and price may
+  //                               not have moved at all
+  //
+  // The second case is invisible on a chart that only shows where a line is
+  // now. A call wall migrating down 80 points toward a flat tape means
+  // writers are pulling their defence closer - that is a real event, and it
+  // reads identically to "price rallied into the wall" unless drift is
+  // tracked separately.
+  //
+  // Closing speed matters more than distance for the same reason: a wall
+  // 100 points away closing at 40 points an hour is a different proposition
+  // from one sitting still at the same distance.
+  const _DRIFT_KEY = 'levelDriftV1';
+  const _drift = { pts: [] };          // {t, spot, maxPain, callWall, putWall, gFlip}
+
+  function _driftRecord(d) {
+    if (!d?.underlying_value) return;
+    const now = Date.now();
+    const last = _drift.pts[_drift.pts.length - 1];
+    if (last && now - last.t < 20000) return;       // 20s grid is plenty
+    let cw = null, pw = null, gf = null;
+    try { const w = _flowWalls(d); cw = w?.callWall ?? null; pw = w?.putWall ?? null; } catch (_) {}
+    try { gf = _computeGex(d)?.flip ?? null; } catch (_) {}
+    const row = { t: now, sym: state.symbol, spot: d.underlying_value,
+                  maxPain: d.max_pain ?? null, callWall: cw, putWall: pw, gFlip: gf };
+    // a level from another instrument drawn on this one's drift is nonsense
+    if (last && last.sym !== row.sym) _drift.pts.length = 0;
+    _drift.pts.push(row);
+    // one session at a 20s grid is ~1,150 points; keep headroom and drop
+    // anything from before today's open
+    const open = _ctxSessionStart ? _ctxSessionStart() : 0;
+    while (_drift.pts.length && (_drift.pts[0].t < open || _drift.pts.length > 1400))
+      _drift.pts.shift();
+  }
+
+  function _driftRead(key) {
+    const p = _drift.pts.filter(x => x.sym === state.symbol && x[key] != null);
+    if (p.length < 4) return null;
+    const now = p[p.length - 1], first = p[0];
+    const sessionChg = now[key] - first[key];
+    // recent rate: over the last 20 minutes, expressed per hour so the
+    // number is comparable between levels and readable at a glance
+    const cut = Date.now() - 20 * 60000;
+    const recent = p.filter(x => x.t >= cut);
+    let ratePerHr = 0;
+    if (recent.length >= 3) {
+      const a = recent[0], b = recent[recent.length - 1];
+      const hrs = (b.t - a.t) / 3600000;
+      if (hrs > 0.02) ratePerHr = (b[key] - a[key]) / hrs;
+    }
+    const dist = now[key] - now.spot;
+    // closing means the gap is shrinking, whichever side the level is on
+    const closing = (dist > 0 && ratePerHr < 0) || (dist < 0 && ratePerHr > 0);
+    return {
+      now: now[key], sessionChg, ratePerHr, dist,
+      closing: closing && Math.abs(ratePerHr) > 5,
+      // minutes until it reaches price at the current rate; only meaningful
+      // while it is actually closing
+      eta: (closing && Math.abs(ratePerHr) > 5) ? Math.abs(dist / ratePerHr) * 60 : null,
+    };
+  }
+
+  const _DRIFT_LEVELS = [
+    { k: 'maxPain',  lab: 'Max pain',  note: 'the OI centre of gravity' },
+    { k: 'callWall', lab: 'Call wall', note: 'largest call OI above' },
+    { k: 'putWall',  lab: 'Put wall',  note: 'largest put OI below' },
+    { k: 'gFlip',    lab: 'γ flip',    note: 'where hedging changes sign' },
+  ];
+
+  function renderDrift(d) {
+    const box = document.getElementById('driftBody');
+    if (!box) return;
+    const rows = [];
+    for (const L of _DRIFT_LEVELS) {
+      const r = _driftRead(L.k);
+      if (!r) continue;
+      const arrow = Math.abs(r.ratePerHr) < 5 ? '→' : (r.ratePerHr > 0 ? '↑' : '↓');
+      const col = r.closing ? 'var(--gold,#d4af37)' : 'var(--muted)';
+      rows.push(`<div style="display:flex;gap:10px;align-items:baseline;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10px;flex-wrap:wrap;">
+        <b style="min-width:76px;">${L.lab}</b>
+        <span style="min-width:66px;">${fmtInt(Math.round(r.now))}</span>
+        <span style="min-width:86px;color:${col};">${arrow} ${r.ratePerHr >= 0 ? '+' : ''}${r.ratePerHr.toFixed(0)}/hr</span>
+        <span style="min-width:96px;color:var(--muted);">session ${r.sessionChg >= 0 ? '+' : ''}${r.sessionChg.toFixed(0)}</span>
+        <span style="min-width:74px;color:var(--muted);">${r.dist >= 0 ? '+' : ''}${r.dist.toFixed(0)} away</span>
+        ${r.closing ? `<b style="color:var(--gold,#d4af37);">closing${r.eta && r.eta < 240 ? ` · reaches price in ~${Math.round(r.eta)} min` : ''}</b>` : ''}
+      </div>`);
+    }
+    if (!rows.length) {
+      box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Collecting — a few more polls.</div>';
+      return;
+    }
+    box.innerHTML = rows.join('') + `
+      <div class="oc-sub" style="margin-top:3px;">Half the lines on the chart move during the session, and <b>a level coming to price is a different event from price going to the level</b>. The first means positioning changed — writers pulling a defence closer, the OI centre of gravity shifting — and it can happen while price does nothing at all. On a chart that only shows where a line sits now, the two look identical. <b>Closing</b> marks a level whose gap to price is shrinking on its own; the rate is shown per hour so the levels are comparable, and the estimated time is a straight-line projection, not a forecast. <b>The frozen levels are not listed here</b> — EOR/EOS, CPR, pivots and the opening range are fixed by definition, which is exactly what makes them useful as references.</div>`;
+  }
 
   // ══ SIGNAL SCORECARD ══════════════════════════════════════════════
   // The gap this closes: twenty-two Trend Engine inputs and nine alert
@@ -21090,6 +20345,20 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
 
     // level lines + right-edge labels (stagger to avoid overlap)
+    // Annotate a moving level's own label with its drift. Putting it here
+    // rather than only in a panel means you see it while reading the line,
+    // which is when it matters.
+    const _driftTag = lab => {
+      try {
+        const map = { 'Max pain': 'maxPain', 'Call wall': 'callWall', 'Put wall': 'putWall' };
+        const k = map[String(lab).replace(/\s*\(.*$/, '').trim()] ||
+                  (/γ flip/.test(lab) ? 'gFlip' : null);
+        if (!k) return '';
+        const r = _driftRead(k);
+        if (!r || Math.abs(r.ratePerHr) < 5) return '';
+        return ` ${r.ratePerHr > 0 ? '↑' : '↓'}${Math.abs(r.ratePerHr).toFixed(0)}`;
+      } catch (_) { return ''; }
+    };
     const used = [];
     // levels: plain horizontal lines. Pivots are solid; outer pivot levels
     // (R3+/S3+) are thinner and fainter so the near ones stay dominant.
@@ -21100,7 +20369,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       while (used.some(u => Math.abs(u - ly) < 9)) ly += 9;
       used.push(ly);
       const line = `<line x1="${padL}" y1="${yv.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yv.toFixed(1)}" stroke="${L.col}" stroke-width="${L.wide ? 1.4 : L.minor ? 0.8 : 1}" stroke-dasharray="${L.dash}" opacity="${L.minor ? 0.55 : 0.85}"/>`;
-      return line + `<text x="${(W - padR + 3).toFixed(1)}" y="${(ly + 3).toFixed(1)}" style="font-size:9px;fill:${L.col};font-weight:600;">${L.lab} ${fmtInt(Math.round(L.v))}</text>`;
+      return line + `<text x="${(W - padR + 3).toFixed(1)}" y="${(ly + 3).toFixed(1)}" style="font-size:9px;fill:${L.col};font-weight:600;">${L.lab} ${fmtInt(Math.round(L.v))}${_driftTag(L.lab)}</text>`;
     }).join('');
     // live price line
     let spotSvg = '';
@@ -28592,6 +27861,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
     'ctx-chart':         '<strong>Context pane</strong>PCR, India VIX and ATM implied volatility drawn against the <b>same time axis as the candles above</b>. Sharing that axis is the entire point: reading the three as numbers tells you where they are, but seeing them co-timed with price tells you which one moved FIRST - and that ordering is where the information sits. Implied volatility lifting while price is flat, or the put-call ratio turning ten minutes before the candles do, is invisible in a set of readouts and obvious here. <b>Each line is scaled to its own range</b>, because they share no units - PCR sits near 1, VIX in the teens, IV in percent - and plotting them on one absolute axis would flatten two of the three into a straight line. The span beside each legend entry tells you what that series has actually covered, so a line that looks dramatic can be checked against a range that may be trivial. <b>Two PCR lines by default.</b> The near band reacts to what is trading now; the one-day band is steadier. Watching them together is the useful part - when the near line pulls away from the day line, positioning is shifting at the strikes price can actually reach, and the wider measure will not show it for a while yet. The near line is the same figure the voice alert watches, so what you hear and what you see are the same number. <b>Two further series lead rather than confirm,</b> and are one tick away: <b>Straddle</b> is the market\'s live price of a move - rising while price is flat means someone is paying for something that has not happened yet - and <b>Skew</b> is OTM put IV minus OTM call IV, so a rising line is protection being bid, which usually precedes the selling it protects against. Both are off by default because six lines on one small pane is unreadable, not because they matter less. Untick anything to remove it; the choice persists.',
+    'level-drift':       '<strong>Level Drift</strong>Half the lines on the chart move during the session, and <b>a level coming to price is a different event from price going to the level</b>. The first means positioning changed - writers pulling a defence closer, the open-interest centre of gravity shifting - and it can happen while price does not move at all. On a chart that only shows where a line sits now, the two are indistinguishable, which is the gap this closes. <b>Closing</b> marks a level whose gap to price is shrinking under its own movement; the rate is shown per hour so levels are comparable to each other, and the estimated time to reach price is a straight-line projection of the current rate, not a forecast - positioning can reverse in a minute. The moving levels are max pain, the call and put walls, and the gamma flip, all recomputed from open interest on every poll. <b>The frozen levels are deliberately absent:</b> EOR and EOS, the CPR, the pivots and the opening-range box are fixed by definition, and that is exactly what makes them useful as references - a reference that moves is not one. Drift also appears on the chart labels themselves as a small arrow and rate, so it is visible while reading the line rather than only in this panel.',
     'signal-score':      '<strong>Signal Scorecard</strong>The system measuring itself. Twenty-two Trend Engine inputs and nine alert families were weighted by judgement and never checked against what happened - some are certainly noise and there was no way to tell which. Every directional reading is now recorded with the spot price at the time and scored <b>15 minutes later</b> against where price actually went. <b>The horizon is fixed in advance deliberately:</b> scoring whenever a move looks resolved lets the scorer choose the answer, which is how backtests flatter themselves. A call counts as right only if price moved far enough to have been tradeable - roughly 0.4 sigma of the horizon - because after costs a two-point win is a loss, and counting it would score noise as skill. <b>Flat is not failure:</b> a source that is usually flat is silent rather than wrong, so the hit rate covers decided calls only and flats are shown separately. <b>Treat anything under 20 decided calls as a sample rather than a result</b>, and give it a few weeks before drawing conclusions. The purpose is subtraction: sources scoring near 50 percent are costing you attention and can be switched off, and knowing which those are is worth more than any additional signal.',
     'capital-flow':      '<strong>Capital Flow and 25-delta Risk Reversal</strong>Two measures a prop desk weights heavily that contract-counting misses entirely. <b>Net premium flow</b> weights each open-interest change by its premium, so it measures capital committed rather than tickets bought. The difference is not cosmetic: a 40,000-lot build in a six-rupee far-OTM call outweighs a 4,000-lot build at the money ten to one by contracts, while the money runs three to one the other way. Open interest counts a lottery ticket and a conviction trade identically; capital does not, and capital is what has to be defended when price moves against it. <b>Conviction</b> is the share of gross flow that is one-directional - a large gross with a small net means two sides fighting, which is the opposite of a trend. <b>The 25-delta risk reversal</b> is the standard directional skew measure: the implied volatility of a 25-delta call minus a 25-delta put, comparing options with equal probability of finishing in the money rather than equal distance from spot. A negative reading is the normal state for index options because protection is structurally bid, so <b>the direction of travel matters far more than the sign</b> - puts being bid up relative to equivalent calls usually precedes the selling they protect against. Both are restricted to strikes price can realistically reach, because far-wing capital is mostly spread legs and margin relief rather than a directional view.',
     'surface-arb':       '<strong>Chain consistency</strong>Implied volatility is solved for each strike independently, so nothing prevents the resulting curve from being impossible. This checks the two classic no-arbitrage conditions. <b>Butterfly:</b> call prices must be convex in strike - if a wing-body-wing combination is worth negative money you could collect cash for a position that cannot lose, which real markets do not offer. <b>Vertical:</b> a higher-strike call cannot cost more than a lower one, for the same reason. When either fails it is not an opportunity; it means a <b>stale quote, a wide spread being mid-marked, or an IV solve that failed</b> at that strike. <b>Why it earns a panel:</b> GEX, charm, vanna, the vol surface and the projected move are all computed from these prices, so a single bad strike quietly skews several panels at once rather than announcing itself - which is exactly the kind of error that is expensive precisely because it looks fine. A prop desk avoids this by fitting an arbitrage-free surface (SVI or SABR) so violations cannot arise; detecting them is far cheaper and catches the case that matters. Readings near flagged strikes should be treated as unreliable until they clear, which is usually within a few ticks.',
