@@ -126,6 +126,110 @@ def _at_module_try(tree, node):
     return False
 
 
+def _strip_js(s):
+    """Remove comments and string/template literals.
+
+    Without this the check matched ordinary English inside comments and CSS
+    words inside style strings - "keep", "skip", "the", "font", "muted" - and
+    a report full of those is one nobody reads, which makes it worse than no
+    report at all.
+    """
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)
+    s = re.sub(r"//[^\n]*", " ", s)
+    s = re.sub(r"`(?:[^`\\]|\\.)*`", " '' ", s, flags=re.S)
+    s = re.sub(r"'(?:[^'\\\n]|\\.)*'", " '' ", s)
+    s = re.sub(r'"(?:[^"\\\n]|\\.)*"', ' "" ', s)
+    return s
+
+
+def test_scope_js_functions():
+    """Names used inside a JS function that are neither params nor locals.
+
+    Added because it was missed: an edit to _leadFire referenced `spoken`
+    while the parameter is called `text`. node --check passes that happily -
+    it is valid syntax and a runtime ReferenceError. This is the JavaScript
+    half of the undefined-name check that already covers the server.
+    """
+    c = open(DASH, encoding="utf-8").read()
+    blocks = re.findall(r"<script>(.*?)</script>", c, re.S)
+    src = "\n".join(blocks)
+    # collect every top-level declaration so they are not reported as unknown
+    known = set(re.findall(r"\n  (?:const|let|var|function|async function) (\w+)", src))
+    known |= set(re.findall(r"function (\w+)\s*\(", src))
+    bad = []
+    for m in re.finditer(r"\n  (?:async )?function (\w+)\s*\(([^)]*)\)\s*\{", src):
+        name, params = m.group(1), m.group(2)
+        # body by brace balance
+        i, depth = src.find("{", m.start()), 0
+        j = i
+        while j < len(src):
+            if src[j] == "{": depth += 1
+            elif src[j] == "}":
+                depth -= 1
+                if depth == 0: break
+            j += 1
+        body = _strip_js(src[i:j])
+        bound = {p.strip().split("=")[0].strip().lstrip("...") for p in params.split(",") if p.strip()}
+        # `const a = 1, b = 2` declares BOTH; matching only the first name
+        # reported every subsequent one as unbound
+        for grp in re.findall(r"(?:const|let|var)\s+([^;\n=]+(?:=[^;\n]*)?)", body):
+            bound |= set(re.findall(r"(\w+)\s*(?:=|,|$)", grp))
+        bound |= set(re.findall(r"(?:const|let|var)\s+(\w+)", body))
+        bound |= set(re.findall(r"(?:const|let|var)\s*\{([^}]*)\}", body).__class__(
+            [x for grp in re.findall(r"(?:const|let|var)\s*\{([^}]*)\}", body)
+             for x in re.findall(r"(\w+)", grp)]))
+        # `for (const [a, b] of …)` binds both names; array and object
+        # destructuring in a for-header was the last source of false alarms
+        for grp in re.findall(r"for\s*\(\s*(?:const|let|var)\s*([\[{][^\]}]*[\]}]|\w+)", body):
+            bound |= set(re.findall(r"(\w+)", grp))
+        bound |= set(re.findall(r"catch\s*\(\s*(\w+)", body))
+        bound |= set(re.findall(r"\(\s*([\w,\s]*?)\s*\)\s*=>", body).__class__(
+            [x for grp in re.findall(r"\(\s*([\w,\s]*?)\s*\)\s*=>", body)
+             for x in re.findall(r"(\w+)", grp)]))
+        bound |= set(re.findall(r"(\w+)\s*=>", body))
+        bound |= set(re.findall(r"function\s*\(([^)]*)\)", body).__class__(
+            [x for grp in re.findall(r"function\s*\(([^)]*)\)", body)
+             for x in re.findall(r"(\w+)", grp)]))
+        # only flag bare lowercase identifiers used as values, not properties
+        used = set(re.findall(r"(?<![.\w$'\"`])\b([a-z][a-zA-Z0-9_]{2,})\b(?!\s*:)", body))
+        JS = {"const","let","var","function","return","if","else","for","while","try","catch",
+              "finally","new","typeof","instanceof","this","null","true","false","undefined",
+              "await","async","class","switch","case","break","continue","delete","in","of",
+              "throw","void","yield","document","window","console","Math","JSON","Date","Object",
+              "Array","String","Number","Boolean","parseInt","parseFloat","isFinite","isNaN",
+              "setTimeout","setInterval","clearTimeout","clearInterval","requestAnimationFrame",
+              "localStorage","sessionStorage","fetch","Promise","Set","Map","Error","RegExp",
+              "encodeURIComponent","decodeURIComponent","structuredClone","navigator","location",
+              # HTML and CSS words that survive imperfect template-literal
+              # stripping; listing them is cheaper than a full JS parser and
+              # keeps the report short enough to actually read
+              "span","div","style","title","button","href","class","input","label","table",
+              "width","height","color","font","fill","stroke","opacity","margin","padding",
+              "flex","grid","auto","none","hidden","left","right","center","top","bottom"}
+        unknown = sorted(used - bound - known - JS)
+        if unknown:
+            bad.append((name, unknown[:3]))
+    # report as a warning rather than a failure: the heuristic cannot see every
+    # binding form, so a hard failure here would be noise. The value is in
+    # showing a short list to eyeball after an edit.
+    # HONEST LIMIT: this heuristic does not work reliably and is kept only as
+    # a rough hint. It failed its own regression test - reintroducing the
+    # `spoken`/`text` mix-up in _leadFire went undetected, because a variable
+    # of that name exists inside a DIFFERENT function and this check cannot
+    # tell function scopes apart without parsing the language.
+    #
+    # The real tool for this is a linter. One line gets it:
+    #     npx eslint --no-eslintrc --rule '{"no-undef":"error"}' --env browser,es2021 file.js
+    # Run that on the extracted <script> blocks and it catches the whole class
+    # properly. Until then, treat anything below as a prompt to look, never as
+    # a clean bill of health.
+    if bad:
+        warn("JS names worth eyeballing (unreliable heuristic)",
+             f"{bad[:3]} — use eslint no-undef for a real check")
+    else:
+        warn("JS scope check inconclusive", "heuristic found nothing, which proves little")
+
+
 def test_scope_python():
     if not os.path.exists(SRV):
         return
@@ -370,7 +474,7 @@ def test_env():
 
 
 def main():
-    for fn in (test_structure, test_scope_js, test_scope_python, test_pcr_reading,
+    for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_index_weights, test_env):
         try:

@@ -1764,6 +1764,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <button class="tab" data-tab="flow">OI Flow</button>
     <button class="tab" data-tab="gann">Gann</button>
     <button class="tab" data-tab="levels">Levels</button>
+        <button class="tab" data-tab="scanners" title="Stock scanners across the F&amp;O universe — moved here from the home tab">Scanners</button>
     <button class="tab" data-tab="numerology">Numerology</button>
     <button class="tab" data-tab="astro">Astrology</button>
     <button class="tab" data-tab="vedic">Vedic</button>
@@ -1816,62 +1817,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <!-- HOME TAB                                                       -->
     <!-- ══════════════════════════════════════════════════════════════ -->
     <section id="tab-home" class="tab-panel active">
-      <div class="home-layout">
-
-        <!-- Left column: AI Suggestions + Pivot Levels -->
-        <div class="home-left">
-          <!-- ── Morning Pre-Session Checklist ─────────────────── -->
-          <div class="checklist-panel" id="checklistPanel">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;cursor:pointer;" id="checklistHead">
-              <span class="skew-chart-title">☑ Pre-Session Checklist<i class="hi" data-h="morning-checklist">i</i></span>
-              <span style="display:flex;gap:8px;align-items:center;">
-                <span id="checklistProgress" style="font-size:9px;color:var(--muted-2);"></span>
-                <button class="collapse-btn" id="checklistCollapse">▸</button>
-              </span>
-            </div>
-            <div id="checklistBody" style="display:none;">
-              <div id="checklistItems"></div>
-              <div class="checklist-progress"><div class="checklist-progress-fill" id="checklistBar" style="width:0%"></div></div>
-            </div>
-          </div>
-
-          <!-- ── AI Strategy Suggestions ──────────────────────────── -->
-          <div class="strategy-suggest-panel" id="strategySuggestPanel">
-            <div class="movers-head">
-              <span class="skew-chart-title">🤖 AI Strategy Suggestions
-                <span style="font-size:10px;color:var(--muted-2);font-weight:400;"> · time-aware · PCR / VIX / IV</span>
-              </span>
-              <span style="display:flex;gap:5px;align-items:center;">
-                <button class="btn" id="getSuggestionsBtn" style="font-size:10.5px;padding:5px 14px;">Generate</button>
-                <button class="collapse-btn" id="suggestCollapseBtn" title="Minimize / expand">▾</button>
-              </span>
-            </div>
-            <div class="dtpl-row" style="align-items:center;">
-              <span style="font-size:9px;color:var(--muted);">My view<i class="hi" data-h="suggest-view">i</i>:</span>
-              <select id="suggestView" class="ohlc-inp" style="font-size:10px;">
-                <option value="auto">Auto (from signals)</option>
-                <option value="bull">Bullish</option>
-                <option value="bear">Bearish</option>
-                <option value="neutral">Neutral / rangebound</option>
-                <option value="bigmove">Big move (either way)</option>
-              </select>
-              <select id="suggestRisk" class="ohlc-inp" style="font-size:10px;">
-                <option value="any">Any risk</option>
-                <option value="defined">Defined-risk only</option>
-              </select>
-            </div>
-            <div id="suggestionsOutput" class="suggestions-output">
-              <div class="movers-loading">Hit Generate for time-aware strategy ideas.</div>
-            </div>
-            <div class="skew-chart-wrap" style="margin-top:8px;">
-              <div class="skew-chart-head"><span class="skew-chart-title">📊 Suggestion Scorecard — is the suggester any good?<i class="hi" data-h="sug-scorecard">i</i></span>
-              <button class="btn" id="sugScorecardBtn" style="font-size:9px;padding:2px 10px;">Refresh</button></div>
-              <div id="sugScorecard" class="gann-levels"></div>
-            </div>
-          </div>
-
-          <!-- ── Live chart with option-derived levels ──────────────── -->
-          <div class="level-panel" id="chartPanel" style="grid-column:1 / -1;">
+<div class="level-panel" id="chartPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
               <span class="skew-chart-title">📈 Live Chart &amp; Levels<i class="hi" data-h="price-chart">i</i></span>
               <span style="display:flex;gap:4px;align-items:center;">
@@ -2000,6 +1946,20 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="scalpBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
           </div>
 
+          <div class="level-panel" id="sigScorePanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.3);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🎯 Signal Scorecard — which of these actually work<i class="hi" data-h="signal-score">i</i></span>
+            </div>
+            <div id="sigScoreBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
+          <div class="level-panel" id="capFlowPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">💰 Capital Flow &amp; 25Δ Risk Reversal<i class="hi" data-h="capital-flow">i</i></span>
+            </div>
+            <div id="capFlowBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
+          </div>
+
           <div class="level-panel" id="surfArbPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">🧮 Chain consistency — are these prices even possible?<i class="hi" data-h="surface-arb">i</i></span>
@@ -2055,6 +2015,70 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           </div>
 
           <!-- ── Market Pulse: VIX · PCR · direction bias ───────────── -->
+          
+          <!-- ── Moved below the chart ─────────────────────────────────
+               The checklist, the suggester and its scorecard were the first
+               three things on the page, so the chart began below the fold.
+               The checklist is used once before the open and the suggester
+               is a review tool; neither is consulted mid-trade, while the
+               chart is consulted constantly. Ordering by how often something
+               is looked at costs nothing and saves a scroll every time. -->
+
+      <div class="home-layout">
+
+        <!-- Left column: AI Suggestions + Pivot Levels -->
+        <div class="home-left">
+          <!-- ── Morning Pre-Session Checklist ─────────────────── -->
+          <div class="checklist-panel" id="checklistPanel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;cursor:pointer;" id="checklistHead">
+              <span class="skew-chart-title">☑ Pre-Session Checklist<i class="hi" data-h="morning-checklist">i</i></span>
+              <span style="display:flex;gap:8px;align-items:center;">
+                <span id="checklistProgress" style="font-size:9px;color:var(--muted-2);"></span>
+                <button class="collapse-btn" id="checklistCollapse">▸</button>
+              </span>
+            </div>
+            <div id="checklistBody" style="display:none;">
+              <div id="checklistItems"></div>
+              <div class="checklist-progress"><div class="checklist-progress-fill" id="checklistBar" style="width:0%"></div></div>
+            </div>
+          </div>
+
+          <!-- ── AI Strategy Suggestions ──────────────────────────── -->
+          <div class="strategy-suggest-panel" id="strategySuggestPanel">
+            <div class="movers-head">
+              <span class="skew-chart-title">🤖 AI Strategy Suggestions
+                <span style="font-size:10px;color:var(--muted-2);font-weight:400;"> · time-aware · PCR / VIX / IV</span>
+              </span>
+              <span style="display:flex;gap:5px;align-items:center;">
+                <button class="btn" id="getSuggestionsBtn" style="font-size:10.5px;padding:5px 14px;">Generate</button>
+                <button class="collapse-btn" id="suggestCollapseBtn" title="Minimize / expand">▾</button>
+              </span>
+            </div>
+            <div class="dtpl-row" style="align-items:center;">
+              <span style="font-size:9px;color:var(--muted);">My view<i class="hi" data-h="suggest-view">i</i>:</span>
+              <select id="suggestView" class="ohlc-inp" style="font-size:10px;">
+                <option value="auto">Auto (from signals)</option>
+                <option value="bull">Bullish</option>
+                <option value="bear">Bearish</option>
+                <option value="neutral">Neutral / rangebound</option>
+                <option value="bigmove">Big move (either way)</option>
+              </select>
+              <select id="suggestRisk" class="ohlc-inp" style="font-size:10px;">
+                <option value="any">Any risk</option>
+                <option value="defined">Defined-risk only</option>
+              </select>
+            </div>
+            <div id="suggestionsOutput" class="suggestions-output">
+              <div class="movers-loading">Hit Generate for time-aware strategy ideas.</div>
+            </div>
+            <div class="skew-chart-wrap" style="margin-top:8px;">
+              <div class="skew-chart-head"><span class="skew-chart-title">📊 Suggestion Scorecard — is the suggester any good?<i class="hi" data-h="sug-scorecard">i</i></span>
+              <button class="btn" id="sugScorecardBtn" style="font-size:9px;padding:2px 10px;">Refresh</button></div>
+              <div id="sugScorecard" class="gann-levels"></div>
+            </div>
+          </div>
+
+          <!-- ── Live chart with option-derived levels ──────────────── -->
           <div class="level-panel" id="pulsePanel">
             <div class="level-panel-head">
               <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -2355,7 +2379,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>
       </div>
 
-      <!-- ACTIVE SCANNER CONTAINER -->
+      </section><!-- #tab-home -->
+
+    <!-- ══ SCANNERS ══════════════════════════════════════════════════
+         Moved off the home tab rather than deleted. Forty-one stock
+         scanners plus the pivot lookup made up 69% of the home markup, and
+         none of them serve index scalping - which is what the home tab is
+         for. They still work; they are simply no longer between you and the
+         chart. -->
+    <section id="tab-scanners" class="tab-section">
+      <div class="oc-sub" style="margin:6px 0 10px;">Stock scanners across the F&amp;O universe. These were on the home tab and pushed the index tools far down the page — nothing has been removed, only moved.</div>
+<!-- ACTIVE SCANNER CONTAINER -->
       <div id="scannerContainer">
 <div class="pivot-scanner-panel scanner-panel" id="pivotScannerPanel">
         <div class="scanner-head">
@@ -3198,7 +3232,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>
         <div id="lookupResult" style="min-height:40px;"></div>
       </div>
-    </section><!-- #tab-home -->
+    
+    </section><!-- #tab-scanners -->
+
 
     <section id="tab-today" class="tab-panel">
       <div class="builder-panel-head">
@@ -12515,7 +12551,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // "Put selling at 23400" is parsed instantly; "short buildup in puts"
       // has to be translated, and mid-trade that is a cost with no benefit.
       const txt = `${(e.bias || 'neutral').toUpperCase()}${e.strength === 'strong' ? '' : ', moderate'}. ` +
-        `${e.spoken || e.kind} at ${Math.round(e.k)}${e.why ? `, ${e.why}` : ''}. Open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
+        `${e.spoken || e.kind} at ${Math.round(e.k)}${e.why ? `, ${e.why}` : ''}.${_confluenceClause(e.bias)} Open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
       _speakOnce(`flow|${state.symbol || 'NIFTY'}|${e.k}|${e.side}|${e.kind}`, txt, 300);
       if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias}`);
       _flowLog({ ts: Date.now(), k: e.k, side: e.side, kind: e.kind, bias: e.bias, oiPct: +e.oiPct.toFixed(1), prPct: +e.prPct.toFixed(1) });
@@ -14787,6 +14823,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
+    try {
+      _scoreResolve(data?.underlying_value, state.symbol, data?.atm_iv, data?.dte);
+      _confluence(data);          // records each vote for scoring
+      renderScorecard();
+    } catch (_) {}
+    try { renderCapitalFlow(data); } catch (_) {}
     try { renderSurfaceArb(data); } catch (_) {}
     try { _pcrBandCheck(data); } catch (_) {}
     try { _shockCheck(data); } catch (_) {}
@@ -17444,6 +17486,330 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   setInterval(_ctxScheduleDraw, 100);      // at most 10 repaints a second
 
+  // ══ SIGNAL SCORECARD ══════════════════════════════════════════════
+  // The gap this closes: twenty-two Trend Engine inputs and nine alert
+  // families, weighted by judgement, never checked against what happened.
+  // Some are certainly noise and there has been no way to tell which.
+  //
+  // Every directional reading is recorded with the spot price at the time,
+  // then scored a fixed horizon later against where price actually went. No
+  // opinion involved - just whether the move followed the call.
+  //
+  // Two design choices that decide whether the numbers mean anything:
+  //
+  //   A FIXED HORIZON, set before the outcome is known. Scoring "whenever it
+  //   looks resolved" lets the scorer pick the answer, which is how backtests
+  //   flatter themselves.
+  //
+  //   A DEAD BAND. A call is only right if price moved enough to trade -
+  //   0.4 sigma of the horizon. Counting a two-point drift as a win would
+  //   score noise as skill, and after costs a two-point win is a loss.
+  const _SCORE_KEY = 'signalScoreV1';
+  const _SCORE_HORIZON_MIN = 15;      // fixed, chosen before any outcome
+  const _SCORE_MAX = 4000;
+
+  function _scoreLoad() {
+    try { return JSON.parse(localStorage.getItem(_SCORE_KEY) || '{"open":[],"done":[]}'); }
+    catch (_) { return { open: [], done: [] }; }
+  }
+  function _scoreSave(s) {
+    try {
+      if (s.done.length > _SCORE_MAX) s.done = s.done.slice(-_SCORE_MAX);
+      localStorage.setItem(_SCORE_KEY, JSON.stringify(s));
+    } catch (_) {}
+  }
+
+  // Called wherever a directional reading is produced. Cheap and silent.
+  function _scoreRecord(source, dir, spot, sym, detail) {
+    if (!spot || !dir) return;
+    const d = dir === 'bullish' || dir === 1 ? 1 : (dir === 'bearish' || dir === -1 ? -1 : 0);
+    if (!d) return;                       // neutral readings make no claim
+    const s = _scoreLoad();
+    // one open claim per source per horizon: a source that fires ten times in
+    // a minute should not get ten chances at the same move
+    const now = Date.now();
+    if (s.open.some(o => o.src === source && o.sym === sym &&
+                         now - o.t < _SCORE_HORIZON_MIN * 60000 * 0.5)) return;
+    s.open.push({ src: source, dir: d, t: now, spot, sym, detail: (detail || '').slice(0, 60) });
+    _scoreSave(s);
+  }
+
+  // Resolve anything past its horizon. Runs on the poll; costs nothing.
+  function _scoreResolve(spotNow, sym, iv, dte) {
+    const s = _scoreLoad();
+    if (!s.open.length || !spotNow) return;
+    const now = Date.now();
+    const ready = s.open.filter(o => now - o.t >= _SCORE_HORIZON_MIN * 60000);
+    if (!ready.length) return;
+    // dead band: the move must be big enough to have been tradeable
+    const sig = spotNow * ((iv || 12) / 100) *
+                Math.sqrt(_volT(Math.max(1 / 1440, (_SCORE_HORIZON_MIN / 375))));
+    const band = Math.max(spotNow * 0.0004, sig * 0.4);
+    for (const o of ready) {
+      if (o.sym !== sym) continue;        // cannot score against another instrument
+      const move = spotNow - o.spot;
+      const hit = Math.abs(move) < band ? 0 : (Math.sign(move) === o.dir ? 1 : -1);
+      s.done.push({ src: o.src, dir: o.dir, t: o.t, move: Math.round(move * 10) / 10,
+                    hit, sym: o.sym });
+    }
+    s.open = s.open.filter(o => !(now - o.t >= _SCORE_HORIZON_MIN * 60000 && o.sym === sym));
+    _scoreSave(s);
+  }
+
+  function _scoreStats() {
+    const s = _scoreLoad();
+    const by = {};
+    for (const r of s.done) {
+      const b = by[r.src] || (by[r.src] = { n: 0, win: 0, loss: 0, flat: 0, sum: 0 });
+      b.n++;
+      if (r.hit > 0) { b.win++; b.sum += Math.abs(r.move); }
+      else if (r.hit < 0) { b.loss++; b.sum -= Math.abs(r.move); }
+      else b.flat++;
+    }
+    return Object.entries(by).map(([src, b]) => ({
+      src, ...b,
+      // decided calls only: a source that is usually flat is not wrong, it is
+      // silent, and mixing those in hides both facts
+      decided: b.win + b.loss,
+      rate: (b.win + b.loss) ? b.win / (b.win + b.loss) : null,
+      avg: b.n ? b.sum / b.n : 0,
+    })).sort((a, b2) => (b2.decided - a.decided));
+  }
+
+  function renderScorecard() {
+    const box = document.getElementById('sigScoreBody');
+    if (!box) return;
+    const st = _scoreStats();
+    const open = _scoreLoad().open.length;
+    if (!st.length) {
+      box.innerHTML = `<div class="movers-loading" style="font-size:10px;">
+        Collecting. Each directional reading is scored ${_SCORE_HORIZON_MIN} minutes later
+        against where price actually went — ${open} claim(s) currently open.
+        Useful numbers need a few sessions, not a few minutes.</div>`;
+      return;
+    }
+    const rows = st.map(r => {
+      const enough = r.decided >= 20;
+      const col = !enough ? 'var(--muted)'
+                : r.rate >= 0.58 ? 'var(--pos,#26a69a)'
+                : r.rate <= 0.45 ? 'var(--neg,#ef5350)' : 'inherit';
+      return `<div style="display:flex;gap:10px;align-items:baseline;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:10px;">
+        <b style="min-width:150px;">${escapeHtml(r.src)}</b>
+        <span style="min-width:64px;color:${col};font-weight:700;">${r.rate == null ? '—' : (r.rate * 100).toFixed(0) + '%'}</span>
+        <span style="min-width:104px;color:var(--muted);">${r.win}W ${r.loss}L ${r.flat} flat</span>
+        <span style="min-width:88px;color:${r.avg >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${r.avg >= 0 ? '+' : ''}${r.avg.toFixed(1)} pts avg</span>
+        <span style="color:var(--muted);font-size:9px;">${enough ? '' : `only ${r.decided} decided — not yet meaningful`}</span>
+      </div>`; }).join('');
+    const tot = st.reduce((a, r) => a + r.decided, 0);
+    box.innerHTML = rows + `
+      <div class="oc-sub" style="margin-top:4px;">Every directional reading is recorded with the spot price at the time and scored <b>${_SCORE_HORIZON_MIN} minutes later</b> against where price actually went. The horizon is fixed in advance on purpose: scoring whenever a move "looks resolved" lets the scorer choose the answer, which is how backtests flatter themselves. A call counts as right only if price moved <b>far enough to trade</b> — smaller moves are recorded as flat, because after costs a two-point win is a loss, and counting it would score noise as skill. <b>Flat is not failure:</b> a source that is usually flat is silent rather than wrong, so the percentage covers decided calls only and the flat count is shown separately. ${tot} decided so far; treat anything under 20 as a sample, not a result. <b>What to do with this:</b> after a few weeks, the sources scoring near 50% are costing you attention and can be switched off — that is the point of measuring.</div>`;
+  }
+
+  // ══ ALERT CONFLUENCE GATE ═════════════════════════════════════════
+  // Every alert family fires on its own evidence, so a bearish flow alert can
+  // be announced in the same minute as a bullish regime alert. Both are
+  // "correct" by their own rule and the listener gets whiplash - and worse,
+  // whichever happened to fire last sounds like the answer.
+  //
+  // A desk resolves this with confluence: a signal that stands alone is
+  // treated as weaker than one several independent measures agree with. This
+  // does not suppress anything, because a lone signal is sometimes the early
+  // one - it QUALIFIES the announcement, so the voice tells you how much
+  // company the reading has.
+  //
+  // The independent measures are deliberately from different families: price
+  // action, option positioning, capital committed, and the order book. Four
+  // measures that all derive from open interest would agree with each other
+  // by construction and mean nothing.
+  function _confluence(d) {
+    const votes = [];
+    const add = (src, dir, note) => { if (dir) votes.push({ src, dir, note }); };
+    try {
+      const t = _trendCompute(d);
+      if (t && Math.abs(t.score) >= 2) add('trend engine', t.score > 0 ? 1 : -1, `score ${t.score}`);
+    } catch (_) {}
+    try {
+      const f = _netPremiumFlow(d);
+      if (f && f.bias !== 'balanced') add('capital flow', f.bias === 'bullish' ? 1 : -1,
+        `${(f.conviction * 100).toFixed(0)}% conviction`);
+    } catch (_) {}
+    try {
+      const cs = _chart.candles || [];
+      if (cs.length >= 10) {
+        const n = Math.min(10, cs.length - 1);
+        const chg = cs[cs.length - 1].c - cs[cs.length - 1 - n].c;
+        if (Math.abs(chg) / cs[cs.length - 1].c * 100 > 0.05)
+          add('price', chg > 0 ? 1 : -1, `${chg > 0 ? '+' : ''}${chg.toFixed(0)} pts`);
+      }
+    } catch (_) {}
+    try {
+      const bk = _depthRead(d?.depth?.index);
+      if (bk && Math.abs(bk.microTilt) > 0.15) add('order book', bk.microTilt > 0 ? 1 : -1,
+        `micro ${(bk.microTilt * 100).toFixed(0)}%`);
+    } catch (_) {}
+    try {
+      const vp = _volumeProfile(_chart.candles || [], (d?.symbol === 'BANKNIFTY') ? 10 : 5);
+      const spot = d?.underlying_value;
+      if (vp && spot) {
+        if (spot > vp.vah) add('value area', 1, 'above value');
+        else if (spot < vp.val) add('value area', -1, 'below value');
+      }
+    } catch (_) {}
+    if (!votes.length) return null;
+    // Record each vote separately. The whole point is to find out WHICH of
+    // these are worth listening to, and an aggregate cannot tell you that.
+    try {
+      const sp = d?.underlying_value, sy = state.symbol;
+      for (const v of votes) _scoreRecord(v.src, v.dir, sp, sy, v.note);
+    } catch (_) {}
+    const up = votes.filter(v => v.dir > 0).length;
+    const dn = votes.filter(v => v.dir < 0).length;
+    const dominant = up > dn ? 'bullish' : dn > up ? 'bearish' : 'split';
+    // the combined reading is itself a claim, and is scored like any other
+    try {
+      if (dominant !== 'split')
+        _scoreRecord('CONFLUENCE (combined)', dominant, d?.underlying_value, state.symbol,
+                     `${up}up/${dn}dn`);
+    } catch (_) {}
+    return { votes, up, dn, total: votes.length, net: up - dn, dominant };
+  }
+
+  // Qualify a spoken alert with how much company its direction has. Returns a
+  // short clause, or '' when there is nothing useful to add - silence is
+  // better than a confidence figure built on one vote.
+  function _confluenceClause(bias) {
+    try {
+      const c2 = _confluence(state.lastData);
+      if (!c2 || c2.total < 2) return '';
+      const b = String(bias || '').toLowerCase();
+      if (b !== 'bullish' && b !== 'bearish') return '';
+      const agree = b === 'bullish' ? c2.up : c2.dn;
+      const against = b === 'bullish' ? c2.dn : c2.up;
+      if (against > agree) {
+        // The honest case, and the one that matters: this alert disagrees
+        // with the weight of the other evidence. Saying so is far more useful
+        // than announcing it as though it stood unopposed.
+        return ` Note: ${against} of ${c2.total} other measures point the other way.`;
+      }
+      if (agree >= 3) return ` ${agree} of ${c2.total} measures agree.`;
+      if (agree === c2.total && c2.total >= 2) return ` Both other measures agree.`;
+      return '';
+    } catch (_) { return ''; }
+  }
+
+  // ══ CAPITAL FLOW & RISK REVERSAL ══════════════════════════════════
+  // Two measures a desk weights heavily that contract-counting misses.
+  //
+  // NET PREMIUM FLOW. Open interest counts contracts, so a 40,000-lot build
+  // in a six-rupee far-OTM call outweighs a 4,000-lot build at the money -
+  // ten to one by contracts, while the money runs three to one the other way.
+  // Weighting by premium measures CAPITAL COMMITTED rather than tickets
+  // bought, and capital is what has to be defended.
+  //
+  // 25-DELTA RISK REVERSAL. The standard directional skew measure: the implied
+  // volatility of a 25-delta call minus that of a 25-delta put, so it compares
+  // options with equal probability of finishing in the money rather than equal
+  // distance from spot. When puts are bid over equivalent calls the market is
+  // paying up for downside, and it usually does so before the downside arrives.
+  function _netPremiumFlow(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const lot = d.lot_size || 75;
+    const gap = d.strike_gap || 50;
+    const iv = (d.atm_iv || 12) / 100;
+    const dte = Math.max(1 / 1440, d.dte ?? 1);
+    // only strikes price can realistically reach: far wings are mostly spread
+    // legs and margin hedges, and their capital is not a directional bet
+    const band = spot * iv * Math.sqrt(_volT(dte)) * 1.5;
+    let ceIn = 0, peIn = 0, ceOut = 0, peOut = 0, n = 0;
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) > band) continue;
+      const cq = (s.ce_oi_chg || 0) * (s.ce_ltp || 0) * lot;
+      const pq = (s.pe_oi_chg || 0) * (s.pe_ltp || 0) * lot;
+      if (cq > 0) ceIn += cq; else ceOut -= cq;
+      if (pq > 0) peIn += pq; else peOut -= pq;
+      n++;
+    }
+    const net = (ceIn - ceOut) - (peIn - peOut);
+    const gross = ceIn + ceOut + peIn + peOut;
+    return {
+      ceIn, peIn, ceOut, peOut, net, gross, strikes: n,
+      // share of gross flow that is one-directional; a large gross with a
+      // small net is two sides fighting, not a trend
+      conviction: gross ? Math.abs(net) / gross : 0,
+      bias: Math.abs(net) < gross * 0.08 ? 'balanced' : (net > 0 ? 'bullish' : 'bearish'),
+    };
+  }
+
+  function _riskReversal(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const dte = Math.max(1 / 1440, d.dte ?? 1);
+    const T = _volT(dte);
+    const pick = (side, target) => {
+      let best = null, bestErr = 1e9;
+      for (const s of st) {
+        const iv = (side === 'ce' ? s.ce_iv : s.pe_iv) || 0;
+        if (iv <= 1) continue;
+        const dl = _bsDeltaJs(spot, s.strike, T, iv / 100, side === 'ce');
+        const err = Math.abs(Math.abs(dl) - target);
+        if (err < bestErr) { bestErr = err; best = { s, iv, dl }; }
+      }
+      return bestErr < 0.12 ? best : null;   // no strike near 25 delta: skip
+    };
+    const c25 = pick('ce', 0.25), p25 = pick('pe', 0.25);
+    if (!c25 || !p25) return null;
+    const rr = c25.iv - p25.iv;
+    return {
+      rr, callIv: c25.iv, putIv: p25.iv,
+      callK: c25.s.strike, putK: p25.s.strike,
+      // negative RR is the normal state for index options; what matters is
+      // the direction of travel, not the sign
+      bias: rr > 0.5 ? 'bullish' : rr < -2.5 ? 'bearish' : 'normal',
+    };
+  }
+
+  function _bsDeltaJs(S, K, T, sigma, isCall, r = 0.07) {
+    if (T <= 0 || sigma <= 0 || S <= 0 || K <= 0) {
+      const itm = isCall ? S > K : S < K;
+      return isCall ? (itm ? 1 : 0) : (itm ? -1 : 0);
+    }
+    const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / (sigma * Math.sqrt(T));
+    // Abramowitz-Stegun normal CDF; JS has no erf
+    const t = 1 / (1 + 0.2316419 * Math.abs(d1));
+    const dn = 0.3989422804 * Math.exp(-d1 * d1 / 2);
+    let p = 1 - dn * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 +
+             t * (-1.821255978 + t * 1.330274429))));
+    if (d1 < 0) p = 1 - p;
+    return isCall ? p : p - 1;
+  }
+
+  function renderCapitalFlow(d) {
+    const box = document.getElementById('capFlowBody');
+    if (!box) return;
+    const f = _netPremiumFlow(d), r = _riskReversal(d);
+    if (!f) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
+    const cr = v => '₹' + (v / 1e7).toFixed(2) + ' cr';
+    const col = f.bias === 'bullish' ? 'var(--pos,#26a69a)'
+              : f.bias === 'bearish' ? 'var(--neg,#ef5350)' : 'var(--muted)';
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:12px;">${f.bias.toUpperCase()}</b>
+        <span>net <b style="color:${col};">${f.net >= 0 ? '+' : ''}${cr(f.net)}</b> into calls</span>
+        <span style="color:var(--muted);">conviction ${(f.conviction * 100).toFixed(0)}% of gross</span>
+        <span style="color:var(--muted);">${f.strikes} strikes in range</span>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:2px 4px;font-size:10px;color:var(--muted);">
+        <span>calls in ${cr(f.ceIn)} · out ${cr(f.ceOut)}</span>
+        <span>puts in ${cr(f.peIn)} · out ${cr(f.peOut)}</span>
+      </div>
+      ${r ? `<div style="display:flex;gap:14px;flex-wrap:wrap;padding:3px 4px;font-size:10.5px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;">
+        <b>25Δ risk reversal <span style="color:${r.bias === 'bearish' ? 'var(--neg,#ef5350)' : r.bias === 'bullish' ? 'var(--pos,#26a69a)' : 'inherit'};">${r.rr >= 0 ? '+' : ''}${r.rr.toFixed(2)}</span></b>
+        <span style="color:var(--muted);">call ${fmtInt(r.callK)} @ ${r.callIv.toFixed(1)}% · put ${fmtInt(r.putK)} @ ${r.putIv.toFixed(1)}%</span>
+      </div>` : ''}
+      <div class="oc-sub" style="margin-top:3px;"><b>Capital, not contracts.</b> Open interest counts tickets: a 40,000-lot build in a six-rupee far-OTM call outweighs a 4,000-lot build at the money ten to one by contracts, while the money runs three to one the other way. Weighting by premium measures what was actually committed — and capital is what has to be defended. <b>Conviction</b> is the share of gross flow that is one-directional; a large gross with a small net is two sides fighting, not a trend. <b>The risk reversal</b> compares a 25-delta call against a 25-delta put — options with equal probability of finishing in the money, rather than equal distance from spot. A negative reading is normal for index options, so the <b>direction of travel matters more than the sign</b>: puts being bid up relative to equivalent calls usually precedes the downside they protect against. Restricted to strikes price can realistically reach, since far-wing capital is mostly spread legs rather than a directional bet.</div>`;
+  }
+
   // ══ VOL SURFACE ARBITRAGE CHECK ═══════════════════════════════════
   // IV is solved per strike independently, which means nothing stops the
   // resulting curve from being impossible. Two classic violations:
@@ -19598,6 +19964,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                        wallBase: {}, straddleBase: null, log: [] };
 
   function _leadFire(key, text, label, tone) {
+    // Qualify directional leading signals with how much company they have,
+    // the same way flow alerts are. A lone bearish signal announced while
+    // three other measures point up should say so.
+    try {
+      const _b = /^BULLISH/i.test(text) ? 'bullish'
+               : /^BEARISH/i.test(text) ? 'bearish' : null;
+      if (_b) text = text.replace(/\.\s*$/, '') + '.' + _confluenceClause(_b);
+    } catch (_) {}
     const cfg = _leadCfg();
     const now = Date.now();
     const cd = (cfg.cooldownMin || 10) * 60000;
@@ -21514,6 +21888,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       // an oversight that happens to work. Losing the morning
                       // to a settings reset is unrecoverable, so it is named.
                       'ctxHistV1',
+                      // measured outcomes: the only evidence about what works
+                      'signalScoreV1',
                       'nse_checklist_v1', 'regimeHistory', 'lastBackupTs',
                       // connection detail, not a preference: clearing it would
                       // point the dashboard at nothing and look like a crash
@@ -28216,6 +28592,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
     'ctx-chart':         '<strong>Context pane</strong>PCR, India VIX and ATM implied volatility drawn against the <b>same time axis as the candles above</b>. Sharing that axis is the entire point: reading the three as numbers tells you where they are, but seeing them co-timed with price tells you which one moved FIRST - and that ordering is where the information sits. Implied volatility lifting while price is flat, or the put-call ratio turning ten minutes before the candles do, is invisible in a set of readouts and obvious here. <b>Each line is scaled to its own range</b>, because they share no units - PCR sits near 1, VIX in the teens, IV in percent - and plotting them on one absolute axis would flatten two of the three into a straight line. The span beside each legend entry tells you what that series has actually covered, so a line that looks dramatic can be checked against a range that may be trivial. <b>Two PCR lines by default.</b> The near band reacts to what is trading now; the one-day band is steadier. Watching them together is the useful part - when the near line pulls away from the day line, positioning is shifting at the strikes price can actually reach, and the wider measure will not show it for a while yet. The near line is the same figure the voice alert watches, so what you hear and what you see are the same number. <b>Two further series lead rather than confirm,</b> and are one tick away: <b>Straddle</b> is the market\'s live price of a move - rising while price is flat means someone is paying for something that has not happened yet - and <b>Skew</b> is OTM put IV minus OTM call IV, so a rising line is protection being bid, which usually precedes the selling it protects against. Both are off by default because six lines on one small pane is unreadable, not because they matter less. Untick anything to remove it; the choice persists.',
+    'signal-score':      '<strong>Signal Scorecard</strong>The system measuring itself. Twenty-two Trend Engine inputs and nine alert families were weighted by judgement and never checked against what happened - some are certainly noise and there was no way to tell which. Every directional reading is now recorded with the spot price at the time and scored <b>15 minutes later</b> against where price actually went. <b>The horizon is fixed in advance deliberately:</b> scoring whenever a move looks resolved lets the scorer choose the answer, which is how backtests flatter themselves. A call counts as right only if price moved far enough to have been tradeable - roughly 0.4 sigma of the horizon - because after costs a two-point win is a loss, and counting it would score noise as skill. <b>Flat is not failure:</b> a source that is usually flat is silent rather than wrong, so the hit rate covers decided calls only and flats are shown separately. <b>Treat anything under 20 decided calls as a sample rather than a result</b>, and give it a few weeks before drawing conclusions. The purpose is subtraction: sources scoring near 50 percent are costing you attention and can be switched off, and knowing which those are is worth more than any additional signal.',
+    'capital-flow':      '<strong>Capital Flow and 25-delta Risk Reversal</strong>Two measures a prop desk weights heavily that contract-counting misses entirely. <b>Net premium flow</b> weights each open-interest change by its premium, so it measures capital committed rather than tickets bought. The difference is not cosmetic: a 40,000-lot build in a six-rupee far-OTM call outweighs a 4,000-lot build at the money ten to one by contracts, while the money runs three to one the other way. Open interest counts a lottery ticket and a conviction trade identically; capital does not, and capital is what has to be defended when price moves against it. <b>Conviction</b> is the share of gross flow that is one-directional - a large gross with a small net means two sides fighting, which is the opposite of a trend. <b>The 25-delta risk reversal</b> is the standard directional skew measure: the implied volatility of a 25-delta call minus a 25-delta put, comparing options with equal probability of finishing in the money rather than equal distance from spot. A negative reading is the normal state for index options because protection is structurally bid, so <b>the direction of travel matters far more than the sign</b> - puts being bid up relative to equivalent calls usually precedes the selling they protect against. Both are restricted to strikes price can realistically reach, because far-wing capital is mostly spread legs and margin relief rather than a directional view.',
     'surface-arb':       '<strong>Chain consistency</strong>Implied volatility is solved for each strike independently, so nothing prevents the resulting curve from being impossible. This checks the two classic no-arbitrage conditions. <b>Butterfly:</b> call prices must be convex in strike - if a wing-body-wing combination is worth negative money you could collect cash for a position that cannot lose, which real markets do not offer. <b>Vertical:</b> a higher-strike call cannot cost more than a lower one, for the same reason. When either fails it is not an opportunity; it means a <b>stale quote, a wide spread being mid-marked, or an IV solve that failed</b> at that strike. <b>Why it earns a panel:</b> GEX, charm, vanna, the vol surface and the projected move are all computed from these prices, so a single bad strike quietly skews several panels at once rather than announcing itself - which is exactly the kind of error that is expensive precisely because it looks fine. A prop desk avoids this by fitting an arbitrage-free surface (SVI or SABR) so violations cannot arise; detecting them is far cheaper and catches the case that matters. Readings near flagged strikes should be treated as unreliable until they clear, which is usually within a few ticks.',
     'pcr-bands':         '<strong>PCR by horizon</strong>One put-call ratio hides which strikes produced it. Computed over the whole chain it includes strikes price cannot reach this week - that open interest is positional and barely moves intraday, so it dilutes a genuine shift near the money into something that looks like nothing happened. The bands here are defined in <b>sigma</b> - the expected move - rather than in strike counts, and that distinction matters more than it sounds. Nifty uses 50-point steps near the money and 100-point steps further out, so a fixed count like \'±12 strikes\' covers ±600 points in one part of the chain and ±1200 in another: the band silently changes meaning depending on where the money is. A fixed count also means different risk on different instruments, because BankNifty\'s higher volatility needs a wider net for the same reachability. Measuring in sigma removes both problems - each band self-adjusts to strike spacing, to the instrument and to today\'s volatility, and the strike COUNT becomes an output worth reading rather than a number to guess at. On a quiet Nifty day the rest-of-day band might be ±111 points and five strikes; on a high-volatility day the same band widens to ±195 points and seven. <b>The divergence between the near and wide bands is the actionable part:</b> when they disagree, positioning is shifting where price actually is, and the wide ratio will not reflect it for some time. The three columns are the same ratio computed on open interest, traded volume, and CHANGE in open interest - and ΔOI is the most immediate of the three, because it counts only what was added or removed today rather than the standing book. <b>Only the ±3 band is announced.</b> The wider ones move slowly by design, so alerting on them would mostly report the passage of time; the near band is the one that can change what you do in the next few minutes. Rising PCR means puts building relative to calls, which is support being written and conventionally bullish - but above 1.6 or below 0.6 the reading inverts and is called out as contrarian, because when everyone is positioned one way there is nobody left to push it further.',
     'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
