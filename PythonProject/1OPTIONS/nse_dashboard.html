@@ -1945,6 +1945,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="scalpBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
           </div>
 
+          <div class="level-panel" id="ladderPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🪜 Strike Ladder — where price will be resisted<i class="hi" data-h="strike-ladder">i</i></span>
+            </div>
+            <div id="ladderBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
+          </div>
+
           <div class="level-panel" id="regimeMapPanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.35);">
             <div class="level-panel-head">
               <span class="skew-chart-title">🧭 Regime — which signals to trust right now<i class="hi" data-h="regime-map">i</i></span>
@@ -14002,6 +14009,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
+    try { renderLadder(data); } catch (_) {}
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
@@ -16672,6 +16680,124 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     });
   }
   setInterval(_ctxScheduleDraw, 100);      // at most 10 repaints a second
+
+  // ══ STRIKE LADDER ═════════════════════════════════════════════════
+  // A price-vertical map of where price will be RESISTED, rather than where
+  // it has been. Candles, EMAs and pivots are all derived from past price:
+  // they describe the path taken. This describes the terrain ahead.
+  //
+  // It replaces the naive reading that the largest open interest marks the
+  // strongest level. Open interest says how many contracts exist at a strike;
+  // it does not say whether anyone is FORCED to act there. What forces action
+  // is dealer gamma:
+  //
+  //   dealer LONG gamma   they sell rallies and buy dips -> price is PINNED
+  //   dealer SHORT gamma  they buy rallies and sell dips -> moves ACCELERATE
+  //
+  // So the largest put wall on the board can be the weakest support, because
+  // a break there gets faster rather than slower. Naive OI reads that exactly
+  // backwards, which is the whole reason for this panel.
+  //
+  // Four independent measures per strike, on one price axis:
+  //   GAMMA     how hard dealers must defend, and in which direction
+  //   OI        the standing wall
+  //   ΔOI       what was added or removed TODAY - fresh conviction
+  //   VOLUME    where price actually traded, from the volume profile
+  function _strikeLadder(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value, iv = d?.atm_iv;
+    if (!st.length || !spot) return null;
+    const dte = Math.max(1 / 1440, d.dte ?? 1);
+    const T = _volT(dte);
+    const lot = d.lot_size || 75;
+    const band = spot * ((iv || 12) / 100) * Math.sqrt(_volT(dte)) * 2;
+    const rows = [];
+    for (const s of st) {
+      if (Math.abs(s.strike - spot) > band) continue;
+      const ceIv = (s.ce_iv || iv || 12) / 100;
+      const peIv = (s.pe_iv || iv || 12) / 100;
+      const g = (K, sig) => {
+        if (T <= 0 || sig <= 0) return 0;
+        const d1 = (Math.log(spot / K) + (0.07 + sig * sig / 2) * T) / (sig * Math.sqrt(T));
+        const npdf = 0.3989422804 * Math.exp(-d1 * d1 / 2);
+        return npdf / (spot * sig * Math.sqrt(T));
+      };
+      // Dealers are assumed short calls and short puts to the street, the
+      // standard convention: call OI contributes positive gamma exposure and
+      // put OI negative. It is a convention, not a measurement - nobody
+      // publishes actual dealer inventory - and the panel says so.
+      const gCe = g(s.strike, ceIv) * (s.ce_oi || 0) * lot * spot * spot * 0.01;
+      const gPe = g(s.strike, peIv) * (s.pe_oi || 0) * lot * spot * spot * 0.01;
+      const gex = gCe - gPe;
+      rows.push({
+        k: s.strike,
+        gex, absG: Math.abs(gex),
+        oi: (s.ce_oi || 0) + (s.pe_oi || 0),
+        ceOi: s.ce_oi || 0, peOi: s.pe_oi || 0,
+        dOi: (s.ce_oi_chg || 0) + (s.pe_oi_chg || 0),
+        vol: (s.ce_volume || 0) + (s.pe_volume || 0),
+        above: s.strike > spot,
+      });
+    }
+    if (rows.length < 3) return null;
+    const maxG = Math.max(...rows.map(r => r.absG)) || 1;
+    const maxOi = Math.max(...rows.map(r => r.oi)) || 1;
+    const maxVol = Math.max(...rows.map(r => r.vol)) || 1;
+    // Strength combines the three: gamma is weighted most because it is the
+    // only one that compels action. OI is standing interest, volume is where
+    // business was done - both matter, neither forces anyone to trade.
+    for (const r of rows) {
+      r.gN = r.absG / maxG; r.oN = r.oi / maxOi; r.vN = r.vol / maxVol;
+      r.strength = r.gN * 0.55 + r.oN * 0.28 + r.vN * 0.17;
+      // A level PINS when dealers are long gamma there, and ACCELERATES when
+      // they are short. This is the distinction naive OI cannot make.
+      r.kind = r.gex > 0 ? 'pin' : 'accelerate';
+    }
+    const above = rows.filter(r => r.above).sort((a, b) => b.strength - a.strength);
+    const below = rows.filter(r => !r.above).sort((a, b) => b.strength - a.strength);
+    return {
+      rows: rows.sort((a, b) => b.k - a.k), spot,
+      resistance: above[0] || null, support: below[0] || null,
+      maxG, maxOi, maxVol, band,
+    };
+  }
+
+  function renderLadder(d) {
+    const box = document.getElementById('ladderBody');
+    if (!box) return;
+    const L = _strikeLadder(d);
+    if (!L) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
+    const W = 100;   // percent units for the bars
+    const bar = (v, col, title) =>
+      `<span title="${escapeHtml(title)}" style="display:inline-block;height:8px;width:${(v * W).toFixed(1)}%;background:${col};border-radius:2px;vertical-align:middle;"></span>`;
+    const rows = L.rows.map(r => {
+      const near = Math.abs(r.k - L.spot) < (d.strike_gap || 50) / 2;
+      const isKey = (L.resistance && r.k === L.resistance.k) || (L.support && r.k === L.support.k);
+      const gcol = r.gex > 0 ? 'rgba(38,166,154,0.75)' : 'rgba(239,83,80,0.75)';
+      return `<div style="display:flex;gap:6px;align-items:center;font-size:9.5px;line-height:1.4;${near ? 'background:rgba(212,175,55,0.10);' : ''}${isKey ? 'font-weight:700;' : ''}">
+        <span style="min-width:52px;color:${near ? 'var(--gold,#d4af37)' : isKey ? 'inherit' : 'var(--muted)'};">${fmtInt(r.k)}</span>
+        <span style="flex:1;min-width:0;">${bar(r.gN, gcol, `gamma ${r.gex > 0 ? 'positive — dealers damp moves here (pin)' : 'negative — dealers amplify moves here (accelerate)'}`)}</span>
+        <span style="min-width:44px;">${bar(r.oN, 'rgba(255,255,255,0.22)', `open interest ${fmtInt(r.oi)}`)}</span>
+        <span style="min-width:34px;">${bar(r.vN, 'rgba(165,94,234,0.55)', `volume ${fmtInt(r.vol)}`)}</span>
+        <span style="min-width:52px;color:${r.dOi >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-size:8.5px;">${r.dOi >= 0 ? '+' : ''}${fmtInt(Math.round(r.dOi / 1000))}k</span>
+        <span style="min-width:62px;color:var(--muted);font-size:8.5px;">${r.kind === 'pin' ? 'pin' : 'accel'}</span>
+      </div>`; }).join('');
+    const say = (r, lab) => {
+      if (!r) return '';
+      const pts = Math.abs(r.k - L.spot);
+      return `<span><b style="color:${lab === 'Resistance' ? 'var(--neg,#ef5350)' : 'var(--pos,#26a69a)'};">${lab} ${fmtInt(r.k)}</b>
+        <span style="color:var(--muted);">${pts.toFixed(0)} pts · ${r.kind === 'pin' ? 'pins — expect a stall' : 'accelerates — expect a break to run'}</span></span>`;
+    };
+    box.innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px 5px;font-size:10.5px;">
+        ${say(L.resistance, 'Resistance')} ${say(L.support, 'Support')}
+      </div>
+      <div style="display:flex;gap:6px;font-size:8.5px;color:var(--muted);padding:0 4px 3px;">
+        <span style="min-width:52px;">strike</span><span style="flex:1;">gamma (green pins / red accelerates)</span>
+        <span style="min-width:44px;">OI</span><span style="min-width:34px;">vol</span><span style="min-width:52px;">ΔOI</span><span style="min-width:62px;">behaviour</span>
+      </div>
+      <div style="max-height:260px;overflow-y:auto;padding:0 4px;">${rows}</div>
+      <div class="oc-sub" style="margin-top:4px;">Candles, EMAs and pivots all derive from past price — they describe <b>the path taken</b>. This describes <b>the terrain ahead</b>. It also replaces the common reading that the largest open interest marks the strongest level: OI says how many contracts exist at a strike, not whether anyone is <b>forced to act</b> there. What forces action is dealer gamma. Where dealers are long gamma they sell rallies and buy dips, so price is <b>pinned</b> and a level holds; where they are short they buy rallies and sell dips, so a break <b>accelerates</b>. The largest put wall on the board can therefore be the weakest support, because a break through it gets faster rather than slower — naive OI reads that exactly backwards. Strength weights gamma most heavily because it is the only one of the three that compels anyone to trade; open interest is standing exposure and volume is where business was done, and neither obliges anybody. <b>Honest limit:</b> nobody publishes actual dealer inventory, so this uses the standard convention that dealers are short both calls and puts to the street. It is right often enough to be useful and wrong in unusual positioning, and it is an assumption rather than a measurement.</div>`;
+  }
 
   // ══ REGIME CLASSIFIER & ALERT GOVERNOR ════════════════════════════
   // Most signals here carry a hidden assumption about the market they are in,
@@ -28234,6 +28360,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
     'ctx-chart':         '<strong>Context pane</strong>PCR, India VIX and ATM implied volatility drawn against the <b>same time axis as the candles above</b>. Sharing that axis is the entire point: reading the three as numbers tells you where they are, but seeing them co-timed with price tells you which one moved FIRST - and that ordering is where the information sits. Implied volatility lifting while price is flat, or the put-call ratio turning ten minutes before the candles do, is invisible in a set of readouts and obvious here. <b>Each line is scaled to its own range</b>, because they share no units - PCR sits near 1, VIX in the teens, IV in percent - and plotting them on one absolute axis would flatten two of the three into a straight line. The span beside each legend entry tells you what that series has actually covered, so a line that looks dramatic can be checked against a range that may be trivial. <b>Two PCR lines by default.</b> The near band reacts to what is trading now; the one-day band is steadier. Watching them together is the useful part - when the near line pulls away from the day line, positioning is shifting at the strikes price can actually reach, and the wider measure will not show it for a while yet. The near line is the same figure the voice alert watches, so what you hear and what you see are the same number. <b>Two further series lead rather than confirm,</b> and are one tick away: <b>Straddle</b> is the market\'s live price of a move - rising while price is flat means someone is paying for something that has not happened yet - and <b>Skew</b> is OTM put IV minus OTM call IV, so a rising line is protection being bid, which usually precedes the selling it protects against. Both are off by default because six lines on one small pane is unreadable, not because they matter less. Untick anything to remove it; the choice persists.',
+    'strike-ladder':     '<strong>Strike Ladder</strong>Candles, moving averages and pivots are all derived from past price - they describe <b>the path taken</b>. This describes <b>the terrain ahead</b>, built from where positions actually sit rather than where price has been. It also replaces a reading that is very common and quite wrong: that the largest open interest marks the strongest level. Open interest says how many contracts exist at a strike; it does not say whether anyone is <b>forced to act</b> there, and being forced is what makes a level hold. What forces action is dealer gamma. Where dealers are long gamma they sell rallies and buy dips, so price is <b>pinned</b> and the level holds. Where they are short they buy rallies and sell dips, so a break <b>accelerates</b> instead of stalling. The largest put wall on the board can therefore be the weakest support, because a break through it gets faster rather than slower - and reading it as strong support is how a stop gets run. Strength weights gamma most heavily because it is the only one of the three measures that compels anyone to trade: open interest is standing exposure and volume is where business was already done, and neither obliges anybody to do anything now. <b>Honest limit, and it is a real one:</b> nobody publishes actual dealer inventory, so this uses the standard convention that dealers are short both calls and puts to the street. That is right often enough to be useful and wrong in unusual positioning - it is an assumption, not a measurement, and it should be read as one.',
     'regime-map':        '<strong>Regime</strong>Most signals in this dashboard carry a hidden assumption about the kind of market they are in, and none of them state it on their own. <b>In a range</b>, mean reversion and contrarian extremes are the higher-odds side and breakout signals are mostly traps. <b>In a trend that inverts completely:</b> fading is how a small loss becomes a large one, and level-touch alerts fire on every level as price goes straight through them. The same alert is sound advice in one regime and expensive in the other - which is why this panel names what to <b>discount</b> rather than only what to trust. <b>Volatility is ranked against this instrument own recent range</b> rather than an absolute number, because 13 percent means quite different things on Nifty and on BankNifty. Direction uses the same net-over-gross efficiency measure as the grind detector, so a market that covered ground by thrashing back and forth is correctly read as ranging rather than trending. <b>Dead regime</b> is the reading nothing else here will give you: when the expected move remaining is comparable to a round trip in spread and slippage, the honest answer is that there is nothing worth trading today - and a system that can never say that will always find a reason to trade. The <b>alert budget</b> exists because every family throttles itself while nothing limited the total: in high volatility they all fire at once, and thirty alerts an hour is the same as none, because you stop listening. High-priority alerts always pass; low-priority ones are the first to be suppressed as the budget fills.',
     'htf-context':       '<strong>Daily Context</strong>Everything else in this dashboard is computed from <b>today alone</b>, which means it cannot tell whether an intraday move continues the larger trend or fights it — and those are the same chart intraday while being very different trades. A long inside a five-day downtrend is a counter-trend scalp whether or not anyone calls it one: it needs a tighter stop, a faster exit and smaller size than the identical setup taken with the trend. <b>This is deliberately excluded from the Trend Engine.</b> Higher-timeframe bias belongs to sizing and holding time rather than to the intraday score, and folding it in would let a week-old trend quietly outvote what is happening right now — the opposite of what a scalper needs. Daily efficiency uses the same net-over-gross measure as the intraday grind detector, so a high reading means the daily move travelled <b>directly</b> rather than merely far; a market that covered the same distance by thrashing back and forth scores low and is correctly read as rotating. The daily bars come from the replay archive, which builds automatically each day the dashboard runs, so this panel becomes more useful the longer the system has been in use.',
     'slow-grind':        '<strong>Slow Trend</strong>Every other alert in this system is event-based - a threshold crossed, a wall decaying, premium jumping - and they share one blind spot that is not small: <b>a slow steady trend contains no dramatic bar anywhere in it</b>, so nothing trips and the system stays silent through exactly the move that was easiest to trade. It is worse than mere silence, because a choppy day produces LARGER individual bars than a grind while going nowhere, so threshold alerts fire more often on the day with no trend than on the day with one. <b>Efficiency ratio</b> fixes this: net movement divided by the sum of all movement. A straight line scores near 100 percent whatever its slope, and violent chop scores near zero whatever its range - it measures how directly price got where it went, which is what a trend actually is, rather than how dramatic any single bar was. <b>Persistence</b>, the share of bars closing on one side of VWAP, is required alongside it, because efficiency on its own can be produced by a single gap followed by silence and persistence cannot. The move is also measured against <b>this session own typical bar</b> rather than a fixed number of points, since on a quiet day a forty-point drift is the entire day and a fixed threshold would dismiss it as noise. The alert repeats only on a direction change or after a cooldown, because a grind by definition persists and announcing it every poll would be the noise it was built to avoid.',
