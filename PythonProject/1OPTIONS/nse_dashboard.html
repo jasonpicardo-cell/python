@@ -1903,6 +1903,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="chartBody" style="padding:4px 6px;">
               <div class="movers-loading">Loading candles…</div>
             </div>
+            <!-- RSI pane. A SIBLING of chartBody rather than a child, because
+                 chartBody's innerHTML is replaced on every render and anything
+                 inside it is destroyed several times a second. -->
+            <div id="rsiPaneBody" style="padding:0 6px 4px;"></div>
           </div>
 
           <!-- ── F&O strength ranking ────────────────────────────────── -->
@@ -14009,7 +14013,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
-    try { renderLadder(data); } catch (_) {}
+    try { _ladderRecord(data); renderLadder(data); } catch (_) {}
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
@@ -16681,6 +16685,188 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   setInterval(_ctxScheduleDraw, 100);      // at most 10 repaints a second
 
+  // ══ RSI SUB-PANE ══════════════════════════════════════════════════
+  // Drawn under the candles on the SAME time axis, so a turn in RSI lines up
+  // with the bar that produced it. On a separate chart with its own scaling
+  // that alignment is lost, and alignment is most of what an oscillator is
+  // for.
+  //
+  // Bands at 80 / 50 / 20 rather than the textbook 70 / 30. On an index at
+  // 1-minute resolution 70 and 30 are reached constantly and stop meaning
+  // anything; 80 and 20 are rare enough to be worth seeing. The 50 line is
+  // the one that matters most intraday - which side RSI sits on is a cleaner
+  // trend read than either extreme.
+  //
+  // DIVERGENCE is the part worth having. Price making a higher high while RSI
+  // makes a lower high says the second push had less force behind it, and
+  // that is visible nowhere on the price chart itself.
+  function _rsiSeries(closes, period) {
+    const p = period || 14;
+    if (!closes || closes.length < p + 2) return [];
+    const out = new Array(closes.length).fill(null);
+    let gain = 0, loss = 0;
+    for (let i = 1; i <= p; i++) {
+      const d = closes[i] - closes[i - 1];
+      if (d >= 0) gain += d; else loss -= d;
+    }
+    gain /= p; loss /= p;
+    out[p] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+    for (let i = p + 1; i < closes.length; i++) {
+      const d = closes[i] - closes[i - 1];
+      // Wilder smoothing, not a simple average - the standard definition,
+      // and it matters: a simple average makes RSI jumpier and shifts the
+      // divergence pivots by a bar or two.
+      gain = (gain * (p - 1) + (d > 0 ? d : 0)) / p;
+      loss = (loss * (p - 1) + (d < 0 ? -d : 0)) / p;
+      out[i] = loss === 0 ? 100 : 100 - 100 / (1 + gain / loss);
+    }
+    return out;
+  }
+
+  function _smaOf(arr, n) {
+    const out = new Array(arr.length).fill(null);
+    let sum = 0, cnt = 0;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] == null) continue;
+      sum += arr[i]; cnt++;
+      if (cnt > n) { // drop the value n places back that was non-null
+        let k = i - 1, seen = 0;
+        while (k >= 0 && seen < n) { if (arr[k] != null) seen++; k--; }
+        if (arr[k + 1] != null) { sum -= arr[k + 1]; cnt--; }
+      }
+      if (cnt >= Math.min(n, 3)) out[i] = sum / cnt;
+    }
+    return out;
+  }
+
+  // Pivot-based divergence. Compares the last two swing highs (and lows) in
+  // price against RSI at the same bars. Pivots rather than raw extremes
+  // because a single spike bar produces a "divergence" on almost every chart
+  // and means nothing.
+  function _rsiDivergence(bars, rsi, look) {
+    const L = look || 3;
+    const n = Math.min(bars.length, rsi.length);
+    if (n < 30) return [];
+    const isHi = i => {
+      for (let k = 1; k <= L; k++)
+        if (bars[i].h <= bars[i - k]?.h || bars[i].h <= bars[i + k]?.h) return false;
+      return true;
+    };
+    const isLo = i => {
+      for (let k = 1; k <= L; k++)
+        if (bars[i].l >= bars[i - k]?.l || bars[i].l >= bars[i + k]?.l) return false;
+      return true;
+    };
+    const highs = [], lows = [];
+    for (let i = L; i < n - L; i++) {
+      if (rsi[i] == null) continue;
+      if (isHi(i)) highs.push(i);
+      if (isLo(i)) lows.push(i);
+    }
+    const out = [];
+    const near = (a, b) => b - a >= 5 && b - a <= 120;   // not adjacent, not ancient
+    for (let i = highs.length - 1; i > 0 && out.length < 3; i--) {
+      const b = highs[i], a = highs[i - 1];
+      if (!near(a, b)) continue;
+      if (bars[b].h > bars[a].h && rsi[b] < rsi[a] - 1.5)
+        out.push({ kind: 'bearish', a, b, ra: rsi[a], rb: rsi[b] });
+    }
+    for (let i = lows.length - 1; i > 0 && out.length < 6; i--) {
+      const b = lows[i], a = lows[i - 1];
+      if (!near(a, b)) continue;
+      if (bars[b].l < bars[a].l && rsi[b] > rsi[a] + 1.5)
+        out.push({ kind: 'bullish', a, b, ra: rsi[a], rb: rsi[b] });
+    }
+    return out;
+  }
+
+  function _rsiPaneSvg(cs, xOf, W, padL, padR, H) {
+    const cfg = (() => {
+      try { return Object.assign({ on: true, period: 14, maLen: 14 },
+                                 JSON.parse(localStorage.getItem('rsiCfg') || '{}')); }
+      catch (_) { return { on: true, period: 14, maLen: 14 }; }
+    })();
+    if (!cfg.on || !cs || cs.length < cfg.period + 4) return '';
+    const closes = cs.map(c => c.c);
+    const rsi = _rsiSeries(closes, cfg.period);
+    const ma = _smaOf(rsi, cfg.maLen);
+    const padT = 6, padB = 12;
+    const y = v => padT + (1 - v / 100) * (H - padT - padB);
+    const right = W - padR;
+    let s = '';
+
+    // background, so the pane reads as its own plane rather than floating
+    s += `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${H}" fill="rgba(255,255,255,0.022)"/>`;
+
+    // Gradient fills for the extremes. Green above 80, red below 20 - the
+    // zones, not the line, because the line spends most of its life in the
+    // middle where neither colour should be shouting.
+    s += `<defs>
+      <linearGradient id="rsiOB" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#26a69a" stop-opacity="0.34"/>
+        <stop offset="100%" stop-color="#26a69a" stop-opacity="0.02"/>
+      </linearGradient>
+      <linearGradient id="rsiOS" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#ef5350" stop-opacity="0.02"/>
+        <stop offset="100%" stop-color="#ef5350" stop-opacity="0.34"/>
+      </linearGradient>
+    </defs>`;
+    s += `<rect x="${padL}" y="${y(100).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(80) - y(100)).toFixed(1)}" fill="url(#rsiOB)"/>`;
+    s += `<rect x="${padL}" y="${y(20).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(0) - y(20)).toFixed(1)}" fill="url(#rsiOS)"/>`;
+    // The 70-80 and 20-30 bands are a WARNING zone, not an extreme one: price
+    // is stretched but has not reached the level that historically matters on
+    // an index. Shaded lightly and flat rather than with a gradient, so they
+    // read as a separate state from the true extremes above and below them
+    // rather than as a continuation of the same colour.
+    s += `<rect x="${padL}" y="${y(80).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(70) - y(80)).toFixed(1)}" fill="rgba(38,166,154,0.10)"/>`;
+    s += `<rect x="${padL}" y="${y(30).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(20) - y(30)).toFixed(1)}" fill="rgba(239,83,80,0.10)"/>`;
+
+    // bands
+    // 80 and 20 carry more weight than 70 and 30, so they are drawn stronger:
+    // on an index at this resolution 70 and 30 are touched constantly, and
+    // giving all four equal weight would make the two that matter disappear
+    // among the two that do not.
+    for (const [v, col, dash, lab] of [[80, 'rgba(38,166,154,0.55)', '4,3', '80'],
+                                       [70, 'rgba(38,166,154,0.30)', '2,4', '70'],
+                                       [50, 'rgba(255,255,255,0.28)', '', '50'],
+                                       [30, 'rgba(239,83,80,0.30)', '2,4', '30'],
+                                       [20, 'rgba(239,83,80,0.55)', '4,3', '20']]) {
+      s += `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${col}" stroke-width="1" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
+      s += `<text x="${(right + 3).toFixed(1)}" y="${(y(v) + 3).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">${lab}</text>`;
+    }
+
+    const line = (vals, col, wdt) => {
+      const pts = [];
+      vals.forEach((v, i) => { if (v != null) pts.push(`${xOf(i).toFixed(1)},${y(v).toFixed(1)}`); });
+      return pts.length > 1
+        ? `<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="${wdt}" stroke-linejoin="round" stroke-linecap="round"/>`
+        : '';
+    };
+    // divergence lines drawn first so the RSI line sits over them
+    let divs = [];
+    try { divs = _rsiDivergence(cs, rsi, 3); } catch (_) {}
+    for (const d of divs) {
+      const col = d.kind === 'bullish' ? '#26de81' : '#ff6b81';
+      s += `<line x1="${xOf(d.a).toFixed(1)}" y1="${y(d.ra).toFixed(1)}" x2="${xOf(d.b).toFixed(1)}" y2="${y(d.rb).toFixed(1)}"
+        stroke="${col}" stroke-width="1.6" stroke-dasharray="5,3" opacity="0.95">
+        <title>${d.kind} divergence — price made a ${d.kind === 'bearish' ? 'higher high' : 'lower low'} while RSI did not, so the second push had less force behind it</title></line>`;
+      s += `<circle cx="${xOf(d.b).toFixed(1)}" cy="${y(d.rb).toFixed(1)}" r="2.6" fill="${col}"/>`;
+    }
+    // MA under the RSI line, both bold as asked
+    s += line(ma, '#f7b731', 2.2);
+    s += line(rsi, '#45aaf2', 2.6);
+
+    // current value at the right edge
+    const last = [...rsi].reverse().find(v => v != null);
+    if (last != null) {
+      const col = last >= 80 ? '#26a69a' : last <= 20 ? '#ef5350' : '#45aaf2';
+      s += `<text x="${(right + 3).toFixed(1)}" y="${(y(last) + 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${last.toFixed(0)}</text>`;
+    }
+    s += `<text x="${(padL + 3)}" y="11" style="font-size:8.5px;fill:var(--muted,#789);">RSI ${cfg.period}` +
+         `${divs.length ? ` · ${divs.length} divergence${divs.length > 1 ? 's' : ''}` : ''}</text>`;
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
+  }
+
   // ══ STRIKE LADDER ═════════════════════════════════════════════════
   // A price-vertical map of where price will be RESISTED, rather than where
   // it has been. Candles, EMAs and pivots are all derived from past price:
@@ -16761,6 +16947,53 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     };
   }
 
+  // ── ladder levels traced over the session ────────────────────────
+  // Drawn on the chart rather than shown as bars, because a bar chart of
+  // strikes has to be mentally mapped onto price before it means anything,
+  // and that mapping is the work. On the price axis it is immediate.
+  //
+  // Traced as a LINE rather than a static level because these move: gamma is
+  // recomputed every poll, so the wall migrates as positioning changes. A
+  // horizontal line would show where resistance is now and hide that it has
+  // been walking down all morning — which is usually the more useful fact.
+  const _ladderHist = { pts: [] };
+
+  function _ladderRecord(d) {
+    try {
+      const L = _strikeLadder(d);
+      if (!L) return;
+      const now = Date.now();
+      const last = _ladderHist.pts[_ladderHist.pts.length - 1];
+      if (last && now - last.t < 15000) return;
+      if (last && last.sym !== state.symbol) _ladderHist.pts.length = 0;
+      _ladderHist.pts.push({
+        t: Math.floor(now / 1000), sym: state.symbol,
+        res: L.resistance ? L.resistance.k : null,
+        sup: L.support ? L.support.k : null,
+      });
+      const open = (typeof _ctxSessionStart === 'function') ? _ctxSessionStart() / 1000 : 0;
+      while (_ladderHist.pts.length && (_ladderHist.pts[0].t < open || _ladderHist.pts.length > 1600))
+        _ladderHist.pts.shift();
+    } catch (_) {}
+  }
+
+  // Returns polyline points for the chart, mapped through the chart's own
+  // slot arithmetic so the lines sit under the candles they belong to.
+  function _ladderSeriesFor(key, slotOf, xOf, yOf, lo, hi, slots) {
+    const p = _ladderHist.pts.filter(x => x.sym === state.symbol && x[key] != null);
+    if (p.length < 2) return '';
+    // one point per slot: the level only changes when positioning does, and
+    // a step line reads more honestly than a smoothed one for a strike level
+    const bySlot = new Map();
+    for (const x of p) bySlot.set(slotOf(x.t), x[key]);
+    const pts = [];
+    for (const [sl, v] of [...bySlot.entries()].sort((a, b) => a[0] - b[0])) {
+      if (v < lo || v > hi) continue;
+      pts.push(`${xOf(sl).toFixed(1)},${yOf(v).toFixed(1)}`);
+    }
+    return pts.length > 1 ? pts.join(' ') : '';
+  }
+
   function renderLadder(d) {
     const box = document.getElementById('ladderBody');
     if (!box) return;
@@ -16769,34 +17002,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const W = 100;   // percent units for the bars
     const bar = (v, col, title) =>
       `<span title="${escapeHtml(title)}" style="display:inline-block;height:8px;width:${(v * W).toFixed(1)}%;background:${col};border-radius:2px;vertical-align:middle;"></span>`;
-    const rows = L.rows.map(r => {
-      const near = Math.abs(r.k - L.spot) < (d.strike_gap || 50) / 2;
-      const isKey = (L.resistance && r.k === L.resistance.k) || (L.support && r.k === L.support.k);
-      const gcol = r.gex > 0 ? 'rgba(38,166,154,0.75)' : 'rgba(239,83,80,0.75)';
-      return `<div style="display:flex;gap:6px;align-items:center;font-size:9.5px;line-height:1.4;${near ? 'background:rgba(212,175,55,0.10);' : ''}${isKey ? 'font-weight:700;' : ''}">
-        <span style="min-width:52px;color:${near ? 'var(--gold,#d4af37)' : isKey ? 'inherit' : 'var(--muted)'};">${fmtInt(r.k)}</span>
-        <span style="flex:1;min-width:0;">${bar(r.gN, gcol, `gamma ${r.gex > 0 ? 'positive — dealers damp moves here (pin)' : 'negative — dealers amplify moves here (accelerate)'}`)}</span>
-        <span style="min-width:44px;">${bar(r.oN, 'rgba(255,255,255,0.22)', `open interest ${fmtInt(r.oi)}`)}</span>
-        <span style="min-width:34px;">${bar(r.vN, 'rgba(165,94,234,0.55)', `volume ${fmtInt(r.vol)}`)}</span>
-        <span style="min-width:52px;color:${r.dOi >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-size:8.5px;">${r.dOi >= 0 ? '+' : ''}${fmtInt(Math.round(r.dOi / 1000))}k</span>
-        <span style="min-width:62px;color:var(--muted);font-size:8.5px;">${r.kind === 'pin' ? 'pin' : 'accel'}</span>
-      </div>`; }).join('');
-    const say = (r, lab) => {
-      if (!r) return '';
-      const pts = Math.abs(r.k - L.spot);
-      return `<span><b style="color:${lab === 'Resistance' ? 'var(--neg,#ef5350)' : 'var(--pos,#26a69a)'};">${lab} ${fmtInt(r.k)}</b>
-        <span style="color:var(--muted);">${pts.toFixed(0)} pts · ${r.kind === 'pin' ? 'pins — expect a stall' : 'accelerates — expect a break to run'}</span></span>`;
-    };
+    // The bars are gone. They required mentally mapping strikes onto price
+    // before they meant anything, and that mapping was the work — the lines
+    // on the chart do it directly. What remains here is the reading itself
+    // plus the reasoning, which a line cannot carry.
     box.innerHTML = `
-      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px 5px;font-size:10.5px;">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px 5px;font-size:11px;">
         ${say(L.resistance, 'Resistance')} ${say(L.support, 'Support')}
       </div>
-      <div style="display:flex;gap:6px;font-size:8.5px;color:var(--muted);padding:0 4px 3px;">
-        <span style="min-width:52px;">strike</span><span style="flex:1;">gamma (green pins / red accelerates)</span>
-        <span style="min-width:44px;">OI</span><span style="min-width:34px;">vol</span><span style="min-width:52px;">ΔOI</span><span style="min-width:62px;">behaviour</span>
+      <div style="padding:2px 4px;font-size:10px;color:var(--muted);">
+        Drawn on the chart as <b style="color:#ef5350;">γ-RES</b> and <b style="color:#26a69a;">γ-SUP</b> — traced across the session, so you can see the level migrate rather than only where it sits now.
       </div>
-      <div style="max-height:260px;overflow-y:auto;padding:0 4px;">${rows}</div>
-      <div class="oc-sub" style="margin-top:4px;">Candles, EMAs and pivots all derive from past price — they describe <b>the path taken</b>. This describes <b>the terrain ahead</b>. It also replaces the common reading that the largest open interest marks the strongest level: OI says how many contracts exist at a strike, not whether anyone is <b>forced to act</b> there. What forces action is dealer gamma. Where dealers are long gamma they sell rallies and buy dips, so price is <b>pinned</b> and a level holds; where they are short they buy rallies and sell dips, so a break <b>accelerates</b>. The largest put wall on the board can therefore be the weakest support, because a break through it gets faster rather than slower — naive OI reads that exactly backwards. Strength weights gamma most heavily because it is the only one of the three that compels anyone to trade; open interest is standing exposure and volume is where business was done, and neither obliges anybody. <b>Honest limit:</b> nobody publishes actual dealer inventory, so this uses the standard convention that dealers are short both calls and puts to the street. It is right often enough to be useful and wrong in unusual positioning, and it is an assumption rather than a measurement.</div>`;
+      <div class="oc-sub" style="margin-top:3px;">Candles, moving averages and pivots all derive from past price — they describe <b>the path taken</b>. These describe <b>the terrain ahead</b>. They also replace the common reading that the largest open interest marks the strongest level: OI says how many contracts exist at a strike, not whether anyone is <b>forced to act</b> there. What forces action is dealer gamma. Where dealers are long gamma they sell rallies and buy dips, so price is <b>pinned</b> and the level holds; where they are short they buy rallies and sell dips, so a break <b>accelerates</b>. The largest put wall on the board can therefore be the weakest support, because a break through it gets faster rather than slower. <b>The lines move</b>, which is why they are traced rather than drawn flat — a wall that has walked down all morning is usually telling you more than where it happens to sit now. <b>Honest limit:</b> nobody publishes dealer inventory, so this uses the standard convention that dealers are short both calls and puts to the street. Right often enough to be useful, wrong in unusual positioning — an assumption, not a measurement.</div>`;
   }
 
   // ══ REGIME CLASSIFIER & ALERT GOVERNOR ════════════════════════════
@@ -20551,6 +20768,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function renderPriceChart(...a) {
     const r = _renderPriceChartInner(...a);
     try { renderCtxChart(); } catch (_) {}
+    try {
+      const box2 = document.getElementById('rsiPaneBody');
+      const k = _chart._rsiCtx;
+      if (box2 && k)
+        box2.innerHTML = _rsiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25));
+    } catch (_) {}
     // The series array holds exactly one VWAP, so if more than one is on
     // SCREEN the extras are stale DOM rather than anything this render
     // produced. Counting the live elements is the only way to tell those
@@ -20841,6 +21064,43 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         }
       }
     }
+
+    // ── gamma-derived support and resistance, traced across the session ──
+    // Red at width 2 as specified for resistance; support in green at the
+    // same weight so the two are distinguishable at a glance — two identical
+    // red lines on one chart would need reading rather than seeing.
+    let ladderSvg = '';
+    try {
+      const xOf = sl => padL + (sl + 0.5) / slots * (W - padL - padR);
+      const slotOfSec = t => {
+        const g2 = new Date(t * 1000);
+        const ist = new Date(g2.getTime() + (5.5 * 60 + g2.getTimezoneOffset()) * 60000);
+        const m = ist.getHours() * 60 + ist.getMinutes() - (9 * 60 + 15);
+        return Math.max(0, Math.min(slots - 1, Math.floor(m / _chart.interval)));
+      };
+      const resPts = _ladderSeriesFor('res', slotOfSec, xOf, y, lo, hi, slots);
+      const supPts = _ladderSeriesFor('sup', slotOfSec, xOf, y, lo, hi, slots);
+      if (resPts)
+        ladderSvg += `<polyline points="${resPts}" fill="none" stroke="#ef5350" stroke-width="2" opacity="0.9" stroke-linejoin="round"><title>Gamma-weighted resistance — the strike dealers must defend hardest above spot</title></polyline>`;
+      if (supPts)
+        ladderSvg += `<polyline points="${supPts}" fill="none" stroke="#26a69a" stroke-width="2" opacity="0.9" stroke-linejoin="round"><title>Gamma-weighted support — the strike dealers must defend hardest below spot</title></polyline>`;
+      // label each at its right edge so they identify themselves
+      for (const [pts, col, lab] of [[resPts, '#ef5350', 'γ-RES'], [supPts, '#26a69a', 'γ-SUP']]) {
+        if (!pts) continue;
+        const lastPt = pts.split(' ').pop().split(',');
+        const ly2 = parseFloat(lastPt[1]);
+        if (isFinite(ly2))
+          ladderSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(ly2 + 3).toFixed(1)}" style="font-size:8.5px;fill:${col};font-weight:700;">${lab}</text>`;
+      }
+    } catch (_) {}
+
+    // Appended here, not in the earlier compose line: ladderSvg is built
+    // just above and referencing it before that point is a use-before-declare
+    // that node --check accepts and the browser throws on.
+    svg += ladderSvg;
+    // hand the pane the same x-mapping and geometry the candles used, so the
+    // two align exactly rather than approximately
+    _chart._rsiCtx = { cs, x, W, padL, padR, H };
 
     // level lines + right-edge labels (stagger to avoid overlap)
     // Annotate a moving level's own label with its drift. Putting it here
