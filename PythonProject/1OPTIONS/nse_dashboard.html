@@ -1945,6 +1945,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="scalpBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
           </div>
 
+          <div class="level-panel" id="regimeMapPanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.35);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🧭 Regime — which signals to trust right now<i class="hi" data-h="regime-map">i</i></span>
+            </div>
+            <div id="regimeMapBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
+          </div>
+
+          <div class="level-panel" id="htfPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.3);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🗓️ Daily Context — with the trend or against it<i class="hi" data-h="htf-context">i</i></span>
+            </div>
+            <div id="htfBody" style="padding:6px 8px;"><div class="movers-loading">Loading…</div></div>
+          </div>
+
+          <div class="level-panel" id="grindPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🐌 Slow Trend — the move no threshold catches<i class="hi" data-h="slow-grind">i</i></span>
+            </div>
+            <div id="grindBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
           <div class="level-panel" id="driftPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">🧲 Level Drift — is the level coming to price?<i class="hi" data-h="level-drift">i</i></span>
@@ -2103,10 +2124,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <span class="skew-chart-title">Pivot Levels<i class="hi" data-h="pivot-levels">i</i></span>
                 <i class="hi" data-h="pivot-type">i</i><select id="pivotTypeSelect" class="level-select">
-                  <option value="fibonacci" selected>Fibonacci</option>
+                  <option value="fibonacci">Fibonacci</option>
                   <option value="traditional">Traditional</option>
                   <option value="woodie">Woodie</option>
-                  <option value="camarilla">Camarilla</option>
+                  <option value="camarilla" selected>Camarilla</option>
                   <option value="demark">DeMark</option>
                   <option value="classic">Classic</option>
                 </select>
@@ -11693,6 +11714,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // events, so call flow can never be crowded out by louder put flow
     const perTick = Math.max(seenCat.size, Math.min(8, cfg.maxPerTick || 6));
     for (const e of ordered.slice(0, perTick)) {
+      // Governed: flow is the highest-volume family and floods first in high
+      // volatility. A regime flip or a hard break should not be crowded out
+      // by the twentieth strike-level flow alert of the hour.
+      if (!_alertAllowed(e.strength === 'strong' ? 'normal' : 'low')) continue;
       state._flowFired[e.fk] = now;                 // stamp ONLY what we speak
       // Lead with the bias. "Fresh call selling" requires the listener to
       // translate it to bearish mid-trade; the bias word does not.
@@ -13977,6 +14002,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
+    try { renderRegime(data); } catch (_) {}
+    try { _htfFetch(); renderHtf(data); } catch (_) {}
+    try { _grindCheck(); } catch (_) {}
     try { _driftRecord(data); renderDrift(data); } catch (_) {}
     try {
       _scoreResolve(data?.underlying_value, state.symbol, data?.atm_iv, data?.dte);
@@ -14669,6 +14697,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _levelTouchToastEl = () => document.getElementById('levelTouchToast');
   let _levelToastTimer = null;
   function alertLevelTouch(label, price, polarity) {
+    // Governed: level touches fire on every level in a trend as price goes
+    // straight through them, which is exactly when they carry least
+    // information and crowd out the alerts that matter.
+    if (!_alertAllowed('low')) return;
     const key = `${state.symbol}:${label}`;
     if (_touchedLevels.has(key)) {
       console.log(`[touch] ${key} already alerted this session — skipping (dedup)`);
@@ -14859,7 +14891,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
 
     const { H, L, C, O, source: src } = frozen;
-    const pivotType = (document.getElementById('pivotTypeSelect')?.value) || 'fibonacci';
+    const pivotType = (document.getElementById('pivotTypeSelect')?.value) || 'camarilla';
     const fn = PIVOT_TYPES[pivotType] || PIVOT_TYPES.fibonacci;
     const pv = fn(H, L, C, O);
 
@@ -15875,8 +15907,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'classic', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
@@ -16640,6 +16672,346 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     });
   }
   setInterval(_ctxScheduleDraw, 100);      // at most 10 repaints a second
+
+  // ══ REGIME CLASSIFIER & ALERT GOVERNOR ════════════════════════════
+  // Most signals here carry a hidden assumption about the market they are in,
+  // and none of them state it. A contrarian PCR read and a trend-following
+  // grind alert can fire in the same minute, both correct by their own rule,
+  // and nothing tells you which one the regime actually supports.
+  //
+  // Two axes, because they fail independently:
+  //   VOLATILITY  from IV against its own recent range, not an absolute level
+  //   DIRECTION   from efficiency, the same net-over-gross measure used
+  //               elsewhere - trending, ranging, or in between
+  //
+  // The grid decides which families to trust. In a RANGE, mean reversion and
+  // contrarian extremes are the higher-odds side and breakout signals are
+  // mostly traps. In a TREND that inverts completely: fading is how a small
+  // loss becomes a large one, and level-touch alerts fire on every level as
+  // price goes through them.
+  //
+  // DEAD REGIME is the case nothing currently admits to. When the remaining
+  // expected move is comparable to the round trip in costs, the honest output
+  // is that today is not worth trading - and a system that never says that
+  // will find a reason to trade every day.
+  function _regime(d) {
+    const spot = d?.underlying_value, iv = d?.atm_iv;
+    if (!spot) return null;
+    // volatility, ranked against this instrument's own recent IV rather than
+    // an absolute number that means different things on different indices
+    const ivr = d?.iv_rank ?? d?.atm_iv_rank?.rank_pct ?? null;
+    const volBand = ivr == null ? (iv > 18 ? 'high' : iv < 9 ? 'low' : 'normal')
+                  : ivr > 70 ? 'high' : ivr < 30 ? 'low' : 'normal';
+    // direction, from efficiency
+    let er = null, dir = 0;
+    try {
+      const g = _grindRead();
+      if (g) { er = g.er; dir = g.qualifies ? g.dir : 0; }
+    } catch (_) {}
+    const dirBand = er == null ? 'unknown'
+                  : er >= 0.34 ? (dir > 0 ? 'trending up' : dir < 0 ? 'trending down' : 'directional')
+                  : er <= 0.18 ? 'ranging' : 'mixed';
+    // is there enough expected move left to cover a round trip?
+    let dead = false, remaining = null;
+    try {
+      const pm = _projectedMove(d);
+      if (pm) {
+        remaining = pm.sigma;
+        // a scalp needs the move to be a multiple of the round-trip cost;
+        // roughly 8 index points of slippage and spread on a liquid strike
+        dead = pm.sigma < 18;
+      }
+    } catch (_) {}
+    const trending = /trending/.test(dirBand);
+    const ranging = dirBand === 'ranging';
+    return {
+      volBand, dirBand, er, dir, ivr, iv, remaining, dead, trending, ranging,
+      // which families the regime supports, and which it argues against
+      trust: trending
+        ? ['grind / trend engine', 'capital flow', 'value-area breakout', 'order book']
+        : ranging
+        ? ['PCR extremes (contrarian)', 'value-area fade', 'max pain pull', 'level touches']
+        : ['capital flow', 'order book', 'grind'],
+      discount: trending
+        ? ['PCR extremes read contrarian', 'VWAP / mean-reversion fades', 'level-touch alerts']
+        : ranging
+        ? ['breakout signals', 'grind continuation']
+        : ['anything claiming high confidence'],
+    };
+  }
+
+  // ── global alert governor ─────────────────────────────────────────
+  // Every family throttles itself, and nothing limits the total. In high
+  // volatility or a strong trend they all fire at once, and thirty alerts an
+  // hour is the same as none: you stop listening. This caps the total and
+  // spends the budget on the highest-value ones rather than whichever
+  // happened to fire first.
+  const _ALERT_BUDGET = { perHour: 12, log: [] };
+  function _alertAllowed(priority) {
+    const now = Date.now();
+    _ALERT_BUDGET.log = _ALERT_BUDGET.log.filter(t => now - t < 3600000);
+    const used = _ALERT_BUDGET.log.length;
+    const cap = _ALERT_BUDGET.perHour;
+    // high-priority alerts always pass: a regime flip or a hard level break
+    // is exactly what the budget exists to make room for
+    if (priority === 'high') { _ALERT_BUDGET.log.push(now); return true; }
+    if (used >= cap) return false;
+    // as the budget fills, raise the bar rather than cutting off abruptly
+    if (used > cap * 0.7 && priority === 'low') return false;
+    _ALERT_BUDGET.log.push(now);
+    return true;
+  }
+
+  function renderRegime(d) {
+    // regimeBody was already taken by the existing regime badge panel;
+    // a duplicate id means one of them silently wins
+    const box = document.getElementById('regimeMapBody');
+    if (!box) return;
+    const r = _regime(d);
+    if (!r) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
+    const used = _ALERT_BUDGET.log.filter(t => Date.now() - t < 3600000).length;
+    const col = r.dead ? 'var(--gold,#d4af37)'
+              : r.trending ? (r.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)')
+              : 'var(--muted)';
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:12px;">${r.volBand.toUpperCase()} VOL · ${r.dirBand.toUpperCase()}</b>
+        ${r.er != null ? `<span style="color:var(--muted);">efficiency ${(r.er * 100).toFixed(0)}%</span>` : ''}
+        ${r.ivr != null ? `<span style="color:var(--muted);">IV rank ${Math.round(r.ivr)}%</span>` : ''}
+        ${r.remaining != null ? `<span style="color:var(--muted);">±${Math.round(r.remaining)} pts left</span>` : ''}
+      </div>
+      ${r.dead ? `<div style="padding:3px 4px;font-size:11px;color:var(--gold,#d4af37);font-weight:700;">
+        DEAD REGIME — only ±${Math.round(r.remaining)} points of expected move remain. After spread and slippage there is very little here; the honest read is that today is not worth forcing.</div>` : ''}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:3px 4px;font-size:10px;">
+        <span><b style="color:var(--pos,#26a69a);">Trust</b> ${r.trust.map(escapeHtml).join(' · ')}</span>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:0 4px 3px;font-size:10px;">
+        <span><b style="color:var(--neg,#ef5350);">Discount</b> ${r.discount.map(escapeHtml).join(' · ')}</span>
+      </div>
+      <div style="padding:2px 4px;font-size:9.5px;color:var(--muted);">
+        alert budget ${used}/${_ALERT_BUDGET.perHour} this hour${used >= _ALERT_BUDGET.perHour ? ' — low-priority alerts suppressed' : ''}
+      </div>
+      <div class="oc-sub" style="margin-top:3px;">Most signals here carry a hidden assumption about the market they are in, and none of them state it on their own. <b>In a range</b>, mean reversion and contrarian extremes are the higher-odds side and breakout signals are mostly traps. <b>In a trend that inverts completely</b> — fading is how a small loss becomes a large one, and level-touch alerts fire on every level as price goes straight through them. The same alert is good advice in one regime and expensive in the other, which is why this panel names what to discount rather than only what to trust. <b>Volatility is ranked against this instrument own recent range</b>, not an absolute number, because 13% means different things on Nifty and BankNifty. <b>Dead regime</b> is the reading nothing else here will give you: when the remaining expected move is comparable to the round trip in costs, the honest answer is that there is nothing worth trading — and a system that can never say that will always find a reason to trade. The <b>alert budget</b> exists because every family throttles itself while nothing limited the total: in high volatility they all fire at once, and thirty alerts an hour is the same as none, because you stop listening.</div>`;
+  }
+
+  // ══ HIGHER TIMEFRAME CONTEXT ══════════════════════════════════════
+  // The system has been session-blind: every reading is computed from today's
+  // data alone, so it cannot tell whether today's move CONTINUES a multi-day
+  // trend or fights it. Those are the same chart intraday and very different
+  // trades - a long in a five-day downtrend is a counter-trend scalp whether
+  // or not anyone calls it that, and it needs a tighter stop and a faster
+  // exit than the identical setup with the trend.
+  //
+  // It is deliberately NOT fed into the Trend Engine. Higher-timeframe bias is
+  // context for how to size and how long to hold; folding it into an intraday
+  // score would have a week-old trend quietly outvoting what is happening now.
+  const _HTF = { days: [], fetched: 0, sym: null };
+
+  async function _htfFetch(force) {
+    const sym = state.symbol || 'NIFTY';
+    const now = Date.now();
+    // daily bars change once a day; hourly is generous
+    if (!force && _HTF.sym === sym && now - _HTF.fetched < 3600000) return;
+    try {
+      // same base-url construction every other fetch in this file uses;
+      // serverUrl() was an invented helper that does not exist
+      const base = (els.serverUrl?.value || '').replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/replay-ohlc?symbol=${encodeURIComponent(sym)}`);
+      const j = await r.json();
+      const rows = (j.days || j.ohlc || j || []).filter(x => x && x.close);
+      _HTF.days = rows.slice(-30);
+      _HTF.sym = sym;
+      _HTF.fetched = now;
+    } catch (_) { /* archive may not exist yet; the panel says so */ }
+  }
+
+  function _htfRead(spot) {
+    const d = _HTF.days;
+    if (!d || d.length < 4) return null;
+    const closes = d.map(x => x.close);
+    const last = closes[closes.length - 1];
+    const px = spot || last;
+    const sma = n => {
+      if (closes.length < n) return null;
+      const w = closes.slice(-n);
+      return w.reduce((a, b) => a + b, 0) / w.length;
+    };
+    const s5 = sma(5), s10 = sma(10), s20 = sma(20);
+    // efficiency over the daily series, the same measure used intraday:
+    // a trend is how DIRECTLY price travelled, not how far
+    const w = closes.slice(-Math.min(10, closes.length));
+    const net = w[w.length - 1] - w[0];
+    let gross = 0;
+    for (let i = 1; i < w.length; i++) gross += Math.abs(w[i] - w[i - 1]);
+    const er = gross ? Math.abs(net) / gross : 0;
+    const hi = Math.max(...d.slice(-20).map(x => x.high ?? x.close));
+    const lo = Math.min(...d.slice(-20).map(x => x.low ?? x.close));
+    const pos = hi > lo ? (px - lo) / (hi - lo) : 0.5;
+    let bias = 'neutral', why = '';
+    if (s5 && s20) {
+      if (px > s5 && s5 > s20 && er > 0.3) { bias = 'bullish'; why = `above the 5-day and 10-day means, ${(er * 100).toFixed(0)}% efficient`; }
+      else if (px < s5 && s5 < s20 && er > 0.3) { bias = 'bearish'; why = `below the 5-day and 10-day means, ${(er * 100).toFixed(0)}% efficient`; }
+      else if (er < 0.2) { bias = 'range'; why = `${(er * 100).toFixed(0)}% efficiency over ${w.length} days — rotating, not trending`; }
+      else { bias = 'mixed'; why = 'the daily means disagree'; }
+    }
+    return { days: d.length, s5, s10, s20, er, net, pos, hi, lo, bias, why, spot: px };
+  }
+
+  function renderHtf(d) {
+    const box = document.getElementById('htfBody');
+    if (!box) return;
+    const r = _htfRead(d?.underlying_value);
+    if (!r) {
+      box.innerHTML = `<div class="movers-loading" style="font-size:10px;">
+        Needs a few days of recorded sessions. The archive builds automatically
+        each day the dashboard runs — ${_HTF.days.length} day(s) so far.</div>`;
+      return;
+    }
+    const col = r.bias === 'bullish' ? 'var(--pos,#26a69a)'
+              : r.bias === 'bearish' ? 'var(--neg,#ef5350)'
+              : 'var(--gold,#d4af37)';
+    // the part that actually changes a decision
+    let align = '';
+    try {
+      const g = _grindRead();
+      const intraday = g && g.qualifies ? (g.dir > 0 ? 'bullish' : 'bearish') : null;
+      if (intraday && (r.bias === 'bullish' || r.bias === 'bearish')) {
+        align = intraday === r.bias
+          ? `<b style="color:var(--pos,#26a69a);">WITH the daily trend</b> — the higher-odds side; give it room.`
+          : `<b style="color:var(--gold,#d4af37);">AGAINST the daily trend</b> — this is a counter-trend scalp. Tighter stop, faster exit, smaller size.`;
+      } else if (intraday && r.bias === 'range') {
+        align = `Daily is rotating, so intraday moves are more likely to mean-revert than extend.`;
+      }
+    } catch (_) {}
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:12px;">DAILY ${r.bias.toUpperCase()}</b>
+        <span style="color:var(--muted);">${escapeHtml(r.why)}</span>
+        <span style="color:var(--muted);">${(r.pos * 100).toFixed(0)}% of the 20-day range</span>
+        <span style="color:var(--muted);">${r.days} days recorded</span>
+      </div>
+      ${align ? `<div style="padding:3px 4px;font-size:10.5px;">${align}</div>` : ''}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;padding:2px 4px;font-size:9.5px;color:var(--muted);">
+        ${r.s5 ? `<span>5d mean ${fmtInt(Math.round(r.s5))}</span>` : ''}
+        ${r.s10 ? `<span>10d ${fmtInt(Math.round(r.s10))}</span>` : ''}
+        ${r.s20 ? `<span>20d ${fmtInt(Math.round(r.s20))}</span>` : ''}
+        <span>20d range ${fmtInt(Math.round(r.lo))}–${fmtInt(Math.round(r.hi))}</span>
+      </div>
+      <div class="oc-sub" style="margin-top:3px;">Everything else here is computed from <b>today alone</b>, so it cannot tell whether an intraday move continues the larger trend or fights it — and those are the same chart intraday while being very different trades. A long inside a five-day downtrend is a counter-trend scalp whether or not anyone calls it one, and it needs a tighter stop and a faster exit than the identical setup with the trend. <b>This is deliberately kept out of the Trend Engine.</b> Higher-timeframe bias belongs to sizing and holding time, not to the intraday score — folding it in would let a week-old trend quietly outvote what is happening right now. Daily efficiency uses the same net-over-gross measure as the intraday grind detector, so a high reading means the daily move travelled <b>directly</b>, not merely far.</div>`;
+  }
+
+  // ══ SLOW TREND (GRIND) DETECTOR ═══════════════════════════════════
+  // Every alert in this system is event-based: a threshold is crossed, a wall
+  // decays, premium jumps. That design has a blind spot, and it is not a
+  // small one - a slow steady grind is a genuine trend with NO dramatic bar
+  // anywhere in it, so nothing trips and the system stays silent through
+  // exactly the move that was easiest to trade.
+  //
+  // Worse, it gets the two cases backwards. A choppy day produces bigger
+  // individual bars than a grind while going nowhere, so thresholds fire more
+  // often on the day with no trend than on the day with one.
+  //
+  // EFFICIENCY RATIO separates them. Net movement divided by the sum of all
+  // movement: a straight line scores near 1 regardless of its slope, and
+  // violent chop scores near 0 regardless of its range. It measures how
+  // directly price got where it went, which is what a trend actually is.
+  //
+  // Paired with PERSISTENCE - the share of bars closing on the same side of
+  // VWAP - because efficiency alone can be produced by one gap and then
+  // silence, and persistence cannot.
+  const _GRIND_KEY = 'grindCfg';
+  function _grindCfg() {
+    try {
+      return Object.assign({ on: true, minEr: 0.34, minBars: 25, minMovePct: 0.06,
+                             cooldownMin: 20 },
+                           JSON.parse(localStorage.getItem(_GRIND_KEY) || '{}'));
+    } catch (_) { return { on: true, minEr: 0.34, minBars: 25, minMovePct: 0.06, cooldownMin: 20 }; }
+  }
+  const _grindState = { firedAt: 0, lastDir: 0 };
+
+  function _grindRead() {
+    const cs = _chart.candles || [];
+    const cfg = _grindCfg();
+    if (cs.length < cfg.minBars) return null;
+    const n = Math.min(60, cs.length);
+    const w = cs.slice(-n);
+    const closes = w.map(c => c.c);
+    const net = closes[closes.length - 1] - closes[0];
+    let gross = 0;
+    for (let i = 1; i < closes.length; i++) gross += Math.abs(closes[i] - closes[i - 1]);
+    if (!gross) return null;
+    const er = Math.abs(net) / gross;
+    const dir = net > 0 ? 1 : -1;
+    // persistence against VWAP: a grind holds one side, chop crosses it
+    let above = 0, vw = null;
+    try {
+      const v = _vwapSeries(cs);
+      vw = v[v.length - 1];
+      const off = cs.length - n;
+      for (let i = 0; i < n; i++) if (w[i].c > (v[off + i] ?? w[i].c)) above++;
+    } catch (_) {}
+    const persistence = vw != null ? Math.max(above, n - above) / n : null;
+    const movePct = Math.abs(net) / closes[0] * 100;
+    // How much of the session's own typical bar this move represents. On a
+    // quiet day a 40-point drift IS the day's move; judging it against a
+    // fixed points threshold would dismiss it.
+    const bars = w.map(c => Math.abs(c.c - c.o));
+    const typical = bars.slice().sort((a, b) => a - b)[Math.floor(bars.length / 2)] || 1;
+    return { er, dir, net, gross, persistence, movePct, bars: n, typical,
+             inBarUnits: Math.abs(net) / typical,
+             qualifies: er >= cfg.minEr && movePct >= cfg.minMovePct &&
+                        (persistence == null || persistence >= 0.62) };
+  }
+
+  function _grindCheck() {
+    const cfg = _grindCfg();
+    if (!cfg.on && !_enableAll()) return;
+    const g = _grindRead();
+    renderGrind(g);
+    if (!g || !g.qualifies) return;
+    const now = Date.now();
+    // re-announce only on a direction change or after the cooldown: a grind
+    // by definition persists, and repeating it every poll would be noise
+    if (g.dir === _grindState.lastDir && now - _grindState.firedAt < cfg.cooldownMin * 60000) return;
+    _grindState.firedAt = now; _grindState.lastDir = g.dir;
+    const sym = state.symbol || 'NIFTY';
+    const bias = g.dir > 0 ? 'BULLISH' : 'BEARISH';
+    const txt = `${bias}, slow grind. ${sym} has moved ${Math.abs(Math.round(g.net))} points ` +
+      `over ${g.bars} bars with ${(g.er * 100).toFixed(0)} percent efficiency` +
+      (g.persistence != null ? ` and ${(g.persistence * 100).toFixed(0)} percent of bars on one side of V W A P` : '') +
+      `. No single bar was large, which is why the other alerts stayed quiet` +
+      _confluenceClause(g.dir > 0 ? 'bullish' : 'bearish');
+    try {
+      if (_streamLive) _relayAlert(`grind|${sym}|${g.dir}`, txt, 'level', 300);
+      else _speakOnce(`grind|${sym}|${g.dir}`, txt, 300);
+    } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`${g.dir > 0 ? '🟢' : '🔴'} slow grind ${g.dir > 0 ? '▲' : '▼'} ${Math.abs(Math.round(g.net))}pts · ${(g.er * 100).toFixed(0)}% efficient`);
+    try { _scoreRecord('slow grind', g.dir > 0 ? 'bullish' : 'bearish',
+                       state.lastData?.underlying_value, sym, `ER ${g.er.toFixed(2)}`); } catch (_) {}
+    try { _pushAlertHistory(`Slow grind ${g.dir > 0 ? '▲' : '▼'}${Math.abs(Math.round(g.net))}`,
+                            state.lastData?.underlying_value, g.dir > 0 ? 'pos' : 'neg', sym); } catch (_) {}
+  }
+
+  function renderGrind(g) {
+    const box = document.getElementById('grindBody');
+    if (!box) return;
+    if (!g) { box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Collecting — needs about 25 bars.</div>'; return; }
+    const cfg = _grindCfg();
+    const col = !g.qualifies ? 'var(--muted)' : (g.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)');
+    const verdict = g.qualifies ? `${g.dir > 0 ? 'BULLISH' : 'BEARISH'} GRIND`
+                  : g.er < cfg.minEr ? 'CHOPPY — movement is not going anywhere'
+                  : 'DRIFTING — too small to act on yet';
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:12px;">${verdict}</b>
+        <span>efficiency <b style="color:${col};">${(g.er * 100).toFixed(0)}%</b></span>
+        <span style="color:var(--muted);">net ${g.net >= 0 ? '+' : ''}${g.net.toFixed(0)} over ${g.bars} bars</span>
+        ${g.persistence != null ? `<span style="color:var(--muted);">${(g.persistence * 100).toFixed(0)}% one side of VWAP</span>` : ''}
+        <span style="color:var(--muted);">${g.inBarUnits.toFixed(1)}× the typical bar</span>
+      </div>
+      <div class="oc-sub" style="margin-top:3px;">Every other alert here is event-based — a threshold crossed, a wall decaying, premium jumping — and they all share one blind spot: <b>a slow steady trend contains no dramatic bar</b>, so nothing trips and the system goes quiet through exactly the move that was easiest to trade. It is worse than silence, because a choppy day produces <b>bigger</b> individual bars than a grind while going nowhere, so thresholds fire more often on the day with no trend. <b>Efficiency</b> is net movement divided by total movement: a straight line scores near 100% whatever its slope, violent chop scores near zero whatever its range. It measures how directly price got where it went, which is what a trend is. <b>Persistence</b> — the share of bars closing on one side of VWAP — is paired with it because efficiency alone can come from one gap followed by silence, and persistence cannot. The move is also shown against <b>this session's own typical bar</b>, since on a quiet day a 40-point drift is the whole day and a fixed points threshold would dismiss it.</div>`;
+  }
 
   // ══ LEVEL DRIFT ═══════════════════════════════════════════════════
   // Half the lines on the chart move during the session, and a moving level
@@ -21122,6 +21494,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'emaCrossCfg',         // EMA crossover pairs and filters
     'priceMaCrossCfg',     // price crossing an EMA or VWAP
     'pcrAlertCfg',         // near-band PCR change alert
+    'grindCfg',            // slow-trend detector
     'ctxChartCfg',         // which context series are drawn
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
@@ -27861,6 +28234,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'coiled':            '<strong>Coiled Spring</strong>The honest version of "the market knows something is coming". <b>What is real:</b> volatility clusters - low-volatility periods are followed by high-volatility periods more often than chance allows, which is one of the few genuinely robust findings in finance and the reason VIX mean-reverts. So a compressing range does raise the odds of an expansion. The informative row is <b>IV rising while realized volatility falls</b>: the market charging for movement the tape is not delivering, which is the closest honest proxy for someone positioning ahead of something. <b>What is not real:</b> this does not know what the news is, which way it breaks, or when. A genuine surprise is a surprise, and the "smart money knew" story is almost always told afterwards - which is exactly when it is useless. Expect it to fire before some large moves and before some sessions where nothing happens at all; that is the nature of a conditions signal rather than an event signal, and anyone selling you the latter is selling something they do not have. <b>How to use it:</b> as a reason to change HOW you trade rather than WHAT you trade. High readings favour buying premium over selling it, smaller size or wider stops, and waiting for the break rather than fading the range. If you are short premium when this reads high, that is the position most exposed to being wrong.',
     'scalp-calc':        '<strong>Scalp Calculator</strong>Answers the part of the decision the rest of the dashboard did not cover: given a view - so many points, within so many minutes - <b>which strike</b> expresses it best, <b>how many lots</b> fit your rupee risk, <b>where the stop and target sit in premium terms</b>, and <b>what the whole thing costs</b>. Candidates are ranked by net rupees AFTER costs, not by gross move, because those two rank differently and only one of them is money. <b>The cost line is the point of this panel.</b> For a two-lot trade in an eighty-rupee option the statutory charges come to roughly seventy rupees, but slippage at a one-and-a-half point spread is over two hundred - more than three times as much, and the cost nobody budgets for. Together they typically equal about four Nifty points at delta 0.5, which means a twenty-point scalp is really a twenty-four-point scalp. A trader who ignores that is measuring a different business from the one he is actually running. <b>Theta while you wait</b> is shown separately because it explains something that feels unfair: a scalp that goes nowhere still loses money, and holding a losing scalp hoping it turns is more expensive than it feels. Brokerage, STT, exchange, GST and stamp rates default to a discount-broker structure and are editable - verify them against a real contract note rather than trusting a default, because they change and differ by broker.',
     'ctx-chart':         '<strong>Context pane</strong>PCR, India VIX and ATM implied volatility drawn against the <b>same time axis as the candles above</b>. Sharing that axis is the entire point: reading the three as numbers tells you where they are, but seeing them co-timed with price tells you which one moved FIRST - and that ordering is where the information sits. Implied volatility lifting while price is flat, or the put-call ratio turning ten minutes before the candles do, is invisible in a set of readouts and obvious here. <b>Each line is scaled to its own range</b>, because they share no units - PCR sits near 1, VIX in the teens, IV in percent - and plotting them on one absolute axis would flatten two of the three into a straight line. The span beside each legend entry tells you what that series has actually covered, so a line that looks dramatic can be checked against a range that may be trivial. <b>Two PCR lines by default.</b> The near band reacts to what is trading now; the one-day band is steadier. Watching them together is the useful part - when the near line pulls away from the day line, positioning is shifting at the strikes price can actually reach, and the wider measure will not show it for a while yet. The near line is the same figure the voice alert watches, so what you hear and what you see are the same number. <b>Two further series lead rather than confirm,</b> and are one tick away: <b>Straddle</b> is the market\'s live price of a move - rising while price is flat means someone is paying for something that has not happened yet - and <b>Skew</b> is OTM put IV minus OTM call IV, so a rising line is protection being bid, which usually precedes the selling it protects against. Both are off by default because six lines on one small pane is unreadable, not because they matter less. Untick anything to remove it; the choice persists.',
+    'regime-map':        '<strong>Regime</strong>Most signals in this dashboard carry a hidden assumption about the kind of market they are in, and none of them state it on their own. <b>In a range</b>, mean reversion and contrarian extremes are the higher-odds side and breakout signals are mostly traps. <b>In a trend that inverts completely:</b> fading is how a small loss becomes a large one, and level-touch alerts fire on every level as price goes straight through them. The same alert is sound advice in one regime and expensive in the other - which is why this panel names what to <b>discount</b> rather than only what to trust. <b>Volatility is ranked against this instrument own recent range</b> rather than an absolute number, because 13 percent means quite different things on Nifty and on BankNifty. Direction uses the same net-over-gross efficiency measure as the grind detector, so a market that covered ground by thrashing back and forth is correctly read as ranging rather than trending. <b>Dead regime</b> is the reading nothing else here will give you: when the expected move remaining is comparable to a round trip in spread and slippage, the honest answer is that there is nothing worth trading today - and a system that can never say that will always find a reason to trade. The <b>alert budget</b> exists because every family throttles itself while nothing limited the total: in high volatility they all fire at once, and thirty alerts an hour is the same as none, because you stop listening. High-priority alerts always pass; low-priority ones are the first to be suppressed as the budget fills.',
+    'htf-context':       '<strong>Daily Context</strong>Everything else in this dashboard is computed from <b>today alone</b>, which means it cannot tell whether an intraday move continues the larger trend or fights it — and those are the same chart intraday while being very different trades. A long inside a five-day downtrend is a counter-trend scalp whether or not anyone calls it one: it needs a tighter stop, a faster exit and smaller size than the identical setup taken with the trend. <b>This is deliberately excluded from the Trend Engine.</b> Higher-timeframe bias belongs to sizing and holding time rather than to the intraday score, and folding it in would let a week-old trend quietly outvote what is happening right now — the opposite of what a scalper needs. Daily efficiency uses the same net-over-gross measure as the intraday grind detector, so a high reading means the daily move travelled <b>directly</b> rather than merely far; a market that covered the same distance by thrashing back and forth scores low and is correctly read as rotating. The daily bars come from the replay archive, which builds automatically each day the dashboard runs, so this panel becomes more useful the longer the system has been in use.',
+    'slow-grind':        '<strong>Slow Trend</strong>Every other alert in this system is event-based - a threshold crossed, a wall decaying, premium jumping - and they share one blind spot that is not small: <b>a slow steady trend contains no dramatic bar anywhere in it</b>, so nothing trips and the system stays silent through exactly the move that was easiest to trade. It is worse than mere silence, because a choppy day produces LARGER individual bars than a grind while going nowhere, so threshold alerts fire more often on the day with no trend than on the day with one. <b>Efficiency ratio</b> fixes this: net movement divided by the sum of all movement. A straight line scores near 100 percent whatever its slope, and violent chop scores near zero whatever its range - it measures how directly price got where it went, which is what a trend actually is, rather than how dramatic any single bar was. <b>Persistence</b>, the share of bars closing on one side of VWAP, is required alongside it, because efficiency on its own can be produced by a single gap followed by silence and persistence cannot. The move is also measured against <b>this session own typical bar</b> rather than a fixed number of points, since on a quiet day a forty-point drift is the entire day and a fixed threshold would dismiss it as noise. The alert repeats only on a direction change or after a cooldown, because a grind by definition persists and announcing it every poll would be the noise it was built to avoid.',
     'level-drift':       '<strong>Level Drift</strong>Half the lines on the chart move during the session, and <b>a level coming to price is a different event from price going to the level</b>. The first means positioning changed - writers pulling a defence closer, the open-interest centre of gravity shifting - and it can happen while price does not move at all. On a chart that only shows where a line sits now, the two are indistinguishable, which is the gap this closes. <b>Closing</b> marks a level whose gap to price is shrinking under its own movement; the rate is shown per hour so levels are comparable to each other, and the estimated time to reach price is a straight-line projection of the current rate, not a forecast - positioning can reverse in a minute. The moving levels are max pain, the call and put walls, and the gamma flip, all recomputed from open interest on every poll. <b>The frozen levels are deliberately absent:</b> EOR and EOS, the CPR, the pivots and the opening-range box are fixed by definition, and that is exactly what makes them useful as references - a reference that moves is not one. Drift also appears on the chart labels themselves as a small arrow and rate, so it is visible while reading the line rather than only in this panel.',
     'signal-score':      '<strong>Signal Scorecard</strong>The system measuring itself. Twenty-two Trend Engine inputs and nine alert families were weighted by judgement and never checked against what happened - some are certainly noise and there was no way to tell which. Every directional reading is now recorded with the spot price at the time and scored <b>15 minutes later</b> against where price actually went. <b>The horizon is fixed in advance deliberately:</b> scoring whenever a move looks resolved lets the scorer choose the answer, which is how backtests flatter themselves. A call counts as right only if price moved far enough to have been tradeable - roughly 0.4 sigma of the horizon - because after costs a two-point win is a loss, and counting it would score noise as skill. <b>Flat is not failure:</b> a source that is usually flat is silent rather than wrong, so the hit rate covers decided calls only and flats are shown separately. <b>Treat anything under 20 decided calls as a sample rather than a result</b>, and give it a few weeks before drawing conclusions. The purpose is subtraction: sources scoring near 50 percent are costing you attention and can be switched off, and knowing which those are is worth more than any additional signal.',
     'capital-flow':      '<strong>Capital Flow and 25-delta Risk Reversal</strong>Two measures a prop desk weights heavily that contract-counting misses entirely. <b>Net premium flow</b> weights each open-interest change by its premium, so it measures capital committed rather than tickets bought. The difference is not cosmetic: a 40,000-lot build in a six-rupee far-OTM call outweighs a 4,000-lot build at the money ten to one by contracts, while the money runs three to one the other way. Open interest counts a lottery ticket and a conviction trade identically; capital does not, and capital is what has to be defended when price moves against it. <b>Conviction</b> is the share of gross flow that is one-directional - a large gross with a small net means two sides fighting, which is the opposite of a trend. <b>The 25-delta risk reversal</b> is the standard directional skew measure: the implied volatility of a 25-delta call minus a 25-delta put, comparing options with equal probability of finishing in the money rather than equal distance from spot. A negative reading is the normal state for index options because protection is structurally bid, so <b>the direction of travel matters far more than the sign</b> - puts being bid up relative to equivalent calls usually precedes the selling they protect against. Both are restricted to strikes price can realistically reach, because far-wing capital is mostly spread legs and margin relief rather than a directional view.',
