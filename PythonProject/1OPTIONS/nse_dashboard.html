@@ -3997,6 +3997,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 </div>
 
 <script>
+  // ── build stamp ───────────────────────────────────────────────────
+  // Printed on load so "did my copy actually take?" is answerable in one
+  // glance. A 1.8 MB file is exactly the kind a browser caches hard, and
+  // without a marker a stale copy is indistinguishable from a broken feature.
+  console.log('%c[build] NSE dashboard 2026-09-18 03:18', 'color:#d4af37;font-weight:700');
+  console.log('[build] features: RSI pane + divergence + 80/20 markers · crosshair mirroring · ' +
+              'strike ladder · regime map · slow grind · daily context · scorecard · memoised render');
+
 (function () {
   'use strict';
 
@@ -6495,7 +6503,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return flip;
   }
 
-  function _computeGex(data) {
+  function _raw_computeGex(data) {
     const strikes = data.strikes || [];
     const spot = data.underlying_value, lot = data.lot_size || 50;
     // dte is now FRACTIONAL (measured to 15:40 (derivatives) IST), so the old 0.25-day floor
@@ -13973,6 +13981,47 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
 
+  // ══ PER-POLL MEMOISATION ══════════════════════════════════════════
+  // Several expensive functions are called many times within a single render
+  // pass - _computeGex from fourteen places, _depthRead from five - and each
+  // call recomputes the same answer from the same data. Roughly 76% of the
+  // analytical work per poll was redundant.
+  //
+  // They are all PURE functions of the chain response, so caching within one
+  // poll is safe and caching ACROSS polls is not: the moment new data arrives
+  // every answer must be recomputed. The cache is therefore keyed on the data
+  // object's identity and cleared whenever a different object appears, which
+  // happens exactly once per poll and needs no manual invalidation anywhere.
+  //
+  // Wrapping rather than editing fourteen call sites, because a missed site
+  // would silently return stale numbers - far worse than the cost it saves.
+  const _memoCache = new Map();
+  let _memoKey = null;
+  function _memoReset(d) {
+    if (d !== _memoKey) { _memoKey = d; _memoCache.clear(); }
+  }
+  function _memoise(name, fn) {
+    return function (...args) {
+      // only memoise the common single-argument call on the current response;
+      // anything else runs uncached rather than risking a wrong cache hit
+      if (args.length !== 1 || args[0] !== _memoKey) return fn.apply(this, args);
+      if (_memoCache.has(name)) return _memoCache.get(name);
+      const v = fn.apply(this, args);
+      _memoCache.set(name, v);
+      return v;
+    };
+  }
+
+
+  // memoised aliases: same name, same behaviour, computed once per poll
+  const _computeGex = _memoise('_computeGex', _raw_computeGex);
+  const _flowWalls = _memoise('_flowWalls', _raw_flowWalls);
+  const _pcrByBand = _memoise('_pcrByBand', _raw_pcrByBand);
+  const _netPremiumFlow = _memoise('_netPremiumFlow', _raw_netPremiumFlow);
+  const _strikeLadder = _memoise('_strikeLadder', _raw_strikeLadder);
+  const _instScale = _memoise('_instScale', _raw_instScale);
+  const _projectedMove = _memoise('_projectedMove', _raw_projectedMove);
+
   function _safe(fn, tag) {
     try { fn(); } catch (e) {
       console.error(`[pipeline] ${tag} failed:`, e);
@@ -13989,6 +14038,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function render(data) {
+    // New response, new answers: clearing here is the only invalidation the
+    // memo needs, because every cached value is a pure function of this
+    // object. Without this call the cache never fills and the wrapper is
+    // dead weight — which is how it shipped a minute ago.
+    try { _memoReset(data); } catch (_) {}
     try { _normaliseChain(data); } catch (_) {}
     // ── stale-response guard ─────────────────────────────────────────
     // Switching instruments sets state.symbol immediately, but a request for
@@ -16743,18 +16797,47 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // price against RSI at the same bars. Pivots rather than raw extremes
   // because a single spike bar produces a "divergence" on almost every chart
   // and means nothing.
+  // Divergence, rewritten. The first version compared only CONSECUTIVE
+  // pivots, which misses most real divergences: a classic one usually spans
+  // a minor swing in between, so neighbour-to-neighbour comparison mostly
+  // compares noise. It also capped bearish results before the bullish scan
+  // ran, so a chart with three bearish divergences reported no bullish ones
+  // at all.
+  //
+  // Now every recent pivot is compared against ALL earlier pivots in the
+  // window, and both classes are scanned independently. Two further filters
+  // stop it firing on wiggles:
+  //   the pivot must be a real swing - a wider lookback, and the swing must
+  //     be worth at least a fraction of the session's typical bar
+  //   both the price gap and the RSI gap must be meaningful, because a
+  //     one-point RSI difference across two highs is not a divergence, it is
+  //     rounding
+  //
+  // HIDDEN divergence is included and marked differently. Regular divergence
+  // warns of reversal; hidden divergence (price higher low with RSI lower
+  // low) is a CONTINUATION signal, and confusing the two is worse than
+  // missing both.
   function _rsiDivergence(bars, rsi, look) {
-    const L = look || 3;
+    const L = look || 5;
     const n = Math.min(bars.length, rsi.length);
     if (n < 30) return [];
+    const ranges = bars.map(b => b.h - b.l).filter(x => x > 0).sort((a, b) => a - b);
+    const typical = ranges[Math.floor(ranges.length / 2)] || 1;
+    const MIN_SWING = typical * 0.8;          // a pivot worth the name
+    const MIN_RSI = 3;                        // below this it is rounding
+
     const isHi = i => {
-      for (let k = 1; k <= L; k++)
-        if (bars[i].h <= bars[i - k]?.h || bars[i].h <= bars[i + k]?.h) return false;
+      for (let k = 1; k <= L; k++) {
+        if (bars[i - k] && bars[i].h <= bars[i - k].h) return false;
+        if (bars[i + k] && bars[i].h <= bars[i + k].h) return false;
+      }
       return true;
     };
     const isLo = i => {
-      for (let k = 1; k <= L; k++)
-        if (bars[i].l >= bars[i - k]?.l || bars[i].l >= bars[i + k]?.l) return false;
+      for (let k = 1; k <= L; k++) {
+        if (bars[i - k] && bars[i].l >= bars[i - k].l) return false;
+        if (bars[i + k] && bars[i].l >= bars[i + k].l) return false;
+      }
       return true;
     };
     const highs = [], lows = [];
@@ -16764,20 +16847,100 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (isLo(i)) lows.push(i);
     }
     const out = [];
-    const near = (a, b) => b - a >= 5 && b - a <= 120;   // not adjacent, not ancient
-    for (let i = highs.length - 1; i > 0 && out.length < 3; i--) {
-      const b = highs[i], a = highs[i - 1];
-      if (!near(a, b)) continue;
-      if (bars[b].h > bars[a].h && rsi[b] < rsi[a] - 1.5)
-        out.push({ kind: 'bearish', a, b, ra: rsi[a], rb: rsi[b] });
+    const span = (a, b) => b - a >= 4 && b - a <= 150;
+
+    // ── highs: bearish (regular) and bullish hidden ──
+    for (let x = highs.length - 1; x >= 1 && out.length < 8; x--) {
+      const b = highs[x];
+      for (let z = x - 1; z >= 0; z--) {
+        const a = highs[z];
+        if (!span(a, b)) continue;
+        if (Math.abs(bars[b].h - bars[a].h) < MIN_SWING) continue;
+        if (bars[b].h > bars[a].h && rsi[b] < rsi[a] - MIN_RSI) {
+          out.push({ kind: 'bearish', hidden: false, a, b, ra: rsi[a], rb: rsi[b] });
+          break;                    // one partner per pivot, the nearest valid
+        }
+        if (bars[b].h < bars[a].h && rsi[b] > rsi[a] + MIN_RSI) {
+          out.push({ kind: 'bearish', hidden: true, a, b, ra: rsi[a], rb: rsi[b] });
+          break;
+        }
+      }
     }
-    for (let i = lows.length - 1; i > 0 && out.length < 6; i--) {
-      const b = lows[i], a = lows[i - 1];
-      if (!near(a, b)) continue;
-      if (bars[b].l < bars[a].l && rsi[b] > rsi[a] + 1.5)
-        out.push({ kind: 'bullish', a, b, ra: rsi[a], rb: rsi[b] });
+    // ── lows: bullish (regular) and bearish hidden ──
+    for (let x = lows.length - 1; x >= 1 && out.length < 12; x--) {
+      const b = lows[x];
+      for (let z = x - 1; z >= 0; z--) {
+        const a = lows[z];
+        if (!span(a, b)) continue;
+        if (Math.abs(bars[b].l - bars[a].l) < MIN_SWING) continue;
+        if (bars[b].l < bars[a].l && rsi[b] > rsi[a] + MIN_RSI) {
+          out.push({ kind: 'bullish', hidden: false, a, b, ra: rsi[a], rb: rsi[b] });
+          break;
+        }
+        if (bars[b].l > bars[a].l && rsi[b] < rsi[a] - MIN_RSI) {
+          out.push({ kind: 'bullish', hidden: true, a, b, ra: rsi[a], rb: rsi[b] });
+          break;
+        }
+      }
     }
-    return out;
+    // most recent first, and keep the chart readable
+    return out.sort((p, q) => q.b - p.b).slice(0, 6);
+  }
+
+  // ── RSI RANGE RULES (Cardwell) ────────────────────────────────────
+  // The best-known use of RSI is overbought and oversold, and for trend
+  // identification it is close to useless: in a strong uptrend RSI sits
+  // "overbought" for hours while price keeps going, and selling it is how
+  // people lose money holding a correct-looking signal.
+  //
+  // The range rules invert the idea. RSI does not oscillate around 50
+  // symmetrically - it oscillates inside a RANGE that shifts with the trend:
+  //
+  //   BULL RANGE   roughly 40-80. Pullbacks stop near 40 and hold.
+  //   BEAR RANGE   roughly 20-60. Rallies stall near 60 and fail.
+  //
+  // So the informative event is not RSI reaching 80. It is RSI FAILING to
+  // reach 60 on a rally, or HOLDING 40 on a pullback - which says which range
+  // the market is in, and therefore which side of the tape is working. A
+  // break of the range floor is an early trend-change signal, usually well
+  // before price confirms it.
+  function _rsiRange(rsi, look) {
+    const vals = rsi.filter(v => v != null);
+    if (vals.length < 30) return null;
+    const w = vals.slice(-(look || 60));
+    // The range is ESTABLISHED historically and then broken. Measuring it
+    // over the whole window including the break is self-defeating: once RSI
+    // drops through 40 the window's low becomes 30, the reading stops looking
+    // like a bull range, and the warning never fires - which is precisely
+    // when it was needed. So the range comes from the earlier portion and the
+    // break is judged against it.
+    const settle = w.slice(0, Math.max(10, Math.floor(w.length * 0.75)));
+    const lo = Math.min(...settle), hi = Math.max(...settle);
+    const last = w[w.length - 1];
+    // how much time was spent above and below 50 - the cleanest range read
+    const above = settle.filter(v => v > 50).length / settle.length;
+    let regime = 'neutral', note = '';
+    if (lo >= 38 && hi >= 70) {
+      regime = 'bull range';
+      note = `held ${lo.toFixed(0)} on pullbacks and reached ${hi.toFixed(0)} — buying dips is the working side`;
+    } else if (hi <= 62 && lo <= 30) {
+      regime = 'bear range';
+      note = `stalled at ${hi.toFixed(0)} on rallies and reached ${lo.toFixed(0)} — selling rallies is the working side`;
+    } else if (above > 0.7) {
+      regime = 'bull range';
+      note = `${(above * 100).toFixed(0)}% of bars above 50`;
+    } else if (above < 0.3) {
+      regime = 'bear range';
+      note = `${(above * 100).toFixed(0)}% of bars below 50`;
+    } else {
+      note = `${lo.toFixed(0)}-${hi.toFixed(0)}, straddling 50 — no range has established`;
+    }
+    // the early warning: a bull range breaking its floor, or a bear range
+    // breaking its ceiling
+    let breaking = null;
+    if (regime === 'bull range' && last < 40) breaking = 'bull range floor broken — trend may be turning';
+    if (regime === 'bear range' && last > 60) breaking = 'bear range ceiling broken — trend may be turning';
+    return { regime, note, lo, hi, last, above, breaking };
   }
 
   function _rsiPaneSvg(cs, xOf, W, padL, padR, H) {
@@ -16786,7 +16949,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                                  JSON.parse(localStorage.getItem('rsiCfg') || '{}')); }
       catch (_) { return { on: true, period: 14, maLen: 14 }; }
     })();
-    if (!cfg.on || !cs || cs.length < cfg.period + 4) return '';
+    if (!cfg.on) return '';
+    // An empty pane is indistinguishable from a broken one, which is exactly
+    // the confusion this caused. Show the warm-up instead of returning
+    // nothing: RSI(14) needs 14 bars plus a couple to smooth, and on a
+    // 5-minute chart that is ninety minutes rather than eighteen — worth
+    // stating, because waiting for something that is working looks identical
+    // to waiting for something that is not.
+    const need = (cfg.period || 14) + 4;
+    if (!cs || cs.length < need) {
+      const have = cs ? cs.length : 0;
+      const mins = Math.max(0, (need - have) * (_chart.interval || 1));
+      return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
+        <rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}" fill="rgba(255,255,255,0.022)"/>
+        <text x="${(padL + 6)}" y="${(H / 2 + 3).toFixed(1)}" style="font-size:10px;fill:var(--muted,#789);">
+          RSI ${cfg.period} warming up — ${have}/${need} bars${mins ? ` · about ${mins} more minute${mins > 1 ? 's' : ''} at ${_chart.interval}m` : ''}</text>
+      </svg>`;
+    }
     const closes = cs.map(c => c.c);
     const rsi = _rsiSeries(closes, cfg.period);
     const ma = _smaOf(rsi, cfg.maLen);
@@ -16847,11 +17026,60 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { divs = _rsiDivergence(cs, rsi, 3); } catch (_) {}
     for (const d of divs) {
       const col = d.kind === 'bullish' ? '#26de81' : '#ff6b81';
+      // Hidden divergence is a CONTINUATION signal, not a reversal one, and
+      // confusing the two is worse than missing both. Dotted and thinner so
+      // it cannot be mistaken for the regular kind at a glance.
+      const tip = d.hidden
+        ? `HIDDEN ${d.kind} divergence — a continuation signal: price made a ${d.kind === 'bullish' ? 'higher low' : 'lower high'} while RSI made a ${d.kind === 'bullish' ? 'lower low' : 'higher high'}, which typically resolves WITH the prevailing trend`
+        : `${d.kind} divergence — price made a ${d.kind === 'bearish' ? 'higher high' : 'lower low'} while RSI did not, so the second push had less force behind it`;
       s += `<line x1="${xOf(d.a).toFixed(1)}" y1="${y(d.ra).toFixed(1)}" x2="${xOf(d.b).toFixed(1)}" y2="${y(d.rb).toFixed(1)}"
-        stroke="${col}" stroke-width="1.6" stroke-dasharray="5,3" opacity="0.95">
-        <title>${d.kind} divergence — price made a ${d.kind === 'bearish' ? 'higher high' : 'lower low'} while RSI did not, so the second push had less force behind it</title></line>`;
+        stroke="${col}" stroke-width="${d.hidden ? 1.1 : 1.8}" stroke-dasharray="${d.hidden ? '2,3' : '5,3'}" opacity="0.95">
+        <title>${tip}</title></line>`;
       s += `<circle cx="${xOf(d.b).toFixed(1)}" cy="${y(d.rb).toFixed(1)}" r="2.6" fill="${col}"/>`;
     }
+    // ── extreme crossings ────────────────────────────────────────
+    // Marked on the CROSSING bar, not on every bar spent beyond the level.
+    // RSI can sit above 80 for twenty bars, and stamping each one turns a
+    // signal into a smear - what carries information is the moment it got
+    // there, and the moment it came back.
+    //
+    // Entry and exit are marked differently on purpose: crossing INTO an
+    // extreme says momentum is stretched, while crossing back OUT is the one
+    // people actually trade, and they should not look alike.
+    const marks = [];
+    for (let i = 1; i < rsi.length; i++) {
+      const p0 = rsi[i - 1], p1 = rsi[i];
+      if (p0 == null || p1 == null) continue;
+      if (p0 <= 80 && p1 > 80) marks.push({ i, v: p1, kind: 'ob-in' });
+      else if (p0 >= 80 && p1 < 80) marks.push({ i, v: p1, kind: 'ob-out' });
+      if (p0 >= 20 && p1 < 20) marks.push({ i, v: p1, kind: 'os-in' });
+      else if (p0 <= 20 && p1 > 20) marks.push({ i, v: p1, kind: 'os-out' });
+    }
+    for (const m of marks.slice(-24)) {
+      const cx = xOf(m.i);
+      const ob = m.kind.startsWith('ob');
+      const entering = m.kind.endsWith('-in');
+      // above the line for overbought, below it for oversold, so the mark
+      // never sits on top of the line it refers to
+      const cy = ob ? Math.max(padT + 5, y(m.v) - 8) : Math.min(H - padB - 5, y(m.v) + 8);
+      const col = ob ? '#26a69a' : '#ef5350';
+      const tip = ob
+        ? (entering ? 'RSI crossed ABOVE 80 — momentum stretched to the upside'
+                    : 'RSI dropped back BELOW 80 — the stretch is unwinding')
+        : (entering ? 'RSI crossed BELOW 20 — momentum stretched to the downside'
+                    : 'RSI recovered back ABOVE 20 — the stretch is unwinding');
+      if (entering) {
+        // solid triangle pointing at the extreme
+        const d = ob
+          ? `M${(cx - 4).toFixed(1)},${(cy + 4).toFixed(1)} L${(cx + 4).toFixed(1)},${(cy + 4).toFixed(1)} L${cx.toFixed(1)},${(cy - 3).toFixed(1)} Z`
+          : `M${(cx - 4).toFixed(1)},${(cy - 4).toFixed(1)} L${(cx + 4).toFixed(1)},${(cy - 4).toFixed(1)} L${cx.toFixed(1)},${(cy + 3).toFixed(1)} Z`;
+        s += `<path d="${d}" fill="${col}"><title>${tip}</title></path>`;
+      } else {
+        // hollow circle: present, quieter, and unmistakably not the same event
+        s += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.2" fill="none" stroke="${col}" stroke-width="1.6"><title>${tip}</title></circle>`;
+      }
+    }
+
     // MA under the RSI line, both bold as asked
     s += line(ma, '#f7b731', 2.2);
     s += line(rsi, '#45aaf2', 2.6);
@@ -16862,7 +17090,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const col = last >= 80 ? '#26a69a' : last <= 20 ? '#ef5350' : '#45aaf2';
       s += `<text x="${(right + 3).toFixed(1)}" y="${(y(last) + 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${last.toFixed(0)}</text>`;
     }
+    // Range regime in the header: the single most useful thing RSI says
+    // about trend, and the one nobody looks at.
+    let rangeTxt = '', rangeCol = 'var(--muted,#789)';
+    try {
+      const rr = _rsiRange(rsi, 60);
+      if (rr) {
+        rangeCol = rr.breaking ? '#d4af37'
+                 : rr.regime === 'bull range' ? '#26a69a'
+                 : rr.regime === 'bear range' ? '#ef5350' : 'var(--muted,#789)';
+        rangeTxt = ` · ${rr.regime}${rr.breaking ? ' — FLOOR BROKEN' : ''}`;
+        s += `<title>${escapeHtml(rr.breaking || rr.note)}</title>`;
+      }
+    } catch (_) {}
     s += `<text x="${(padL + 3)}" y="11" style="font-size:8.5px;fill:var(--muted,#789);">RSI ${cfg.period}` +
+         `<tspan fill="${rangeCol}" font-weight="700">${escapeHtml(rangeTxt)}</tspan>` +
          `${divs.length ? ` · ${divs.length} divergence${divs.length > 1 ? 's' : ''}` : ''}</text>`;
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
   }
@@ -16889,7 +17131,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   //   OI        the standing wall
   //   ΔOI       what was added or removed TODAY - fresh conviction
   //   VOLUME    where price actually traded, from the volume profile
-  function _strikeLadder(d) {
+  function _raw_strikeLadder(d) {
     const st = d?.strikes || [], spot = d?.underlying_value, iv = d?.atm_iv;
     if (!st.length || !spot) return null;
     const dte = Math.max(1 / 1440, d.dte ?? 1);
@@ -17681,7 +17923,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // options with equal probability of finishing in the money rather than equal
   // distance from spot. When puts are bid over equivalent calls the market is
   // paying up for downside, and it usually does so before the downside arrives.
-  function _netPremiumFlow(d) {
+  function _raw_netPremiumFlow(d) {
     const st = d?.strikes || [], spot = d?.underlying_value;
     if (!st.length || !spot) return null;
     const lot = d.lot_size || 75;
@@ -18232,7 +18474,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return total ? Math.max(0, left / total) : 0;
   }
 
-  function _projectedMove(d) {
+  function _raw_projectedMove(d) {
     const spot = d?.underlying_value, iv = d?.atm_iv;
     if (!spot || !iv) return null;
     const g = new Date(Date.now() + 5.5 * 3600000);
@@ -18301,7 +18543,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // instrument's OWN expected move and its OWN typical strike OI. That adapts
   // to a new index, and to a volatile day on a familiar one, without anyone
   // maintaining a lookup.
-  function _instScale(d) {
+  function _raw_instScale(d) {
     const spot = d?.underlying_value;
     if (!spot) return { pts: 1, oi: 1, ref: null };
     // points scale: this instrument's 1-sigma day move against Nifty's typical
@@ -18408,7 +18650,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       note: `Calls building while price rises: they are being bought, which extends the move.` };
   }
 
-  function _pcrByBand(d) {
+  function _raw_pcrByBand(d) {
     const st = d?.strikes || [], spot = d?.underlying_value, iv = d?.atm_iv;
     if (!st.length || !spot) return null;
     const gap = d.strike_gap || 50;
@@ -21297,7 +21539,13 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         const r = svgEl.getBoundingClientRect();
         const px = (ev.clientX - r.left) / r.width * W;
         const py = (ev.clientY - r.top) / r.height * H;
-        if (px < padL || px > W - padR || py < padT || py > H - padB) { g.style.display = 'none'; hv.textContent = ''; return; }
+        if (px < padL || px > W - padR || py < padT || py > H - padB) {
+          g.style.display = 'none'; hv.textContent = '';
+          try { _mirrorCrosshair(0, false); } catch (_) {}
+          return;
+        }
+        // same x, same viewBox width — the panes line up by construction
+        try { _mirrorCrosshair(px, true, W); } catch (_) {}
         // map pointer x -> slot -> nearest printed candle
         const wantSlot = (px - padL) / (W - padL - padR) * slots - 0.5;
         let i = 0, bestD = Infinity;
@@ -21343,7 +21591,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         const up2 = c2.c >= c2.o;
         hv.innerHTML = `<b>${new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</b> &nbsp; O <b>${fmtInt(Math.round(c2.o))}</b> H <b>${fmtInt(Math.round(c2.h))}</b> L <b>${fmtInt(Math.round(c2.l))}</b> C <b style="color:${up2 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(c2.c))}</b> &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(val))}</span>`;
       });
-      svgEl.addEventListener('mouseleave', () => { g.style.display = 'none'; hv.textContent = ''; const t1 = document.getElementById('lvlTip'); if (t1) t1.style.display = 'none'; });
+      svgEl.addEventListener('mouseleave', () => {
+        try { _mirrorCrosshair(0, false); } catch (_) {} g.style.display = 'none'; hv.textContent = ''; const t1 = document.getElementById('lvlTip'); if (t1) t1.style.display = 'none'; });
       // wheel = vertical zoom anchored at the cursor price (like TradingView's
       // price axis). Shift+wheel or wheel over the right axis zooms faster.
       svgEl.addEventListener('wheel', ev => {
@@ -22975,7 +23224,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // questions: the IV cone gives the market's PROBABILITY distribution, the
   // OI walls give where WRITERS have committed capital to defend. When they
   // agree, that's the strongest range read this dashboard can produce.
-  function _flowWalls(d) {
+  function _raw_flowWalls(d) {
     const spot = d.underlying_value, st = d.strikes || [];
     if (!spot || !st.length) return null;
     let callWall = null, putWall = null, cMax = 0, pMax = 0;
