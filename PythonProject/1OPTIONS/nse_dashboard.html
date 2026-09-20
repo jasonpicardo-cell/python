@@ -1874,6 +1874,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
                 <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
+                <label title="Volume profile in the right margin, split by polarity: buying and selling volume at each price level. Value-area rows are brighter; POC, VAH and VAL are drawn across the chart. Needs a broker feed for real volume."><input type="checkbox" id="chk_vprofile"> VP</label>
                 <select id="chartPivotType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Pivot formula drawn on the chart (independent of the Pivot Levels panel)">
                   <option value="classic">Classic</option>
                   <option value="fibonacci">Fibonacci</option>
@@ -15973,8 +15974,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, vprofile: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, vprofile: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
@@ -16368,6 +16369,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!(hi > lo)) return null;
     const bucket = bucketPts || Math.max(1, Math.round((hi - lo) / 60));
     const rows = new Map();
+    const upRows = new Map();   // buying share of each row
     for (const c of withVol) {
       // spread each candle's volume across the range it actually covered,
       // rather than dumping it all at the close - a wide bar traded at every
@@ -16375,7 +16377,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const b0 = Math.floor(c.l / bucket), b1 = Math.floor(c.h / bucket);
       const n = Math.max(1, b1 - b0 + 1);
       const share = (c.v || 0) / n;
-      for (let b = b0; b <= b1; b++) rows.set(b, (rows.get(b) || 0) + share);
+      // Split by bar polarity, the convention the TradingView profiles use:
+      // a candle closing above its open contributes UP volume. It is an
+      // approximation - the true split needs trade-level data - but it is the
+      // standard one, and the asymmetry it reveals is the point: a level where
+      // most volume was buying behaves differently from one where it was
+      // selling, and a single-colour profile cannot show that at all.
+      const up = c.c > c.o;
+      for (let b = b0; b <= b1; b++) {
+        rows.set(b, (rows.get(b) || 0) + share);
+        if (up) upRows.set(b, (upRows.get(b) || 0) + share);
+      }
     }
     if (!rows.size) return null;
     const sorted = [...rows.entries()].sort((a, b) => a[0] - b[0]);
@@ -16397,7 +16409,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       poc: sorted[pocIdx][0] * bucket + bucket / 2,
       vah: sorted[hi_i][0] * bucket + bucket,
       val: sorted[lo_i][0] * bucket,
-      rows: sorted.map(([b, v]) => ({ price: b * bucket + bucket / 2, vol: v })),
+      rows: sorted.map(([b, v]) => {
+        const u = upRows.get(b) || 0;
+        return { price: b * bucket + bucket / 2, vol: v, up: u, dn: v - u,
+                 // net buying pressure at this level, -1 to +1
+                 bias: v ? (2 * u - v) / v : 0 };
+      }),
       maxVol, lvn: lvn.slice(0, 6),
     };
   }
@@ -17107,6 +17124,69 @@ body.compact-esoteric .lore-decorative { display: none !important; }
          `<tspan fill="${rangeCol}" font-weight="700">${escapeHtml(rangeTxt)}</tspan>` +
          `${divs.length ? ` · ${divs.length} divergence${divs.length > 1 ? 's' : ''}` : ''}</text>`;
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
+  }
+
+  // ══ VOLUME PROFILE ON THE CHART ═══════════════════════════════════
+  // Rendered as horizontal rows in the right margin, the way TradingView and
+  // every desk platform draws it. That placement is not cosmetic: the profile
+  // has to share the PRICE axis with the candles or it means nothing, and
+  // putting it in the margin keeps the bars and their wicks completely clear -
+  // which is why the earlier attempt at demand/supply boxes had to go.
+  //
+  // Each row is split by polarity: buying volume drawn one way, selling the
+  // other. A single-colour profile tells you where business was done; the
+  // split tells you WHO did it, and a shelf built on selling behaves quite
+  // differently from the same shelf built on buying.
+  //
+  // Value-area rows are drawn brighter than the rest, so the 68% of activity
+  // that defines value separates itself from the tails without a legend.
+  function _vpChartSvg(cs, y, lo, hi, W, padL, padR, spot, gap) {
+    if (!_chart.show.vprofile) return '';
+    let vp;
+    try { vp = _volumeProfile(cs, gap ? Math.max(1, Math.round(gap / 2)) : null); } catch (_) { return ''; }
+    if (!vp || !vp.rows?.length) return '';
+    const right = W - padR;
+    // the profile occupies the right quarter, growing leftward from the axis
+    const maxW = (W - padL - padR) * 0.24;
+    let s = '';
+    const inVa = r => r.price >= vp.val && r.price <= vp.vah;
+    // row height from the bucket size, so rows sit flush rather than striped
+    const rowH = Math.max(1.2, Math.abs(y(vp.rows[0].price) - y(vp.rows[0].price + vp.bucket)) - 0.6);
+    for (const r of vp.rows) {
+      if (r.price < lo || r.price > hi) continue;
+      const yr = y(r.price) - rowH / 2;
+      const wTot = r.vol / vp.maxVol * maxW;
+      const wUp = r.vol ? (r.up / vp.maxVol) * maxW : 0;
+      const va = inVa(r);
+      // buying drawn from the axis leftward, selling continuing beyond it, so
+      // the boundary between them is readable at a glance
+      if (wUp > 0.4)
+        s += `<rect x="${(right - wUp).toFixed(1)}" y="${yr.toFixed(1)}" width="${wUp.toFixed(1)}" height="${rowH.toFixed(1)}" fill="${va ? 'rgba(38,166,154,0.62)' : 'rgba(38,166,154,0.28)'}"/>`;
+      const wDn = wTot - wUp;
+      if (wDn > 0.4)
+        s += `<rect x="${(right - wTot).toFixed(1)}" y="${yr.toFixed(1)}" width="${wDn.toFixed(1)}" height="${rowH.toFixed(1)}" fill="${va ? 'rgba(239,83,80,0.62)' : 'rgba(239,83,80,0.28)'}"/>`;
+    }
+    // POC, VAH and VAL across the full width: these are the levels price
+    // actually reacts to, so they belong on the chart rather than only in the
+    // margin where the rows live
+    const lvl = (v, col, wdt, dash, lab) => {
+      if (v < lo || v > hi) return '';
+      return `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(v).toFixed(1)}"
+        stroke="${col}" stroke-width="${wdt}" ${dash ? `stroke-dasharray="${dash}"` : ''} opacity="0.9"/>
+        <text x="${(padL + 3)}" y="${(y(v) - 2).toFixed(1)}" style="font-size:8px;fill:${col};font-weight:700;">${lab}</text>`;
+    };
+    s += lvl(vp.vah, '#2962ff', 1, '4,3', 'VAH');
+    s += lvl(vp.poc, '#f44336', 2, '', 'POC');
+    s += lvl(vp.val, '#2962ff', 1, '4,3', 'VAL');
+    // Low-volume nodes: prices the market passed through quickly. Marked with
+    // a short tick in the margin rather than a shaded band across the chart,
+    // because a band there would sit over the candles and that is exactly the
+    // problem the margin placement avoids.
+    for (const v of (vp.lvn || []).slice(0, 8)) {
+      if (v < lo || v > hi) continue;
+      s += `<line x1="${(right - maxW - 6).toFixed(1)}" y1="${y(v).toFixed(1)}" x2="${(right - maxW).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="rgba(255,152,0,0.85)" stroke-width="1.4"><title>Low-volume node ${Math.round(v)} — price passed through quickly and tends to again</title></line>`;
+    }
+    return s;
   }
 
   // ══ STRIKE LADDER ═════════════════════════════════════════════════
@@ -21340,6 +21420,11 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // just above and referencing it before that point is a use-before-declare
     // that node --check accepts and the browser throws on.
     svg += ladderSvg;
+    // volume profile last, so its levels sit above the candles while its rows
+    // stay in the margin where nothing is obscured
+    // state.lastData, not `d`: _renderPriceChartInner takes no parameters,
+    // so referencing `d` here would have thrown on the first render
+    try { svg += _vpChartSvg(cs, y, lo, hi, W, padL, padR, spot, state.lastData?.strike_gap); } catch (_) {}
     // hand the pane the same x-mapping and geometry the candles used, so the
     // two align exactly rather than approximately
     _chart._rsiCtx = { cs, x, W, padL, padR, H };
@@ -22248,7 +22333,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'vprofile', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       el.checked = !!_chart.show[k];
