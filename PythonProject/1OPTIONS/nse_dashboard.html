@@ -11655,7 +11655,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   function _flowSpeak(text) {
     if (typeof _voiceQ !== 'undefined' && typeof _voicePump === 'function' && _voiceEnabled()) {
-      _voiceQ.push(text);
+      _voiceEnqueue(text);
       while (_voiceQ.length > 3) _voiceQ.shift();
       _voicePump();
     }
@@ -14537,12 +14537,69 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _voicePick = _pickVoice();
   } catch (_) {}
 
+  // Queue items are {text, t, topic, prio}. Plain strings from older call
+  // sites are still accepted and treated as normal priority.
+  const _VOICE_MAX_AGE_MS = 25000;
+  function _voiceItem(x) {
+    return typeof x === 'string' ? { text: x, t: Date.now(), topic: null, prio: 1 } : x;
+  }
+  // Priority is read from what the alert SAYS, so no call site has to change.
+  // Regime changes, trend-level alerts and warnings outrank routine flow and
+  // level touches, which are the high-volume families.
+  function _voicePriority(text) {
+    const t = String(text || '');
+    if (/^(RISK WARNING|DEAD REGIME)/i.test(t)) return 3;
+    if (/Regime change|slow grind|gamma flip|FLOOR BROKEN|CEILING BROKEN/i.test(t)) return 3;
+    if (/^(BULLISH|BEARISH)[^.]{0,20}\.\s*(Near-strike put-call|Volume put-call|.*wall)/i.test(t)) return 2;
+    if (/crossover|closed (above|below) EMA|VWAP/i.test(t)) return 2;
+    return 1;          // flow, level touches, everything else
+  }
+  // Topic, so a newer alert on the same subject replaces a queued older one
+  // rather than both being spoken: two PCR updates thirty seconds apart
+  // should be one announcement of the current value, not a history lesson.
+  function _voiceTopic(text) {
+    const t = String(text || '');
+    const m = t.match(/(put-call ratio|slow grind|Regime change|gamma flip|wall at \d+|crossover|EMA \d+|VWAP|Straddle|Coiled spring|Premium shock)/i);
+    return m ? m[1].toLowerCase() : null;
+  }
+  function _voiceEnqueue(text) {
+    const item = { text, t: Date.now(), topic: _voiceTopic(text), prio: _voicePriority(text) };
+    if (item.topic) {
+      for (let k = _voiceQ.length - 1; k >= 0; k--) {
+        const q = _voiceItem(_voiceQ[k]);
+        if (q.topic === item.topic) {
+          console.log(`[voice] superseded queued: "${q.text.slice(0, 50)}"`);
+          _voiceQ.splice(k, 1);
+        }
+      }
+    }
+    _voiceQ.push(item);
+  }
+
   function _voicePump() {
     if (_voiceBusy || !_voiceQ.length) return;
     const synth = window.speechSynthesis;
     if (!synth) { _voiceQ.length = 0; return; }
+    // STALENESS. An alert describes the market at the moment it fired. Spoken
+    // forty seconds later, after two others ahead of it, it describes a price
+    // that no longer exists - and it sounds exactly as current as a fresh one.
+    // Dropping it is better than speaking it late.
+    const now = Date.now();
+    for (let k = _voiceQ.length - 1; k >= 0; k--) {
+      const it = _voiceItem(_voiceQ[k]);
+      if (now - it.t > _VOICE_MAX_AGE_MS) {
+        console.log(`[voice] dropped stale (${Math.round((now - it.t) / 1000)}s old): "${it.text.slice(0, 60)}"`);
+        _voiceQ.splice(k, 1);
+      }
+    }
+    if (!_voiceQ.length) return;
+    // PRIORITY. A regime flip should not wait behind three flow alerts.
+    let best = 0;
+    for (let k = 1; k < _voiceQ.length; k++)
+      if (_voiceItem(_voiceQ[k]).prio > _voiceItem(_voiceQ[best]).prio) best = k;
     _voiceBusy = true;
-    const text = _voiceQ.shift();
+    const item = _voiceItem(_voiceQ.splice(best, 1)[0]);
+    const text = item.text;
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 1.1; utter.pitch = 1.0;
     utter.volume = Math.max(_alertVolume(), 0.01);
@@ -14558,16 +14615,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     utter.onstart = () => console.log(`[voice] speaking: "${text}"`);
     utter.onend   = () => finish('finished');
     utter.onerror = (e) => finish(`error (${e.error})`);
-    // Watchdog: if the utterance neither ends nor errors within 12s (wedged
-    // synth / silently dropped), reset ONCE and move on — never touches a
-    // healthy in-flight utterance because end/error settle first.
+    // Watchdog, scaled to the utterance. It used a flat 12 seconds on the
+    // assumption that anything still speaking by then was wedged - but a
+    // healthy fifty-word alert takes eighteen seconds, so the watchdog was
+    // cancelling LIVE speech mid-sentence. Four alert types were being cut
+    // off, the longest losing nearly half its text. The limit is now the
+    // expected speaking time plus a margin, so it only fires on a genuine
+    // wedge.
+    const words = (text.match(/\S+/g) || []).length;
+    const expectMs = words / (2.6 * utter.rate) * 1000;
+    const limitMs = Math.max(8000, expectMs * 1.6 + 3000);
     setTimeout(() => {
       if (!settled) {
-        console.log('[voice] watchdog: utterance stuck >12s — resetting synth');
+        console.log(`[voice] watchdog: no end after ${Math.round(limitMs / 1000)}s (expected ~${Math.round(expectMs / 1000)}s) — resetting synth`);
         try { synth.cancel(); } catch (_) {}
         finish('watchdog-reset');
       }
-    }, 12000);
+    }, limitMs);
     try {
       synth.resume();   // un-wedge paused state (Chrome background tabs)
       synth.speak(utter);
@@ -14669,7 +14733,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (/^R(\d+)$/.test(label)) text = `Resistance ${label.slice(1)} touched at ${Math.round(price)}`;
     else if (/^S(\d+)$/.test(label)) text = `Support ${label.slice(1)} touched at ${Math.round(price)}`;
     else text = `${label} touched at ${Math.round(price)}`;
-    _voiceQ.push(text);
+    _voiceEnqueue(text);
     while (_voiceQ.length > 3) {           // cap backlog: keep newest 3
       const dropped = _voiceQ.shift();
       console.log(`[voice] queue full — dropped oldest: "${dropped}"`);
@@ -16710,10 +16774,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (c.score < 65) return;
     if (Date.now() - _coilState.fired < 20 * 60000) return;
     _coilState.fired = Date.now();
-    const txt = `NO DIRECTION. Coiled spring on ${state.symbol || 'NIFTY'}. ` +
-      `Range has compressed to ${(c.compression * 100).toFixed(0)} percent of earlier` +
-      (c.divergence ? `, and implied volatility is rising while the tape delivers less` : '') +
-      `. A move is more likely, but this does not say which way. Favour buying premium over selling it`;
+    const txt = `NO DIRECTION. Coiled spring on ${state.symbol || 'NIFTY'}: range compressed to ` +
+      `${(c.compression * 100).toFixed(0)} percent. A move is more likely, direction unknown.`;
     try {
       if (_streamLive) _relayAlert(`coil|${state.symbol}|${Math.round(Date.now() / 1200000)}`, txt, 'level', 900);
       else _speakOnce(`coil|${state.symbol}`, txt, 900);
@@ -18309,8 +18371,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const p = near(spot - gap * 4), cc2 = near(spot + gap * 4);
       if (p?.pe_iv && cc2?.ce_iv) skew = p.pe_iv - cc2.ce_iv;
     } catch (_) {}
-    const row = { ts: Date.now(), sym, pcr, pcr1d, vix: d.india_vix ?? null,
-                  iv: d.atm_iv ?? null, straddle, skew };
+    // spot stored so the index can be drawn against PCR on the same time axis
+    const row = { ts: Date.now(), sym, spot: d.underlying_value, pcr, pcr1d,
+                  vix: d.india_vix ?? null, iv: d.atm_iv ?? null, straddle, skew };
     if (row.pcr == null && row.vix == null && row.iv == null && row.straddle == null) return;
     const last = _ctxHist[_ctxHist.length - 1];
     // Coalesce inside 400ms rather than 3s: with tick-driven updates a 3s
@@ -18353,9 +18416,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const ctrls = `<span style="display:flex;gap:8px;font-size:9px;color:var(--muted,#789);">
         ${_CTX_SERIES.map(s => `<label title="${escapeHtml(s.tip || '')}"><input type="checkbox" data-ctxs="${s.k}" ${cfg[s.k] !== false ? 'checked' : ''}> ${s.lab}</label>`).join('')}
       </span>`;
-    if (pts.length < 3 || !shown.length) {
+    // Price is always drawn, so an empty series selection is no longer a reason
+    // to blank the pane - only a lack of history is.
+    if (pts.length < 3) {
       box.innerHTML = `<div style="display:flex;gap:12px;align-items:center;padding:6px 8px;font-size:9.5px;color:var(--muted,#789);">
-          <span>${pts.length < 3 ? 'Collecting — a few more polls.' : 'No series selected — tick one to draw it.'}</span>
+          <span>${'Collecting — a few more polls.'}</span>
           <span style="margin-left:auto;">${ctrls}</span>
         </div>`;
       return;
@@ -18380,35 +18445,102 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     let svg = '';
     const legend = [];
-    for (const s of shown) {
-      const vals = pts.map(p => ({ t: p.ts, v: s.get(p) })).filter(p => p.v != null);
-      if (vals.length < 2) continue;
-      const lo = Math.min(...vals.map(v => v.v)), hi = Math.max(...vals.map(v => v.v));
-      const span = (hi - lo) || Math.abs(hi) * 0.02 || 1;
-      // each series normalised to its OWN range - they share no units
-      const y = v => padT + (1 - (v - lo) / span) * (H - padT - padB);
-      // A smooth path is what makes a line LOOK smooth - not more samples of
-      // the same value. Catmull-Rom through the real points: no invented data,
-      // just a curve instead of a polyline between the points that exist.
-      const P = vals.map(v => [x(v.t), y(v.v)]);
-      let dpath = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
-      for (let i = 0; i < P.length - 1; i++) {
-        const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || P[i + 1];
-        const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
-        const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
-        dpath += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+    // ONE POINT PER SLOT. History arrives far faster than the x grid - about
+    // twelve points a minute on a poll and up to a hundred and fifty on ticks
+    // - and every point in a minute maps to the same x. A curve through many
+    // points at one x cannot move forward, so it scribbled vertically inside
+    // each slot and the smoothing overshot into spikes. Keeping the last value
+    // per slot gives a strictly increasing x, which is what a line needs.
+    const perSlot = getter => {
+      const m = new Map();
+      for (const p of pts) {
+        const v = getter(p);
+        if (v != null && isFinite(v)) m.set(slotOf(p.ts), v);
       }
-      svg += `<path d="${dpath}" fill="none" stroke="${s.col}" stroke-width="1.4" opacity="0.9"/>`;
-      const lastV = vals[vals.length - 1];
-      svg += `<circle cx="${x(lastV.t).toFixed(1)}" cy="${y(lastV.v).toFixed(1)}" r="2.2" fill="${s.col}"/>`;
-      svg += `<text x="${(W - padR + 4).toFixed(1)}" y="${(y(lastV.v) + 3).toFixed(1)}" style="font-size:9px;fill:${s.col};">${
-        s.k === 'pcr' ? lastV.v.toFixed(2) : lastV.v.toFixed(1)}</text>`;
-      const first = vals[0].v, chg = lastV.v - first;
-      legend.push(`<span style="color:${s.col};font-size:9.5px;">● ${s.lab} ${
-        s.k === 'pcr' ? lastV.v.toFixed(2) : lastV.v.toFixed(1)} <span style="opacity:.7;">${
-        chg >= 0 ? '+' : ''}${s.k === 'pcr' ? chg.toFixed(2) : chg.toFixed(1)}</span> <span style="opacity:.55;">${
-        lo.toFixed(s.k === 'pcr' ? 2 : 1)}–${hi.toFixed(s.k === 'pcr' ? 2 : 1)}</span></span>`);
+      return [...m.entries()].sort((q, r) => q[0] - r[0]).map(([sl, v]) => ({ sl, v }));
+    };
+    const xs = sl => padL + (sl + 0.5) / slots * (W - padL - padR);
+    const niceTicks = (lo, hi, n) => {
+      const span = hi - lo || 1;
+      const raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+      const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(s => span / s <= n) || raw;
+      const out = [];
+      for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v);
+      return out;
+    };
+    const pathOf = (P) => {
+      if (P.length < 2) return '';
+      let dp = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
+      for (let k = 0; k < P.length - 1; k++) {
+        const p0 = P[k - 1] || P[k], p1 = P[k], p2 = P[k + 1], p3 = P[k + 2] || P[k + 1];
+        dp += `C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)},${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)} ` +
+              `${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)},${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)} ` +
+              `${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+      }
+      return dp;
+    };
+    const plotH = H - padT - padB;
+
+    // ── PCR on the LEFT axis, in real units ─────────────────────────
+    // PCR and PCR 1-day share one axis because they are the same quantity;
+    // normalising each to its own range made them impossible to compare.
+    const pcrSeries = shown.filter(s => s.k === 'pcr' || s.k === 'pcr1d');
+    const pcrData = pcrSeries.map(s => ({ s, d: perSlot(s.get) })).filter(o => o.d.length >= 2);
+    if (pcrData.length) {
+      const all = pcrData.flatMap(o => o.d.map(p => p.v));
+      let lo = Math.min(...all), hi = Math.max(...all);
+      const pad = (hi - lo) * 0.12 || 0.02; lo -= pad; hi += pad;
+      const yP = v => padT + (1 - (v - lo) / (hi - lo)) * plotH;
+      for (const t of niceTicks(lo, hi, 4)) {
+        svg += `<line x1="${padL}" y1="${yP(t).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yP(t).toFixed(1)}" stroke="rgba(255,255,255,0.05)"/>`;
+        // labels INSIDE the plot's left edge rather than in a new margin:
+        // widening the left margin would shift the time axis and break the
+        // alignment with the candles above, which is the point of this pane
+        svg += `<text x="${(padL + 2)}" y="${(yP(t) - 2).toFixed(1)}" style="font-size:8.5px;fill:#d4af37;opacity:.85;">${t.toFixed(2)}</text>`;
+      }
+      for (const o of pcrData) {
+        const P = o.d.map(p => [xs(p.sl), yP(p.v)]);
+        svg += `<path d="${pathOf(P)}" fill="none" stroke="${o.s.col}" stroke-width="1.8" opacity="0.95"/>`;
+        const last = o.d[o.d.length - 1];
+        svg += `<circle cx="${xs(last.sl).toFixed(1)}" cy="${yP(last.v).toFixed(1)}" r="2.4" fill="${o.s.col}"/>`;
+        const chg = last.v - o.d[0].v;
+        legend.push(`<span style="color:${o.s.col};font-size:9.5px;">● ${o.s.lab} <b>${last.v.toFixed(2)}</b> <span style="opacity:.7;">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}</span></span>`);
+      }
     }
+
+    // ── INDEX PRICE on the RIGHT axis ───────────────────────────────
+    // Drawn in the same pane so a PCR turn can be read against what price did
+    // at that moment - the pairing that decides whether rising PCR is puts
+    // being written (price up) or bought (price down).
+    const px = perSlot(p => p.spot);
+    if (px.length >= 2) {
+      let lo = Math.min(...px.map(p => p.v)), hi = Math.max(...px.map(p => p.v));
+      const pad = (hi - lo) * 0.08 || lo * 0.001; lo -= pad; hi += pad;
+      const yS = v => padT + (1 - (v - lo) / (hi - lo)) * plotH;
+      for (const t of niceTicks(lo, hi, 4))
+        svg += `<text x="${(W - padR + 4).toFixed(1)}" y="${(yS(t) + 3).toFixed(1)}" style="font-size:8.5px;fill:rgba(220,225,235,0.75);">${fmtInt(Math.round(t))}</text>`;
+      const P = px.map(p => [xs(p.sl), yS(p.v)]);
+      svg += `<path d="${pathOf(P)}" fill="none" stroke="rgba(220,225,235,0.85)" stroke-width="1.6"/>`;
+      const last = px[px.length - 1];
+      svg += `<circle cx="${xs(last.sl).toFixed(1)}" cy="${yS(last.v).toFixed(1)}" r="2.2" fill="rgba(220,225,235,0.95)"/>`;
+      const chg = last.v - px[0].v;
+      legend.push(`<span style="color:rgba(220,225,235,0.9);font-size:9.5px;">● ${escapeHtml(state.symbol || 'NIFTY')} <b>${fmtInt(Math.round(last.v))}</b> <span style="opacity:.7;">${chg >= 0 ? '+' : ''}${chg.toFixed(0)}</span></span>`);
+    }
+
+    // ── any other series: own range, no axis ────────────────────────
+    // VIX, IV, straddle and skew share no units with PCR or price, so they
+    // keep their own scaling and report values in the legend only.
+    for (const s of shown.filter(s2 => s2.k !== 'pcr' && s2.k !== 'pcr1d')) {
+      const d2 = perSlot(s.get);
+      if (d2.length < 2) continue;
+      const lo = Math.min(...d2.map(p => p.v)), hi = Math.max(...d2.map(p => p.v));
+      const span = (hi - lo) || Math.abs(hi) * 0.02 || 1;
+      const yO = v => padT + (1 - (v - lo) / span) * plotH;
+      svg += `<path d="${pathOf(d2.map(p => [xs(p.sl), yO(p.v)]))}" fill="none" stroke="${s.col}" stroke-width="1.3" opacity="0.8" stroke-dasharray="4,2"/>`;
+      const last = d2[d2.length - 1];
+      legend.push(`<span style="color:${s.col};font-size:9.5px;">● ${s.lab} ${last.v.toFixed(1)} <span style="opacity:.55;">${lo.toFixed(1)}–${hi.toFixed(1)}</span></span>`);
+    }
+
     // half-hour gridlines, matching the candle pane
     for (let m = 0; m <= SESSION_MIN; m += 30) {
       const cx = padL + (m / _chart.interval) / slots * (W - padL - padR);
@@ -18754,12 +18886,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 : rd?.bias === 'stretched' ? 'STRETCHED, no clear direction'
                 : 'NO CLEAR DIRECTION');
     const sym = state.symbol || 'NIFTY';
-    const txt = `${bias}. Near-strike put-call ratio ${rising ? 'rose' : 'fell'} ` +
-      `${Math.abs(chgPct).toFixed(0)} percent in ${cfg.windowMin} minutes, ` +
-      `${base.pcr.toFixed(2)} to ${near.pcr.toFixed(2)}, on ${sym} within ${Math.round(near.width)} points of ${Math.round(res.atm)}. ` +
-      (rd?.note || 'Direction is unclear without price context.') +
-      (priceUp === null ? ' Price direction is not yet known from the chart.'
-                        : ` Price has been ${priceUp ? 'rising' : 'falling'} over the last few bars.`);
+    // Short on purpose. The full version ran to fifty-three words - over
+    // twenty seconds of speech, longer than many scalps last. The reasoning
+    // is on screen in the PCR panel; the ear needs the verdict and the number.
+    const why = rd?.bias === 'bearish' ? (priceUp ? 'calls building' : 'puts being bought')
+              : rd?.bias === 'bullish' ? (priceUp ? 'puts being written' : 'calls being bought')
+              : 'stretched';
+    const txt = `${bias}. Near P C R ${rising ? 'up' : 'down'} ${Math.abs(chgPct).toFixed(0)} percent, ` +
+      `${near.pcr.toFixed(2)}, ${why}.`;
     try {
       if (_streamLive) _relayAlert(`pcrband|${sym}|${Math.round(now / 300000)}`, txt, 'level', 300);
       else _speakOnce(`pcrband|${sym}`, txt, 300);
@@ -18949,8 +19083,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (s.score < 60) { _shockState.prevScore = s.score; return; }
     if (Date.now() - _shockState.firedAt < 10 * 60000) return;
     _shockState.firedAt = Date.now();
-    const txt = `RISK WARNING, no direction. Premium shock on ${state.symbol || 'NIFTY'}. ${(s.conc * 100).toFixed(0)} percent of gamma sits at spot and implied volatility is rising ${s.ivVel > 0 ? 'fast' : ''}. ` +
-      `A one percent move with two volatility points would take the at-the-money straddle up ${s.shockPct ? s.shockPct.toFixed(0) : 'sharply'} percent. If you are short premium, reduce size`;
+    const txt = `RISK WARNING, no direction. Premium shock on ${state.symbol || 'NIFTY'}: ` +
+      `${(s.conc * 100).toFixed(0)} percent of gamma at spot and I V rising. Options can reprice violently.`;
     try {
       if (_streamLive) _relayAlert(`shock|${state.symbol}|${Math.round(Date.now() / 600000)}`, txt, 'level', 600);
       else _speakOnce(`shock|${state.symbol}`, txt, 600);
@@ -20359,8 +20493,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             const rise = (prem - b.prem) / b.prem * 100;
             if (rise >= (cfg.straddlePct || 8)) {
               _leadFire('straddle',
-                `NO DIRECTION. Straddle premium up ${rise.toFixed(0)} percent while price has barely moved. ` +
-                `The market is paying for a move that has not happened yet, but is not saying which way`,
+                `NO DIRECTION. Straddle up ${rise.toFixed(0)} percent on a flat tape. A move is being priced in.`,
                 `🟡 no direction · straddle +${rise.toFixed(0)}% on a flat tape`, 'mid');
               _leadState.straddleBase = { prem, spot, t: Date.now() };
             }
