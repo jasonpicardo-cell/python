@@ -18451,6 +18451,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // what protection costs. Both move before the candles do, which is exactly
   // what a co-timed pane is for. Off by default so the pane stays readable.
   const _CTX_SERIES = [
+    { k: 'cvd',      lab: 'CVD',       col: '#a55eea', get: () => null,
+      tip: 'Cumulative volume delta: buying minus selling, bar by bar. Drawn from the candles, not the poll history. Its divergence from price is the order-flow twin of RSI divergence — and it leads, where PCR lags.' },
     { k: 'pcr',      lab: 'PCR now',   col: '#d4af37', get: h => h.pcr,
       tip: 'Put-call ratio across the strikes price can reach in the hours left' },
     { k: 'pcr1d',    lab: 'PCR 1-day', col: '#f7b731', get: h => h.pcr1d,
@@ -18595,7 +18597,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // PCR is the one that moves on positioning rather than on price - VIX and
     // IV largely restate what the candles already show. They stay one tick
     // away for when the question is specifically about volatility.
-    const CTX_DEFAULT = { pcr: true, pcr1d: false, vix: false, iv: false,
+    // CVD on, PCR off by default. PCR is the standing option book and moves
+    // over hours, so as a line it mostly redraws a number already shown in
+    // the chart strip. CVD updates tick by tick and turns before price does,
+    // which is what a pane sharing the price axis is for.
+    const CTX_DEFAULT = { cvd: true, pcr: false, pcr1d: false, vix: false, iv: false,
                           straddle: false, skew: false };
     const cfg = (() => {
       try {
@@ -18722,6 +18728,37 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       svg += `<circle cx="${xs(last.sl).toFixed(1)}" cy="${yS(last.v).toFixed(1)}" r="2.2" fill="rgba(220,225,235,0.95)"/>`;
       const chg = last.v - px[0].v;
       legend.push(`<span style="color:rgba(220,225,235,0.9);font-size:9.5px;">● ${escapeHtml(state.symbol || 'NIFTY')} <b>${fmtInt(Math.round(last.v))}</b> <span style="opacity:.7;">${chg >= 0 ? '+' : ''}${chg.toFixed(0)}</span></span>`);
+    }
+
+    // ── CVD: cumulative volume delta, from the candles ──────────────
+    // Drawn from bars rather than the poll history because it is a per-bar
+    // quantity, and on the same x as price so a divergence is visible rather
+    // than merely reported. The ZERO line is what matters - CVD above it
+    // means buying has dominated the session so far - so it is marked.
+    if (cfg.cvd !== false) {
+      try {
+        const cs2 = _chart.candles || [];
+        const cvd = _cvdSeries(cs2);
+        if (cvd && cvd.length > 3 && _chart.hasVolume) {
+          const vals = cvd.map(p => p.cum);
+          let clo = Math.min(...vals, 0), chi = Math.max(...vals, 0);
+          const cp = (chi - clo) * 0.1 || 1; clo -= cp; chi += cp;
+          const yC = v => padT + (1 - (v - clo) / (chi - clo)) * plotH;
+          // zero line: the side CVD sits on is the reading
+          svg += `<line x1="${padL}" y1="${yC(0).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yC(0).toFixed(1)}" stroke="rgba(165,94,234,0.45)" stroke-dasharray="2,3"/>`;
+          const P = [];
+          const seen = new Map();
+          cvd.forEach((p, ix) => { if (cs2[ix]) seen.set(slotOf(cs2[ix].t * 1000), p.cum); });
+          [...seen.entries()].sort((a, b) => a[0] - b[0]).forEach(([sl, v]) => P.push([xs(sl), yC(v)]));
+          if (P.length > 1) {
+            svg += `<path d="${pathOf(P)}" fill="none" stroke="#a55eea" stroke-width="1.9" opacity="0.95"/>`;
+            const lastV = vals[vals.length - 1];
+            const dv = _cvdDivergence(cvd, cs2);
+            legend.push(`<span style="color:#a55eea;font-size:9.5px;">● CVD <b>${lastV >= 0 ? '+' : ''}${fmtInt(Math.round(lastV))}</b>` +
+              (dv ? ` <b style="color:${dv.dir === 'bullish' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">⚠ ${dv.dir} divergence</b>` : '') + `</span>`);
+          }
+        }
+      } catch (_) {}
     }
 
     // ── any other series: own range, no axis ────────────────────────
