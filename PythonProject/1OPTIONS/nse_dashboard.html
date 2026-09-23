@@ -1970,6 +1970,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="htfBody" style="padding:6px 8px;"><div class="movers-loading">Loading…</div></div>
           </div>
 
+          <div class="level-panel" id="maturityPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">⏳ Trend Maturity — how far through it are we<i class="hi" data-h="trend-maturity">i</i></span>
+            </div>
+            <div id="maturityBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
           <div class="level-panel" id="grindPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">🐌 Slow Trend — the move no threshold catches<i class="hi" data-h="slow-grind">i</i></span>
@@ -11751,7 +11758,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const txt = `${(e.bias || 'neutral').toUpperCase()}${e.strength === 'strong' ? '' : ', moderate'}. ` +
         `${e.spoken || e.kind} at ${Math.round(e.k)}${e.why ? `, ${e.why}` : ''}.${_confluenceClause(e.bias)} Open interest ${e.oiPct > 0 ? 'up' : 'down'} ${Math.abs(e.oiPct).toFixed(0)} percent, premium ${e.prPct > 0 ? 'up' : 'down'} ${Math.abs(e.prPct).toFixed(0)} percent. ${e.bias}`;
       _speakOnce(`flow|${state.symbol || 'NIFTY'}|${e.k}|${e.side}|${e.kind}`, txt, 300);
-      if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias}`);
+      if (typeof showToast === 'function') showToast(`${e.isFresh ? '🆕' : '↩'} ${e.kind} @ ${fmtInt(e.k)} · OI ${e.oiPct > 0 ? '+' : ''}${e.oiPct.toFixed(0)}% · prem ${e.prPct > 0 ? '+' : ''}${e.prPct.toFixed(0)}% → ${e.bias} · ${e.source === 'book' ? '📖 book' : e.source === 'delta-adjusted premium' ? '~delta-adj' : '~raw'}`);
       _flowLog({ ts: Date.now(), k: e.k, side: e.side, kind: e.kind, bias: e.bias, oiPct: +e.oiPct.toFixed(1), prPct: +e.prPct.toFixed(1) });
     }
     _flowRenderLog();
@@ -14070,6 +14077,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _ladderRecord(data); renderLadder(data); } catch (_) {}
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
+    try { _maturityCheck(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
     try { _driftRecord(data); renderDrift(data); } catch (_) {}
     try {
@@ -14550,18 +14558,51 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const t = String(text || '');
     if (/^(RISK WARNING|DEAD REGIME)/i.test(t)) return 3;
     if (/Regime change|slow grind|gamma flip|FLOOR BROKEN|CEILING BROKEN/i.test(t)) return 3;
-    if (/^(BULLISH|BEARISH)[^.]{0,20}\.\s*(Near-strike put-call|Volume put-call|.*wall)/i.test(t)) return 2;
-    if (/crossover|closed (above|below) EMA|VWAP/i.test(t)) return 2;
+    // Matched on phrases the alerts actually use. An earlier version still
+    // looked for "Near-strike put-call ratio" after that alert had been
+    // shortened to "Near P C R", so the PCR alert silently fell to the lowest
+    // priority - the kind of break that leaves everything working and only
+    // the ordering wrong.
+    if (/Near P C R|Volume put-call ratio|wall at \d+/i.test(t)) return 2;
+    if (/crossover|closed (above|below) (EMA|VWAP)|Straddle|Coiled spring/i.test(t)) return 2;
     return 1;          // flow, level touches, everything else
   }
-  // Topic, so a newer alert on the same subject replaces a queued older one
-  // rather than both being spoken: two PCR updates thirty seconds apart
-  // should be one announcement of the current value, not a history lesson.
+  // Topic, so a newer alert on the same subject replaces a queued older one:
+  // two PCR updates thirty seconds apart should be one announcement of the
+  // current value, not a history lesson.
+  //
+  // The topic must identify the SUBJECT, not the alert family. A first
+  // attempt matched the bare word "crossover", which meant a 20/50 signal and
+  // a 50/200 signal shared a topic and silently cancelled each other - two
+  // different events reported as one. Anything with an instance (a strike, a
+  // moving average, a pair) carries that instance in its topic, and the
+  // symbol is included because the relay can carry both indices.
   function _voiceTopic(text) {
     const t = String(text || '');
-    const m = t.match(/(put-call ratio|slow grind|Regime change|gamma flip|wall at \d+|crossover|EMA \d+|VWAP|Straddle|Coiled spring|Premium shock)/i);
-    return m ? m[1].toLowerCase() : null;
+    // Fall back to the current instrument when the text does not name one:
+    // flow alerts say "Put selling at 23400" with no symbol, and without this
+    // a Nifty and a BankNifty alert could share a topic and cancel each other.
+    const sym = ((t.match(/\b(NIFTY|BANKNIFTY|FINNIFTY|MIDCPNIFTY)\b/i) || [])[1]
+                 || state.symbol || '').toUpperCase();
+    const pair = t.match(/(\d+\s*\/\s*\d+)\s*\w*\s*crossover/i);
+    if (pair) return `${sym}|cross|${pair[1].replace(/\s+/g, '')}`;
+    const ema = t.match(/\b(EMA\s*\d+|VWAP)\b/i);
+    if (/closed (above|below)/i.test(t) && ema) return `${sym}|pxma|${ema[1].replace(/\s+/g, '').toUpperCase()}`;
+    const wall = t.match(/wall at (\d+)/i);
+    if (wall) return `${sym}|wall|${wall[1]}`;
+    const strike = t.match(/\b(?:buying|selling|writers buying back|longs closing)\s+at\s+(\d+)/i);
+    if (strike) return `${sym}|flow|${strike[1]}`;
+    if (/\bNear P C R\b/i.test(t)) return `${sym}|pcr-near`;
+    if (/Volume put-call ratio/i.test(t)) return `${sym}|pcr-vol`;
+    if (/slow grind/i.test(t)) return `${sym}|grind`;
+    if (/Regime change/i.test(t)) return `${sym}|regime`;
+    if (/gamma flip/i.test(t)) return `${sym}|gflip`;
+    if (/Coiled spring/i.test(t)) return `${sym}|coil`;
+    if (/Premium shock/i.test(t)) return `${sym}|shock`;
+    if (/\bStraddle\b/i.test(t)) return `${sym}|straddle`;
+    return null;          // no instance identified: never supersede
   }
+
   function _voiceEnqueue(text) {
     const item = { text, t: Date.now(), topic: _voiceTopic(text), prio: _voicePriority(text) };
     if (item.topic) {
@@ -17545,6 +17586,162 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span>20d range ${fmtInt(Math.round(r.lo))}–${fmtInt(Math.round(r.hi))}</span>
       </div>
       <div class="oc-sub" style="margin-top:3px;">Everything else here is computed from <b>today alone</b>, so it cannot tell whether an intraday move continues the larger trend or fights it — and those are the same chart intraday while being very different trades. A long inside a five-day downtrend is a counter-trend scalp whether or not anyone calls it one, and it needs a tighter stop and a faster exit than the identical setup with the trend. <b>This is deliberately kept out of the Trend Engine.</b> Higher-timeframe bias belongs to sizing and holding time, not to the intraday score — folding it in would let a week-old trend quietly outvote what is happening right now. Daily efficiency uses the same net-over-gross measure as the intraday grind detector, so a high reading means the daily move travelled <b>directly</b>, not merely far.</div>`;
+  }
+
+  // ══ TREND MATURITY ════════════════════════════════════════════════
+  // Every other trend measure here answers "is there a trend?". None answers
+  // "how far through it am I?" - and a trend twenty minutes old that has
+  // travelled half a sigma looks identical to one three hours old that has
+  // travelled two and a half. They are opposite trades, and joining the
+  // second one late is where trend-following loses money.
+  //
+  // Three measurements, each independent:
+  //   EXTENSION   distance travelled in sigma of the day's expected move.
+  //     Beyond about 1.5 sigma a session has done most of what it was priced
+  //     to do, and continuation needs fresh information rather than momentum.
+  //   PULLBACK DEPTH, and its direction. A healthy trend pulls back shallowly;
+  //     pullbacks getting DEEPER is the earliest structural warning there is,
+  //     usually well before price breaks anything.
+  //   ACCELERATION  whether the recent leg is covering ground faster or
+  //     slower than the earlier one. Efficiency says a move was direct; it
+  //     says nothing about whether it is still gathering pace.
+  //
+  // The output is a STATE, and it is announced only when the state changes -
+  // a mature trend stays mature, and saying so every poll is the noise these
+  // alerts exist to avoid.
+  const _matState = { last: null, since: 0 };
+
+  function _trendMaturity(d) {
+    const cs = _chart.candles || [];
+    if (cs.length < 30 || !d?.underlying_value) return null;
+    const closes = cs.map(c => c.c);
+    const spot = d.underlying_value;
+    // day sigma, the same yardstick the projected move uses
+    const iv = (d.atm_iv || 12) / 100;
+    const daySig = spot * iv * Math.sqrt(_volT(1));
+    if (!(daySig > 0)) return null;
+
+    // direction and extent of the current leg, from the session low/high
+    const lo = Math.min(...closes), hi = Math.max(...closes);
+    const last = closes[closes.length - 1];
+    const upLeg = (last - lo) >= (hi - last);
+    const travelled = upLeg ? last - lo : hi - last;
+    const extension = travelled / daySig;
+
+    // when the leg began: the bar of the extreme it started from
+    const startIdx = upLeg ? closes.indexOf(lo) : closes.indexOf(hi);
+    const ageBars = Math.max(1, closes.length - 1 - startIdx);
+    const ageMin = ageBars * (_chart.interval || 1);
+
+    // pullbacks within the leg, measured as retracements against it
+    const seg = cs.slice(startIdx);
+    const pulls = [];
+    let peak = upLeg ? seg[0].h : seg[0].l;
+    let trough = peak;
+    for (const b of seg) {
+      if (upLeg) {
+        if (b.h > peak) { if (peak - trough > 0) pulls.push(peak - trough); peak = b.h; trough = b.h; }
+        else if (b.l < trough) trough = b.l;
+      } else {
+        if (b.l < peak) { if (trough - peak > 0) pulls.push(trough - peak); peak = b.l; trough = b.l; }
+        else if (b.h > trough) trough = b.h;
+      }
+    }
+    const meanPull = pulls.length ? pulls.reduce((a, b) => a + b, 0) / pulls.length : 0;
+    // deepening: are the later pullbacks bigger than the earlier ones?
+    // Deepening compares the LATEST pullback against the average of the ones
+    // before it, rather than splitting the list in halves. The halves version
+    // needed four pullbacks before it would report anything, and a trend
+    // often shows only two or three - so the single most useful warning here
+    // was silent exactly when it was still early enough to act on. This works
+    // from the third pullback and reacts to the newest one, which is the one
+    // that carries the information.
+    let deepening = 0;
+    if (pulls.length >= 3) {
+      const prior = pulls.slice(0, -1);
+      const mean = prior.reduce((a, b) => a + b, 0) / prior.length;
+      deepening = mean > 0 ? (pulls[pulls.length - 1] - mean) / mean : 0;
+    }
+    // acceleration: recent leg speed against the earlier half
+    const halfway = Math.floor((closes.length + startIdx) / 2);
+    const firstHalf = Math.abs(closes[halfway] - closes[startIdx]) / Math.max(1, halfway - startIdx);
+    const secondHalf = Math.abs(last - closes[halfway]) / Math.max(1, closes.length - 1 - halfway);
+    const accel = firstHalf > 0 ? (secondHalf - firstHalf) / firstHalf : 0;
+
+    let state, advice;
+    if (extension < 0.35) {
+      state = 'FORMING';
+      advice = 'early — the move has barely started, so a failure here is cheap';
+    } else if (extension < 1.0 && deepening < 0.35) {
+      state = 'ESTABLISHED';
+      advice = 'the higher-odds stretch — pullbacks are holding and there is room left';
+    } else if (deepening > 0.5 || accel < -0.45) {
+      state = 'WEAKENING';
+      advice = 'pullbacks are deepening or the pace is decaying — tighten, do not add';
+    } else if (extension >= 1.5) {
+      state = 'EXTENDED';
+      advice = `${extension.toFixed(1)} sigma travelled — most of the priced move is done, and continuation now needs fresh news rather than momentum`;
+    } else {
+      state = 'MATURE';
+      advice = 'still working, but the easy part is behind — take what it gives';
+    }
+    return { state, advice, extension, ageMin, ageBars, upLeg, travelled,
+             pulls: pulls.length, meanPull, deepening, accel, daySig };
+  }
+
+  function _maturityCheck(d) {
+    const m = _trendMaturity(d);
+    renderMaturity(m);
+    if (!m) return;
+    // announce only on a CHANGE of state, and never the first observation of
+    // the session - "trend is forming" at 09:20 tells you nothing
+    if (m.state === _matState.last) return;
+    const prev = _matState.last;
+    _matState.last = m.state; _matState.since = Date.now();
+    if (!prev) return;
+    const sym = state.symbol || 'NIFTY';
+    const dir = m.upLeg ? 'up' : 'down';
+    const bias = m.state === 'WEAKENING' || m.state === 'EXTENDED'
+      ? (m.upLeg ? 'CAUTION on longs' : 'CAUTION on shorts')
+      : (m.upLeg ? 'BULLISH' : 'BEARISH');
+    const txt = `${bias}. ${sym} ${dir} trend is now ${m.state}, ` +
+      `${m.extension.toFixed(1)} sigma over ${Math.round(m.ageMin)} minutes.`;
+    try {
+      if (_streamLive) _relayAlert(`maturity|${sym}|${m.state}`, txt, 'level', 300);
+      else _speakOnce(`maturity|${sym}|${m.state}`, txt, 300);
+    } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`${m.upLeg ? '🟢' : '🔴'} trend ${m.state} · ${m.extension.toFixed(1)}σ · ${Math.round(m.ageMin)}m`);
+    try { _scoreRecord('trend maturity', m.state === 'WEAKENING' || m.state === 'EXTENDED'
+                       ? (m.upLeg ? 'bearish' : 'bullish') : (m.upLeg ? 'bullish' : 'bearish'),
+                       d.underlying_value, sym, m.state); } catch (_) {}
+  }
+
+  function renderMaturity(m) {
+    const box = document.getElementById('maturityBody');
+    if (!box) return;
+    if (!m) { box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Needs about 30 bars.</div>'; return; }
+    const col = m.state === 'ESTABLISHED' ? 'var(--pos,#26a69a)'
+              : m.state === 'WEAKENING' || m.state === 'EXTENDED' ? 'var(--gold,#d4af37)'
+              : 'var(--muted)';
+    const bar = (v, max, c2) =>
+      `<span style="display:inline-block;height:7px;width:${Math.max(2, Math.min(100, v / max * 100)).toFixed(0)}%;background:${c2};border-radius:3px;vertical-align:middle;"></span>`;
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:12px;">${m.upLeg ? '▲' : '▼'} ${m.state}</b>
+        <span>extension <b>${m.extension.toFixed(2)}σ</b></span>
+        <span style="color:var(--muted);">age ${Math.round(m.ageMin)} min</span>
+        <span style="color:var(--muted);">${m.pulls} pullback${m.pulls === 1 ? '' : 's'}, mean ${m.meanPull.toFixed(0)} pts</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;padding:2px 4px;font-size:9.5px;">
+        <span style="min-width:74px;color:var(--muted);">extension</span>
+        ${bar(m.extension, 2.5, m.extension >= 1.5 ? 'var(--gold,#d4af37)' : 'rgba(38,166,154,0.7)')}
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:2px 4px;font-size:10px;">
+        <span style="color:${m.deepening > 0.5 ? 'var(--neg,#ef5350)' : 'var(--muted)'};">pullbacks ${m.deepening >= 0 ? '+' : ''}${(m.deepening * 100).toFixed(0)}% ${m.deepening > 0.15 ? 'deeper' : m.deepening < -0.15 ? 'shallower' : 'steady'}</span>
+        <span style="color:${m.accel < -0.45 ? 'var(--neg,#ef5350)' : 'var(--muted)'};">pace ${m.accel >= 0 ? '+' : ''}${(m.accel * 100).toFixed(0)}%</span>
+      </div>
+      <div class="oc-sub" style="margin-top:3px;">${escapeHtml(m.advice)}. <b>Every other trend measure here answers "is there a trend?"</b> — this one answers how far through it you are, which is a different question and usually the more expensive one to get wrong. A move twenty minutes old that has travelled half a sigma and one three hours old that has travelled two and a half look identical to efficiency, confluence and the range rules, yet they are opposite trades. <b>Extension</b> is distance travelled against the day's own expected move: beyond roughly 1.5 sigma a session has done most of what it was priced to do, and continuation needs fresh information rather than momentum. <b>Deepening pullbacks are the earliest structural warning there is</b>, usually arriving well before price breaks any level. <b>Pace</b> compares the recent leg against the earlier one — efficiency says a move was direct, not whether it is still gathering speed. The state is announced only when it CHANGES, because a mature trend stays mature and repeating it every poll is the noise these alerts exist to avoid.</div>`;
   }
 
   // ══ SLOW TREND (GRIND) DETECTOR ═══════════════════════════════════
@@ -29005,6 +29202,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'strike-ladder':     '<strong>Strike Ladder</strong>Candles, moving averages and pivots are all derived from past price - they describe <b>the path taken</b>. This describes <b>the terrain ahead</b>, built from where positions actually sit rather than where price has been. It also replaces a reading that is very common and quite wrong: that the largest open interest marks the strongest level. Open interest says how many contracts exist at a strike; it does not say whether anyone is <b>forced to act</b> there, and being forced is what makes a level hold. What forces action is dealer gamma. Where dealers are long gamma they sell rallies and buy dips, so price is <b>pinned</b> and the level holds. Where they are short they buy rallies and sell dips, so a break <b>accelerates</b> instead of stalling. The largest put wall on the board can therefore be the weakest support, because a break through it gets faster rather than slower - and reading it as strong support is how a stop gets run. Strength weights gamma most heavily because it is the only one of the three measures that compels anyone to trade: open interest is standing exposure and volume is where business was already done, and neither obliges anybody to do anything now. <b>Honest limit, and it is a real one:</b> nobody publishes actual dealer inventory, so this uses the standard convention that dealers are short both calls and puts to the street. That is right often enough to be useful and wrong in unusual positioning - it is an assumption, not a measurement, and it should be read as one.',
     'regime-map':        '<strong>Regime</strong>Most signals in this dashboard carry a hidden assumption about the kind of market they are in, and none of them state it on their own. <b>In a range</b>, mean reversion and contrarian extremes are the higher-odds side and breakout signals are mostly traps. <b>In a trend that inverts completely:</b> fading is how a small loss becomes a large one, and level-touch alerts fire on every level as price goes straight through them. The same alert is sound advice in one regime and expensive in the other - which is why this panel names what to <b>discount</b> rather than only what to trust. <b>Volatility is ranked against this instrument own recent range</b> rather than an absolute number, because 13 percent means quite different things on Nifty and on BankNifty. Direction uses the same net-over-gross efficiency measure as the grind detector, so a market that covered ground by thrashing back and forth is correctly read as ranging rather than trending. <b>Dead regime</b> is the reading nothing else here will give you: when the expected move remaining is comparable to a round trip in spread and slippage, the honest answer is that there is nothing worth trading today - and a system that can never say that will always find a reason to trade. The <b>alert budget</b> exists because every family throttles itself while nothing limited the total: in high volatility they all fire at once, and thirty alerts an hour is the same as none, because you stop listening. High-priority alerts always pass; low-priority ones are the first to be suppressed as the budget fills.',
     'htf-context':       '<strong>Daily Context</strong>Everything else in this dashboard is computed from <b>today alone</b>, which means it cannot tell whether an intraday move continues the larger trend or fights it — and those are the same chart intraday while being very different trades. A long inside a five-day downtrend is a counter-trend scalp whether or not anyone calls it one: it needs a tighter stop, a faster exit and smaller size than the identical setup taken with the trend. <b>This is deliberately excluded from the Trend Engine.</b> Higher-timeframe bias belongs to sizing and holding time rather than to the intraday score, and folding it in would let a week-old trend quietly outvote what is happening right now — the opposite of what a scalper needs. Daily efficiency uses the same net-over-gross measure as the intraday grind detector, so a high reading means the daily move travelled <b>directly</b> rather than merely far; a market that covered the same distance by thrashing back and forth scores low and is correctly read as rotating. The daily bars come from the replay archive, which builds automatically each day the dashboard runs, so this panel becomes more useful the longer the system has been in use.',
+    'trend-maturity':    '<strong>Trend Maturity</strong>Every other trend measure in this dashboard answers "is there a trend?" - efficiency, confluence, the RSI range rules, the daily context. None of them answers <b>how far through it you are</b>, and that is a different question which is usually more expensive to get wrong. A move twenty minutes old that has travelled half a sigma and one three hours old that has travelled two and a half sigma look identical to every existing measure, yet they are opposite trades: joining the second one late is where trend-following loses money. <b>Extension</b> is distance travelled measured against the day own expected move, so it adapts to the instrument and to the day. Beyond roughly 1.5 sigma a session has done most of what it was priced to do, and continuation from there needs fresh information rather than momentum. <b>Pullback depth and its direction</b> is the most useful of the three: a healthy trend pulls back shallowly, and pullbacks getting DEEPER is the earliest structural warning available, usually arriving well before price breaks any level anyone is watching. <b>Pace</b> compares the recent leg against the earlier one, because efficiency tells you a move was direct and says nothing about whether it is still gathering speed. The state is announced only when it CHANGES - a mature trend stays mature, and repeating that every poll is exactly the noise these alerts exist to avoid.',
     'slow-grind':        '<strong>Slow Trend</strong>Every other alert in this system is event-based - a threshold crossed, a wall decaying, premium jumping - and they share one blind spot that is not small: <b>a slow steady trend contains no dramatic bar anywhere in it</b>, so nothing trips and the system stays silent through exactly the move that was easiest to trade. It is worse than mere silence, because a choppy day produces LARGER individual bars than a grind while going nowhere, so threshold alerts fire more often on the day with no trend than on the day with one. <b>Efficiency ratio</b> fixes this: net movement divided by the sum of all movement. A straight line scores near 100 percent whatever its slope, and violent chop scores near zero whatever its range - it measures how directly price got where it went, which is what a trend actually is, rather than how dramatic any single bar was. <b>Persistence</b>, the share of bars closing on one side of VWAP, is required alongside it, because efficiency on its own can be produced by a single gap followed by silence and persistence cannot. The move is also measured against <b>this session own typical bar</b> rather than a fixed number of points, since on a quiet day a forty-point drift is the entire day and a fixed threshold would dismiss it as noise. The alert repeats only on a direction change or after a cooldown, because a grind by definition persists and announcing it every poll would be the noise it was built to avoid.',
     'level-drift':       '<strong>Level Drift</strong>Half the lines on the chart move during the session, and <b>a level coming to price is a different event from price going to the level</b>. The first means positioning changed - writers pulling a defence closer, the open-interest centre of gravity shifting - and it can happen while price does not move at all. On a chart that only shows where a line sits now, the two are indistinguishable, which is the gap this closes. <b>Closing</b> marks a level whose gap to price is shrinking under its own movement; the rate is shown per hour so levels are comparable to each other, and the estimated time to reach price is a straight-line projection of the current rate, not a forecast - positioning can reverse in a minute. The moving levels are max pain, the call and put walls, and the gamma flip, all recomputed from open interest on every poll. <b>The frozen levels are deliberately absent:</b> EOR and EOS, the CPR, the pivots and the opening-range box are fixed by definition, and that is exactly what makes them useful as references - a reference that moves is not one. Drift also appears on the chart labels themselves as a small arrow and rate, so it is visible while reading the line rather than only in this panel.',
     'signal-score':      '<strong>Signal Scorecard</strong>The system measuring itself. Twenty-two Trend Engine inputs and nine alert families were weighted by judgement and never checked against what happened - some are certainly noise and there was no way to tell which. Every directional reading is now recorded with the spot price at the time and scored <b>15 minutes later</b> against where price actually went. <b>The horizon is fixed in advance deliberately:</b> scoring whenever a move looks resolved lets the scorer choose the answer, which is how backtests flatter themselves. A call counts as right only if price moved far enough to have been tradeable - roughly 0.4 sigma of the horizon - because after costs a two-point win is a loss, and counting it would score noise as skill. <b>Flat is not failure:</b> a source that is usually flat is silent rather than wrong, so the hit rate covers decided calls only and flats are shown separately. <b>Treat anything under 20 decided calls as a sample rather than a result</b>, and give it a few weeks before drawing conclusions. The purpose is subtraction: sources scoring near 50 percent are costing you attention and can be switched off, and knowing which those are is worth more than any additional signal.',
