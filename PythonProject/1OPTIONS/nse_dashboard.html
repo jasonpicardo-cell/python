@@ -1907,6 +1907,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                  chartBody's innerHTML is replaced on every render and anything
                  inside it is destroyed several times a second. -->
             <div id="rsiPaneBody" style="padding:0 6px 4px;"></div>
+            <!-- Announced-alert tally. Sits under the chart because it is a
+                 read on the SESSION rather than on any one signal. -->
+            <div id="alertTally" style="margin:2px 6px 6px;padding:5px 8px;border:1px solid rgba(212,175,55,0.35);border-radius:6px;background:rgba(212,175,55,0.06);"></div>
           </div>
 
           <!-- ── F&O strength ranking ────────────────────────────────── -->
@@ -4198,7 +4201,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // entries were untagged, so a NIFTY touch and a BANKNIFTY touch looked
     // identical in the list and could not be filtered afterwards
     _alertHistory.unshift({ time: t, label, price, polarity, sym: sym || state.symbol || '' });
-    if (_alertHistory.length > 30) _alertHistory.pop();
+    // Merge with whatever is stored before trimming. Two tabs each hold their
+    // own copy of this list, and writing an in-memory copy back means the
+    // second tab's write erases entries the first one recorded - the same
+    // clobbering the tally had. Merging keeps both, de-duplicated on the
+    // time-and-label pair, which is what a shared record needs.
+    try {
+      const stored = JSON.parse(localStorage.getItem('nse_alert_log_v1') || '[]');
+      if (Array.isArray(stored) && stored.length) {
+        const seen = new Set();
+        const merged = [..._alertHistory, ...stored].filter(e => {
+          const k = `${e.time}|${e.label}|${e.sym || ''}`;
+          if (seen.has(k)) return false;
+          seen.add(k); return true;
+        });
+        merged.sort((a, b) => String(b.time).localeCompare(String(a.time)));
+        _alertHistory.splice(0, _alertHistory.length, ...merged);
+      }
+    } catch (_) {}
+    if (_alertHistory.length > 30) _alertHistory.length = 30;
     _renderAlertHistory();
     _saveAlertLog();   // persist to localStorage
   }
@@ -14604,6 +14625,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function _voiceEnqueue(text) {
+    // Counted here because every spoken alert passes through this one point,
+    // so the tally cannot drift out of step with what was actually announced.
+    try { _tallyCount(text); } catch (_) {}
     const item = { text, t: Date.now(), topic: _voiceTopic(text), prio: _voicePriority(text) };
     if (item.topic) {
       for (let k = _voiceQ.length - 1; k >= 0; k--) {
@@ -17588,6 +17612,164 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div class="oc-sub" style="margin-top:3px;">Everything else here is computed from <b>today alone</b>, so it cannot tell whether an intraday move continues the larger trend or fights it — and those are the same chart intraday while being very different trades. A long inside a five-day downtrend is a counter-trend scalp whether or not anyone calls it one, and it needs a tighter stop and a faster exit than the identical setup with the trend. <b>This is deliberately kept out of the Trend Engine.</b> Higher-timeframe bias belongs to sizing and holding time, not to the intraday score — folding it in would let a week-old trend quietly outvote what is happening right now. Daily efficiency uses the same net-over-gross measure as the intraday grind detector, so a high reading means the daily move travelled <b>directly</b>, not merely far.</div>`;
   }
 
+  // ══ BULLISH / BEARISH ALERT TALLY ═════════════════════════════════
+  // A running count of what has actually been ANNOUNCED, not of what the
+  // engines computed. Two reasons that distinction matters: alerts are
+  // governed and deduplicated, so the spoken set is smaller than the detected
+  // set, and it is the spoken set that shaped your impression of the session.
+  //
+  // It answers a question no panel does: has the day been telling you one
+  // thing all along, or have you been hearing both sides? Fourteen bullish
+  // against thirteen bearish is a market with no opinion, and it is very easy
+  // to sit through that and remember only the alerts that agreed with the
+  // position you had on.
+  //
+  // Counts reset at the session open, because a tally spanning days answers
+  // nothing about today.
+  // Persisted, because the count is a record of the SESSION rather than of
+  // this page load. A browser refresh or a server restart mid-morning is a
+  // routine event - losing the tally to one would make the number quietly
+  // wrong for the rest of the day, and a counter you cannot trust is worse
+  // than none. Stored per IST trading day, so it starts fresh at the open
+  // without any reset step.
+  const _TALLY_KEY = 'alertTallyV1';
+
+  function _tallyDayKey() {
+    const g = new Date();
+    const ist = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+    return `${ist.getFullYear()}-${ist.getMonth() + 1}-${ist.getDate()}`;
+  }
+
+  function _tallyLoad() {
+    const day = _tallyDayKey();
+    try {
+      const raw = JSON.parse(localStorage.getItem(_TALLY_KEY) || 'null');
+      // Only today's counts are restored. A tally carried over from yesterday
+      // would look current and answer nothing about this session.
+      if (raw && raw.day === day) return { bull: raw.bull | 0, bear: raw.bear | 0,
+                                           neutral: raw.neutral | 0, day };
+    } catch (_) {}
+    return { bull: 0, bear: 0, neutral: 0, day };
+  }
+
+  function _tallySave() {
+    try { localStorage.setItem(_TALLY_KEY, JSON.stringify(_tally)); } catch (_) {}
+  }
+
+  // ── multi-tab safety ──────────────────────────────────────────────
+  // Two tabs of the same dashboard each run their own detection engines, so
+  // without this they cause two distinct faults:
+  //
+  //   DOUBLE COUNTING  both tabs count the same alert, and the tally doubles.
+  //   CLOBBERING       each holds its own in-memory copy and writes the whole
+  //     object back, so a tab that loaded when the count was 3 will overwrite
+  //     another tab's 5 with 4. Counts vanish silently, which is worse than
+  //     doubling because nothing looks wrong.
+  //
+  // Both are fixed by treating storage as the single source of truth: every
+  // increment is a read-modify-write against what is stored right now, and a
+  // short list of recently counted alerts means the second tab to see the
+  // same alert skips it.
+  const _TALLY_SEEN_KEY = 'alertTallySeenV1';
+  const _TALLY_SEEN_MS = 20000;
+
+  function _tallyAlreadyCounted(text) {
+    // signature is the alert text itself: the same alert announced by two
+    // tabs is character-identical, while two genuine alerts of the same type
+    // differ in their strike, level or percentage
+    const sig = String(text).slice(0, 90);
+    const now = Date.now();
+    let seen = [];
+    try { seen = JSON.parse(localStorage.getItem(_TALLY_SEEN_KEY) || '[]'); } catch (_) {}
+    seen = seen.filter(e => now - e.t < _TALLY_SEEN_MS);
+    if (seen.some(e => e.s === sig)) {
+      try { localStorage.setItem(_TALLY_SEEN_KEY, JSON.stringify(seen)); } catch (_) {}
+      return true;
+    }
+    seen.push({ s: sig, t: now });
+    try { localStorage.setItem(_TALLY_SEEN_KEY, JSON.stringify(seen.slice(-40))); } catch (_) {}
+    return false;
+  }
+
+  const _tally = _tallyLoad();
+
+  // Classify from the spoken text, which is where the bias word already is.
+  function _tallyCount(text) {
+    const t = String(text || '');
+    const day = _tallyDayKey();
+    // another tab may have counted this same alert a moment ago
+    if (_tallyAlreadyCounted(t)) return;
+    // Re-read before incrementing. Using the in-memory copy is what loses
+    // counts when a second tab is open.
+    const cur = _tallyLoad();
+    _tally.bull = cur.bull; _tally.bear = cur.bear; _tally.neutral = cur.neutral;
+    _tally.day = cur.day;
+    if (_tally.day !== day) {
+      // new trading day: start clean rather than carrying yesterday forward
+      _tally.bull = _tally.bear = _tally.neutral = 0; _tally.day = day; _tallySave();
+    }
+    // CAUTION alerts are advice about risk on an existing position, not a new
+    // directional call, so they are counted as neither side.
+    if (/^CAUTION|NO DIRECTION|RISK WARNING|STRETCHED/i.test(t)) _tally.neutral++;
+    else if (/\bBULLISH\b/i.test(t)) _tally.bull++;
+    else if (/\bBEARISH\b/i.test(t)) _tally.bear++;
+    else _tally.neutral++;
+    _tallySave();
+    renderTally();
+  }
+
+  function renderTally() {
+    const box = document.getElementById('alertTally');
+    if (!box) return;
+    const { bull, bear, neutral } = _tally;
+    const tot = bull + bear;
+    const lean = !tot ? 0 : (bull - bear) / tot;
+    const verdict = !tot ? 'no directional alerts yet'
+      : Math.abs(lean) < 0.2 ? 'both sides — the day has no clear opinion'
+      : lean > 0 ? `leaning bullish ${(lean * 100).toFixed(0)}%`
+      : `leaning bearish ${(Math.abs(lean) * 100).toFixed(0)}%`;
+    const barW = tot ? (bull / tot * 100) : 50;
+    box.innerHTML = `
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+        <span style="display:inline-flex;align-items:baseline;gap:5px;">
+          <span style="font-size:9px;color:var(--muted,#789);text-transform:uppercase;letter-spacing:.5px;">Bullish</span>
+          <b style="font-size:17px;color:var(--pos,#26a69a);">${bull}</b>
+        </span>
+        <span style="display:inline-flex;align-items:baseline;gap:5px;">
+          <span style="font-size:9px;color:var(--muted,#789);text-transform:uppercase;letter-spacing:.5px;">Bearish</span>
+          <b style="font-size:17px;color:var(--neg,#ef5350);">${bear}</b>
+        </span>
+        <span style="flex:1;min-width:120px;max-width:260px;height:9px;background:rgba(239,83,80,0.35);border-radius:5px;overflow:hidden;">
+          <span style="display:block;height:100%;width:${barW.toFixed(0)}%;background:rgba(38,166,154,0.85);"></span>
+        </span>
+        <span style="font-size:10px;color:${Math.abs(lean) < 0.2 ? 'var(--gold,#d4af37)' : 'var(--muted,#789)'};">${escapeHtml(verdict)}</span>
+        ${neutral ? `<span style="font-size:9px;color:var(--muted,#789);">${neutral} non-directional</span>` : ''}
+        <a href="#" id="tallyReset" style="font-size:9px;color:var(--muted,#789);text-decoration:underline;">reset</a>
+      </div>`;
+    const r = document.getElementById('tallyReset');
+    if (r && !r._wired) {
+      r._wired = true;
+      r.addEventListener('click', ev => {
+        ev.preventDefault();
+        _tally.bull = _tally.bear = _tally.neutral = 0;
+        _tallySave();
+        renderTally();
+      });
+    }
+  }
+
+  // A tab that is not the one counting still shows the current numbers: the
+  // storage event fires in every OTHER tab when one of them writes.
+  window.addEventListener('storage', ev => {
+    if (ev.key !== _TALLY_KEY) return;
+    try {
+      const cur = _tallyLoad();
+      _tally.bull = cur.bull; _tally.bear = cur.bear;
+      _tally.neutral = cur.neutral; _tally.day = cur.day;
+      renderTally();
+    } catch (_) {}
+  });
+
   // ══ TREND MATURITY ════════════════════════════════════════════════
   // Every other trend measure here answers "is there a trend?". None answers
   // "how far through it am I?" - and a trend twenty minutes old that has
@@ -18515,8 +18697,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const open = _ctxSessionStart();
       // persist the COARSE version only: it is for surviving a refresh, not
       // for storing every tick, and a 5-second grid over a session is small
-      const slim = _ctxHist.filter((p, i, a) =>
+      let slim = _ctxHist.filter((p, i, a) =>
         i === 0 || p.ts - a[i - 1].ts >= _CTX_COARSE_MS || i === a.length - 1);
+      // Merge with the stored series instead of replacing it. A second tab
+      // opened at lunchtime holds only the afternoon, and writing that over a
+      // full morning would silently truncate the session for every tab.
+      // Points are keyed on their timestamp, so the union is correct however
+      // many tabs contribute.
+      try {
+        const prev = JSON.parse(localStorage.getItem(_CTX_KEY) || 'null');
+        if (prev && prev.d === new Date(open).toDateString() &&
+            prev.sym === state.symbol && Array.isArray(prev.pts)) {
+          const byTs = new Map();
+          for (const p of prev.pts) byTs.set(p.ts, p);
+          for (const p of slim) byTs.set(p.ts, p);
+          slim = [...byTs.values()].filter(p => p.ts >= open).sort((a, b) => a.ts - b.ts);
+        }
+      } catch (_) {}
       localStorage.setItem(_CTX_KEY, JSON.stringify({
         d: new Date(open).toDateString(), sym: state.symbol, pts: slim,
       }));
@@ -22253,6 +22450,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     step(_csrcWire, 'csrcWire');
     step(_emaxWire, 'emaxWire');
     step(_pxmaWire, 'pxmaWire');
+    // paint the tally at 0 straight away, so an empty counter is visibly
+    // a counter rather than a gap where one should be
+    step(renderTally, 'renderTally');
     step(_leadWire, 'leadWire');
     step(_trendWire, 'trendWire');
     step(_lvlVoiceWire, 'lvlVoiceWire');
@@ -22534,6 +22734,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       'ctxHistV1',
                       // measured outcomes: the only evidence about what works
                       'signalScoreV1',
+                      // today's announced-alert counts: a record, not a setting
+                      'alertTallyV1',
                       'nse_checklist_v1', 'regimeHistory', 'lastBackupTs',
                       // connection detail, not a preference: clearing it would
                       // point the dashboard at nothing and look like a crash
