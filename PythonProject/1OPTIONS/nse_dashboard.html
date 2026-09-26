@@ -1874,6 +1874,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
                 <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
+                <label title="Fibonacci retracements and 127.2/161.8 projections measured from the 09:15-09:20 body range — the same range as the opening-range box, so the two agree."><input type="checkbox" id="chk_orbFib"> Fib</label>
                 <select id="chartPivotType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Pivot formula drawn on the chart (independent of the Pivot Levels panel)">
                   <option value="classic">Classic</option>
                   <option value="fibonacci">Fibonacci</option>
@@ -16102,8 +16103,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
@@ -21727,6 +21728,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // It grows live from 09:15 and freezes when the 09:20 candle completes,
     // so the box is usable while it forms rather than appearing after the
     // fact. It then persists for the rest of the session.
+    // The opening-range block below redeclares lo and hi as the RANGE's own
+    // low and high, shadowing the chart's visible price bounds. Capture those
+    // bounds here under different names so anything inside can still clip to
+    // what is on screen.
+    const _visLo = lo, _visHi = hi;
     let orbSvg = '';
     if (!_chart.optionMeta) {
       try {
@@ -21764,6 +21770,54 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
             orbSvg += `<line x1="${x1.toFixed(1)}" y1="${yTop.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yTop.toFixed(1)}" stroke="rgba(212,175,55,0.30)" stroke-width="0.8" stroke-dasharray="2,5"/>`;
             orbSvg += `<line x1="${x1.toFixed(1)}" y1="${yBot.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yBot.toFixed(1)}" stroke="rgba(212,175,55,0.30)" stroke-width="0.8" stroke-dasharray="2,5"/>`;
             orbSvg += `<text x="${(x0 + 2).toFixed(1)}" y="${(yTop - 2.5).toFixed(1)}" style="font-size:8px;fill:rgba(212,175,55,0.8);">9:15-9:20 ${Math.round(hi - lo)}pt${done ? '' : ' …'}</text>`;
+
+            // ── Fibonacci extensions off the opening range ─────────
+            // TWO sets, both anchored on the full range INCLUDING the wicks:
+            // for projections the extreme matters, because that is the price
+            // the market actually reached and the distance being projected.
+            // (The box itself stays body-only — it marks where the five
+            // minutes closed out, which is a different question.)
+            //
+            //   DOWN set  0 at the high, 1 at the low, projecting lower
+            //   UP set    0 at the low,  1 at the high, projecting higher
+            //
+            // Only levels at or beyond 1.0, because these are TARGETS rather
+            // than retracements: 1.0 is the range fully travelled, and the
+            // rest are multiples of it. Drawn thick so they separate from the
+            // pivots, EOR and EOS lines at a glance, and labelled on the LEFT
+            // because the right margin already carries price, the γ lines and
+            // the EMA names.
+            if (_chart.show.orbFib !== false && done) {
+              const wickHi = Math.max(...inOr.map(k => k.h));
+              const wickLo = Math.min(...inOr.map(k => k.l));
+              const span = wickHi - wickLo;
+              const RATIOS = [1, 1.618, 2.618, 3.618, 4.618];
+              // Hide levels price cannot realistically reach. A ratio is a
+              // multiple of the OPENING RANGE, so on a wide-range morning
+              // 3.618 can land beyond two sigma of the whole day - a line
+              // that will not be touched, drawn thicker than anything else on
+              // the chart. The cutoff is in sigma of the day's expected move
+              // rather than in points, so it adapts to the instrument and to
+              // the day: on a narrow range all five levels show, on a wide
+              // one only the reachable ones do.
+              const _dSig = (state.lastData?.underlying_value || 0) *
+                            ((state.lastData?.atm_iv || 12) / 100) * Math.sqrt(_volT(1));
+              const MAX_SIGMA = 1.5;
+              const reachable = r => !(_dSig > 0) || (span * r) / _dSig <= MAX_SIGMA;
+              const fline = (v, lab, col) => {
+                if (!(span > 0) || v < _visLo || v > _visHi) return '';
+                return `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y(v).toFixed(1)}"
+                    stroke="${col}" stroke-width="2.6" opacity="0.75"/>
+                  <text x="${(padL + 3)}" y="${(y(v) - 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${lab} ${fmtInt(Math.round(v))}</text>`;
+              };
+              for (const r of RATIOS) {
+                if (!reachable(r)) continue;
+                // down set: measured from the high, travelling lower
+                orbSvg += fline(wickHi - span * r, `▼${r}`, '#ef5350');
+                // up set: measured from the low, travelling higher
+                orbSvg += fline(wickLo + span * r, `▲${r}`, '#26a69a');
+              }
+            }
           }
         }
       } catch (_) {}
@@ -22817,7 +22871,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       el.checked = !!_chart.show[k];
