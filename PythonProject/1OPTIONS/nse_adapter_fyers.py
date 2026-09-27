@@ -826,6 +826,11 @@ def _lot_size(symbol: str) -> int:
 # ── historical candles: real OHLC with VOLUME ─────────────────────────
 _history_cache: Dict[tuple, Any] = {}
 _history_lock = threading.Lock()
+# Keys currently being fetched, so concurrent callers wait on the one call in
+# flight rather than each starting their own. The chain path has had this from
+# the start; history did not, and the gap only showed once a request became
+# slow enough for the next poll to arrive before it finished.
+_history_inflight: Dict[tuple, threading.Event] = {}
 _rest_count = {"n": 0, "day": ""}
 
 
@@ -846,7 +851,8 @@ def rest_usage() -> Dict[str, Any]:
         return dict(_rest_count)
 
 
-def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dict[str, Any]]:
+def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1,
+                  on_date: str = None) -> List[Dict[str, Any]]:
     """Intraday candles from Fyers history.
 
     This is the piece NSE cannot give: genuine OHLC with TRADED VOLUME, rather
@@ -865,12 +871,37 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dic
     # per-second limit even while the daily total looked comfortable.
     # Completed candles never change, so re-fetching them is pure waste; the
     # live edge of the chart comes from the WebSocket, not from here.
-    key = (ysym, interval_min, days)
-    ttl = float(os.environ.get("FYERS_HISTORY_TTL", "30"))
+    # on_date is part of the cache key: a past session is a different series
+    # from today's, and sharing a key would serve one for the other.
+    key = (ysym, interval_min, days, on_date or "")
+    # A completed past session never changes, so it can be cached for the
+    # whole run rather than for thirty seconds. Today's data still needs the
+    # short TTL because its last candle is still forming.
+    ttl = 86400.0 if on_date else float(os.environ.get("FYERS_HISTORY_TTL", "30"))
+    # ── cache, then coalesce ──────────────────────────────────────────
+    # A cold history call can take many seconds. The chart polls every five,
+    # so without coalescing each poll started ANOTHER call for the same date:
+    # threads accumulated, the Fyers per-minute history limit tripped, and the
+    # server stopped answering anything at all. One caller fetches; the rest
+    # wait on its result.
+    waiter = None
     with _history_lock:
+        if len(_history_cache) > 40:
+            _history_cache.clear()
         hit = _history_cache.get(key)
         if hit and time.time() - hit[0] < ttl:
             return hit[1]
+        ev = _history_inflight.get(key)
+        if ev is not None:
+            waiter = ev
+        else:
+            _history_inflight[key] = threading.Event()
+    if waiter is not None:
+        # someone else is already fetching this exact series
+        waiter.wait(timeout=30)
+        with _history_lock:
+            hit = _history_cache.get(key)
+        return hit[1] if hit else []
     res = {1: "1", 3: "3", 5: "5", 15: "15", 30: "30", 60: "60"}.get(interval_min, "1")
     # Dates must be IST, not the server's local timezone - a machine running
     # in UTC would otherwise ask for the wrong day either side of midnight.
@@ -878,13 +909,21 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dic
         g = time.gmtime(time.time() + 5 * 3600 + 1800 - offset_days * 86400)
         return f"{g.tm_year:04d}-{g.tm_mon:02d}-{g.tm_mday:02d}"
 
-    today = _ist_date(0)
+    today = on_date or _ist_date(0)
     # Ask for a couple of days so a holiday or a weekend still returns the last
     # session, then filter to the day we actually want. Requesting only today
     # returns nothing before the open, and requesting a range without filtering
     # drew YESTERDAY'S candles alongside today's - which is what this fixes.
-    frm = _ist_date(max(1, days))
-    want_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday
+    # For an explicit date ask for that day only; the +/- day padding exists
+    # to survive weekends when asking for "today", and here it would drag in
+    # the neighbouring session.
+    frm = on_date or _ist_date(max(1, days))
+    if on_date:
+        _y, _m, _d = (int(x) for x in on_date.split("-"))
+        # midday avoids any timezone rounding landing on the wrong day
+        want_yday = time.gmtime(time.mktime((_y, _m, _d, 12, 0, 0, 0, 0, 0))).tm_yday
+    else:
+        want_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday
     try:
         r = _count_rest("history") or _client.history({
             "symbol": ysym, "resolution": res, "date_format": "1",
@@ -911,12 +950,31 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1) -> List[Dic
         if dropped:
             print(f"[fyers] history: kept {len(out)} of today's candles, "
                   f"dropped {dropped} from other sessions or outside market hours")
+        # Never cache an EMPTY result for a day. A transient failure - a rate
+        # limit, a dropped connection, a token that expired mid-session -
+        # would otherwise be remembered for twenty-four hours, and that date
+        # would stay blank no matter how many times it was reselected. Empty
+        # results get the short TTL so the next attempt actually retries.
         with _history_lock:
-            _history_cache[key] = (time.time(), out)
+            _history_cache[key] = (time.time() if out else 0.0, out)
+            _ev = _history_inflight.pop(key, None)
+        if _ev:
+            _ev.set()
+        if on_date:
+            print(f"[fyers] history {on_date}: {len(out)} candle(s)"
+                  f"{' — EMPTY, will retry' if not out else ''}")
         return out
     except Exception as e:  # noqa: BLE001
         print(f"[fyers] history failed: {e}")
         return []
+    finally:
+        # Waiters must be released even when the fetch raised, or every other
+        # caller blocks for the full timeout and the pile-up this was meant to
+        # prevent happens anyway - just more slowly.
+        with _history_lock:
+            _ev2 = _history_inflight.pop(key, None)
+        if _ev2:
+            _ev2.set()
 
 
 def constituent_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:

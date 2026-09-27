@@ -4590,6 +4590,43 @@ class Handler(BaseHTTPRequestHandler):
                 interval = max(1, min(60, int(qs.get("interval", ["5"])[0])))
             except Exception:
                 interval = 5
+            # ── historical mode ───────────────────────────────────────
+            # An explicit date short-circuits every live source: NSE's
+            # intraday feed and the tick archive only hold today, so asking
+            # them for a past session would silently return today's candles
+            # under a historical label - worse than an empty chart.
+            on_date = (qs.get("date", [""])[0] or "").strip()
+            if on_date:
+                import re as _re2
+                if not _re2.match(r"^\d{4}-\d{2}-\d{2}$", on_date):
+                    self._send_json({"error": "date must be YYYY-MM-DD"}, status=400)
+                    return
+                try:
+                    import nse_adapter_fyers as _fyh
+                    print(f"[history] {symbol} {on_date} interval={interval}m requested")
+                    rows = _fyh.fetch_candles(symbol, interval, 1, on_date=on_date)
+                    print(f"[history] {symbol} {on_date}: returned {len(rows)} candle(s)")
+                except Exception as e:  # noqa: BLE001
+                    self._send_json({"candles": [], "error": f"history fetch failed: {e}"})
+                    return
+                if not rows:
+                    self._send_json({"candles": [], "source": f"fyers-history {on_date}",
+                                     "error": f"No candles for {on_date}. "
+                                              f"A market holiday, a weekend, or beyond what "
+                                              f"Fyers will serve at this resolution."})
+                    return
+                # coverage is a "HH:MM-HH:MM" STRING on the live path and the
+                # client splits it. Returning an object here threw
+                # `coverage.split is not a function` and killed the whole
+                # chart render - the shape has to match, not merely exist.
+                def _hm(ts):
+                    g = time.gmtime(int(ts) + 5 * 3600 + 1800)
+                    return f"{g.tm_hour:02d}:{g.tm_min:02d}"
+                cov = f"{_hm(rows[0]['t'])}-{_hm(rows[-1]['t'])}" if rows else ""
+                self._send_json({"candles": rows, "source": f"fyers-history {on_date}",
+                                 "historical": True, "date": on_date,
+                                 "coverage": cov, "gaps": []})
+                return
             idx_names = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
                          "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
 

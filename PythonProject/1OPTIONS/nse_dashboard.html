@@ -1874,6 +1874,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
                 <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
+                <span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.05);">
+                  <select id="chartDataMode" class="ohlc-inp" style="font-size:9px;padding:1px 3px;" title="Live uses today's session. Historical replays a past date's 1-minute candles through the same chart and indicators.">
+                    <option value="live">Live</option>
+                    <option value="hist">Historical</option>
+                  </select>
+                  <input type="date" id="chartHistDate" class="ohlc-inp" style="font-size:9px;padding:1px 3px;display:none;" title="Pick a past trading day">
+                </span>
                 <label title="Fibonacci retracements and 127.2/161.8 projections measured from the 09:15-09:20 body range — the same range as the opening-range box, so the two agree."><input type="checkbox" id="chk_orbFib"> Fib</label>
                 <select id="chartPivotType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Pivot formula drawn on the chart (independent of the Pivot Levels panel)">
                   <option value="classic">Classic</option>
@@ -17875,6 +17882,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _maturityCheck(d) {
     const m = _trendMaturity(d);
     renderMaturity(m);
+    // Candle-derived, so in historical mode this would describe a past
+    // session while sounding exactly like a live alert. The panel still
+    // renders - reading a past day is the point - but nothing is announced
+    // or scored from it.
+    if (typeof _isHistorical === 'function' && _isHistorical()) return;
     if (!m) return;
     // announce only on a CHANGE of state, and never the first observation of
     // the session - "trend is forming" at 09:20 tells you nothing
@@ -17995,6 +18007,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!cfg.on && !_enableAll()) return;
     const g = _grindRead();
     renderGrind(g);
+    // Candle-derived, so in historical mode this would describe a past
+    // session while sounding exactly like a live alert. The panel still
+    // renders - reading a past day is the point - but nothing is announced
+    // or scored from it.
+    if (typeof _isHistorical === 'function' && _isHistorical()) return;
     if (!g || !g.qualifies) return;
     const now = Date.now();
     // re-announce only on a direction change or after the cooldown: a grind
@@ -18176,6 +18193,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Called wherever a directional reading is produced. Cheap and silent.
   function _scoreRecord(source, dir, spot, sym, detail) {
     if (!spot || !dir) return;
+    // A claim made from a past session would be scored against TODAY's price
+    // fifteen minutes later - noise recorded as evidence, in the one store
+    // whose whole value is that it contains only real outcomes.
+    if (typeof _isHistorical === 'function' && _isHistorical()) return;
     const d = dir === 'bullish' || dir === 1 ? 1 : (dir === 'bearish' || dir === -1 ? -1 : 0);
     if (!d) return;                       // neutral readings make no claim
     const s = _scoreLoad();
@@ -21025,6 +21046,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _pxmaState = { side: {}, firedAt: {}, log: [] };
 
   function _priceMaCheck() {
+    // Candle-derived, so in historical mode this would describe a past
+    // session while sounding exactly like a live alert. The panel still
+    // renders - reading a past day is the point - but nothing is announced
+    // or scored from it.
+    if (typeof _isHistorical === 'function' && _isHistorical()) return;
     const cfg = _pxmaCfg();
     const all = _enableAll();
     if (!cfg.on && !all) return;
@@ -21148,6 +21174,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   ];
   let _emaxFired = {};        // pairKey|dir -> candle timestamp it fired on
   function _emaCrossCheck() {
+    // Candle-derived, so in historical mode this would describe a past
+    // session while sounding exactly like a live alert. The panel still
+    // renders - reading a past day is the point - but nothing is announced
+    // or scored from it.
+    if (typeof _isHistorical === 'function' && _isHistorical()) return;
     const cfg = _emaxCfg();
     // "Enable ALL alert types" covers this like every other alert TYPE:
     // when it is on, crossovers announce on every pair regardless of the
@@ -21333,6 +21364,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _chartLiveExtend(spot) {
     const cs = _chart.candles;
     if (!cs.length || !spot || !isFinite(spot)) return false;
+    // Never extend a historical series with today's price. The last candle of
+    // a past session would grow toward the current spot, producing a bar that
+    // never existed — and it would look like ordinary live movement.
+    if (typeof _isHistorical === 'function' && _isHistorical()) return false;
     const bucket = _chart.interval * 60;
     const nowSec = Date.now() / 1000;
     const curT = Math.floor(nowSec / bucket) * bucket;
@@ -21526,10 +21561,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!silent && !_chart.candles.length) box.innerHTML = '<div class="movers-loading">Loading candles…</div>';
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
-      const r = await fetch(`${base}/api/intraday-candles?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&interval=${_chart.interval}`);
+      const r = await fetch(`${base}/api/intraday-candles?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}&interval=${_chart.interval}` +
+        (window._histDate ? `&date=${encodeURIComponent(window._histDate)}` : ''));
       const j = await r.json();
       if (j.error) { box.innerHTML = `<div class="movers-loading">${escapeHtml(j.error)}</div>`; _chart.candles = []; return; }
-      _chart.candles = _todaySessionOnly(j.candles || []); _chart.src = j.source; _chart.coverage = j.coverage || null;
+      // _todaySessionOnly exists to stop other days being drawn on today's
+      // axis. In historical mode every candle IS another day, so applying it
+      // would drop the entire series - the filter is for live only.
+      _chart.candles = window._histDate ? _dedupeSortCandles(j.candles || [])
+                                 : _todaySessionOnly(j.candles || []);
+      _chart.src = j.source; _chart.coverage = j.coverage || null;
       _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
       _chart.hasVolume = !!j.has_volume;
       try { _emaCrossCheck(); } catch (_) {}
@@ -22097,7 +22138,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
           return `<span style="color:${full ? 'var(--pos,#26a69a)' : 'var(--gold,#d4af37)'};" title="Minutes recorded versus minutes elapsed in the session. The reconciler re-checks every 5 minutes, fills holes from NSE, and upgrades any Yahoo-filled minute to NSE data once the authoritative feed recovers.">${full ? '✓' : '⚠'} ${h.minutes}/${h.expected} min${h.provisional ? ` · ${h.provisional} provisional` : ''}</span>`;
         })()}
         ${_chart.gapMins ? `<span style="color:var(--gold,#d4af37);" title="Shaded bands mark minutes with no recorded data — the server was not running then. NSE's own feed fills these when reachable; press ⤢ fill from 9:15 to retry.">⚠ ${_chart.gapMins} min not recorded</span>` : ''}
-        ${!_chart.optionMeta && _chart.coverage && !/^09:1[0-9]/.test(_chart.coverage) ? `<span style="color:var(--gold,#d4af37);cursor:pointer;" id="chartFillHint" title="The chart does not reach back to the open — click to pull the morning from NSE's own feed">⤢ starts ${escapeHtml(_chart.coverage.split('-')[0])} — fill from 9:15</span>` : ''}
+        ${!_chart.optionMeta && _chart.coverage && !/^09:1[0-9]/.test(_chart.coverage) ? `<span style="color:var(--gold,#d4af37);cursor:pointer;" id="chartFillHint" title="The chart does not reach back to the open — click to pull the morning from NSE's own feed">⤢ starts ${escapeHtml(String(_chart.coverage).split('-')[0])} — fill from 9:15</span>` : ''}
         <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
         ${_pvsraOn() && _chart.hasVolume ? `<span style="display:inline-flex;gap:7px;align-items:center;" title="PVSRA: candle colour by volume against the 10-bar average. Ordinary bars are dimmed so the exceptional ones stand out; climax bars carry a triangle above the wick.">
           <b style="color:#00E676;">▼200%</b><b style="color:#FF1744;">▼</b>
@@ -22948,6 +22989,44 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
           showToast?.('PVSRA needs traded volume — switch DATA_SOURCE to fyers. NSE gives one spot sample a minute with no volume.');
         renderPriceChart();
       });
+    }
+    // ── live / historical switch ──────────────────────────────────
+    const modeSel = document.getElementById('chartDataMode');
+    const histInp = document.getElementById('chartHistDate');
+    if (modeSel && histInp) {
+      // default the picker to the most recent weekday, so the common case is
+      // one click rather than typing a date
+      const d0 = new Date();
+      do { d0.setDate(d0.getDate() - 1); } while (d0.getDay() === 0 || d0.getDay() === 6);
+      histInp.value = d0.toISOString().slice(0, 10);
+      histInp.max = new Date().toISOString().slice(0, 10);
+      const apply = () => {
+        const hist = modeSel.value === 'hist';
+        // Logged because a silent no-op here is indistinguishable from a
+        // server that never answered, and the two need different fixes.
+        console.log(`[chart] mode=${hist ? 'historical ' + histInp.value : 'live'}`);
+        // The diagnosis panel blocks fetchCandles entirely; leaving it open
+        // makes every subsequent date change appear to do nothing.
+        _chart.diagOpen = false;
+        histInp.style.display = hist ? '' : 'none';
+        window._histDate = hist ? histInp.value : '';
+        // A past session has no live ticks and no current option chain, so
+        // streaming must stop: leaving it on would let today's spot extend a
+        // candle belonging to another day.
+        _chart.candles = []; _chart.liveBar = false;
+        _chart.yZoom = 1; _chart.yCenter = null;
+        document.getElementById('histBadge')?.remove();
+        if (hist) {
+          const badge = document.createElement('span');
+          badge.id = 'histBadge';
+          badge.textContent = `HISTORICAL ${window._histDate}`;
+          badge.style.cssText = 'margin-left:8px;padding:1px 7px;border-radius:4px;background:rgba(212,175,55,0.22);color:var(--gold,#d4af37);font-size:9px;font-weight:700;letter-spacing:.4px;';
+          modeSel.parentElement?.appendChild(badge);
+        }
+        fetchCandles();
+      };
+      modeSel.addEventListener('change', apply);
+      histInp.addEventListener('change', apply);
     }
     document.getElementById('chartFillBtn')?.addEventListener('click', _chartFillSession);
     document.getElementById('chartDiagBtn')?.addEventListener('click', _chartDiagnose);
@@ -29454,6 +29533,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // context-chart code, and relying on block evaluation order for a shared
   // flag is the kind of thing that works until someone reorders the file.
   window._ctxRaf = window._ctxRaf || 0;
+
+  // Historical replay. Empty string means live. Held in memory only and never
+  // persisted, so a refresh always returns to live - a dashboard that quietly
+  // reopened on last Tuesday's data would be a dangerous thing to leave open.
+  //
+  // On window because the chart fetch and the mode switch live in a different
+  // <script> block from this one, and a const read across blocks depends on
+  // evaluation order.
+  window._histDate = window._histDate || '';
+  function _isHistorical() { return !!window._histDate; }
 
 (function() {
   // ── Help text library ────────────────────────────────────────────────────
