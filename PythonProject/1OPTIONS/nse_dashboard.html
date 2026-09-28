@@ -17620,6 +17620,103 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div class="oc-sub" style="margin-top:3px;">Everything else here is computed from <b>today alone</b>, so it cannot tell whether an intraday move continues the larger trend or fights it — and those are the same chart intraday while being very different trades. A long inside a five-day downtrend is a counter-trend scalp whether or not anyone calls it one, and it needs a tighter stop and a faster exit than the identical setup with the trend. <b>This is deliberately kept out of the Trend Engine.</b> Higher-timeframe bias belongs to sizing and holding time, not to the intraday score — folding it in would let a week-old trend quietly outvote what is happening right now. Daily efficiency uses the same net-over-gross measure as the intraday grind detector, so a high reading means the daily move travelled <b>directly</b>, not merely far.</div>`;
   }
 
+  // ══ CHART CONTEXT MENU — ADD ALERT ════════════════════════════════
+  // Right-click a price on the chart to set an alert there, the way a
+  // charting platform does. It creates a rule in the EXISTING custom-alert
+  // engine rather than a parallel store, so these alerts arm, disarm, fire
+  // and persist exactly like the ones made in the Alerts tab - a second
+  // mechanism would drift from the first and only one of them would be
+  // maintained.
+  function _chartMenuClose() {
+    document.getElementById('chartCtxMenu')?.remove();
+  }
+
+  function _chartAddAlertAt(price, kind) {
+    const rules = _caLoad();
+    const sym = state.symbol || 'NIFTY';
+    const rounded = Math.round(price * 20) / 20;      // quarter-point grid
+    rules.push({
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      type: kind,                                     // 'cross' or 'near'
+      value: rounded,
+      pts: kind === 'near' ? 10 : undefined,
+      label: `${sym} ${fmtInt(rounded)}`,
+      armed: true,
+      sym,
+      fromChart: true,
+    });
+    _caSave(rules);
+    try { _caRenderRules(); } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`🔔 alert set: spot ${kind === 'cross' ? 'crosses' : 'within 10 pts of'} ${fmtInt(rounded)}`);
+    try { renderPriceChart(); } catch (_) {}
+  }
+
+  function _chartAlertLines(y, lo, hi, W, padL, padR) {
+    // Alert lines with an inline delete, the way a charting platform does it.
+    // Removing an alert from a list on another tab means finding it there
+    // first; removing it from the line you are already looking at does not.
+    let out = '';
+    let rules = [];
+    try { rules = _caLoad(); } catch (_) { return ''; }
+    const sym = state.symbol || 'NIFTY';
+    for (const r of rules) {
+      if (!r || (r.type !== 'cross' && r.type !== 'near')) continue;
+      if (r.sym && r.sym !== sym) continue;
+      const v = Number(r.value);
+      if (!isFinite(v) || v < lo || v > hi) continue;
+      const yy = y(v);
+      const col = r.armed ? '#d4af37' : 'rgba(212,175,55,0.4)';
+      const lbl = `${r.armed ? '🔔' : '🔕'} ${fmtInt(Math.round(v))}`;
+      const w = 74;                       // label plate width
+      const x0 = W - padR - w - 16;
+      out += `<g class="alert-line" data-alert-id="${r.id}" style="cursor:pointer;">
+          <line x1="${padL}" y1="${yy.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yy.toFixed(1)}"
+            stroke="${col}" stroke-width="1.2" stroke-dasharray="7,4" opacity="0.9"/>
+          <rect x="${x0.toFixed(1)}" y="${(yy - 8).toFixed(1)}" width="${w}" height="15" rx="3"
+            fill="rgba(20,24,32,0.88)" stroke="${col}" stroke-width="0.8"/>
+          <text x="${(x0 + 5).toFixed(1)}" y="${(yy + 3.5).toFixed(1)}"
+            style="font-size:9px;fill:${col};font-weight:700;">${lbl}</text>
+          <text data-alert-del="${r.id}" x="${(x0 + w - 8).toFixed(1)}" y="${(yy + 3.5).toFixed(1)}"
+            text-anchor="middle" style="font-size:11px;fill:#ef5350;font-weight:700;cursor:pointer;">×</text>
+          <title>${r.type === 'cross' ? 'Alert when spot crosses' : 'Alert within 10 pts of'} ${fmtInt(Math.round(v))} — click × to delete, click the bell to arm or disarm</title>
+        </g>`;
+      // the bell doubles as an arm/disarm toggle, so an alert can be silenced
+      // without losing the level it marks
+      out += `<rect data-alert-arm="${r.id}" x="${(x0 + 2).toFixed(1)}" y="${(yy - 8).toFixed(1)}"
+          width="14" height="15" fill="transparent" style="cursor:pointer;"/>`;
+    }
+    return out;
+  }
+
+  // Delegated once: the chart SVG is rebuilt on every render, so handlers
+  // bound to its elements would be destroyed several times a second.
+  if (!window._alertLineWired) {
+    window._alertLineWired = true;
+    document.addEventListener('click', ev => {
+      const del = ev.target?.closest?.('[data-alert-del]');
+      const arm = ev.target?.closest?.('[data-alert-arm]');
+      if (!del && !arm) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      const id = (del || arm).getAttribute(del ? 'data-alert-del' : 'data-alert-arm');
+      const rules = _caLoad();
+      if (del) {
+        const gone = rules.find(x => x.id === id);
+        _caSave(rules.filter(x => x.id !== id));
+        if (gone && typeof showToast === 'function')
+          showToast(`alert removed at ${fmtInt(Math.round(gone.value))}`);
+      } else {
+        const r = rules.find(x => x.id === id);
+        if (r) { r.armed = !r.armed; _caSave(rules); }
+        if (r && typeof showToast === 'function')
+          showToast(`${r.armed ? '🔔 armed' : '🔕 disarmed'} ${fmtInt(Math.round(r.value))}`);
+      }
+      try { _caRenderRules(); } catch (_) {}
+      try { renderPriceChart(); } catch (_) {}
+    }, true);   // capture, so the chart's own click handlers do not swallow it
+  }
+
   // ══ BULLISH / BEARISH ALERT TALLY ═════════════════════════════════
   // A running count of what has actually been ANNOUNCED, not of what the
   // engines computed. Two reasons that distinction matters: alerts are
@@ -21832,7 +21929,18 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
               const wickHi = Math.max(...inOr.map(k => k.h));
               const wickLo = Math.min(...inOr.map(k => k.l));
               const span = wickHi - wickLo;
-              const RATIOS = [1, 1.618, 2.618, 3.618, 4.618];
+              // Two conventions exist and they diverge after 2.618: powers of
+              // phi give 4.236 and 6.854, while the additive set gives 3.618
+              // and 4.618. The first version used the additive set without
+              // saying so, and picked exactly the wrong half of the range -
+              // 3.618 and 4.618 sit at 1.1 and 1.4 sigma and are rarely
+              // reached, while 1.272 and 2.0 land at 0.38 and 0.60 sigma,
+              // squarely where price actually trades, and were missing.
+              //
+              // Five levels rather than seven: at this spacing more lines
+              // mean more coincidental touches, not more information, and
+              // the reachability filter trims further on a wide-range day.
+              const RATIOS = [1, 1.272, 1.618, 2, 2.618];
               // Hide levels price cannot realistically reach. A ratio is a
               // multiple of the OPENING RANGE, so on a wide-range morning
               // 3.618 can land beyond two sigma of the whole day - a line
@@ -21999,6 +22107,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // just above and referencing it before that point is a use-before-declare
     // that node --check accepts and the browser throws on.
     svg += ladderSvg;
+    // user alerts last, so they sit above the levels they were set against
+    try { svg += _chartAlertLines(y, lo, hi, W, padL, padR); } catch (_) {}
     // hand the pane the same x-mapping and geometry the candles used, so the
     // two align exactly rather than approximately
     _chart._rsiCtx = { cs, x, W, padL, padR, H };
@@ -22250,6 +22360,56 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         const up2 = c2.c >= c2.o;
         hv.innerHTML = `<b>${new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</b> &nbsp; O <b>${fmtInt(Math.round(c2.o))}</b> H <b>${fmtInt(Math.round(c2.h))}</b> L <b>${fmtInt(Math.round(c2.l))}</b> C <b style="color:${up2 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(c2.c))}</b> &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(val))}</span>`;
       });
+      // ── right-click: add an alert at the price under the cursor ──
+      svgEl.addEventListener('contextmenu', ev => {
+        ev.preventDefault();
+        _chartMenuClose();
+        const rct = svgEl.getBoundingClientRect();
+        const py2 = (ev.clientY - rct.top) / rct.height * H;
+        // same inverse mapping the crosshair uses, so the menu price matches
+        // what the crosshair reads at that pixel
+        const price = hi - (py2 - padT) / (H - padT - padB) * (hi - lo);
+        if (!isFinite(price)) return;
+        const menu = document.createElement('div');
+        menu.id = 'chartCtxMenu';
+        menu.style.cssText = `position:fixed;left:${ev.clientX}px;top:${ev.clientY}px;z-index:9999;` +
+          'background:var(--panel,#161b22);border:1px solid rgba(255,255,255,0.18);border-radius:6px;' +
+          'box-shadow:0 6px 20px rgba(0,0,0,0.5);padding:4px;min-width:186px;font-size:11px;';
+        const near = _caLoad().filter(r => r.sym === (state.symbol || 'NIFTY') &&
+                                           Math.abs(Number(r.value) - price) < (hi - lo) * 0.012);
+        const item = (label, fn) => {
+          const b = document.createElement('div');
+          b.textContent = label;
+          b.style.cssText = 'padding:5px 9px;cursor:pointer;border-radius:4px;white-space:nowrap;';
+          b.addEventListener('mouseenter', () => b.style.background = 'rgba(255,255,255,0.08)');
+          b.addEventListener('mouseleave', () => b.style.background = '');
+          b.addEventListener('click', () => { _chartMenuClose(); fn(); });
+          menu.appendChild(b);
+        };
+        item(`🔔 Alert when spot crosses ${fmtInt(Math.round(price))}`,
+             () => _chartAddAlertAt(price, 'cross'));
+        item(`📍 Alert within 10 pts of ${fmtInt(Math.round(price))}`,
+             () => _chartAddAlertAt(price, 'near'));
+        if (near.length) {
+          const sep = document.createElement('div');
+          sep.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:3px 0;';
+          menu.appendChild(sep);
+          for (const r of near.slice(0, 3))
+            item(`✕ Remove alert at ${fmtInt(Math.round(r.value))}`, () => {
+              _caSave(_caLoad().filter(x => x.id !== r.id));
+              try { _caRenderRules(); } catch (_) {}
+              try { renderPriceChart(); } catch (_) {}
+            });
+        }
+        document.body.appendChild(menu);
+        // one-shot dismissal, registered after this event finishes so the
+        // click that opened the menu does not immediately close it
+        setTimeout(() => {
+          const close = () => { _chartMenuClose(); document.removeEventListener('mousedown', close); };
+          document.addEventListener('mousedown', close);
+        }, 0);
+      });
+
       svgEl.addEventListener('mouseleave', () => {
         try { _mirrorCrosshair(0, false); } catch (_) {} g.style.display = 'none'; hv.textContent = ''; const t1 = document.getElementById('lvlTip'); if (t1) t1.style.display = 'none'; });
       // wheel = vertical zoom anchored at the cursor price (like TradingView's

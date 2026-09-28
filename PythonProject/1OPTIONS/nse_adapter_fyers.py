@@ -542,25 +542,12 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     # subscribe the chain plus the index itself so ticks flow for both
     if tokens:
         _subscribe(sorted(set(tokens))[:400] + [ysym, INDIA_VIX])
-        # depth only for the strikes actually traded intraday: five either side
-        near_syms = []
-        for r in strikes:
-            if abs(r["strike"] - atm) <= strike_gap * 5:
-                for p in ("ce", "pe"):
-                    fs = r.get(f"{p}_symbol")
-                    if fs:
-                        near_syms.append(fs)
-        _subscribe_depth(near_syms + [ysym])
 
     atm = min((s["strike"] for s in strikes), key=lambda k: abs(k - spot))
     atm_row = next((s for s in strikes if s["strike"] == atm), {})
     ivs = [v for v in (atm_row.get("ce_iv"), atm_row.get("pe_iv")) if v]
     atm_iv = sum(ivs) / len(ivs) if ivs else 0.0
     fut = {}
-    try:
-        fut = _futures_quote(sym, exp_epochs)
-    except Exception:
-        pass
 
     tot_ce = sum(s.get("ce_oi", 0) for s in strikes)
     tot_pe = sum(s.get("pe_oi", 0) for s in strikes)
@@ -581,6 +568,17 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         g = time.gmtime(ep + 5 * 3600 + 1800)
         return time.strftime("%d-%b-%Y", g)
     expiries = [_exp_str(x) for x in exp_epochs]
+
+    # Futures quote, moved down to here. It was called before exp_epochs was
+    # assigned, so it raised UnboundLocalError on every single call - and
+    # because the call sat inside a bare `except Exception: pass`, it failed
+    # silently and the futures basis has simply never been populated on the
+    # broker path. A swallowed exception is how a feature stays broken for
+    # months without anyone seeing an error.
+    try:
+        fut = _futures_quote(sym, exp_epochs)
+    except Exception as _fe:
+        print(f"[fyers] futures quote failed: {_fe}")
 
     def _dte_from(ep):
         """Fractional days to 15:30 IST on expiry day.
@@ -608,6 +606,25 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
 
     gaps = sorted({round(b - a) for a, b in zip(sorted(by_strike), sorted(by_strike)[1:]) if b > a})
     strike_gap = gaps[0] if gaps else 50
+
+    # ── L2 depth subscription ─────────────────────────────────────────
+    # Placed here, not up with the price subscription, because it needs BOTH
+    # atm and strike_gap and those are computed above. Referencing them
+    # earlier raised UnboundLocalError on every chain fetch, and because the
+    # adapter catches and falls back to NSE, the dashboard kept working while
+    # the broker path was dead - a failure that hides itself.
+    if _status.get("streaming") and strikes:
+        try:
+            near_syms = []
+            for r in strikes:
+                if abs(r["strike"] - atm) <= strike_gap * 5:
+                    for p in ("ce", "pe"):
+                        fs = r.get(f"{p}_symbol")
+                        if fs:
+                            near_syms.append(fs)
+            _subscribe_depth(near_syms + [ysym])
+        except Exception as _e:
+            print(f"[fyers] depth subscribe skipped: {_e}")
 
     # Support and resistance: the largest put-OI and call-OI strikes within the
     # band. The dashboard reads these as OBJECTS (support.strike), not numbers -
