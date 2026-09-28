@@ -1874,6 +1874,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
                 <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
+                <button id="addAlertBtn" class="mini-btn" style="font-size:9px;padding:1px 6px;" title="Add a price alert. Shift-click the chart (or right-click) to place one at the price under the cursor.">🔔 Alert</button>
                 <span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.05);">
                   <select id="chartDataMode" class="ohlc-inp" style="font-size:9px;padding:1px 3px;" title="Live uses today's session. Historical replays a past date's 1-minute candles through the same chart and indicators.">
                     <option value="live">Live</option>
@@ -4396,22 +4397,61 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   // FEATURE: Custom price level alerts
   // ======================================================================
-  const _customLevels = [];   // [{label, price, triggered}]
+  // Persisted. These were memory-only, so every refresh silently discarded
+  // them - and an alert you set in the morning being gone after a reload is
+  // the same failure as one that deletes itself on firing.
+  const _CL_KEY = 'customLevelsV1';
+  const _customLevels = (() => {
+    try {
+      const a = JSON.parse(localStorage.getItem(_CL_KEY) || '[]');
+      return Array.isArray(a) ? a : [];
+    } catch (_) { return []; }
+  })();   // [{label, price, triggered}]
+  function _clSave() {
+    try { localStorage.setItem(_CL_KEY, JSON.stringify(_customLevels)); } catch (_) {}
+  }
 
   function _renderCustomLevelsList() {
     const el = document.getElementById('customAlertsList');
     if (!el) return;
-    if (!_customLevels.length) { el.innerHTML = ''; return; }
-    el.innerHTML = _customLevels.map((lvl, i) =>
-      `<div class="custom-alert-item${lvl.triggered ? ' triggered' : ''}">
-        <span>${escapeHtml(lvl.label)} <b>${fmtInt(lvl.price)}</b></span>
-        <button onclick="window._removeCustomLevel(${i})" style="background:none;border:none;cursor:pointer;color:var(--neg);font-size:10px;padding:0 2px;">✕</button>
-      </div>`
-    ).join('');
+    // Chart-placed alerts are listed here too. They were only visible on the
+    // chart and in the Alerts tab, so an alert set on a strike you had since
+    // scrolled away from could not be found, let alone removed.
+    let chartRules = [];
+    try {
+      const sym = state.symbol || 'NIFTY';
+      chartRules = _caLoad().filter(r => r && (r.type === 'cross' || r.type === 'near') &&
+                                         (!r.sym || r.sym === sym));
+    } catch (_) {}
+    if (!_customLevels.length && !chartRules.length) { el.innerHTML = ''; return; }
+    el.innerHTML =
+      _customLevels.map((lvl, i) =>
+        `<div class="custom-alert-item${lvl.triggered ? ' triggered' : ''}">
+          <span>${escapeHtml(lvl.label)} <b>${fmtInt(lvl.price)}</b></span>
+          <button onclick="window._removeCustomLevel(${i})" style="background:none;border:none;cursor:pointer;color:var(--neg);font-size:10px;padding:0 2px;">✕</button>
+        </div>`
+      ).join('') +
+      chartRules.map(r =>
+        `<div class="custom-alert-item" title="${r.type === 'cross' ? 'fires when spot crosses this level' : 'fires within 10 points of this level'} — set on the chart">
+          <span>${r.armed ? '🔔' : '🔕'} ${r.type === 'cross' ? 'cross' : 'near'} <b>${fmtInt(Math.round(r.value))}</b></span>
+          <button onclick="window._removeChartAlert('${r.id}')" style="background:none;border:none;cursor:pointer;color:var(--neg);font-size:10px;padding:0 2px;">✕</button>
+        </div>`
+      ).join('');
   }
   window._removeCustomLevel = (i) => {
     _customLevels.splice(i, 1);
+    _clSave();
     _renderCustomLevelsList();
+  };
+  // Removes a chart-placed alert from this list, the chart, and the Alerts
+  // tab at once — one store, so they cannot disagree.
+  window._removeChartAlert = (id) => {
+    try {
+      _caSave(_caLoad().filter(x => x.id !== id));
+      _caRenderRules();
+      _renderCustomLevelsList();
+      renderPriceChart();
+    } catch (e) { console.warn('[alert] remove failed:', e); }
   };
   document.getElementById('addCustomAlertBtn')?.addEventListener('click', () => {
     const priceEl = document.getElementById('customAlertPrice');
@@ -4420,6 +4460,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!price) return;
     const label = labelEl?.value.trim() || `Level ${fmtInt(price)}`;
     _customLevels.push({ label, price, triggered: false });
+    _clSave();
     if (priceEl) priceEl.value = '';
     if (labelEl) labelEl.value = '';
     _renderCustomLevelsList();
@@ -10865,14 +10906,52 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _CA_KEY = 'customAlerts';
   function _caLoad() { try { const a = JSON.parse(localStorage.getItem(_CA_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (_) { return []; } }
   function _caSave(a) { try { localStorage.setItem(_CA_KEY, JSON.stringify(a)); } catch (_) {} }
-  function _caNotify(msg) {
+  // A rising two-note motif, deliberately unlike the other alert sounds:
+  // those are single tones or a falling chime, so a rising pair is
+  // identifiable without looking at the screen - which is the entire point of
+  // a price alert firing while you are watching something else.
+  function _playPriceAlertSound() {
+    try {
+      const v = (typeof _alertVolume === 'function' ? _alertVolume() : 1) * 0.34;
+      _playTone(784, 0.14, v);                      // G5
+      setTimeout(() => _playTone(1175, 0.30, v), 130);   // D6
+    } catch (_) {}
+  }
+
+  // Spoken wording for a price alert. The stored message reads
+  // "Spot crossed 23400 (23395 -> 23412)", which is fine on screen and poor
+  // aloud - brackets and arrows do not survive speech. This says the level,
+  // the direction, and where price is now, in that order, because the level
+  // is what you set and the direction is what you need.
+  function _priceAlertSpeech(msg, rule) {
+    const lvl = rule && isFinite(rule.value) ? Math.round(rule.value) : null;
+    const sym = (rule && rule.sym) || state.symbol || 'NIFTY';
+    const m = String(msg).match(/(\d[\d,.]*)\s*→\s*(\d[\d,.]*)/);
+    // The "within" message has no arrow, so the spot has to come from its own
+    // wording ("Spot 23405 within 10 pts of 23400"). Reading only the arrow
+    // form made it announce the level back instead of where price actually is.
+    const near = String(msg).match(/Spot\s+(\d[\d,.]*)/i);
+    const now = m ? m[2].replace(/,/g, '') : (near ? near[1].replace(/,/g, '') : null);
+    if (lvl == null) return msg;
+    if (/within/i.test(msg))
+      return `Price alert. ${sym} at ${Math.round(Number(now) || lvl)}, touching your level of ${lvl}.`;
+    const dir = m ? (Number(now) > Number(m[1].replace(/,/g, '')) ? 'upward' : 'downward') : null;
+    return `Price alert. ${sym} crossed ${lvl}${dir ? ` ${dir}` : ''}` +
+           `${now ? `, now ${Math.round(Number(now))}` : ''}.`;
+  }
+
+  function _caNotify(msg, rule) {
     if (typeof showToast === 'function') showToast('🔔 ' + msg);
     try { if ('Notification' in window && Notification.permission === 'granted') new Notification('1OPTIONS alert', { body: msg }); } catch (_) {}
+    // price alerts get their own sound and their own phrasing
+    const isPrice = !!rule && (rule.type === 'cross' || rule.type === 'near');
+    if (isPrice) _playPriceAlertSound();
+    const spoken = isPrice ? _priceAlertSpeech(msg, rule) : msg;
     try {
       // stream-first: one announcement across all systems; _speakOnce is the
       // standalone fallback when no server stream is connected
-      if (_streamLive) _relayAlert(`custom|${state.symbol || 'NIFTY'}|` + msg.slice(0, 60), msg, 'alert', 300);
-      else _speakOnce('alert|' + msg.slice(0, 60), msg, 300);
+      if (_streamLive) _relayAlert(`custom|${state.symbol || 'NIFTY'}|` + msg.slice(0, 60), spoken, 'alert', 300);
+      else _speakOnce('alert|' + msg.slice(0, 60), spoken, 300);
     } catch (_) {}
     const log = JSON.parse(localStorage.getItem('customAlertsFired') || '[]');
     log.push({ ts: Date.now(), msg });
@@ -10895,7 +10974,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       else if (r.type === 'cross' && prevSpot && Math.sign(prevSpot - r.value) !== Math.sign(spot - r.value) && prevSpot !== spot) { hit = true; msg = `Spot crossed ${r.label || r.value} (${fmtInt(Math.round(prevSpot))} → ${fmtInt(Math.round(spot))})`; }
       else if (r.type === 'iv_above' && (d.iv_rank ?? -1) >= r.value) { hit = true; msg = `IV rank ${d.iv_rank} ≥ ${r.value} — premium selling regime`; }
       else if (r.type === 'iv_below' && d.iv_rank !== null && d.iv_rank !== undefined && d.iv_rank <= r.value) { hit = true; msg = `IV rank ${d.iv_rank} ≤ ${r.value} — cheap options regime`; }
-      if (hit) { r.lastFired = Date.now(); dirty = true; _caNotify(msg); }
+      if (hit) { r.lastFired = Date.now(); dirty = true; _caNotify(msg, r); }
     }
     if (dirty) { _caSave(rules); _caRenderRules(); }
   }
@@ -17646,7 +17725,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       fromChart: true,
     });
     _caSave(rules);
-    try { _caRenderRules(); } catch (_) {}
+    console.log(`[alert] created ${kind} @ ${rounded}; total rules now ${rules.length}`);
+    try { _caRenderRules(); } catch (e) { console.warn('[alert] _caRenderRules failed:', e); }
     if (typeof showToast === 'function')
       showToast(`🔔 alert set: spot ${kind === 'cross' ? 'crosses' : 'within 10 pts of'} ${fmtInt(rounded)}`);
     try { renderPriceChart(); } catch (_) {}
@@ -17658,16 +17738,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // first; removing it from the line you are already looking at does not.
     let out = '';
     let rules = [];
-    try { rules = _caLoad(); } catch (_) { return ''; }
+    try { rules = _caLoad(); } catch (e) { console.warn('[alert] _caLoad failed:', e); return ''; }
     const sym = state.symbol || 'NIFTY';
+    if (rules.length && !window._alertDrawLogged) {
+      window._alertDrawLogged = true;
+      console.log(`[alert] drawing pass: ${rules.length} rule(s), symbol ${sym}, ` +
+                  `visible ${Math.round(lo)}-${Math.round(hi)}`,
+                  rules.map(r => ({ type: r.type, value: r.value, sym: r.sym, armed: r.armed })));
+    }
     for (const r of rules) {
       if (!r || (r.type !== 'cross' && r.type !== 'near')) continue;
       if (r.sym && r.sym !== sym) continue;
       const v = Number(r.value);
-      if (!isFinite(v) || v < lo || v > hi) continue;
-      const yy = y(v);
+      if (!isFinite(v)) continue;
+      // An alert outside the visible range used to vanish entirely, which is
+      // indistinguishable from a broken feature - and it cannot be dragged
+      // back or deleted if it cannot be seen. Off-screen alerts are pinned to
+      // the nearest edge with an arrow, so they stay reachable.
+      const off = v < lo ? -1 : v > hi ? 1 : 0;
+      const yy = off ? (off < 0 ? y(lo) - 6 : y(hi) + 6) : y(v);
       const col = r.armed ? '#d4af37' : 'rgba(212,175,55,0.4)';
-      const lbl = `${r.armed ? '🔔' : '🔕'} ${fmtInt(Math.round(v))}`;
+      const lbl = `${r.armed ? '🔔' : '🔕'} ${off < 0 ? '▼' : off > 0 ? '▲' : ''}${fmtInt(Math.round(v))}`;
       const w = 74;                       // label plate width
       const x0 = W - padR - w - 16;
       out += `<g class="alert-line" data-alert-id="${r.id}" style="cursor:pointer;">
@@ -17689,33 +17780,296 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
-  // Delegated once: the chart SVG is rebuilt on every render, so handlers
-  // bound to its elements would be destroyed several times a second.
-  if (!window._alertLineWired) {
-    window._alertLineWired = true;
-    document.addEventListener('click', ev => {
-      const del = ev.target?.closest?.('[data-alert-del]');
-      const arm = ev.target?.closest?.('[data-alert-arm]');
-      if (!del && !arm) return;
+  // ── alert interaction layer ───────────────────────────────────────
+  // All of it on #chartBody. That element survives every render; the SVG
+  // inside it does not, and binding to the SVG (or delegating into it) left
+  // right-click and the delete control dead. One handler set, wired once.
+  function _alertGeom() {
+    const g = _chart._geom;
+    // getElementById, not a descendant selector. #chartBody holds more than
+    // one <svg>, and the first match had a blank id and a different
+    // rectangle - so every pixel-to-price mapping was computed against the
+    // wrong element and no hit test could ever land. That single character
+    // of sloppiness cost three rewrites.
+    const svg = document.getElementById('chartSvg');
+    if (!g || !svg) return null;
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    const plot = g.H - g.padT - g.padB;
+    return {
+      ...g, rect: r,
+      // client pixel -> price, and back
+      priceAt: clientY => {
+        const vy = (clientY - r.top) / r.height * g.H;
+        return g.hi - (vy - g.padT) / plot * (g.hi - g.lo);
+      },
+      clientYOf: price => r.top + (g.padT + (1 - (price - g.lo) / (g.hi - g.lo)) * plot) / g.H * r.height,
+    };
+  }
+
+  // #chartBody is taller than the price chart: it also holds the toolbar and
+  // the context pane. A right-click on those is still "inside the container",
+  // and mapping it through the price scale produced a price far below the
+  // visible range - which is how an alert ended up at 22780 on a chart
+  // showing 22900-23007, invisible and unreachable. Every interaction now
+  // requires the pointer to be inside the price plot itself.
+  function _inPlot(ev) {
+    const svg = document.getElementById('chartSvg');
+    if (!svg) return false;
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const g = _chart._geom;
+    if (!g) return false;
+    // exclude the axis padding as well, so the price is always meaningful
+    const top = r.top + g.padT / g.H * r.height;
+    const bot = r.top + (g.H - g.padB) / g.H * r.height;
+    return ev.clientX >= r.left && ev.clientX <= r.right &&
+           ev.clientY >= top && ev.clientY <= bot;
+  }
+
+  function _alertHitTest(ev) {
+    // Which alert, if any, is under the pointer — and whether the pointer is
+    // over its delete control. Done by geometry rather than by DOM hit
+    // testing, so it cannot be defeated by stacking or pointer-events.
+    const G = _alertGeom();
+    if (!G) return null;
+    const sym = state.symbol || 'NIFTY';
+    let rules = [];
+    try { rules = _caLoad(); } catch (_) { return null; }
+    const xInVb = (ev.clientX - G.rect.left) / G.rect.width * G.W;
+    for (const r of rules) {
+      if (!r || (r.type !== 'cross' && r.type !== 'near')) continue;
+      if (r.sym && r.sym !== sym) continue;
+      const v = Number(r.value);
+      if (!isFinite(v)) continue;
+      // match the clamped drawing position, so an off-screen alert can still
+      // be grabbed, dragged back into range, or deleted
+      const vClamp = Math.min(G.hi, Math.max(G.lo, v));
+      if (Math.abs(ev.clientY - G.clientYOf(vClamp)) > 7) continue;    // 7px grab band
+      const w = 74, x0 = G.W - G.padR - w - 16;
+      const onDel = xInVb >= x0 + w - 16 && xInVb <= x0 + w;
+      const onBell = xInVb >= x0 && xInVb <= x0 + 16;
+      return { rule: r, onDel, onBell, G };
+    }
+    return null;
+  }
+
+  // Wired from init rather than at top level. A function DECLARATION hoists,
+  // so _chartAlertLines exists and the lines draw even if top-level execution
+  // stopped earlier in this block - which is exactly the shape of "lines
+  // appear but nothing is clickable". Running this from init means an
+  // unrelated failure elsewhere cannot silently skip it.
+  function _wireAlertLayer() {
+    if (window._alertLayerWired) return;
+    window._alertLayerWired = true;
+    console.log('[alert] interaction layer wired');
+    const host = () => document.getElementById('chartBody');
+
+    document.addEventListener('mousedown', ev => {
+      if (ev.button !== 0 || !_inPlot(ev)) return;
+      // SHIFT-CLICK places an alert. Right-click should do the same, but a
+      // context menu can be taken by the browser, the OS or an extension
+      // before any page listener sees it - and none of that is visible from
+      // here. A plain left-click gesture cannot be intercepted that way, so
+      // there is always a working path.
+      if (ev.shiftKey) {
+        const G0 = _alertGeom();
+        if (G0) {
+          const px0 = G0.priceAt(ev.clientY);
+          if (isFinite(px0)) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            console.log('[alert] shift-click at', px0.toFixed(2));
+            _chartAddAlertAt(px0, 'cross');
+            return;
+          }
+        }
+      }
+      const hit = _alertHitTest(ev);
+      if (!hit) return;
       ev.preventDefault();
       ev.stopPropagation();
-      const id = (del || arm).getAttribute(del ? 'data-alert-del' : 'data-alert-arm');
-      const rules = _caLoad();
-      if (del) {
-        const gone = rules.find(x => x.id === id);
-        _caSave(rules.filter(x => x.id !== id));
-        if (gone && typeof showToast === 'function')
-          showToast(`alert removed at ${fmtInt(Math.round(gone.value))}`);
-      } else {
-        const r = rules.find(x => x.id === id);
+      if (hit.onDel) {
+        const rules = _caLoad().filter(x => x.id !== hit.rule.id);
+        _caSave(rules);
+        if (typeof showToast === 'function') showToast(`alert removed at ${fmtInt(Math.round(hit.rule.value))}`);
+        try { _caRenderRules(); } catch (_) {}
+        try { renderPriceChart(); } catch (_) {}
+        return;
+      }
+      if (hit.onBell) {
+        const rules = _caLoad();
+        const r = rules.find(x => x.id === hit.rule.id);
         if (r) { r.armed = !r.armed; _caSave(rules); }
         if (r && typeof showToast === 'function')
           showToast(`${r.armed ? '🔔 armed' : '🔕 disarmed'} ${fmtInt(Math.round(r.value))}`);
+        try { _caRenderRules(); } catch (_) {}
+        try { renderPriceChart(); } catch (_) {}
+        return;
+      }
+      // otherwise: start dragging the level
+      window._alertDrag = { id: hit.rule.id, startY: ev.clientY };
+      document.body.style.cursor = 'ns-resize';
+    }, true);
+
+    document.addEventListener('mousemove', ev => {
+      const d = window._alertDrag;
+      const box = host();
+      if (!d) {
+        if (box && _inPlot(ev)) {
+          const h = _alertHitTest(ev);
+          box.style.cursor = h ? (h.onDel ? 'pointer' : h.onBell ? 'pointer' : 'ns-resize') : '';
+        }
+        return;
+      }
+      const G = _alertGeom();
+      if (!G) return;
+      // clamp to the visible range: an alert dragged off the chart becomes
+      // unreachable, which is how the last one was lost
+      const px = Math.min(G.hi, Math.max(G.lo, G.priceAt(ev.clientY)));
+      if (!isFinite(px)) return;
+      const rules = _caLoad();
+      const r = rules.find(x => x.id === d.id);
+      if (!r) return;
+      r.value = Math.round(px * 20) / 20;
+      r.label = `${r.sym || state.symbol || 'NIFTY'} ${fmtInt(r.value)}`;
+      _caSave(rules);
+      try { renderPriceChart(); } catch (_) {}
+    }, true);
+
+    document.addEventListener('mouseup', () => {
+      if (!window._alertDrag) return;
+      const rules = _caLoad();
+      const r = rules.find(x => x.id === window._alertDrag.id);
+      window._alertDrag = null;
+      document.body.style.cursor = '';
+      if (r) {
+        // a moved alert has not fired at its new level yet
+        delete r.lastFired;
+        _caSave(rules);
+        if (typeof showToast === 'function') showToast(`alert moved to ${fmtInt(Math.round(r.value))}`);
       }
       try { _caRenderRules(); } catch (_) {}
       try { renderPriceChart(); } catch (_) {}
-    }, true);   // capture, so the chart's own click handlers do not swallow it
+    }, true);
+
+    // Bound on the container as well as on document. If one route is being
+    // intercepted the other still works, and _chartMenuClose() at the top of
+    // the handler makes a double invocation harmless.
+    const onCtx = ev => {
+      // Bound on both document and the container for redundancy, so the same
+      // gesture arrives twice. Building the menu twice also installed two
+      // dismissal handlers, which compounded the problem above.
+      if (ev.__alertCtxHandled) return;
+      ev.__alertCtxHandled = true;
+      // No containment test. Whether ev.target happens to be the SVG, the
+      // crosshair group, the hover readout or any other overlay is irrelevant
+      // and was a source of silent failure - if the pointer is over the price
+      // plot, the gesture was meant for the chart. Position decides.
+      if (!_inPlot(ev)) {
+        // report the numbers, so "outside the plot" can be checked rather
+        // than taken on trust
+        const s = document.getElementById('chartSvg');
+        const r = s && s.getBoundingClientRect();
+        const g = _chart._geom;
+        console.log('[alert] ctx: NOT in plot. clientY', Math.round(ev.clientY),
+                    '| svg rect', r ? `${Math.round(r.top)}..${Math.round(r.bottom)} x ${Math.round(r.left)}..${Math.round(r.right)}` : 'none',
+                    '| clientX', Math.round(ev.clientX),
+                    '| geom', g ? `padT ${g.padT} padB ${g.padB} H ${g.H}` : 'none');
+        return;
+      }
+      ev.preventDefault();
+      const G = _alertGeom();
+      if (!G) { console.log('[alert] ctx: _alertGeom() null'); return; }
+      const price = G.priceAt(ev.clientY);
+      if (!isFinite(price)) { console.log('[alert] ctx: price not finite'); return; }
+      console.log('[alert] ctx: menu opening at', price.toFixed(2));
+      _chartMenuClose();
+      const hit = _alertHitTest(ev);
+      const menu = document.createElement('div');
+      menu.id = 'chartCtxMenu';
+      menu.style.cssText = `position:fixed;left:${ev.clientX}px;top:${ev.clientY}px;z-index:99999;` +
+        'background:var(--panel,#161b22);border:1px solid rgba(255,255,255,0.18);border-radius:6px;' +
+        'box-shadow:0 6px 20px rgba(0,0,0,0.5);padding:4px;min-width:190px;font-size:11px;color:var(--text,#e6edf3);';
+      const item = (label, fn) => {
+        const b = document.createElement('div');
+        b.textContent = label;
+        b.style.cssText = 'padding:5px 9px;cursor:pointer;border-radius:4px;white-space:nowrap;';
+        b.onmouseenter = () => b.style.background = 'rgba(255,255,255,0.08)';
+        b.onmouseleave = () => b.style.background = '';
+        // mousedown rather than click: it is the first event to arrive, so
+        // the action cannot be lost to anything that closes the menu in
+        // between.
+        b.onmousedown = e2 => { e2.preventDefault(); e2.stopPropagation(); _chartMenuClose(); fn(); };
+        menu.appendChild(b);
+      };
+      item(`🔔 Alert when spot crosses ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'cross'));
+      item(`📍 Alert within 10 pts of ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'near'));
+      if (hit) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:3px 0;';
+        menu.appendChild(sep);
+        item(`✕ Delete alert at ${fmtInt(Math.round(hit.rule.value))}`, () => {
+          _caSave(_caLoad().filter(x => x.id !== hit.rule.id));
+          try { _caRenderRules(); } catch (_) {}
+          try { renderPriceChart(); } catch (_) {}
+        });
+      }
+      document.body.appendChild(menu);
+      const r2 = menu.getBoundingClientRect();
+      console.log(`[alert] menu in DOM: ${menu.childElementCount} items, ` +
+                  `${Math.round(r2.width)}x${Math.round(r2.height)} at ${Math.round(r2.left)},${Math.round(r2.top)}`);
+      // If the menu has zero size it is in the DOM but not painted — a
+      // stacking or CSS problem rather than a logic one, and the numbers
+      // above say which.
+      // The dismissal handler listens on mousedown in capture phase, which
+      // fires BEFORE the item's click - so without this check it removed the
+      // menu first and the click landed on nothing. That is why the menu
+      // appeared correctly and selecting an item did nothing.
+      setTimeout(() => {
+        const close = ev2 => {
+          if (menu.contains(ev2.target)) return;    // let the item handle it
+          _chartMenuClose();
+          document.removeEventListener('mousedown', close, true);
+        };
+        document.addEventListener('mousedown', close, true);
+      }, 0);
+    };
+    document.addEventListener('contextmenu', onCtx, true);
+    const bx = host();
+    if (bx) bx.addEventListener('contextmenu', onCtx);
   }
+
+  // One command that reports every link in the chain, so a failure can be
+  // located in a single step instead of by successive rewrites.
+  window.alertDebug = function () {
+    const box = document.getElementById('chartBody');
+    const svg = document.getElementById('chartSvg');
+    const allSvg = document.querySelectorAll('#chartBody svg');
+    const g = _chart._geom;
+    let rules = [];
+    try { rules = _caLoad(); } catch (e) { console.error('  _caLoad threw:', e); }
+    const sym = state.symbol || 'NIFTY';
+    console.log('── alert layer diagnostic ──');
+    console.log('  #chartBody present      :', !!box);
+    console.log('  #chartSvg present       :', !!svg);
+    console.log('  svgs inside #chartBody  :', allSvg.length,
+                [...allSvg].map(s => s.id || '(no id)').join(', '));
+    console.log('  handlers wired          :', !!window._alertLayerWired);
+    console.log('  _chart._geom            :', g ? `lo ${Math.round(g.lo)} hi ${Math.round(g.hi)} H ${g.H}` : 'NOT SET');
+    console.log('  symbol                  :', sym);
+    console.log('  rules stored            :', rules.length);
+    for (const r of rules)
+      console.log(`    ${r.id}  type=${r.type}  value=${r.value}  sym=${r.sym}  armed=${r.armed}` +
+                  (g ? `  visible=${r.value >= g.lo && r.value <= g.hi}` : ''));
+    const G = _alertGeom();
+    console.log('  _alertGeom()            :', G ? 'ok' : 'NULL — this is why nothing responds');
+    if (G && rules.length) {
+      const r0 = rules[0];
+      console.log(`    "${r0.value}" sits at client Y ${Math.round(G.clientYOf(r0.value))}`);
+    }
+    return 'done';
+  };
 
   // ══ BULLISH / BEARISH ALERT TALLY ═════════════════════════════════
   // A running count of what has actually been ANNOUNCED, not of what the
@@ -22112,6 +22466,11 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // hand the pane the same x-mapping and geometry the candles used, so the
     // two align exactly rather than approximately
     _chart._rsiCtx = { cs, x, W, padL, padR, H };
+    // Geometry for the alert interaction layer. It lives on the CONTAINER,
+    // not on the SVG, because the SVG is replaced on every render while
+    // #chartBody itself persists - handlers bound to the SVG die with it, and
+    // event delegation into it proved unreliable.
+    _chart._geom = { lo, hi, W, H, padT, padB, padL, padR };
 
     // level lines + right-edge labels (stagger to avoid overlap)
     // Annotate a moving level's own label with its drift. Putting it here
@@ -22360,56 +22719,6 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         const up2 = c2.c >= c2.o;
         hv.innerHTML = `<b>${new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}</b> &nbsp; O <b>${fmtInt(Math.round(c2.o))}</b> H <b>${fmtInt(Math.round(c2.h))}</b> L <b>${fmtInt(Math.round(c2.l))}</b> C <b style="color:${up2 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(c2.c))}</b> &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(val))}</span>`;
       });
-      // ── right-click: add an alert at the price under the cursor ──
-      svgEl.addEventListener('contextmenu', ev => {
-        ev.preventDefault();
-        _chartMenuClose();
-        const rct = svgEl.getBoundingClientRect();
-        const py2 = (ev.clientY - rct.top) / rct.height * H;
-        // same inverse mapping the crosshair uses, so the menu price matches
-        // what the crosshair reads at that pixel
-        const price = hi - (py2 - padT) / (H - padT - padB) * (hi - lo);
-        if (!isFinite(price)) return;
-        const menu = document.createElement('div');
-        menu.id = 'chartCtxMenu';
-        menu.style.cssText = `position:fixed;left:${ev.clientX}px;top:${ev.clientY}px;z-index:9999;` +
-          'background:var(--panel,#161b22);border:1px solid rgba(255,255,255,0.18);border-radius:6px;' +
-          'box-shadow:0 6px 20px rgba(0,0,0,0.5);padding:4px;min-width:186px;font-size:11px;';
-        const near = _caLoad().filter(r => r.sym === (state.symbol || 'NIFTY') &&
-                                           Math.abs(Number(r.value) - price) < (hi - lo) * 0.012);
-        const item = (label, fn) => {
-          const b = document.createElement('div');
-          b.textContent = label;
-          b.style.cssText = 'padding:5px 9px;cursor:pointer;border-radius:4px;white-space:nowrap;';
-          b.addEventListener('mouseenter', () => b.style.background = 'rgba(255,255,255,0.08)');
-          b.addEventListener('mouseleave', () => b.style.background = '');
-          b.addEventListener('click', () => { _chartMenuClose(); fn(); });
-          menu.appendChild(b);
-        };
-        item(`🔔 Alert when spot crosses ${fmtInt(Math.round(price))}`,
-             () => _chartAddAlertAt(price, 'cross'));
-        item(`📍 Alert within 10 pts of ${fmtInt(Math.round(price))}`,
-             () => _chartAddAlertAt(price, 'near'));
-        if (near.length) {
-          const sep = document.createElement('div');
-          sep.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:3px 0;';
-          menu.appendChild(sep);
-          for (const r of near.slice(0, 3))
-            item(`✕ Remove alert at ${fmtInt(Math.round(r.value))}`, () => {
-              _caSave(_caLoad().filter(x => x.id !== r.id));
-              try { _caRenderRules(); } catch (_) {}
-              try { renderPriceChart(); } catch (_) {}
-            });
-        }
-        document.body.appendChild(menu);
-        // one-shot dismissal, registered after this event finishes so the
-        // click that opened the menu does not immediately close it
-        setTimeout(() => {
-          const close = () => { _chartMenuClose(); document.removeEventListener('mousedown', close); };
-          document.addEventListener('mousedown', close);
-        }, 0);
-      });
-
       svgEl.addEventListener('mouseleave', () => {
         try { _mirrorCrosshair(0, false); } catch (_) {} g.style.display = 'none'; hv.textContent = ''; const t1 = document.getElementById('lvlTip'); if (t1) t1.style.display = 'none'; });
       // wheel = vertical zoom anchored at the cursor price (like TradingView's
@@ -22989,6 +23298,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       'ctxHistV1',
                       // measured outcomes: the only evidence about what works
                       'signalScoreV1',
+                      // price levels the user set by hand
+                      'customLevelsV1',
                       // today's announced-alert counts: a record, not a setting
                       'alertTallyV1',
                       'nse_checklist_v1', 'regimeHistory', 'lastBackupTs',
@@ -23188,6 +23499,17 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       modeSel.addEventListener('change', apply);
       histInp.addEventListener('change', apply);
     }
+    // Button path for adding an alert, independent of the right-click menu.
+    // If contextmenu is being swallowed by the browser or an extension, this
+    // still works - and it tells us which of the two is at fault.
+    _wireAlertLayer();
+    document.getElementById('addAlertBtn')?.addEventListener('click', () => {
+      const spot = state.lastData?.underlying_value;
+      const v = prompt('Alert when spot crosses which price?',
+                       spot ? String(Math.round(spot)) : '');
+      const px = parseFloat(String(v || '').replace(/[, ]/g, ''));
+      if (isFinite(px) && px > 0) _chartAddAlertAt(px, 'cross');
+    });
     document.getElementById('chartFillBtn')?.addEventListener('click', _chartFillSession);
     document.getElementById('chartDiagBtn')?.addEventListener('click', _chartDiagnose);
     const ct = document.getElementById('chartType');
