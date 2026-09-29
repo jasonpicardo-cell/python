@@ -4420,7 +4420,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let chartRules = [];
     try {
       const sym = state.symbol || 'NIFTY';
-      chartRules = _caLoad().filter(r => r && (r.type === 'cross' || r.type === 'near') &&
+      chartRules = _caLoad().filter(r => r && (r.type === 'touch' || r.type === 'cross' || r.type === 'near') &&
                                          (!r.sym || r.sym === sym));
     } catch (_) {}
     if (!_customLevels.length && !chartRules.length) { el.innerHTML = ''; return; }
@@ -4433,7 +4433,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       ).join('') +
       chartRules.map(r =>
         `<div class="custom-alert-item" title="${r.type === 'cross' ? 'fires when spot crosses this level' : 'fires within 10 points of this level'} — set on the chart">
-          <span>${r.armed ? '🔔' : '🔕'} ${r.type === 'cross' ? 'cross' : 'near'} <b>${fmtInt(Math.round(r.value))}</b></span>
+          <span>${r.armed ? '🔔' : '🔕'} ${r.type === 'near' ? 'near' : 'touch'} <b>${fmtInt(Math.round(r.value))}</b></span>
           <button onclick="window._removeChartAlert('${r.id}')" style="background:none;border:none;cursor:pointer;color:var(--neg);font-size:10px;padding:0 2px;">✕</button>
         </div>`
       ).join('');
@@ -10912,10 +10912,68 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // a price alert firing while you are watching something else.
   function _playPriceAlertSound() {
     try {
-      const v = (typeof _alertVolume === 'function' ? _alertVolume() : 1) * 0.34;
-      _playTone(784, 0.14, v);                      // G5
-      setTimeout(() => _playTone(1175, 0.30, v), 130);   // D6
-    } catch (_) {}
+      const raw = (typeof _alertVolume === 'function' ? _alertVolume() : 1);
+      // A price alert you asked for should be audible even if the general
+      // alert volume is turned down, so the slider sets the level but cannot
+      // take it to silence. The master mute still silences everything.
+      const v = Math.max(0.18, (isFinite(raw) ? raw : 1)) * 0.34;
+      const ctx = (typeof _ctx === 'function') ? _ctx() : null;
+      console.log(`[alert] sound: vol ${v.toFixed(2)}, audio ${ctx ? ctx.state : 'no context'}`);
+      if (typeof _masterMuted === 'function' && _masterMuted()) {
+        console.log('[alert] sound suppressed: master mute is on');
+        return;
+      }
+      // resume() is ASYNCHRONOUS. Scheduling a note at ctx.currentTime while
+      // the resume is still settling can leave it starting in the past, which
+      // produces silence with no error - the context reports "running" by the
+      // time anything is logged. Waiting for the promise and starting a few
+      // milliseconds out avoids both.
+      const fire = () => {
+        try {
+          const t0 = ctx.currentTime + 0.03;
+          // A struck bell rather than two beeps: a fast attack and a long
+          // exponential decay, with inharmonic partials above the fundamental.
+          // Those partials are what makes a bell sound like a bell instead of
+          // a sine tone, and they let it carry over two seconds without
+          // becoming annoying the way a sustained beep does.
+          const DUR = 2.0;
+          const strike = (at, gainMul) => {
+            [[1, 1], [2.76, 0.42], [5.4, 0.22], [8.9, 0.12]].forEach(([mult, amp]) => {
+              const osc = ctx.createOscillator(), gn = ctx.createGain();
+              osc.connect(gn); gn.connect(ctx.destination);
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(880 * mult, at);
+              const peak = Math.max(0.0002, v * amp * gainMul);
+              gn.gain.setValueAtTime(0.0001, at);
+              gn.gain.exponentialRampToValueAtTime(peak, at + 0.006);
+              // higher partials fade first, as they do on a real bell
+              gn.gain.exponentialRampToValueAtTime(0.0001, at + DUR / (1 + (mult - 1) * 0.55));
+              osc.start(at); osc.stop(at + DUR + 0.05);
+            });
+          };
+          strike(t0, 1);
+          strike(t0 + 0.38, 0.55);       // second, softer strike
+          console.log(`[alert] bell scheduled at ${t0.toFixed(3)}, ${DUR}s`);
+        } catch (e) { console.warn('[alert] sound schedule failed:', e); }
+      };
+      // If speech is already running - another alert, or this one's own
+      // announcement - the bell competes with it and is effectively inaudible.
+      // Waiting for the synth to fall silent costs a moment and means the
+      // bell is always heard, which is the whole point of having one.
+      const go = () => {
+        let waited = 0;
+        const tick = () => {
+          const busy = window.speechSynthesis &&
+                       (window.speechSynthesis.speaking || window.speechSynthesis.pending);
+          if (busy && waited < 8000) { waited += 150; setTimeout(tick, 150); return; }
+          if (waited) console.log(`[alert] bell waited ${waited}ms for speech to finish`);
+          fire();
+        };
+        tick();
+      };
+      if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume().then(go).catch(go);
+      else go();
+    } catch (e) { console.warn('[alert] sound failed:', e); }
   }
 
   // Spoken wording for a price alert. The stored message reads
@@ -10930,9 +10988,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // The "within" message has no arrow, so the spot has to come from its own
     // wording ("Spot 23405 within 10 pts of 23400"). Reading only the arrow
     // form made it announce the level back instead of where price actually is.
-    const near = String(msg).match(/Spot\s+(\d[\d,.]*)/i);
+    const nowM = String(msg).match(/now\s+(\d[\d,.]*)/i);
+    const near = nowM || String(msg).match(/Spot\s+(\d[\d,.]*)/i);
     const now = m ? m[2].replace(/,/g, '') : (near ? near[1].replace(/,/g, '') : null);
     if (lvl == null) return msg;
+    if (/touched/i.test(msg))
+      return `Price alert. ${sym} touched ${lvl}${now ? `, now ${Math.round(Number(now))}` : ''}.`;
     if (/within/i.test(msg))
       return `Price alert. ${sym} at ${Math.round(Number(now) || lvl)}, touching your level of ${lvl}.`;
     const dir = m ? (Number(now) > Number(m[1].replace(/,/g, '')) ? 'upward' : 'downward') : null;
@@ -10944,15 +11005,37 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (typeof showToast === 'function') showToast('🔔 ' + msg);
     try { if ('Notification' in window && Notification.permission === 'granted') new Notification('1OPTIONS alert', { body: msg }); } catch (_) {}
     // price alerts get their own sound and their own phrasing
-    const isPrice = !!rule && (rule.type === 'cross' || rule.type === 'near');
+    const isPrice = !!rule && (rule.type === 'touch' || rule.type === 'cross' || rule.type === 'near');
     if (isPrice) _playPriceAlertSound();
     const spoken = isPrice ? _priceAlertSpeech(msg, rule) : msg;
+    if (isPrice) {
+      // Voice has its own enable toggle, separate from the bell. Silence here
+      // is usually that switch rather than a fault, and it is worth saying
+      // which so the two are not confused.
+      let vOn = 'unknown';
+      try { vOn = (typeof _canSpeak === 'function') ? String(_canSpeak()) : 'no _canSpeak'; } catch (_) {}
+      console.log(`[alert] voice: enabled=${vOn}, stream=${!!_streamLive}, text="${spoken}"`);
+    }
     try {
-      // stream-first: one announcement across all systems; _speakOnce is the
-      // standalone fallback when no server stream is connected
-      if (_streamLive) _relayAlert(`custom|${state.symbol || 'NIFTY'}|` + msg.slice(0, 60), spoken, 'alert', 300);
-      else _speakOnce('alert|' + msg.slice(0, 60), spoken, 300);
-    } catch (_) {}
+      if (isPrice) {
+        // Announced LOCALLY, always: the relay exists so a market-wide signal
+        // is spoken once across all machines, but a price level is something
+        // you placed on this screen for yourself, and relaying it meant it
+        // could speak elsewhere and stay silent here.
+        //
+        // Delayed until the bell has rung. Firing both at once buries the
+        // bell under the voice, and the bell is what tells you an alert
+        // happened at all.
+        setTimeout(() => {
+          try { _speakOnce('alert|' + msg.slice(0, 60), spoken, 300); } catch (_) {}
+        }, 2200);
+      } else if (_streamLive) {
+        // stream-first for everything else: one announcement across systems
+        _relayAlert(`custom|${state.symbol || 'NIFTY'}|` + msg.slice(0, 60), spoken, 'alert', 300);
+      } else {
+        _speakOnce('alert|' + msg.slice(0, 60), spoken, 300);
+      }
+    } catch (e) { console.warn('[alert] announce failed:', e); }
     const log = JSON.parse(localStorage.getItem('customAlertsFired') || '[]');
     log.push({ ts: Date.now(), msg });
     localStorage.setItem('customAlertsFired', JSON.stringify(log.slice(-30)));
@@ -10968,13 +11051,65 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // every other alert-TYPE selection. The flag itself is untouched, so
       // unticking the master switch restores your armed/disarmed choices.
       if (!r.armed && !_enableAll()) continue;
-      if (r.lastFired && Date.now() - r.lastFired < 5 * 60 * 1000) continue;   // 5-min refire cooldown
+      // A flat five-minute cooldown is wrong for a touch. Price hovering at a
+      // level would either spam every poll (no cooldown) or go quiet for five
+      // minutes after the first contact (this one) - and the second visit to
+      // a level is often the one that matters.
+      //
+      // Price rules re-arm on EXIT instead: once price leaves the zone it can
+      // fire again on the next return. The exit band is wider than the entry
+      // band so a tick sitting on the boundary cannot rattle in and out. A
+      // short floor stops genuine chatter.
+      const isPriceRule = r.type === 'touch' || r.type === 'cross' || r.type === 'near';
+      if (isPriceRule) {
+        const tol0 = r.type === 'near' ? (r.pts || 10) : Math.max(1.5, r.value * 0.00012);
+        const away = Math.abs(spot - r.value) > tol0 * 2.5;
+        if (away && r.inZone) { r.inZone = false; dirty = true; }   // re-armed
+        if (r.inZone) continue;                                      // still here
+        // No time cooldown. The zone re-arm above already prevents a fire on
+        // every poll while price sits at the level, so a floor on top of it
+        // would only suppress genuine second and third visits - which are the
+        // ones worth hearing.
+      } else if (r.lastFired && Date.now() - r.lastFired < 5 * 60 * 1000) {
+        continue;   // 5-min refire cooldown for the non-price families
+      }
+      // Visible evaluation: a rule that never fires looks identical to one
+      // that fired silently, and they need different fixes.
+      if (r.type === 'touch' || r.type === 'cross' || r.type === 'near')
+        console.log(`[alert] eval ${r.type} @ ${r.value} | prevSpot ${prevSpot ? Math.round(prevSpot) : 'none'} -> spot ${Math.round(spot)} | armed ${r.armed}`);
       let hit = false, msg = '';
       if (r.type === 'near' && Math.abs(spot - r.value) <= (r.pts || 10)) { hit = true; msg = `Spot ${fmtInt(Math.round(spot))} within ${r.pts || 10} pts of ${r.label || r.value}`; }
-      else if (r.type === 'cross' && prevSpot && Math.sign(prevSpot - r.value) !== Math.sign(spot - r.value) && prevSpot !== spot) { hit = true; msg = `Spot crossed ${r.label || r.value} (${fmtInt(Math.round(prevSpot))} → ${fmtInt(Math.round(spot))})`; }
+      else if ((r.type === 'touch' || r.type === 'cross') && (() => {
+        // TOUCH, not cross. A crossing needs price to pass fully through the
+        // level BETWEEN two polls; at a five-second poll on a fast tape it can
+        // step over a level and back, or sit exactly on it, and never
+        // register. That is why alerts placed near price did not fire.
+        //
+        // A touch fires on contact - price reaching the level within a small
+        // tolerance - and still fires on a genuine crossing, so nothing that
+        // worked before stops working. Tolerance scales with price so it means
+        // the same thing on Nifty and BankNifty.
+        const tol = Math.max(1.5, r.value * 0.00012);     // ~2.8 pts at 23,400
+        if (Math.abs(spot - r.value) <= tol) return true;
+        return prevSpot && prevSpot !== spot &&
+               Math.sign(prevSpot - r.value) !== Math.sign(spot - r.value);
+      })()) {
+        hit = true;
+        const touched = Math.abs(spot - r.value) <= Math.max(1.5, r.value * 0.00012);
+        msg = touched
+          ? `Spot touched ${r.label || r.value} (now ${fmtInt(Math.round(spot))})`
+          : `Spot crossed ${r.label || r.value} (${fmtInt(Math.round(prevSpot))} → ${fmtInt(Math.round(spot))})`;
+      }
       else if (r.type === 'iv_above' && (d.iv_rank ?? -1) >= r.value) { hit = true; msg = `IV rank ${d.iv_rank} ≥ ${r.value} — premium selling regime`; }
       else if (r.type === 'iv_below' && d.iv_rank !== null && d.iv_rank !== undefined && d.iv_rank <= r.value) { hit = true; msg = `IV rank ${d.iv_rank} ≤ ${r.value} — cheap options regime`; }
-      if (hit) { r.lastFired = Date.now(); dirty = true; _caNotify(msg, r); }
+      if (hit) {
+        r.lastFired = Date.now();
+        // mark the zone as occupied so it does not re-fire until price leaves
+        if (r.type === 'touch' || r.type === 'cross' || r.type === 'near') r.inZone = true;
+        dirty = true;
+        console.log(`[alert] FIRED ${r.type} @ ${r.value}: ${msg}`);
+        _caNotify(msg, r);
+      }
     }
     if (dirty) { _caSave(rules); _caRenderRules(); }
   }
@@ -17747,7 +17882,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   rules.map(r => ({ type: r.type, value: r.value, sym: r.sym, armed: r.armed })));
     }
     for (const r of rules) {
-      if (!r || (r.type !== 'cross' && r.type !== 'near')) continue;
+      if (!r || (r.type !== 'touch' && r.type !== 'cross' && r.type !== 'near')) continue;
       if (r.sym && r.sym !== sym) continue;
       const v = Number(r.value);
       if (!isFinite(v)) continue;
@@ -17758,7 +17893,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const off = v < lo ? -1 : v > hi ? 1 : 0;
       const yy = off ? (off < 0 ? y(lo) - 6 : y(hi) + 6) : y(v);
       const col = r.armed ? '#d4af37' : 'rgba(212,175,55,0.4)';
-      const lbl = `${r.armed ? '🔔' : '🔕'} ${off < 0 ? '▼' : off > 0 ? '▲' : ''}${fmtInt(Math.round(v))}`;
+      // The icon states what you will HEAR, not merely whether the rule is
+      // armed - an armed alert under a master mute is silent, and an alert
+      // price is currently sitting on will not ring again until price leaves.
+      // Both look identical to a plain bell, and both are worth knowing at a
+      // glance.
+      let icon = '🔔';
+      try {
+        if (!r.armed) icon = '🔕';                                   // disarmed
+        else if (typeof _masterMuted === 'function' && _masterMuted()) icon = '🔇';  // muted
+        else if (r.inZone) icon = '🔔⏸';                             // waiting to re-arm
+      } catch (_) {}
+      const lbl = `${icon} ${off < 0 ? '▼' : off > 0 ? '▲' : ''}${fmtInt(Math.round(v))}`;
       const w = 74;                       // label plate width
       const x0 = W - padR - w - 16;
       out += `<g class="alert-line" data-alert-id="${r.id}" style="cursor:pointer;">
@@ -17838,7 +17984,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { rules = _caLoad(); } catch (_) { return null; }
     const xInVb = (ev.clientX - G.rect.left) / G.rect.width * G.W;
     for (const r of rules) {
-      if (!r || (r.type !== 'cross' && r.type !== 'near')) continue;
+      if (!r || (r.type !== 'touch' && r.type !== 'cross' && r.type !== 'near')) continue;
       if (r.sym && r.sym !== sym) continue;
       const v = Number(r.value);
       if (!isFinite(v)) continue;
@@ -17880,7 +18026,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             ev.preventDefault();
             ev.stopPropagation();
             console.log('[alert] shift-click at', px0.toFixed(2));
-            _chartAddAlertAt(px0, 'cross');
+            _chartAddAlertAt(px0, 'touch');
             return;
           }
         }
@@ -18003,7 +18149,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         b.onmousedown = e2 => { e2.preventDefault(); e2.stopPropagation(); _chartMenuClose(); fn(); };
         menu.appendChild(b);
       };
-      item(`🔔 Alert when spot crosses ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'cross'));
+      item(`🔔 Alert when spot touches ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'touch'));
       item(`📍 Alert within 10 pts of ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'near'));
       if (hit) {
         const sep = document.createElement('div');
@@ -18042,6 +18188,31 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   // One command that reports every link in the chain, so a failure can be
   // located in a single step instead of by successive rewrites.
+  // Fires the notification path directly, with no rule evaluation involved.
+  // If this is audible, the sound and voice work and the problem is that the
+  // rule is not firing. If it is silent, the audio path is the problem. The
+  // two need opposite fixes, and nothing else separates them.
+  window.alertTest = function (price) {
+    const p = price || Math.round(state.lastData?.underlying_value || 23400);
+    const fake = { id: 'test', type: 'cross', value: p, sym: state.symbol || 'NIFTY', armed: true };
+    console.log('[alert] TEST firing at', p);
+    // Always speak LOCALLY here, whatever the relay is doing. _streamLive is
+    // set automatically when the stream connects and has no UI switch, so a
+    // test that respects it can be silent on this machine for a reason that
+    // has nothing to do with the audio path - which is the one thing this is
+    // meant to check.
+    _playPriceAlertSound();
+    const text = _priceAlertSpeech(`Spot crossed ${p} (${p - 5} → ${p + 5})`, fake);
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+      console.log('[alert] TEST speaking locally:', text);
+    } catch (e) { console.warn('[alert] local speech failed:', e); }
+    return 'if you heard a two-note chime and a voice, the audio path on THIS machine works';
+  };
+
   window.alertDebug = function () {
     const box = document.getElementById('chartBody');
     const svg = document.getElementById('chartSvg');
@@ -23300,6 +23471,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       'signalScoreV1',
                       // price levels the user set by hand
                       'customLevelsV1',
+                      // Price alerts the user placed by hand. These are not a
+                      // setting - they are instructions left for the system,
+                      // and Reset restoring defaults should never silently
+                      // discard them. Removal is by ✕ only.
+                      'customAlerts',
+                      'customAlertsFired',
                       // today's announced-alert counts: a record, not a setting
                       'alertTallyV1',
                       'nse_checklist_v1', 'regimeHistory', 'lastBackupTs',
@@ -23505,10 +23682,10 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     _wireAlertLayer();
     document.getElementById('addAlertBtn')?.addEventListener('click', () => {
       const spot = state.lastData?.underlying_value;
-      const v = prompt('Alert when spot crosses which price?',
+      const v = prompt('Alert when spot touches which price?',
                        spot ? String(Math.round(spot)) : '');
       const px = parseFloat(String(v || '').replace(/[, ]/g, ''));
-      if (isFinite(px) && px > 0) _chartAddAlertAt(px, 'cross');
+      if (isFinite(px) && px > 0) _chartAddAlertAt(px, 'touch');
     });
     document.getElementById('chartFillBtn')?.addEventListener('click', _chartFillSession);
     document.getElementById('chartDiagBtn')?.addEventListener('click', _chartDiagnose);
