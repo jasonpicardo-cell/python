@@ -1982,6 +1982,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="htfBody" style="padding:6px 8px;"><div class="movers-loading">Loading…</div></div>
           </div>
 
+          <div class="level-panel" id="sigEnginePanel" style="grid-column:1 / -1;border:1px solid rgba(38,166,154,0.4);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🎯 Signal — buy / sell from confluence<i class="hi" data-h="signal-engine">i</i></span>
+            </div>
+            <div id="signalBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
           <div class="level-panel" id="maturityPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">⏳ Trend Maturity — how far through it are we<i class="hi" data-h="trend-maturity">i</i></span>
@@ -14321,6 +14328,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
     try { _maturityCheck(data); } catch (_) {}
+    try { _signalCheck(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
     try { _driftRecord(data); renderDrift(data); } catch (_) {}
     try {
@@ -18399,6 +18407,240 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       renderTally();
     } catch (_) {}
   });
+
+  // ══ SIGNAL ENGINE ═════════════════════════════════════════════════
+  // A buy/sell call from the confluence of everything already measured here.
+  // Nine families vote; the score is their weighted sum, and a signal needs
+  // both a strong score AND a regime that supports it.
+  //
+  // Three rules that decide whether this is usable rather than decorative:
+  //
+  //   CLOSED BARS ONLY, on a 5-minute grid. A signal that appears mid-bar and
+  //     disappears when the bar closes differently is worse than no signal,
+  //     because you will have acted on it.
+  //   THE REGIME CAN VETO. A breakout vote in a ranging market and a fade vote
+  //     in a trend are the same number with opposite meaning, so the regime
+  //     gates the signal rather than merely contributing to it.
+  //   MATURITY CAPS IT. A perfect confluence score 2 sigma into a move is a
+  //     late entry; extension reduces the score rather than being ignored.
+  //
+  // Honest limit: the weights below are judgement, not measurement. Every
+  // signal is recorded by the Scorecard, so after a few weeks the hit rate
+  // will say whether this is worth anything. Until then it is a hypothesis.
+  const _SIG = { last: null, bar: null, hist: [] };
+
+  function _signalEval(d) {
+    const cs = _chart.candles || [];
+    if (cs.length < 40 || !d?.underlying_value) return null;
+    const bars = _chart.liveBar ? cs.slice(0, -1) : cs;      // closed only
+    if (bars.length < 30) return null;
+    const px = bars[bars.length - 1].c;
+    const votes = [];
+    const add = (src, dir, wt, why) => { if (dir) votes.push({ src, dir, wt, why }); };
+
+    // ── 1. price action: structure of the last swings ──
+    try {
+      const h = bars.slice(-10).map(b => b.h), l = bars.slice(-10).map(b => b.l);
+      const hh = Math.max(...h.slice(-5)) > Math.max(...h.slice(0, 5));
+      const hl = Math.min(...l.slice(-5)) > Math.min(...l.slice(0, 5));
+      if (hh && hl) add('structure', 1, 14, 'higher highs and higher lows');
+      else if (!hh && !hl) add('structure', -1, 14, 'lower highs and lower lows');
+    } catch (_) {}
+
+    // ── 2. moving-average stack ──
+    try {
+      const ema = n => { const k = 2 / (n + 1); let e = bars[0].c; for (const b of bars) e = b.c * k + e * (1 - k); return e; };
+      const e9 = ema(9), e21 = ema(21), e50 = ema(50);
+      const up = px > e9 && e9 > e21 && e21 > e50;
+      const dn = px < e9 && e9 < e21 && e21 < e50;
+      if (up) add('EMA stack', 1, 16, 'price above 9 above 21 above 50');
+      else if (dn) add('EMA stack', -1, 16, 'price below 9 below 21 below 50');
+      else if (px > e21) add('EMA stack', 1, 6, 'above the 21 but not stacked');
+      else if (px < e21) add('EMA stack', -1, 6, 'below the 21 but not stacked');
+    } catch (_) {}
+
+    // ── 3. VWAP: side, and how far ──
+    try {
+      const v = _vwapSeries(bars);
+      const vw = v[v.length - 1];
+      if (isFinite(vw)) {
+        const band = Math.max(1, px * 0.0006);
+        if (px > vw + band) add('VWAP', 1, 12, 'holding above VWAP');
+        else if (px < vw - band) add('VWAP', -1, 12, 'holding below VWAP');
+      }
+    } catch (_) {}
+
+    // ── 4. RSI: range regime, the 50 line, and divergence ──
+    try {
+      const rsi = _rsiSeries(bars.map(b => b.c), 14);
+      const last = [...rsi].reverse().find(x => x != null);
+      const rr = _rsiRange(rsi, 60);
+      if (rr?.regime === 'bull range') add('RSI range', 1, 12, rr.note);
+      else if (rr?.regime === 'bear range') add('RSI range', -1, 12, rr.note);
+      if (rr?.breaking) add('RSI break', rr.regime === 'bull range' ? -1 : 1, 14, rr.breaking);
+      if (last != null) {
+        if (last > 50 && last < 78) add('RSI 50', 1, 7, `RSI ${last.toFixed(0)}, above the midline`);
+        else if (last < 50 && last > 22) add('RSI 50', -1, 7, `RSI ${last.toFixed(0)}, below the midline`);
+      }
+      const dv = _rsiDivergence(bars, rsi, 5) || [];
+      const fresh = dv.filter(x => x.b >= bars.length - 12);
+      for (const x of fresh.slice(0, 2))
+        add(`RSI ${x.hidden ? 'hidden ' : ''}divergence`, x.kind === 'bullish' ? 1 : -1,
+            x.hidden ? 9 : 15, `${x.kind}${x.hidden ? ' hidden' : ''} divergence`);
+    } catch (_) {}
+
+    // ── 5. CVD: who is actually transacting ──
+    try {
+      if (_chart.hasVolume) {
+        const cvd = _cvdSeries(bars);
+        if (cvd?.length > 6) {
+          const a = cvd[cvd.length - 7].cum, b = cvd[cvd.length - 1].cum;
+          if (b > a) add('CVD', 1, 13, 'cumulative delta rising');
+          else if (b < a) add('CVD', -1, 13, 'cumulative delta falling');
+          const dv = _cvdDivergence(cvd, bars);
+          if (dv) add('CVD divergence', dv.dir === 'bullish' ? 1 : -1, 15, `${dv.dir} delta divergence`);
+        }
+      }
+    } catch (_) {}
+
+    // ── 6. capital flow in the option chain ──
+    try {
+      const f = _netPremiumFlow(d);
+      if (f && Math.abs(f.conviction) > 0.15)
+        add('capital flow', f.net > 0 ? 1 : -1, 12, 'premium committed to one side');
+    } catch (_) {}
+
+    // ── 7. value area position ──
+    try {
+      const vp = _volumeProfile(bars, null);
+      if (vp) {
+        if (px > vp.vah) add('value area', 1, 8, 'accepted above value');
+        else if (px < vp.val) add('value area', -1, 8, 'accepted below value');
+      }
+    } catch (_) {}
+
+    // ── 8. gamma: does the level ahead pin or accelerate ──
+    try {
+      const gx = _computeGex(d);
+      if (gx && isFinite(gx.flip)) {
+        if (px > gx.flip) add('gamma', 1, 6, 'above the flip, hedging damps');
+        else add('gamma', -1, 6, 'below the flip, hedging amplifies');
+      }
+    } catch (_) {}
+
+    if (votes.length < 4) return null;
+    const gross = votes.reduce((s, v) => s + v.wt, 0);
+    const net = votes.reduce((s, v) => s + v.wt * v.dir, 0);
+    let score = Math.round(net / Math.max(1, gross) * 100);
+
+    // ── maturity discount: a late entry is a worse entry ──
+    let mat = null, matNote = '';
+    try {
+      mat = _trendMaturity(d);
+      if (mat) {
+        if (mat.state === 'EXTENDED') { score = Math.round(score * 0.45); matNote = 'discounted: trend extended'; }
+        else if (mat.state === 'WEAKENING') { score = Math.round(score * 0.55); matNote = 'discounted: pullbacks deepening'; }
+        else if (mat.state === 'FORMING') { score = Math.round(score * 1.1); matNote = 'early in the move'; }
+      }
+    } catch (_) {}
+
+    // ── regime veto ──
+    let veto = null, reg = null;
+    try {
+      reg = _regime(d);
+      if (reg?.dead) veto = 'dead regime — not enough expected move left to pay for the trade';
+      else if (reg?.ranging && Math.abs(score) < 55)
+        veto = 'ranging market — only a strong reading is worth taking against the chop';
+      else if (reg?.trending && reg.dir && Math.sign(score) !== reg.dir && Math.abs(score) < 65)
+        veto = 'counter-trend to the prevailing move, and not strong enough for it';
+    } catch (_) {}
+
+    const dir = score >= 40 ? 1 : score <= -40 ? -1 : 0;
+    return {
+      score, dir: veto ? 0 : dir, votes, veto, mat, matNote, reg, px,
+      bar: bars[bars.length - 1].t,
+      up: votes.filter(v => v.dir > 0).length,
+      dn: votes.filter(v => v.dir < 0).length,
+    };
+  }
+
+  // Fires on the 5-minute grid, on closed bars only.
+  function _signalCheck(d) {
+    const s = _signalEval(d);
+    renderSignal(s);
+    if (!s || !s.dir) return;
+    // one signal per bar, and only when the direction changes
+    if (_SIG.bar === s.bar) return;
+    const istMin2 = t => { const g = new Date(t * 1000); const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000); return i2.getHours() * 60 + i2.getMinutes(); };
+    if (istMin2(s.bar) % 5 !== 0) return;             // 5-minute grid
+    _SIG.bar = s.bar;
+    if (_SIG.last === s.dir) return;                  // already called this way
+    _SIG.last = s.dir;
+    _SIG.hist.push({ t: s.bar, dir: s.dir, score: s.score, px: s.px });
+    if (_SIG.hist.length > 40) _SIG.hist.shift();
+    const sym = state.symbol || 'NIFTY';
+    const word = s.dir > 0 ? 'BUY' : 'SELL';
+    const top = s.votes.filter(v => v.dir === s.dir).sort((a, b) => b.wt - a.wt).slice(0, 2)
+                  .map(v => v.src).join(' and ');
+    const txt = `${s.dir > 0 ? 'BULLISH' : 'BEARISH'}. ${word} signal on ${sym} at ${Math.round(s.px)}, ` +
+                `score ${Math.abs(s.score)}, led by ${top}.`;
+    try {
+      if (_streamLive) _relayAlert(`signal|${sym}|${s.dir}`, txt, 'level', 300);
+      else _speakOnce(`signal|${sym}|${s.dir}`, txt, 300);
+    } catch (_) {}
+    if (typeof showToast === 'function')
+      showToast(`${s.dir > 0 ? '🟢 BUY' : '🔴 SELL'} ${fmtInt(Math.round(s.px))} · score ${Math.abs(s.score)}`);
+    try { _scoreRecord('signal engine', s.dir > 0 ? 'bullish' : 'bearish', s.px, sym, `score ${s.score}`); } catch (_) {}
+    try { renderPriceChart(); } catch (_) {}
+  }
+
+  // Markers on the chart at the bar that produced them.
+  function _signalSvg(cs, x, y, lo, hi) {
+    let out = '';
+    for (const h of _SIG.hist) {
+      const i = cs.findIndex(c => c.t === h.t);
+      if (i < 0) continue;
+      const v = h.px;
+      if (v < lo || v > hi) continue;
+      const cx = x(i), cy = y(v);
+      const up = h.dir > 0;
+      const yy = up ? cy + 16 : cy - 16;
+      const col = up ? '#26a69a' : '#ef5350';
+      const d2 = up
+        ? `M${(cx - 6).toFixed(1)},${(yy + 7).toFixed(1)} L${(cx + 6).toFixed(1)},${(yy + 7).toFixed(1)} L${cx.toFixed(1)},${(yy - 5).toFixed(1)} Z`
+        : `M${(cx - 6).toFixed(1)},${(yy - 7).toFixed(1)} L${(cx + 6).toFixed(1)},${(yy - 7).toFixed(1)} L${cx.toFixed(1)},${(yy + 5).toFixed(1)} Z`;
+      out += `<path d="${d2}" fill="${col}" stroke="#0b0e14" stroke-width="0.8">
+        <title>${up ? 'BUY' : 'SELL'} · score ${Math.abs(h.score)} · ${fmtInt(Math.round(h.px))}</title></path>`;
+      out += `<text x="${cx.toFixed(1)}" y="${(up ? yy + 19 : yy - 12).toFixed(1)}" text-anchor="middle"
+        style="font-size:8px;fill:${col};font-weight:700;">${up ? 'BUY' : 'SELL'}</text>`;
+    }
+    return out;
+  }
+
+  function renderSignal(s) {
+    const box = document.getElementById('signalBody');
+    if (!box) return;
+    if (!s) { box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Needs about 40 bars.</div>'; return; }
+    const col = s.dir > 0 ? 'var(--pos,#26a69a)' : s.dir < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+    const label = s.dir > 0 ? 'BUY' : s.dir < 0 ? 'SELL' : (s.veto ? 'STAND ASIDE' : 'NO EDGE');
+    const rows = s.votes.slice().sort((a, b) => b.wt - a.wt).map(v =>
+      `<div style="display:flex;gap:8px;font-size:9.5px;padding:1px 4px;">
+        <span style="min-width:15px;color:${v.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${v.dir > 0 ? '▲' : '▼'}</span>
+        <b style="min-width:120px;">${escapeHtml(v.src)}</b>
+        <span style="min-width:26px;color:var(--muted);">${v.wt}</span>
+        <span style="color:var(--muted);">${escapeHtml(v.why)}</span>
+      </div>`).join('');
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:13px;">${label}</b>
+        <span>score <b style="color:${col};">${s.score > 0 ? '+' : ''}${s.score}</b></span>
+        <span style="color:var(--muted);">${s.up} for · ${s.dn} against</span>
+        ${s.matNote ? `<span style="color:var(--gold,#d4af37);">${escapeHtml(s.matNote)}</span>` : ''}
+      </div>
+      ${s.veto ? `<div style="padding:2px 4px;font-size:10px;color:var(--gold,#d4af37);"><b>Vetoed:</b> ${escapeHtml(s.veto)}</div>` : ''}
+      <div style="max-height:150px;overflow-y:auto;margin-top:3px;">${rows}</div>
+      <div class="oc-sub" style="margin-top:3px;">Nine families vote and the score is their weighted sum, but two things sit above the arithmetic. <b>The regime can veto</b>: a breakout vote in a ranging market and a fade vote in a trend are the same number with opposite meaning, so the regime gates the signal rather than just contributing to it. <b>Maturity discounts it</b>: a perfect score two sigma into a move is a late entry, so extension cuts the score rather than being ignored. Evaluated on <b>closed 5-minute bars only</b> — a signal that appears mid-bar and vanishes when the bar closes differently is worse than none, because you will have acted on it. <b>The honest limit:</b> these weights are judgement, not measurement. Every signal is recorded by the Scorecard, so in a few weeks the hit rate will tell you whether this is worth following. Until then it is a hypothesis with a number attached, and should be read as one.</div>`;
+  }
 
   // ══ TREND MATURITY ════════════════════════════════════════════════
   // Every other trend measure here answers "is there a trend?". None answers
@@ -22632,6 +22874,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // just above and referencing it before that point is a use-before-declare
     // that node --check accepts and the browser throws on.
     svg += ladderSvg;
+    try { svg += _signalSvg(cs, x, y, lo, hi); } catch (_) {}
     // user alerts last, so they sit above the levels they were set against
     try { svg += _chartAlertLines(y, lo, hi, W, padL, padR); } catch (_) {}
     // hand the pane the same x-mapping and geometry the candles used, so the
