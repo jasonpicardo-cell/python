@@ -1816,7 +1816,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <!-- HOME TAB                                                       -->
     <!-- ══════════════════════════════════════════════════════════════ -->
     <section id="tab-home" class="tab-panel active">
-<div class="level-panel" id="chartPanel" style="grid-column:1 / -1;">
+
+          
+          
+          
+          
+          
+          
+          
+          
+
+          <div class="level-panel" id="chartPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
               <span class="skew-chart-title">📈 Live Chart &amp; Levels<i class="hi" data-h="price-chart">i</i></span>
               <span style="display:flex;gap:4px;align-items:center;">
@@ -1933,6 +1943,69 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="trendBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain and let the chart collect a few candles.</div></div>
           </div>
 
+          <div class="level-panel" id="sigEnginePanel" style="grid-column:1 / -1;border:1px solid rgba(38,166,154,0.4);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🎯 Signal — buy / sell from confluence<i class="hi" data-h="signal-engine">i</i></span>
+            </div>
+            <div id="signalBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
+          <div class="level-panel" id="posnPanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.4);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">⚖️ Positioning — futures vs options, hedge or view<i class="hi" data-h="positioning">i</i></span>
+            </div>
+            <div id="posnBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
+          <div class="level-panel" id="regimeMapPanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.35);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🧭 Regime — which signals to trust right now<i class="hi" data-h="regime-map">i</i></span>
+            </div>
+            <div id="regimeMapBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
+          </div>
+
+          <div class="level-panel" id="maturityPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">⏳ Trend Maturity — how far through it are we<i class="hi" data-h="trend-maturity">i</i></span>
+            </div>
+            <div id="maturityBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
+          <div class="level-panel" id="ladderPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🪜 Strike Ladder — where price will be resisted<i class="hi" data-h="strike-ladder">i</i></span>
+            </div>
+            <div id="ladderBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
+          </div>
+
+          <div class="level-panel" id="grindPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🐌 Slow Trend — the move no threshold catches<i class="hi" data-h="slow-grind">i</i></span>
+            </div>
+            <div id="grindBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
+          <div class="level-panel" id="driftPanel" style="grid-column:1 / -1;">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🧲 Level Drift — is the level coming to price?<i class="hi" data-h="level-drift">i</i></span>
+            </div>
+            <div id="driftBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
+          <div class="level-panel" id="htfPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.3);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🗓️ Daily Context — with the trend or against it<i class="hi" data-h="htf-context">i</i></span>
+            </div>
+            <div id="htfBody" style="padding:6px 8px;"><div class="movers-loading">Loading…</div></div>
+          </div>
+
+          <div class="level-panel" id="sigScorePanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.3);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🎯 Signal Scorecard — which of these actually work<i class="hi" data-h="signal-score">i</i></span>
+            </div>
+            <div id="sigScoreBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
           <div class="level-panel" id="depthPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
               <span class="skew-chart-title">📖 Order Book Depth — what must be consumed<i class="hi" data-h="depth-imbalance">i</i></span>
@@ -1961,61 +2034,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="scalpBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain.</div></div>
           </div>
 
-          <div class="level-panel" id="ladderPanel" style="grid-column:1 / -1;">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">🪜 Strike Ladder — where price will be resisted<i class="hi" data-h="strike-ladder">i</i></span>
-            </div>
-            <div id="ladderBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
-          </div>
+          
 
-          <div class="level-panel" id="regimeMapPanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.35);">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">🧭 Regime — which signals to trust right now<i class="hi" data-h="regime-map">i</i></span>
-            </div>
-            <div id="regimeMapBody" style="padding:6px 8px;"><div class="movers-loading">Load the option chain.</div></div>
-          </div>
+          
 
-          <div class="level-panel" id="htfPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.3);">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">🗓️ Daily Context — with the trend or against it<i class="hi" data-h="htf-context">i</i></span>
-            </div>
-            <div id="htfBody" style="padding:6px 8px;"><div class="movers-loading">Loading…</div></div>
-          </div>
+          
 
-          <div class="level-panel" id="sigEnginePanel" style="grid-column:1 / -1;border:1px solid rgba(38,166,154,0.4);">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">🎯 Signal — buy / sell from confluence<i class="hi" data-h="signal-engine">i</i></span>
-            </div>
-            <div id="signalBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
-          </div>
+          
 
-          <div class="level-panel" id="maturityPanel" style="grid-column:1 / -1;">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">⏳ Trend Maturity — how far through it are we<i class="hi" data-h="trend-maturity">i</i></span>
-            </div>
-            <div id="maturityBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
-          </div>
+          
 
-          <div class="level-panel" id="grindPanel" style="grid-column:1 / -1;">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">🐌 Slow Trend — the move no threshold catches<i class="hi" data-h="slow-grind">i</i></span>
-            </div>
-            <div id="grindBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
-          </div>
+          
 
-          <div class="level-panel" id="driftPanel" style="grid-column:1 / -1;">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">🧲 Level Drift — is the level coming to price?<i class="hi" data-h="level-drift">i</i></span>
-            </div>
-            <div id="driftBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
-          </div>
+          
 
-          <div class="level-panel" id="sigScorePanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.3);">
-            <div class="level-panel-head">
-              <span class="skew-chart-title">🎯 Signal Scorecard — which of these actually work<i class="hi" data-h="signal-score">i</i></span>
-            </div>
-            <div id="sigScoreBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
-          </div>
+          
+
+          
 
           <div class="level-panel" id="capFlowPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head">
@@ -14328,6 +14363,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
     try { _maturityCheck(data); } catch (_) {}
+    try { renderPositioning(data); } catch (_) {}
     try { _signalCheck(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
     try { _driftRecord(data); renderDrift(data); } catch (_) {}
@@ -18408,6 +18444,111 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
   });
 
+  // ══ POSITIONING: THE OTHER SIDE OF THE COIN ═══════════════════════
+  // Option open interest on its own is genuinely uninterpretable, and this is
+  // the single biggest blind spot in everything above.
+  //
+  // A large call-writing position looks bearish. Against a long futures
+  // position it is a COVERED CALL - neutral to mildly bullish, someone
+  // selling upside they do not expect to need. Against nothing it is a naked
+  // short, which is bearish. Identical option OI, opposite meaning, and the
+  // option chain cannot tell them apart. That is why price and OI can point
+  // one way and the outcome surprises you.
+  //
+  // The futures leg is what disambiguates it:
+  //
+  //   futures OI RISING + price rising   long buildup, directional
+  //   futures OI RISING + price falling  short buildup, directional
+  //   futures OI FALLING + price rising  short covering, positions closing
+  //   futures OI FALLING + price falling long unwinding, positions closing
+  //
+  // BASIS - futures minus spot, adjusted for carry - says what that money is
+  // paying to hold. A premium above fair carry is willingness to pay up for
+  // long exposure; a discount is hedging pressure or outright shorting.
+  function _positioning(d) {
+    const spot = d?.underlying_value;
+    // The server sends FLAT keys — futures_price, futures_oi, futures_oi_chg,
+    // futures_prev_close — not a nested object. Reading d.futures gave
+    // undefined on every poll and the panel simply said "needs the futures
+    // quote" forever, which looks identical to the broker not supplying it.
+    const fut = (d && isFinite(d.futures_price)) ? {
+      price: d.futures_price,
+      oi: d.futures_oi,
+      oi_chg: d.futures_oi_chg,
+      prev_close: d.futures_prev_close,
+    } : null;
+    if (!spot || !fut || !isFinite(fut.price)) return null;
+    const dte = Math.max(1 / 365, (d.dte ?? 7) / 365);
+    // fair basis at a 7% cost of carry: what the future SHOULD trade at if
+    // nobody had a view, so any gap beyond it is positioning rather than maths
+    const fair = spot * (Math.exp(0.07 * dte) - 1);
+    const basis = fut.price - spot;
+    const excess = basis - fair;
+    const oiChg = isFinite(fut.oi_chg) ? fut.oi_chg : (isFinite(fut.oi) && isFinite(fut.prev_oi) ? fut.oi - fut.prev_oi : null);
+    const pxUp = isFinite(fut.prev_close) ? fut.price > fut.prev_close : null;
+
+    let quad = null, quadNote = '';
+    if (oiChg != null && pxUp != null) {
+      if (oiChg > 0 && pxUp) { quad = 'long buildup'; quadNote = 'new money is long — directional, and it has to be defended'; }
+      else if (oiChg > 0 && !pxUp) { quad = 'short buildup'; quadNote = 'new money is short — directional, and it has to be defended'; }
+      else if (oiChg < 0 && pxUp) { quad = 'short covering'; quadNote = 'shorts closing, not new buying — these rallies run out'; }
+      else { quad = 'long unwinding'; quadNote = 'longs closing, not new selling — these falls run out'; }
+    }
+
+    // is the option chain's apparent bias supported by the futures leg?
+    let optBias = null, verdict = '', conflict = false;
+    try {
+      const f = _netPremiumFlow(d);
+      if (f && Math.abs(f.conviction) > 0.1) optBias = f.net > 0 ? 1 : -1;
+    } catch (_) {}
+    const futBias = quad === 'long buildup' ? 1 : quad === 'short buildup' ? -1
+                  : quad === 'short covering' ? 1 : quad === 'long unwinding' ? -1 : 0;
+    if (optBias && futBias) {
+      if (optBias === futBias) {
+        verdict = 'Options and futures agree — the option position is directional, not a hedge.';
+      } else {
+        conflict = true;
+        verdict = optBias > 0
+          ? 'Options look bullish while futures are being sold. That pattern is usually PROTECTION being bought against a long book, not a bullish view — the option leg is the hedge, and the futures leg is the position.'
+          : 'Options look bearish while futures are being bought. Usually a COVERED CALL or collar against long futures — someone selling upside they do not expect to need, which is not a bearish call.';
+      }
+    }
+    return {
+      spot, futPrice: fut.price, basis, fair, excess, oiChg, pxUp, quad, quadNote,
+      optBias, futBias, verdict, conflict,
+      carryRead: excess > spot * 0.0006 ? 'premium beyond carry — paying up for long exposure'
+               : excess < -spot * 0.0006 ? 'discount to carry — hedging pressure or outright shorts'
+               : 'near fair carry — no strong positioning in the basis',
+    };
+  }
+
+  function renderPositioning(d) {
+    const box = document.getElementById('posnBody');
+    if (!box) return;
+    const p = _positioning(d);
+    if (!p) {
+      box.innerHTML = `<div class="movers-loading" style="font-size:10px;">
+        Needs the futures quote. It arrives with the chain on the broker feed —
+        NSE's public endpoint does not carry it.</div>`;
+      return;
+    }
+    const col = p.conflict ? 'var(--gold,#d4af37)'
+              : p.futBias > 0 ? 'var(--pos,#26a69a)' : p.futBias < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:12px;">${p.quad ? p.quad.toUpperCase() : 'FUTURES FLAT'}</b>
+        <span style="color:var(--muted);">basis ${p.basis >= 0 ? '+' : ''}${p.basis.toFixed(1)}</span>
+        <span style="color:var(--muted);">fair ${p.fair.toFixed(1)}</span>
+        <span style="color:${Math.abs(p.excess) > p.spot * 0.0006 ? 'var(--gold,#d4af37)' : 'var(--muted)'};">
+          excess ${p.excess >= 0 ? '+' : ''}${p.excess.toFixed(1)}</span>
+      </div>
+      ${p.quadNote ? `<div style="padding:2px 4px;font-size:10px;color:var(--muted);">${escapeHtml(p.quadNote)}</div>` : ''}
+      <div style="padding:2px 4px;font-size:10px;color:var(--muted);">${escapeHtml(p.carryRead)}</div>
+      ${p.verdict ? `<div style="padding:4px;font-size:10.5px;color:${p.conflict ? 'var(--gold,#d4af37)' : 'inherit'};">
+        <b>${p.conflict ? '⚠ Options and futures disagree' : '✓ Options and futures agree'}</b> — ${escapeHtml(p.verdict)}</div>` : ''}
+      <div class="oc-sub" style="margin-top:3px;">Option open interest on its own is <b>uninterpretable</b>, and this is the largest blind spot in everything else here. A big call-writing position looks bearish; held against long futures it is a <b>covered call</b> — neutral to mildly bullish, someone selling upside they do not expect to need. Held against nothing it is a naked short, which is bearish. Identical open interest, opposite meaning, and the option chain cannot tell them apart. That is exactly how price and OI point one way and the outcome surprises you. <b>The futures leg disambiguates it:</b> open interest rising with price is new directional money that has to be defended, while open interest falling is positions closing — and rallies on short covering run out, because nobody is buying, they are merely stopping selling. <b>Basis</b> — futures minus spot against fair carry — says what that money is paying to hold: a premium beyond carry is willingness to pay up for long exposure, a discount is hedging pressure. <b>The disagreement line is the valuable one.</b> When options look bullish while futures are sold, that is usually protection bought against a long book rather than a bullish view. Institutions are not hedged against loss — no such thing exists — they simply know which way they lose and how much.</div>`;
+  }
+
   // ══ SIGNAL ENGINE ═════════════════════════════════════════════════
   // A buy/sell call from the confluence of everything already measured here.
   // Nine families vote; the score is their weighted sum, and a signal needs
@@ -18432,7 +18573,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _signalEval(d) {
     const cs = _chart.candles || [];
     if (cs.length < 40 || !d?.underlying_value) return null;
-    const bars = _chart.liveBar ? cs.slice(0, -1) : cs;      // closed only
+    let bars = _chart.liveBar ? cs.slice(0, -1) : cs;        // closed only
+    // Aggregate to TRUE five-minute bars. The five-minute gate below only
+    // controlled WHEN this fired, not which bars it read - so structure and
+    // the EMA stack were one-minute reads wearing a five-minute label. A
+    // one-minute EMA stack flips several times inside a single five-minute
+    // candle, which is exactly the noise the slower timeframe is meant to
+    // remove.
+    const iv = _chart.interval || 1;
+    if (iv < 5 && iv > 0) {
+      const grp = Math.round(5 / iv);
+      const agg = [];
+      for (let i = 0; i + grp <= bars.length; i += grp) {
+        const w = bars.slice(i, i + grp);
+        agg.push({
+          t: w[0].t, o: w[0].o, c: w[w.length - 1].c,
+          h: Math.max(...w.map(b => b.h)), l: Math.min(...w.map(b => b.l)),
+          v: w.reduce((s, b) => s + (b.v || 0), 0),
+        });
+      }
+      if (agg.length >= 30) bars = agg;
+    }
     if (bars.length < 30) return null;
     const px = bars[bars.length - 1].c;
     const votes = [];
@@ -18568,13 +18729,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _signalCheck(d) {
     const s = _signalEval(d);
     renderSignal(s);
-    if (!s || !s.dir) return;
+    if (!s || !s.dir) {
+      // a bar with no call is what re-opens the same direction later
+      if (s && _SIG.bar !== s.bar) { _SIG.bar = s.bar; _SIG.flatBars = (_SIG.flatBars || 0) + 1; }
+      return;
+    }
     // one signal per bar, and only when the direction changes
     if (_SIG.bar === s.bar) return;
     const istMin2 = t => { const g = new Date(t * 1000); const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000); return i2.getHours() * 60 + i2.getMinutes(); };
     if (istMin2(s.bar) % 5 !== 0) return;             // 5-minute grid
     _SIG.bar = s.bar;
-    if (_SIG.last === s.dir) return;                  // already called this way
+    // Track how long the signal has been flat. Suppressing every repeat of the
+    // same direction meant a fresh setup after the previous one had gone flat
+    // was silently dropped - and a second entry in a continuing trend is
+    // often the better one, because the first has already proved itself.
+    if (_SIG.last === s.dir && (_SIG.flatBars || 0) < 3) return;
+    _SIG.flatBars = 0;
     _SIG.last = s.dir;
     _SIG.hist.push({ t: s.bar, dir: s.dir, score: s.score, px: s.px });
     if (_SIG.hist.length > 40) _SIG.hist.shift();
