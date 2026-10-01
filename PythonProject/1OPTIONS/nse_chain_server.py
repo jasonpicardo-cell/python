@@ -4420,6 +4420,158 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(_build_health_response())
             return
 
+        if parsed.path == "/api/accumulation-scan":
+            # Scans the local daily OHLCV cache for institutional footprints.
+            #
+            # What this can and cannot see, stated plainly: the cache has no
+            # delivery percentage, which is the single best accumulation
+            # signal, so this infers from VOLUME and WHERE PRICE CLOSES IN ITS
+            # RANGE instead. A fund buying 2% of a company does it over many
+            # sessions, and that leaves a pattern - repeated days of heavy
+            # volume closing in the upper part of the range, while price has
+            # not yet moved far. Markup comes after accumulation, not during.
+            #
+            # Every threshold is relative to the stock's OWN history. A 70%
+            # close-location stock at 70% is nothing; a 40% stock at 70% is a
+            # footprint, and a fixed cutoff cannot tell them apart.
+            import csv as _csv
+            cache = _os.environ.get("NSE_DATA_CACHE") or _os.path.join(
+                _os.path.dirname(_os.path.abspath(__file__)), "..", "nse_data_cache")
+            cache = _os.path.abspath(cache)
+            if not _os.path.isdir(cache):
+                self._send_json({"error": f"Cache folder not found: {cache}. "
+                                          f"Set NSE_DATA_CACHE in env to its path."}, status=404)
+                return
+            try:
+                look = int(qs.get("lookback", ["10"])[0])        # days of footprint
+                base = int(qs.get("baseline", ["60"])[0])        # days of baseline
+                minv = float(qs.get("minvol", ["200000"])[0])    # skip illiquid names
+                want = (qs.get("mode", ["accumulation"])[0] or "accumulation").lower()
+            except Exception:
+                look, base, minv, want = 10, 60, 200000.0, "accumulation"
+            need = look + base + 5
+            # ── universe: Nifty 500 ───────────────────────────────────
+            # Two ways to define it, in order of preference.
+            #
+            # If a list file exists in the cache folder (nifty500.txt or .csv,
+            # one symbol per line) that is authoritative - an actual index
+            # membership list beats any proxy.
+            #
+            # Otherwise fall back to the top 500 by median daily TURNOVER.
+            # That is a close approximation: the Nifty 500 is built on free
+            # float market cap, and turnover tracks it well enough for this
+            # purpose. It is also self-maintaining, which a pasted list is
+            # not - index membership changes twice a year and a stale list
+            # quietly scans the wrong universe.
+            universe = None
+            for lf in ("nifty500.txt", "nifty500.csv", "NIFTY500.txt", "NIFTY500.csv"):
+                lp = _os.path.join(cache, lf)
+                if _os.path.isfile(lp):
+                    try:
+                        with open(lp, "r") as fh:
+                            universe = {ln.strip().upper().replace(".NS", "").split(",")[0]
+                                        for ln in fh if ln.strip() and not ln.lower().startswith("symbol")}
+                        print(f"[scan] universe from {lf}: {len(universe)} symbols")
+                    except Exception:
+                        universe = None
+                    break
+            if universe is None:
+                turn = []
+                for fn in sorted(_os.listdir(cache)):
+                    if not fn.lower().endswith(".csv"):
+                        continue
+                    try:
+                        with open(_os.path.join(cache, fn), "r", newline="") as fh:
+                            rr = list(_csv.DictReader(fh))
+                        if len(rr) < base:
+                            continue
+                        rr = rr[-base:]
+                        vals = sorted(float(x["Close"]) * float(x["Volume"]) for x in rr)
+                        turn.append((vals[len(vals) // 2], fn[:-4].upper()))
+                    except Exception:
+                        continue
+                turn.sort(reverse=True)
+                universe = {sym for _, sym in turn[:500]}
+                print(f"[scan] universe by turnover: {len(universe)} symbols "
+                      f"(drop a nifty500.txt in the cache folder to use the real list)")
+
+            results, scanned, skipped = [], 0, 0
+            for fn in sorted(_os.listdir(cache)):
+                if not fn.lower().endswith(".csv"):
+                    continue
+                sym = fn[:-4].upper()
+                if universe and sym not in universe:
+                    continue
+                path = _os.path.join(cache, fn)
+                try:
+                    with open(path, "r", newline="") as fh:
+                        rows = list(_csv.DictReader(fh))
+                    if len(rows) < need:
+                        skipped += 1
+                        continue
+                    rows = rows[-need:]
+                    o = [float(r["Open"]) for r in rows]
+                    h = [float(r["High"]) for r in rows]
+                    lo = [float(r["Low"]) for r in rows]
+                    c = [float(r["Close"]) for r in rows]
+                    v = [float(r["Volume"]) for r in rows]
+                except Exception:
+                    skipped += 1
+                    continue
+                scanned += 1
+                bv = v[:base]
+                avg_v = sum(bv) / max(1, len(bv))
+                if avg_v < minv:
+                    continue
+                # close location in range, per day: 1.0 = closed on the high
+                def cl(i):
+                    rng = h[i] - lo[i]
+                    return 0.5 if rng <= 0 else (c[i] - lo[i]) / rng
+                base_cl = sum(cl(i) for i in range(base)) / max(1, base)
+                win = range(len(c) - look, len(c))
+                # the footprint: heavy volume days closing high in their range
+                heavy, heavy_up, vol_sum = 0, 0, 0.0
+                for i in win:
+                    vol_sum += v[i]
+                    if v[i] > avg_v * 1.5:
+                        heavy += 1
+                        if cl(i) > max(0.6, base_cl + 0.12):
+                            heavy_up += 1
+                        elif cl(i) < min(0.4, base_cl - 0.12):
+                            heavy_up -= 1
+                recent_cl = sum(cl(i) for i in win) / look
+                vol_ratio = (vol_sum / look) / max(1.0, avg_v)
+                px_chg = (c[-1] / c[len(c) - look - 1] - 1.0) * 100.0
+                base_px = (c[base - 1] / c[0] - 1.0) * 100.0
+                # Quiet accumulation is the valuable case: volume is up and
+                # closes are strong, but price has NOT run yet. Once price has
+                # already moved the information is in the price.
+                quiet = abs(px_chg) < 6.0
+                score = 0.0
+                score += min(40.0, max(0.0, (vol_ratio - 1.0) * 55.0))
+                score += (recent_cl - base_cl) * 110.0
+                score += heavy_up * 5.5
+                if quiet:
+                    score += 12.0
+                if want == "distribution":
+                    score = -score
+                if abs(score) < 25:
+                    continue
+                results.append({
+                    "symbol": sym, "score": round(score, 1),
+                    "vol_ratio": round(vol_ratio, 2),
+                    "close_loc": round(recent_cl, 2), "base_close_loc": round(base_cl, 2),
+                    "heavy_days": heavy, "heavy_net": heavy_up,
+                    "px_chg": round(px_chg, 2), "base_px_chg": round(base_px, 2),
+                    "last": c[-1], "avg_vol": int(avg_v), "quiet": quiet,
+                })
+            results.sort(key=lambda r: -abs(r["score"]))
+            self._send_json({"mode": want, "scanned": scanned, "skipped": skipped,
+                             "lookback": look, "baseline": base,
+                             "universe": len(universe) if universe else 0,
+                             "results": results[:60], "cache": cache})
+            return
+
         if parsed.path == "/api/participant-oi":
             # Participant-wise open interest, published by NSE after the close.
             # This is the closest thing to seeing the institutional book: FII,

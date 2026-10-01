@@ -2498,6 +2498,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="postMktBody" style="padding:6px 8px;"><div class="movers-loading" style="font-size:10px;">Press Fetch after about 7:30pm, once NSE has published the day's participant open interest.</div></div>
           </div>
 
+          <div class="level-panel" id="accumPanel" style="grid-column:1 / -1;border:1px solid rgba(212,175,55,0.35);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🔍 Accumulation Scan — footprints across every stock<i class="hi" data-h="accum-scan">i</i></span>
+              <span style="display:flex;gap:4px;">
+                <button id="accumBuyBtn" class="mini-btn" style="font-size:9px;padding:1px 7px;">Accumulation</button>
+                <button id="accumSellBtn" class="mini-btn" style="font-size:9px;padding:1px 7px;">Distribution</button>
+              </span>
+            </div>
+            <div id="accumBody" style="padding:6px 8px;"><div class="movers-loading" style="font-size:10px;">Scans your local daily cache. No network, no rate limit — the whole universe in one pass.</div></div>
+          </div>
+
           <div class="level-panel" id="preMktPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.35);">
             <div class="level-panel-head">
               <span class="skew-chart-title">🌅 Pre-Market — overnight and the gap<i class="hi" data-h="pre-market">i</i></span>
@@ -18476,6 +18487,61 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // rate-sensitive besides.
   function _deskBase() { return (els.serverUrl?.value || '').replace(/\/+$/, ''); }
 
+  // ── ACCUMULATION SCAN ─────────────────────────────────────────────
+  // Scans the local daily cache for institutional footprints across every
+  // stock in it. Local files mean no rate limit and no network, so the whole
+  // universe can be swept in one pass.
+  //
+  // What it can and cannot see, stated plainly: the cache carries no delivery
+  // percentage, which is the single best accumulation signal. This infers
+  // from VOLUME and WHERE PRICE CLOSES IN ITS RANGE instead - a fund buying
+  // two percent of a company does it across many sessions, and that leaves
+  // repeated heavy-volume days closing in the upper part of their range while
+  // price has not yet run.
+  async function runAccumScan(mode) {
+    const box = document.getElementById('accumBody');
+    if (!box) return;
+    box.innerHTML = `<div class="movers-loading">Scanning the local cache for ${escapeHtml(mode)}…</div>`;
+    let j = null;
+    try {
+      j = await (await fetch(`${_deskBase()}/api/accumulation-scan?mode=${encodeURIComponent(mode)}`)).json();
+    } catch (e) { j = { error: String(e) }; }
+    if (!j || j.error) {
+      box.innerHTML = `<div class="movers-loading">${escapeHtml(j?.error || 'Scan failed.')}</div>`;
+      return;
+    }
+    if (!j.results?.length) {
+      box.innerHTML = `<div class="movers-loading">Nothing above threshold. Scanned ${j.scanned} stocks.</div>`;
+      return;
+    }
+    const rows = j.results.map(r => `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+        <td style="padding:3px 6px;"><b>${escapeHtml(r.symbol)}</b>${r.quiet ? ' <span title="price has not run yet — the informative case" style="color:var(--gold,#d4af37);">◆</span>' : ''}</td>
+        <td style="padding:3px 6px;text-align:right;color:${r.score > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};"><b>${Math.abs(r.score).toFixed(0)}</b></td>
+        <td style="padding:3px 6px;text-align:right;">${r.vol_ratio.toFixed(2)}×</td>
+        <td style="padding:3px 6px;text-align:right;">${r.close_loc.toFixed(2)}<span style="color:var(--muted);font-size:9px;"> vs ${r.base_close_loc.toFixed(2)}</span></td>
+        <td style="padding:3px 6px;text-align:right;color:var(--muted);">${r.heavy_net >= 0 ? '+' : ''}${r.heavy_net}/${r.heavy_days}</td>
+        <td style="padding:3px 6px;text-align:right;color:${r.px_chg >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${r.px_chg >= 0 ? '+' : ''}${r.px_chg.toFixed(1)}%</td>
+        <td style="padding:3px 6px;text-align:right;color:var(--muted);">${fmtInt(Math.round(r.last))}</td>
+      </tr>`).join('');
+    box.innerHTML = `
+      <div style="font-size:10px;color:var(--muted);padding:2px 4px;">
+        ${j.scanned} of ${j.universe || '—'} in the universe scanned · ${j.results.length} shown · ${j.lookback}-day footprint against a ${j.baseline}-day baseline
+        · <span style="color:var(--gold,#d4af37);">◆</span> price has not run yet</div>
+      <div style="max-height:360px;overflow:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:10px;">
+          <tr style="color:var(--muted);font-size:9px;position:sticky;top:0;background:var(--panel,#161b22);">
+            <th style="text-align:left;padding:3px 6px;">stock</th>
+            <th style="text-align:right;padding:3px 6px;">score</th>
+            <th style="text-align:right;padding:3px 6px;">volume</th>
+            <th style="text-align:right;padding:3px 6px;">close in range</th>
+            <th style="text-align:right;padding:3px 6px;">heavy days</th>
+            <th style="text-align:right;padding:3px 6px;">price</th>
+            <th style="text-align:right;padding:3px 6px;">last</th>
+          </tr>${rows}
+        </table></div>
+      <div class="oc-sub" style="margin-top:3px;">There is no secret feed here, and anything sold as one is inference from the same public data. What this does have is the footprint large buying leaves: a fund taking two percent of a company does it across many sessions, not in one print, and those sessions show <b>heavy volume closing in the upper part of the day's range</b>. Distribution is the mirror — heavy volume closing low. <b>Everything is measured against the stock's own history</b>, never a fixed cutoff: a stock that normally closes at 0.70 of its range sitting at 0.70 is nothing, while one that normally closes at 0.40 sitting at 0.70 is a footprint, and a fixed threshold cannot tell those apart. <b>The ◆ marks the valuable case</b> — volume and closes have shifted but price has NOT yet run. Once price has moved, the information is already in the price and you are late. <b>The universe is the Nifty 500.</b> If a <code>nifty500.txt</code> sits in the cache folder, one symbol per line, that list is used directly. Otherwise the top 500 by median daily turnover stands in for it — a close proxy, since the index is built on free-float market cap and turnover tracks that well, and one that maintains itself, which a pasted list does not: membership changes twice a year and a stale list quietly scans the wrong universe. <b>The honest limit:</b> the cache carries no delivery percentage, which is the strongest accumulation signal available, so this is inference from volume and range rather than a direct read. It will flag operator activity, index-rebalance buying and genuine institutional accumulation alike, and it cannot tell you which is which.</div>`;
+  }
+
   // ── POST-MARKET (after 8pm) ───────────────────────────────────────
   // Participant-wise OI is the closest thing to seeing the institutional
   // book: it names WHO holds what, not merely how much exists. That single
@@ -24412,6 +24478,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // control and polling would spend requests on data that has not moved.
     document.getElementById('postMktBtn')?.addEventListener('click', () => runPostMarket());
     document.getElementById('preMktBtn')?.addEventListener('click', () => runPreMarket());
+    document.getElementById('accumBuyBtn')?.addEventListener('click', () => runAccumScan('accumulation'));
+    document.getElementById('accumSellBtn')?.addEventListener('click', () => runAccumScan('distribution'));
     document.getElementById('addAlertBtn')?.addEventListener('click', () => {
       const spot = state.lastData?.underlying_value;
       const v = prompt('Alert when spot touches which price?',
