@@ -1756,6 +1756,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   <nav class="tabs">
     <button class="tab active" data-tab="home">Home</button>
     <button class="tab" data-tab="today">Today</button>
+        <button class="tab" data-tab="desk" title="Post-market FII/DII positioning and pre-market gap analysis — both fetched on demand">Desk</button>
     <button class="tab" data-tab="chain">Option Chain</button>
     <button class="tab" data-tab="strategy">Strategy</button>
     <button class="tab" data-tab="builder">Builder</button>
@@ -1942,6 +1943,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             </div>
             <div id="trendBody" style="padding:6px 8px;"><div class="movers-loading">Load the chain and let the chart collect a few candles.</div></div>
           </div>
+
+          
+
+          
 
           <div class="level-panel" id="sigEnginePanel" style="grid-column:1 / -1;border:1px solid rgba(38,166,154,0.4);">
             <div class="level-panel-head">
@@ -2483,7 +2488,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     
 
 
-    <section id="tab-today" class="tab-panel">
+    <section id="tab-desk" class="tab-panel">
+          <div class="level-grid" style="grid-template-columns:1fr;">
+          <div class="level-panel" id="postMktPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.35);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🌙 Post-Market — FII / DII positioning<i class="hi" data-h="post-market">i</i></span>
+              <button id="postMktBtn" class="mini-btn" style="font-size:9px;padding:1px 7px;">Fetch</button>
+            </div>
+            <div id="postMktBody" style="padding:6px 8px;"><div class="movers-loading" style="font-size:10px;">Press Fetch after about 7:30pm, once NSE has published the day's participant open interest.</div></div>
+          </div>
+
+          <div class="level-panel" id="preMktPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.35);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🌅 Pre-Market — overnight and the gap<i class="hi" data-h="pre-market">i</i></span>
+              <button id="preMktBtn" class="mini-btn" style="font-size:9px;padding:1px 7px;">Fetch</button>
+            </div>
+            <div id="preMktBody" style="padding:6px 8px;"><div class="movers-loading" style="font-size:10px;">Press Fetch before the open for GIFT Nifty, the overnight gap and today's expected range.</div></div>
+          </div>
+          </div>
+        </section>
+
+        <section id="tab-today" class="tab-panel">
       <div class="builder-panel-head">
         <h3>Today — your morning read in one glance<i class="hi" data-h="today-tab">i</i></h3>
         <button class="btn" id="todayRefreshBtn" style="font-size:11px;">↻ Refresh</button>
@@ -18444,6 +18469,246 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
   });
 
+  // ══ MARKET DESK: POST-MARKET AND PRE-MARKET ═══════════════════════
+  // Both fetch ON DEMAND only. These are end-of-day and start-of-day reads
+  // that change once per session, so polling them would spend requests on
+  // data that has not moved - and the NSE archive endpoints are slow and
+  // rate-sensitive besides.
+  function _deskBase() { return (els.serverUrl?.value || '').replace(/\/+$/, ''); }
+
+  // ── POST-MARKET (after 8pm) ───────────────────────────────────────
+  // Participant-wise OI is the closest thing to seeing the institutional
+  // book: it names WHO holds what, not merely how much exists. That single
+  // distinction answers the question the option chain cannot - FIIs net short
+  // index futures while buying cash are HEDGED LONG, not bearish.
+  async function runPostMarket() {
+    const box = document.getElementById('postMktBody');
+    if (!box) return;
+    box.innerHTML = '<div class="movers-loading">Fetching participant OI and cash flows…</div>';
+    const base = _deskBase();
+    let poi = null, flows = null;
+    try { poi = await (await fetch(`${base}/api/participant-oi`)).json(); } catch (e) { poi = { error: String(e) }; }
+    try { flows = await (await fetch(`${base}/api/fii-dii`)).json(); } catch (_) {}
+    if (!poi || poi.error) {
+      box.innerHTML = `<div class="movers-loading">${escapeHtml(poi?.error || 'Participant OI unavailable.')}
+        <br><span style="font-size:9px;">NSE publishes this after the close on trading days, usually by about 7:30pm IST.</span></div>`;
+      return;
+    }
+    const by = {}; for (const r of poi.rows) by[r.who] = r;
+    const fmtL = n => (Math.abs(n) >= 1e5 ? (n / 1e5).toFixed(2) + 'L' : fmtInt(Math.round(n)));
+    const line = who => {
+      const r = by[who]; if (!r) return '';
+      const fNet = r.fut_idx_long - r.fut_idx_short;
+      const fRatio = r.fut_idx_short > 0 ? r.fut_idx_long / r.fut_idx_short : null;
+      // Option legs: long calls and short puts are bullish exposure; long
+      // puts and short calls are bearish or protective.
+      const oBull = r.opt_idx_call_long + r.opt_idx_put_short;
+      const oBear = r.opt_idx_put_long + r.opt_idx_call_short;
+      const oNet = oBull - oBear;
+      const col = v => v > 0 ? 'var(--pos,#26a69a)' : v < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+      return `<tr>
+        <td style="padding:3px 6px;"><b>${who}</b></td>
+        <td style="padding:3px 6px;text-align:right;color:${col(fNet)};">${fNet >= 0 ? '+' : ''}${fmtL(fNet)}</td>
+        <td style="padding:3px 6px;text-align:right;color:var(--muted);">${fRatio ? fRatio.toFixed(2) : '—'}</td>
+        <td style="padding:3px 6px;text-align:right;color:${col(oNet)};">${oNet >= 0 ? '+' : ''}${fmtL(oNet)}</td>
+      </tr>`;
+    };
+    // the reading that matters: FII futures stance against their cash flow
+    const fii = by.FII;
+    let verdict = '';
+    if (fii) {
+      const fNet = fii.fut_idx_long - fii.fut_idx_short;
+      const cash = flows?.fii_net ?? flows?.fiiNet ?? null;
+      if (cash != null) {
+        if (fNet < 0 && cash > 0)
+          verdict = 'FIIs are net SHORT index futures while BUYING cash. That is a hedged long book, not a bearish view — the futures leg is protection on stock they are accumulating.';
+        else if (fNet > 0 && cash < 0)
+          verdict = 'FIIs are net LONG index futures while SELLING cash. Exposure is being kept through derivatives while the underlying is reduced — often a prelude to unwinding both.';
+        else if (fNet < 0 && cash < 0)
+          verdict = 'FIIs are short futures AND selling cash. Directionally bearish on both legs — no hedging ambiguity here.';
+        else
+          verdict = 'FIIs are long futures AND buying cash. Directionally bullish on both legs.';
+      } else {
+        verdict = fNet < 0 ? 'FIIs are net short index futures. Whether that is a view or a hedge depends on their cash flow, which did not load.'
+                           : 'FIIs are net long index futures.';
+      }
+    }
+    box.innerHTML = `
+      <div style="font-size:10px;color:var(--muted);padding:2px 4px;">Participant open interest for <b>${escapeHtml(poi.date)}</b>${flows ? ' · cash flows included' : ''}</div>
+      <table style="width:100%;border-collapse:collapse;font-size:10px;margin-top:3px;">
+        <tr style="color:var(--muted);font-size:9px;">
+          <th style="text-align:left;padding:2px 6px;">who</th>
+          <th style="text-align:right;padding:2px 6px;">index futures net</th>
+          <th style="text-align:right;padding:2px 6px;">long/short</th>
+          <th style="text-align:right;padding:2px 6px;">index options net</th>
+        </tr>
+        ${['FII', 'DII', 'Pro', 'Client'].map(line).join('')}
+      </table>
+      ${verdict ? `<div style="padding:5px 4px;font-size:10.5px;"><b>Read:</b> ${escapeHtml(verdict)}</div>` : ''}
+      ${(() => {
+        // The five-day trend, not the snapshot. One day's ratio is noise; the
+        // direction across a week is the institutional signal, and a ratio
+        // falling from 0.9 to 0.4 says something a single 0.4 cannot.
+        const h = poi.fii_history || [];
+        if (h.length < 2) return '';
+        const first = h[0], last = h[h.length - 1];
+        const dR = (last.ratio != null && first.ratio != null) ? last.ratio - first.ratio : null;
+        const dir = dR == null ? '' : dR > 0.08 ? 'FIIs have been REDUCING shorts across the week'
+                  : dR < -0.08 ? 'FIIs have been ADDING shorts across the week'
+                  : 'FII positioning is broadly unchanged across the week';
+        const cells = h.map(x =>
+          `<td style="padding:2px 6px;text-align:right;">
+             <div style="font-size:9px;color:var(--muted);">${x.date.slice(5)}</div>
+             <b style="color:${x.ratio == null ? 'var(--muted)' : x.ratio >= 1 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">
+               ${x.ratio == null ? '—' : x.ratio.toFixed(2)}</b>
+           </td>`).join('');
+        return `<div style="margin-top:5px;padding:4px;border-top:1px solid rgba(255,255,255,0.07);">
+          <div style="font-size:9.5px;color:var(--muted);margin-bottom:2px;">FII index-futures long/short, last ${h.length} sessions</div>
+          <table style="border-collapse:collapse;font-size:10px;"><tr>${cells}</tr></table>
+          ${dir ? `<div style="font-size:10.5px;margin-top:3px;">${escapeHtml(dir)}${dR != null ? ` (${dR >= 0 ? '+' : ''}${dR.toFixed(2)})` : ''}</div>` : ''}
+        </div>`;
+      })()}
+      ${(() => {
+        // ── DECEPTION CHECK ────────────────────────────────────────
+        // The surface read against the participant-level truth. The chain
+        // says what EXISTS; the participant file says WHO holds it, and the
+        // two disagreeing is the specific shape of "it shows something and
+        // does something else".
+        //
+        // Four tests, each a known way the surface misleads.
+        const d0 = state.lastData || {};
+        const out = [];
+        const f = by.FII, cl = by.Client, pro = by.Pro;
+        if (!f) return '';
+        const fFutNet = f.fut_idx_long - f.fut_idx_short;
+        const fPutLong = f.opt_idx_put_long, fCallShort = f.opt_idx_call_short;
+
+        // 1. PCR says one thing, FII futures say another
+        const pcr = Number(d0.pcr);
+        if (isFinite(pcr) && pcr > 1.2 && fFutNet < 0)
+          out.push(['PCR reads bullish, FIIs are short futures',
+            'A high put-call ratio is usually read as support building. If the institutions holding those puts are ALSO short futures, the puts are not support - they are the hedge on a short book, and the "support" is a position that profits from a fall.']);
+        if (isFinite(pcr) && pcr < 0.8 && fFutNet > 0)
+          out.push(['PCR reads bearish, FIIs are long futures',
+            'Heavy call writing against a long futures book is a covered call, not a bearish view. The ceiling it implies is someone selling upside they do not expect to need.']);
+
+        // 2. the chain's own walls vs who is writing them
+        if (fCallShort > fPutLong * 1.4 && fFutNet > 0)
+          out.push(['Call walls are FII-written against long futures',
+            'The resistance the chain is showing is covered call writing. These walls cap upside but do not predict a fall, and they tend to dissolve rather than hold when price pushes through.']);
+
+        // 3. retail on the other side, at an extreme
+        if (cl) {
+          const clNet = (cl.opt_idx_call_long + cl.opt_idx_put_short) -
+                        (cl.opt_idx_put_long + cl.opt_idx_call_short);
+          const fiiOptNet = (f.opt_idx_call_long + f.opt_idx_put_short) -
+                            (f.opt_idx_put_long + f.opt_idx_call_short);
+          if (clNet !== 0 && fiiOptNet !== 0 && Math.sign(clNet) !== Math.sign(fiiOptNet))
+            out.push([`Clients are ${clNet > 0 ? 'long' : 'short'} the index options that FIIs are ${fiiOptNet > 0 ? 'long' : 'short'}`,
+              'Clients are structurally the other side of institutional flow, and at extremes that side has historically been the wrong one. This is not a signal on its own, but a crowded retail position against an institutional one is worth knowing before taking the retail side of it.']);
+        }
+
+        // 4. prop desks leading
+        if (pro) {
+          const proNet = pro.fut_idx_long - pro.fut_idx_short;
+          if (proNet !== 0 && fFutNet !== 0 && Math.sign(proNet) !== Math.sign(fFutNet))
+            out.push(['Prop desks are positioned against FIIs',
+              'Proprietary books turn faster than foreign institutional ones and are usually closer to the tape. When they diverge from FIIs it often marks the start of a turn, because the slower money has not repositioned yet.']);
+        }
+
+        if (!out.length)
+          return `<div style="margin-top:5px;padding:5px;border-top:1px solid rgba(255,255,255,0.07);font-size:10.5px;color:var(--muted);">
+            <b>Deception check:</b> the surface read and participant positioning agree today. The chain can be taken at face value.</div>`;
+        return `<div style="margin-top:5px;padding:5px;border-top:1px solid rgba(212,175,55,0.3);">
+          <div style="font-size:11px;color:var(--gold,#d4af37);font-weight:700;margin-bottom:3px;">⚠ Deception check — ${out.length} disagreement${out.length > 1 ? 's' : ''}</div>
+          ${out.map(([h, w]) => `<div style="margin-bottom:5px;font-size:10.5px;">
+            <b>${escapeHtml(h)}</b><div style="color:var(--muted);">${escapeHtml(w)}</div></div>`).join('')}
+        </div>`;
+      })()}
+      <div class="oc-sub" style="margin-top:3px;">This is the closest public view of the institutional book, because it names <b>who</b> holds what rather than only how much exists — which is exactly what open interest alone cannot tell you. <b>Index futures net</b> is long minus short contracts; the <b>long/short ratio</b> is the cleaner gauge, since it is scale-free and comparable across days. <b>Index options net</b> treats long calls and short puts as bullish exposure and long puts and short calls as bearish or protective. <b>The valuable line is the last one:</b> futures stance read against the cash flow. FIIs short futures while buying cash are hedged long, not bearish — and reading that as bearish is one of the most common and expensive mistakes in this market. Clients are usually the other side of whatever FIIs are doing, so a crowded client position is worth noting on its own. Published after the close on trading days, typically by about 7:30pm.</div>`;
+  }
+
+  // ── PRE-MARKET (around 9am) ───────────────────────────────────────
+  // The overnight question is a gap question: where did offshore money mark
+  // Nifty while NSE was shut, and how far is that from yesterday's close.
+  async function runPreMarket() {
+    const box = document.getElementById('preMktBody');
+    if (!box) return;
+    box.innerHTML = '<div class="movers-loading">Fetching GIFT Nifty, prior session and levels…</div>';
+    const base = _deskBase();
+    const sym = state.symbol || 'NIFTY';
+    let gift = null, prev = null, vix = null;
+    try { gift = await (await fetch(`${base}/api/gift-nifty`)).json(); } catch (_) {}
+    // /api/ohlc and /api/vix are the real endpoints. The first version called
+    // /api/prev-day and /api/india-vix, which do not exist - both fetches
+    // failed silently into the catch and the panel rendered with nothing in
+    // it, which looks exactly like the data being unavailable.
+    try { prev = await (await fetch(`${base}/api/ohlc?symbol=${encodeURIComponent(sym)}`)).json(); } catch (_) {}
+    try { vix = await (await fetch(`${base}/api/vix`)).json(); } catch (_) {}
+    const gPx = Number(gift?.last ?? gift?.price ?? gift?.lastPrice ?? NaN);
+    const pClose = Number(prev?.prev_close ?? prev?.close ?? state.lastData?.prev_close ?? NaN);
+    const gap = (isFinite(gPx) && isFinite(pClose)) ? gPx - pClose : null;
+    const ivNow = Number(vix?.india_vix ?? state.lastData?.india_vix ?? NaN);
+    // a gap is only meaningful against what the day was expected to move
+    const daySig = isFinite(pClose) && isFinite(ivNow)
+      ? pClose * (ivNow / 100) * Math.sqrt(_volT(1)) : null;
+    const gapSig = (gap != null && daySig) ? gap / daySig : null;
+    const read = gapSig == null ? ''
+      : Math.abs(gapSig) < 0.25 ? 'A quiet open. Most of the day\'s range is still ahead, so the opening move carries little information.'
+      : Math.abs(gapSig) < 0.6 ? 'A meaningful gap. Watch whether the first thirty minutes fills it — an unfilled gap usually means the move continues.'
+      : 'A large gap, a substantial share of the day\'s expected move used before the open. Ranges after big gaps are often narrower than they look, because the move has already happened.';
+    if (!isFinite(gPx) && !isFinite(pClose)) {
+      // Say which fetch came back empty rather than rendering a panel of
+      // dashes, which is indistinguishable from a bug.
+      box.innerHTML = `<div class="movers-loading" style="font-size:10px;">
+        Nothing returned. GIFT ${isFinite(gPx) ? 'ok' : 'empty'}, prior close ${isFinite(pClose) ? 'ok' : 'empty'}.
+        <br><span style="font-size:9px;">GIFT Nifty needs a warmed NSE session; try again a few seconds after the server starts.</span></div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10.5px;">
+        <span>GIFT Nifty <b>${isFinite(gPx) ? fmtInt(Math.round(gPx)) : '—'}</b></span>
+        <span style="color:var(--muted);">prior close ${isFinite(pClose) ? fmtInt(Math.round(pClose)) : '—'}</span>
+        <span style="color:${gap == null ? 'var(--muted)' : gap > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-weight:700;">
+          gap ${gap == null ? '—' : (gap >= 0 ? '+' : '') + Math.round(gap)}</span>
+        ${gapSig != null ? `<span style="color:var(--muted);">${Math.abs(gapSig).toFixed(2)}σ of the day</span>` : ''}
+        ${isFinite(ivNow) ? `<span style="color:var(--muted);">VIX ${ivNow.toFixed(2)}</span>` : ''}
+        ${daySig ? `<span style="color:var(--muted);">1σ day ±${Math.round(daySig)}</span>` : ''}
+      </div>
+      ${read ? `<div style="padding:4px;font-size:10.5px;">${escapeHtml(read)}</div>` : ''}
+      ${isFinite(pClose) && daySig ? `<div style="padding:2px 4px;font-size:10px;color:var(--muted);">
+        Expected range today, one sigma: <b>${fmtInt(Math.round(pClose - daySig))}</b> to <b>${fmtInt(Math.round(pClose + daySig))}</b></div>` : ''}
+      ${(() => {
+        // One block to read at 9am and carry in your head. Everything here is
+        // already computed elsewhere; the value is purely in having it in one
+        // place at the moment you actually want it.
+        const d0 = state.lastData;
+        if (!d0 && !isFinite(pClose)) return '';
+        const rows = [];
+        const push = (k, v) => { if (v != null && isFinite(v)) rows.push([k, Math.round(v)]); };
+        push('Prior close', pClose);
+        try {
+          const cp = state._cpr;
+          if (cp) { push('CPR top', cp.TC); push('Pivot', cp.P); push('CPR bottom', cp.BC); }
+        } catch (_) {}
+        try {
+          const pv = state._pivots?.camarilla || state._pivots;
+          if (pv) { push('H4', pv.H4); push('H3', pv.H3); push('L3', pv.L3); push('L4', pv.L4); }
+        } catch (_) {}
+        if (isFinite(pClose) && daySig) {
+          push('1σ up', pClose + daySig);
+          push('1σ down', pClose - daySig);
+        }
+        if (!rows.length) return '';
+        return `<div style="margin-top:5px;padding:4px;border-top:1px solid rgba(255,255,255,0.07);">
+          <div style="font-size:9.5px;color:var(--muted);margin-bottom:3px;">Levels for today</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:10px;">
+            ${rows.map(([k, v]) => `<span style="min-width:104px;"><span style="color:var(--muted);">${escapeHtml(k)}</span> <b>${fmtInt(v)}</b></span>`).join('')}
+          </div></div>`;
+      })()}
+      <div class="oc-sub" style="margin-top:3px;">The overnight question is a gap question: where offshore money marked Nifty while NSE was shut, and how far that sits from yesterday's close. <b>GIFT Nifty trades nearly twenty-one hours against NSE's six and a quarter</b>, so it carries every piece of news that broke after 3:30pm — which is why the open so often disagrees with what the option chain said at the close. <b>The gap is expressed in sigma</b>, not points, because forty points means something quite different at 11% volatility and at 20%. A gap worth a large share of the day's expected move has already spent that move: ranges after big gaps are frequently narrower than they look, and the common mistake is sizing for a big day because the open was dramatic. <b>Fetched on demand</b> rather than polled, because these change once per session and the NSE archive endpoints are slow and rate-sensitive.</div>`;
+  }
+
   // ══ POSITIONING: THE OTHER SIDE OF THE COIN ═══════════════════════
   // Option open interest on its own is genuinely uninterpretable, and this is
   // the single biggest blind spot in everything above.
@@ -18716,8 +18981,51 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         veto = 'counter-trend to the prevailing move, and not strong enough for it';
     } catch (_) {}
 
+    // ── WHERE the signal fires, not just how strong it is ──────────
+    // The biggest structural gap: the score knew nothing about the levels the
+    // system already computes. A perfect BUY twenty points under a gamma wall
+    // is a bad trade however many inputs agree - price has to get through the
+    // wall before the trade works, and the wall is where it stops. Equally, a
+    // BUY sitting just above strong support is the same score at a far better
+    // price, because the invalidation is close and known.
+    //
+    // This is not another opinion input. It is the distance to the thing that
+    // will decide the trade, and it belongs in the decision rather than in a
+    // separate panel the eye has to combine by itself.
+    let room = null, stop = null, target = null, roomNote = '';
+    try {
+      const L = _strikeLadder(d);
+      if (L) {
+        const res = L.resistance ? L.resistance.k : null;
+        const sup = L.support ? L.support.k : null;
+        const up = score > 0;
+        const ahead = up ? (res != null ? res - px : null) : (sup != null ? px - sup : null);
+        const behind = up ? (sup != null ? px - sup : null) : (res != null ? res - px : null);
+        if (ahead != null && behind != null && ahead > 0 && behind > 0) {
+          // reward to risk against the levels that actually matter
+          room = ahead / Math.max(1, behind);
+          stop = up ? sup : res;
+          target = up ? res : sup;
+          if (room < 0.8) {
+            score = Math.round(score * 0.4);
+            roomNote = `poor location: ${Math.round(ahead)} pts to the level ahead, ${Math.round(behind)} behind`;
+          } else if (room > 1.8) {
+            score = Math.round(score * 1.15);
+            roomNote = `good location: ${Math.round(ahead)} pts of room against ${Math.round(behind)} of risk`;
+          } else {
+            roomNote = `${Math.round(ahead)} pts ahead, ${Math.round(behind)} behind`;
+          }
+          // a level that ACCELERATES is not a target, it is a trapdoor
+          const aheadRow = up ? L.resistance : L.support;
+          if (aheadRow && aheadRow.kind === 'accelerate' && room >= 0.8)
+            roomNote += ' — the level ahead accelerates rather than pins, so a break runs';
+        }
+      }
+    } catch (_) {}
+
     const dir = score >= 40 ? 1 : score <= -40 ? -1 : 0;
     return {
+      room, stop, target, roomNote,
       score, dir: veto ? 0 : dir, votes, veto, mat, matNote, reg, px,
       bar: bars[bars.length - 1].t,
       up: votes.filter(v => v.dir > 0).length,
@@ -18807,6 +19115,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span style="color:var(--muted);">${s.up} for · ${s.dn} against</span>
         ${s.matNote ? `<span style="color:var(--gold,#d4af37);">${escapeHtml(s.matNote)}</span>` : ''}
       </div>
+      ${s.dir && s.stop != null && s.target != null ? `
+      <div style="padding:3px 4px;font-size:10.5px;">
+        <b>Invalidation</b> <span style="color:var(--neg,#ef5350);">${fmtInt(Math.round(s.stop))}</span>
+        &nbsp;·&nbsp; <b>Level ahead</b> <span style="color:var(--pos,#26a69a);">${fmtInt(Math.round(s.target))}</span>
+        &nbsp;·&nbsp; <span style="color:var(--muted);">${s.room != null ? s.room.toFixed(1) + ':1 room to risk' : ''}</span>
+      </div>` : ''}
+      ${s.roomNote ? `<div style="padding:1px 4px;font-size:10px;color:${s.room != null && s.room < 0.8 ? 'var(--neg,#ef5350)' : 'var(--muted)'};">${escapeHtml(s.roomNote)}</div>` : ''}
       ${s.veto ? `<div style="padding:2px 4px;font-size:10px;color:var(--gold,#d4af37);"><b>Vetoed:</b> ${escapeHtml(s.veto)}</div>` : ''}
       <div style="max-height:150px;overflow-y:auto;margin-top:3px;">${rows}</div>
       <div class="oc-sub" style="margin-top:3px;">Nine families vote and the score is their weighted sum, but two things sit above the arithmetic. <b>The regime can veto</b>: a breakout vote in a ranging market and a fade vote in a trend are the same number with opposite meaning, so the regime gates the signal rather than just contributing to it. <b>Maturity discounts it</b>: a perfect score two sigma into a move is a late entry, so extension cuts the score rather than being ignored. Evaluated on <b>closed 5-minute bars only</b> — a signal that appears mid-bar and vanishes when the bar closes differently is worse than none, because you will have acted on it. <b>The honest limit:</b> these weights are judgement, not measurement. Every signal is recorded by the Scorecard, so in a few weeks the hit rate will tell you whether this is worth following. Until then it is a hypothesis with a number attached, and should be read as one.</div>`;
@@ -24093,6 +24408,10 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // If contextmenu is being swallowed by the browser or an extension, this
     // still works - and it tells us which of the two is at fault.
     _wireAlertLayer();
+    // On demand only: these change once per session, so a button is the right
+    // control and polling would spend requests on data that has not moved.
+    document.getElementById('postMktBtn')?.addEventListener('click', () => runPostMarket());
+    document.getElementById('preMktBtn')?.addEventListener('click', () => runPreMarket());
     document.getElementById('addAlertBtn')?.addEventListener('click', () => {
       const spot = state.lastData?.underlying_value;
       const v = prompt('Alert when spot touches which price?',

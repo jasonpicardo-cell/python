@@ -4420,6 +4420,119 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(_build_health_response())
             return
 
+        if parsed.path == "/api/participant-oi":
+            # Participant-wise open interest, published by NSE after the close.
+            # This is the closest thing to seeing the institutional book: FII,
+            # DII, Pro and Client, split across index futures and index
+            # options, long and short separately.
+            #
+            # It is the answer to "what are the big players doing" in a way no
+            # intraday feed is, because it names WHO holds what rather than
+            # only how much exists. FIIs net short index futures while buying
+            # cash are hedged long, not bearish - a distinction the option
+            # chain alone cannot make.
+            day = (qs.get("date", [""])[0] or "").strip()
+            try:
+                import datetime as _dd
+                if day:
+                    dt = _dd.datetime.strptime(day, "%Y-%m-%d")
+                else:
+                    dt = _dd.datetime.now() + _dd.timedelta(hours=5, minutes=30)
+                out, used = None, None
+                # walk back up to 5 days: holidays and weekends have no file
+                for back in range(0, 6):
+                    d2 = dt - _dd.timedelta(days=back)
+                    ds = d2.strftime("%d%m%Y")
+                    url = ("https://nsearchives.nseindia.com/content/nsccl/"
+                           f"fao_participant_oi_{ds}.csv")
+                    try:
+                        # reuse the warmed NSE session: these archive files
+                        # reject requests without the cookies the site sets
+                        _f2 = _shared_fetcher
+                        if not _f2:
+                            self._send_json({"error": "NSE session not warmed yet — "
+                                                      "try again in a few seconds."})
+                            return
+                        _r2 = _f2.session.get(url, timeout=12)
+                        txt = _r2.text if _r2.status_code == 200 else None
+                    except Exception:
+                        txt = None
+                    if not txt or "Client Type" not in txt:
+                        continue
+                    rows = []
+                    for line in txt.splitlines():
+                        parts = [p.strip() for p in line.split(",")]
+                        if len(parts) < 12 or parts[0] in ("", "Client Type"):
+                            continue
+                        if parts[0] not in ("Client", "DII", "FII", "Pro", "TOTAL"):
+                            continue
+                        def _n(x):
+                            try:
+                                return float(str(x).replace(",", "") or 0)
+                            except Exception:
+                                return 0.0
+                        rows.append({
+                            "who": parts[0],
+                            "fut_idx_long": _n(parts[1]), "fut_idx_short": _n(parts[2]),
+                            "fut_stk_long": _n(parts[3]), "fut_stk_short": _n(parts[4]),
+                            "opt_idx_call_long": _n(parts[5]), "opt_idx_put_long": _n(parts[6]),
+                            "opt_idx_call_short": _n(parts[7]), "opt_idx_put_short": _n(parts[8]),
+                        })
+                    if rows:
+                        out, used = rows, d2.strftime("%Y-%m-%d")
+                        break
+                if not out:
+                    self._send_json({"error": "No participant OI file found for the last 5 sessions. "
+                                              "NSE publishes it after the close on trading days."})
+                    return
+                # ── history ───────────────────────────────────────────
+                # A single day's long/short ratio is noise: 0.42 means nothing
+                # without knowing it was 0.61 on Monday. The DIRECTION of that
+                # ratio across a week is the institutional signal, and the
+                # walk-back loop above already proves these files are cheap to
+                # read, so collecting a few of them costs little.
+                hist = []
+                try:
+                    base_dt = _dd.datetime.strptime(used, "%Y-%m-%d")
+                    for back in range(0, 9):
+                        d3 = base_dt - _dd.timedelta(days=back)
+                        ds3 = d3.strftime("%d%m%Y")
+                        u3 = ("https://nsearchives.nseindia.com/content/nsccl/"
+                              f"fao_participant_oi_{ds3}.csv")
+                        try:
+                            r3 = _shared_fetcher.session.get(u3, timeout=10)
+                            t3 = r3.text if r3.status_code == 200 else None
+                        except Exception:
+                            t3 = None
+                        if not t3 or "Client Type" not in t3:
+                            continue
+                        for line in t3.splitlines():
+                            p3 = [x.strip() for x in line.split(",")]
+                            if len(p3) < 9 or p3[0] != "FII":
+                                continue
+                            def _n3(x):
+                                try:
+                                    return float(str(x).replace(",", "") or 0)
+                                except Exception:
+                                    return 0.0
+                            lg, sh = _n3(p3[1]), _n3(p3[2])
+                            hist.append({
+                                "date": d3.strftime("%Y-%m-%d"),
+                                "long": lg, "short": sh,
+                                "ratio": (lg / sh) if sh else None,
+                                "net": lg - sh,
+                            })
+                            break
+                        if len(hist) >= 5:
+                            break
+                except Exception:
+                    pass
+                hist.reverse()          # oldest first, so a trend reads left to right
+                self._send_json({"date": used, "rows": out, "fii_history": hist})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"participant OI failed: {e}"}, status=500)
+            return
+
         if parsed.path == "/api/fii-dii":
             try:
                 self._send_json(_fetch_fii_dii())
