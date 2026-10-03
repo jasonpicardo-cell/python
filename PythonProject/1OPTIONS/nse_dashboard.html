@@ -18457,7 +18457,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (best != null) _delta90.held[slot] = best;
       return best == null ? null : { k: best, delta: dlt(best, put), target, err: bestErr, held: false };
     };
-    const TARGETS = [0.90, 0.80, 0.70];
+    // 0.80 dropped: it sat between two bands that each said more than it
+    // did. 0.25 added because that is where fresh positioning concentrates -
+    // speculative buying on one wing, premium selling on the other - and
+    // heavy writing there defines where the market believes price will NOT
+    // go, which is a more opinionated statement than deep-ITM depth.
+    const TARGETS = [0.90, 0.70, 0.25];
     const books = d.depth || {};
     const side = (k, leg) => {
       const row = st.find(s => s.strike === k);
@@ -18557,6 +18562,30 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         ${cell('CE', r.ce, true)}
         ${cell('PE', r.pe, false)}
       </div>`).join('')}
+      ${(() => {
+        // Book-based risk reversal. The Capital Flow panel already asks this
+        // of implied volatility; this asks it of the order book, and the two
+        // disagreeing is informative on its own - IV skew is where the market
+        // is PRICED, book skew is where it is currently being TRADED.
+        const w = x.rows.find(r => r.target === 0.25);
+        if (!w?.ce?.book || !w?.pe?.book) return '';
+        const cb = w.ce.book, pb = w.pe.book;
+        const callBid = cb.bid, putBid = pb.bid;
+        const tot = callBid + putBid;
+        if (!tot) return '';
+        const skew = (callBid - putBid) / tot;        // -1 all puts, +1 all calls
+        const col = Math.abs(skew) < 0.15 ? 'var(--muted)'
+                  : skew > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+        const read = Math.abs(skew) < 0.15 ? 'both wings bid evenly — no directional preference in the book'
+                   : skew > 0 ? 'the upside wing is being paid for'
+                   : 'the downside wing is being paid for';
+        return `<div style="display:flex;gap:12px;flex-wrap:wrap;padding:3px 4px;font-size:10px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;align-items:baseline;">
+          <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">RR</span>
+          <span>25δ call bid <b>${fmtInt(callBid)}</b> vs put bid <b>${fmtInt(putBid)}</b></span>
+          <span style="color:${col};font-weight:700;">${skew >= 0 ? '+' : ''}${(skew * 100).toFixed(0)}%</span>
+          <span style="color:var(--muted);">${escapeHtml(read)}</span>
+        </div>`;
+      })()}
       <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;">
         ${fcell('FUT current', f.near)}
         ${fcell('FUT next', f.far)}
