@@ -1929,6 +1929,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="rsiPaneBody" style="padding:0 6px 4px;"></div>
             <!-- Announced-alert tally. Sits under the chart because it is a
                  read on the SESSION rather than on any one signal. -->
+            <!-- 0.90-delta book, directly above the tally as asked -->
+            <div id="d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:rgba(255,255,255,0.025);"></div>
             <div id="alertTally" style="margin:2px 6px 6px;padding:5px 8px;border:1px solid rgba(212,175,55,0.35);border-radius:6px;background:rgba(212,175,55,0.06);"></div>
           </div>
 
@@ -14399,6 +14401,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
     try { _maturityCheck(data); } catch (_) {}
+    try { renderDelta90(data); } catch (_) {}
     try { renderPositioning(data); } catch (_) {}
     try { _signalCheck(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
@@ -18321,6 +18324,245 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     return 'done';
   };
+
+  // ══ 0.90-DELTA BOOK ═══════════════════════════════════════════════
+  // Deep-ITM book depth at the strike nearest 0.90 delta, on both sides,
+  // plus the futures book for the current and next series.
+  //
+  // Deep ITM is where directional size gets worked quietly: extrinsic value
+  // is small, so the option tracks the underlying almost one-for-one and a
+  // large order moves the premium far less than the same order at the money.
+  //
+  // The strike is RECOMPUTED every poll. A 0.90-delta strike is only
+  // 0.90-delta at one price - as spot moves, the strike that carries that
+  // delta moves with it, and a strike fixed at the open stops answering the
+  // question within the hour.
+  //
+  // How to read it, with the caveat that matters: resting size is passive
+  // liquidity, not demand. Deep ITM it is mostly market-maker inventory, and
+  // real buyers frequently take the offer rather than joining the bid - which
+  // removes size from the ask and makes aggressive buying look bid-light.
+  // Treat a lasting imbalance as information and a momentary one as noise.
+  // ── imbalance persistence ─────────────────────────────────────────
+  // A 2x ratio on one poll is noise; the same imbalance holding for ten
+  // minutes while price does not move is someone working an order. The strip
+  // could not tell those apart, which is the difference between information
+  // and decoration.
+  //
+  // RESTART AND REFRESH, handled honestly. A streak is a claim about
+  // CONTINUOUS OBSERVATION, not a count of events - so unlike the alert tally
+  // it must NOT simply survive a gap. If the browser was shut for twenty
+  // minutes, or the server was down, nobody was watching, and reporting "held
+  // for 25 minutes" across that gap would be false. The streak is persisted
+  // with the time it was last SEEN, and restored only if the gap is short
+  // enough to count as the same observation.
+  const _IMB_KEY = 'bookImbalanceV1';
+  const _IMB_GAP_MS = 90 * 1000;        // longer than this and the thread is broken
+  const _imb = (() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(_IMB_KEY) || 'null');
+      if (!raw || !raw.t) return {};
+      if (Date.now() - raw.t > _IMB_GAP_MS) {
+        console.log(`[book] streaks discarded: ${Math.round((Date.now() - raw.t) / 1000)}s gap in observation`);
+        return {};
+      }
+      return raw.cells || {};
+    } catch (_) { return {}; }
+  })();
+  function _imbSave() {
+    try { localStorage.setItem(_IMB_KEY, JSON.stringify({ t: Date.now(), cells: _imb })); } catch (_) {}
+  }
+
+  // key is the CELL, not the strike: the strike moves with spot, and a streak
+  // that followed a strike would reset every time the 0.90 band stepped to the
+  // next one - which is exactly when the position is still there.
+  function _imbTrack(key, ratio) {
+    const now = Date.now();
+    const side = ratio == null ? 0 : ratio >= 2 ? 1 : ratio <= 0.5 ? -1 : 0;
+    const prev = _imb[key];
+    if (!side || !prev || prev.side !== side || now - prev.last > _IMB_GAP_MS) {
+      _imb[key] = side ? { side, since: now, last: now } : null;
+      if (!side) delete _imb[key];
+      _imbSave();
+      return { side, heldMs: 0 };
+    }
+    prev.last = now;
+    _imbSave();
+    return { side, heldMs: now - prev.since };
+  }
+  function _imbLabel(heldMs) {
+    if (heldMs < 45000) return '';
+    const m = Math.round(heldMs / 60000);
+    return m < 1 ? ' ·45s' : ` ·${m}m`;
+  }
+
+  function _delta90(d) {
+    const spot = d?.underlying_value, iv = (d?.atm_iv || 12) / 100;
+    const st = d?.strikes || [];
+    if (!spot || !st.length) return null;
+    const T = _volT(Math.max(1 / 1440, d.dte ?? 1));
+    if (!(T > 0)) return null;
+    const nd = x => {               // Abramowitz-Stegun normal CDF
+      const t = 1 / (1 + 0.2316419 * Math.abs(x));
+      const dd = 0.3989423 * Math.exp(-x * x / 2);
+      const p = dd * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+      return x > 0 ? 1 - p : p;
+    };
+    const dlt = (K, put) => {
+      const s2 = iv;
+      const d1 = (Math.log(spot / K) + (0.07 + s2 * s2 / 2) * T) / (s2 * Math.sqrt(T));
+      const c = nd(d1);
+      return put ? c - 1 : c;       // put delta is negative
+    };
+    // Only round-hundred strikes, as asked: the 50s are thinner and their
+    // books are frequently empty deep in the money, which would make the
+    // ratio swing on one or two lots.
+    const hundreds = st.map(s => s.strike).filter(k => k % 100 === 0);
+    if (!hundreds.length) return null;
+    // Several target deltas rather than one. 0.90 is almost a futures
+    // substitute; 0.70 still carries real extrinsic value and behaves quite
+    // differently, so reading them together shows whether positioning is
+    // concentrated deep or spread across the curve - which one strike cannot.
+    // HYSTERESIS, anchored on delta drift rather than on price.
+    //
+    // Re-picking the nearest strike every poll makes it flip on a twenty-point
+    // wobble - four changes across a gentle 110-point oscillation - and every
+    // flip resets the imbalance streak at exactly the moment the position is
+    // still sitting there.
+    //
+    // A fixed "adjust every 100 points" rule fixes the flicker but measures
+    // the wrong thing. Delta moves for reasons price does not: holding 23,100
+    // against a motionless 23,400 spot, delta runs 0.77 at 20% IV, 0.88 at
+    // 13%, and 0.97 one day from expiry. Near expiry, time moves delta faster
+    // than price does, and a price rule cannot see any of it.
+    //
+    // So: KEEP the current strike until its own delta has drifted beyond a
+    // band, then re-pick. That is stable when price chops, and it still
+    // adjusts when the thing we actually care about has changed.
+    const DRIFT = 0.055;
+    _delta90.held = _delta90.held || {};
+    const pick = (put, target) => {
+      const slot = `${put ? 'PE' : 'CE'}|${target}`;
+      const prev = _delta90.held[slot];
+      if (prev != null && hundreds.includes(prev)) {
+        const dNow = Math.abs(dlt(prev, put));
+        if (Math.abs(dNow - target) <= DRIFT)
+          return { k: prev, delta: dlt(prev, put), target, err: Math.abs(dNow - target), held: true };
+      }
+      let best = null, bestErr = 9;
+      for (const k of hundreds) {
+        const err = Math.abs(Math.abs(dlt(k, put)) - target);
+        if (err < bestErr) { bestErr = err; best = k; }
+      }
+      if (best != null) _delta90.held[slot] = best;
+      return best == null ? null : { k: best, delta: dlt(best, put), target, err: bestErr, held: false };
+    };
+    const TARGETS = [0.90, 0.80, 0.70];
+    const books = d.depth || {};
+    const side = (k, leg) => {
+      const row = st.find(s => s.strike === k);
+      const symk = row ? row[`${leg}_symbol`] : null;
+      const bk = symk ? books[symk] : null;
+      if (!bk?.bids?.length || !bk?.asks?.length) return null;
+      const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
+      const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
+      return { bid, ask, ratio: ask > 0 ? bid / ask : null, bestB: bk.bids[0]?.p, bestA: bk.asks[0]?.p };
+    };
+    return {
+      rows: TARGETS.map(t => {
+        const ce = pick(false, t), pe = pick(true, t);
+        return {
+          target: t,
+          ce: ce ? { ...ce, book: side(ce.k, 'ce') } : null,
+          pe: pe ? { ...pe, book: side(pe.k, 'pe') } : null,
+        };
+      }),
+      spot,
+    };
+  }
+
+  function _futBooks(d) {
+    // Current and next series. The far month is the rollover leg, and a
+    // lopsided book there near expiry says which way positions are being
+    // carried rather than closed.
+    const books = d?.depth || {};
+    const rd = sym => {
+      const bk = sym ? books[sym] : null;
+      if (!bk?.bids?.length || !bk?.asks?.length) return null;
+      const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
+      const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
+      return { bid, ask, ratio: ask > 0 ? bid / ask : null };
+    };
+    return {
+      near: { price: d?.futures_price, book: rd(d?.futures_symbol) },
+      far: { price: d?.futures_far_price, book: rd(d?.futures_far_symbol) },
+    };
+  }
+
+  function renderDelta90(d) {
+    const box = document.getElementById('d90Body');
+    if (!box) return;
+    const x = _delta90(d);
+    const f = _futBooks(d);
+    if (!x) { box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Load the option chain.</div>'; return; }
+    const cell = (lab, leg, bullIfBid) => {
+      if (!leg) return `<span style="min-width:150px;color:var(--muted);">${lab} —</span>`;
+      const b = leg.book;
+      if (!b) return `<span style="min-width:150px;"><b>${lab} ${fmtInt(leg.k)}</b> <span style="color:var(--muted);">δ${Math.abs(leg.delta).toFixed(2)} · no book</span></span>`;
+      const r = b.ratio;
+      // 2x either way is the threshold asked for; below it, say so plainly
+      let read = '', col = 'var(--muted)';
+      if (r != null && r >= 2) { read = bullIfBid ? 'buyers' : 'buyers'; col = bullIfBid ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'; }
+      else if (r != null && r <= 0.5) { read = 'sellers'; col = bullIfBid ? 'var(--neg,#ef5350)' : 'var(--pos,#26a69a)'; }
+      else read = 'balanced';
+      // Highlight the DOMINANT side itself, not just the ratio. The eye should
+      // land on which side is heavy without having to parse two numbers and a
+      // multiplier first - that is the whole point of a glanceable strip.
+      const hot = 'padding:1px 5px;border-radius:3px;font-weight:700;';
+      // Only colour an imbalance that has HELD. A flicker above 2x on one poll
+      // is a quote adjustment; the same side holding is an order being worked,
+      // and colouring both equally made the strip blink without meaning.
+      const track = _imbTrack(`${lab}|${leg.target}`, r);
+      const held = track.heldMs >= 45000;
+      const bidHot = r != null && r >= 2 && held;
+      const askHot = r != null && r <= 0.5 && held;
+      const bidStyle = bidHot ? `${hot}background:${bullIfBid ? 'rgba(38,166,154,0.30)' : 'rgba(239,83,80,0.30)'};color:${bullIfBid ? '#26a69a' : '#ef5350'};` : '';
+      const askStyle = askHot ? `${hot}background:${bullIfBid ? 'rgba(239,83,80,0.30)' : 'rgba(38,166,154,0.30)'};color:${bullIfBid ? '#ef5350' : '#26a69a'};` : '';
+      return `<span style="min-width:214px;"><b>${lab} ${fmtInt(leg.k)}</b>
+        <span style="color:var(--muted);font-size:9px;">δ${Math.abs(leg.delta).toFixed(2)}</span>
+        &nbsp;bid <span style="${bidStyle}">${fmtInt(b.bid)}</span>
+        / ask <span style="${askStyle}">${fmtInt(b.ask)}</span>
+        <span style="color:${held ? col : 'var(--muted)'};font-weight:700;">${r != null ? r.toFixed(2) + '× ' + read : ''}</span>
+        <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(track.heldMs)}</span></span>`;
+    };
+    const fcell = (lab, o) => {
+      if (!o?.book) return `<span style="min-width:150px;color:var(--muted);">${lab} —</span>`;
+      const r = o.book.ratio;
+      const col = r == null ? 'var(--muted)' : r >= 2 ? 'var(--pos,#26a69a)' : r <= 0.5 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+      // Futures have no call/put inversion: a heavy bid is simply buyers.
+      const hotF = 'padding:1px 5px;border-radius:3px;font-weight:700;';
+      const tk = _imbTrack(`FUT|${lab}`, r);
+      const heldF = tk.heldMs >= 45000;
+      const bS = (r != null && r >= 2 && heldF) ? `${hotF}background:rgba(38,166,154,0.30);color:#26a69a;` : '';
+      const aS = (r != null && r <= 0.5 && heldF) ? `${hotF}background:rgba(239,83,80,0.30);color:#ef5350;` : '';
+      return `<span style="min-width:204px;"><b>${lab}</b>${o.price ? ` <span style="color:var(--muted);font-size:9px;">${fmtInt(Math.round(o.price))}</span>` : ''}
+        &nbsp;bid <span style="${bS}">${fmtInt(o.book.bid)}</span>
+        / ask <span style="${aS}">${fmtInt(o.book.ask)}</span>
+        <span style="color:${heldF ? col : 'var(--muted)'};font-weight:700;">${r != null ? r.toFixed(2) + '×' : ''}</span>
+        <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(tk.heldMs)}</span></span>`;
+    };
+    box.innerHTML = `
+      ${x.rows.map(r => `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;align-items:baseline;">
+        <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">δ${r.target.toFixed(2).slice(1)}</span>
+        ${cell('CE', r.ce, true)}
+        ${cell('PE', r.pe, false)}
+      </div>`).join('')}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;">
+        ${fcell('FUT current', f.near)}
+        ${fcell('FUT next', f.far)}
+      </div>
+      <div class="oc-sub" style="margin-top:3px;">The strike is <b>recomputed every poll</b> — a 0.90-delta strike is only 0.90 delta at one price, and one fixed at the open stops answering the question within the hour. Round-hundred strikes only, as the fifties are thinner and their books are frequently empty this deep in the money, which would let one or two lots swing the ratio. <b>Deep ITM is where directional size gets worked quietly:</b> extrinsic value is small, the option tracks the underlying almost one-for-one, and a large order moves the premium far less than the same order at the money. <b>Read it with the caveat that matters:</b> resting size is passive liquidity, not demand. This deep it is mostly market-maker inventory, and real buyers often take the offer rather than joining the bid — which removes size from the ask and makes aggressive buying look bid-light, the opposite of the obvious reading. A 2× imbalance that <b>persists</b> is worth something; a single-poll ratio is noise. For commitment rather than intention, the aggressor flow panel classifies actual prints, and a trade is a position where a quote is not.</div>`;
+  }
 
   // ══ BULLISH / BEARISH ALERT TALLY ═════════════════════════════════
   // A running count of what has actually been ANNOUNCED, not of what the

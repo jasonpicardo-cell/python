@@ -131,3 +131,4 @@ NSE_KEEP_BHAV_DAYS=30
 # 1.5 covers the strikes price can realistically reach plus the walls just
 # beyond. Lower it to 1.0 for tighter, near-the-money flow only.
 NSE_FLOW_SIGMA=1.5
+FYERS_DEPTH_STRIKES=10

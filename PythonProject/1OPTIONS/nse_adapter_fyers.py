@@ -617,7 +617,17 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         try:
             near_syms = []
             for r in strikes:
-                if abs(r["strike"] - atm) <= strike_gap * 5:
+                # +/- 10 strikes, not 5. A 0.90-delta option sits roughly
+                # seven strikes from the money on a weekly Nifty, so the old
+                # band stopped short of exactly the strikes whose book is
+                # worth reading: deep ITM is where size is worked quietly,
+                # because the extrinsic value is small and a large order moves
+                # the premium far less than it would at the money.
+                #
+                # Ten strikes each side is about 60 extra subscriptions and
+                # the socket carries it comfortably.
+                if abs(r["strike"] - atm) <= strike_gap * int(
+                        os.environ.get("FYERS_DEPTH_STRIKES", "10")):
                     for p in ("ce", "pe"):
                         fs = r.get(f"{p}_symbol")
                         if fs:
