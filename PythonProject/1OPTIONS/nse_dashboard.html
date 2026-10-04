@@ -1950,6 +1950,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
           
 
+          <div class="level-panel" id="budgetPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.35);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">⏱️ Session Budget — how much of the day's move is left<i class="hi" data-h="session-budget">i</i></span>
+            </div>
+            <div id="budgetBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
+
           <div class="level-panel" id="sigEnginePanel" style="grid-column:1 / -1;border:1px solid rgba(38,166,154,0.4);">
             <div class="level-panel-head">
               <span class="skew-chart-title">🎯 Signal — buy / sell from confluence<i class="hi" data-h="signal-engine">i</i></span>
@@ -14401,6 +14408,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
     try { _maturityCheck(data); } catch (_) {}
+    try { renderBudget(data); } catch (_) {}
     try { renderDelta90(data); } catch (_) {}
     try { renderPositioning(data); } catch (_) {}
     try { _signalCheck(data); } catch (_) {}
@@ -18324,6 +18332,100 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     return 'done';
   };
+
+  // ══ SESSION BUDGET ════════════════════════════════════════════════
+  // The day's expected move is a budget, and it is published: the straddle
+  // premium at the open IS the market's forecast of how far price will travel.
+  // Nobody decides that range - it gets priced, and the price is public.
+  //
+  // What makes it tradeable is that the budget gets SPENT. By eleven o'clock
+  // you can measure what fraction is gone, and that changes what the rest of
+  // the day can reasonably do:
+  //
+  //   most of it spent early   continuation needs fresh information, not
+  //                            momentum - the move has already happened
+  //   little of it spent       premium is decaying faster than it is being
+  //                            earned, which favours the writer
+  //
+  // The two halves are tracked separately because they are not comparable.
+  // Variance is front-loaded: the first hour carries far more of the day's
+  // movement than the lunch hour does, so "half the day remains" never means
+  // "half the move remains".
+  function _sessionBudget(d) {
+    const cs = _chart.candles || [];
+    const spot = d?.underlying_value;
+    if (!cs.length || !spot) return null;
+    const iv = (d?.atm_iv || 12) / 100;
+    const open0 = cs[0].o;
+    const dayExp = open0 * iv * Math.sqrt(_volT(1));     // the budget, in points
+    if (!(dayExp > 0)) return null;
+
+    const istMin3 = t => {
+      const g = new Date(t * 1000);
+      const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+      return i2.getHours() * 60 + i2.getMinutes();
+    };
+    const NOON = 12 * 60;
+    const am = cs.filter(c => istMin3(c.t) < NOON);
+    const pm = cs.filter(c => istMin3(c.t) >= NOON);
+    const span = arr => arr.length ? Math.max(...arr.map(c => c.h)) - Math.min(...arr.map(c => c.l)) : 0;
+    const amRange = span(am), pmRange = span(pm);
+    const dayRange = span(cs);
+
+    // Variance remaining, from the same U-shaped clock the projected move
+    // uses: morning and late afternoon carry most of it, lunch very little.
+    const CLOCK = [[555, 600, 2.2], [600, 690, 1.2], [690, 810, 0.65], [810, 885, 1.0], [885, 940, 1.9]];
+    const varLeft = n => {
+      let left = 0, tot = 0;
+      for (const [a, b, w] of CLOCK) { tot += (b - a) * w; if (n < b) left += (b - Math.max(a, n)) * w; }
+      return tot ? left / tot : 0;
+    };
+    const nowMin = cs.length ? istMin3(cs[cs.length - 1].t) : 555;
+    const left = varLeft(nowMin);
+    const spent = dayRange / dayExp;          // budget used, as a fraction
+
+    // What the remaining session can reasonably still do: the unspent budget
+    // scaled by the variance still ahead.
+    const roomLeft = Math.max(0, dayExp * Math.sqrt(Math.max(0, left)));
+
+    let verdict = '', tone = 'neutral';
+    if (spent >= 1.15) { verdict = 'The day has travelled further than it was priced to. Continuation from here needs new information rather than momentum, and ranges that overshoot early often stall.'; tone = 'warn'; }
+    else if (spent >= 0.8 && left < 0.4) { verdict = 'Most of the expected move has been used and little of the session remains. The asymmetry favours the premium seller from here.'; tone = 'warn'; }
+    else if (spent < 0.4 && left < 0.35) { verdict = 'A quiet day against the move that was priced. Premium has been decaying faster than it has been earned, which is the writer\u2019s side.'; tone = 'quiet'; }
+    else if (spent < 0.5 && left > 0.5) { verdict = 'Most of the budget is unspent with most of the session ahead. There is room for a real move.'; tone = 'open'; }
+    else verdict = 'The move spent and the session remaining are roughly in proportion.';
+
+    return { dayExp, dayRange, amRange, pmRange, spent, left, roomLeft, nowMin,
+             verdict, tone, inPm: nowMin >= NOON, amDone: am.length > 0 };
+  }
+
+  function renderBudget(d) {
+    const box = document.getElementById('budgetBody');
+    if (!box) return;
+    const b = _sessionBudget(d);
+    if (!b) { box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Needs candles.</div>'; return; }
+    const col = b.tone === 'warn' ? 'var(--gold,#d4af37)'
+              : b.tone === 'open' ? 'var(--pos,#26a69a)' : 'var(--muted)';
+    const pct = Math.min(140, b.spent * 100);
+    box.innerHTML = `
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:2px 4px;font-size:10.5px;">
+        <b style="color:${col};font-size:12px;">${(b.spent * 100).toFixed(0)}% of the day's move spent</b>
+        <span style="color:var(--muted);">priced ±${Math.round(b.dayExp)} · travelled ${Math.round(b.dayRange)}</span>
+        <span style="color:var(--muted);">${(b.left * 100).toFixed(0)}% of the session's variance left</span>
+        <span style="color:var(--muted);">room ahead ≈ ${Math.round(b.roomLeft)} pts</span>
+      </div>
+      <div style="padding:2px 4px;">
+        <span style="display:block;height:9px;background:rgba(255,255,255,0.08);border-radius:5px;overflow:hidden;">
+          <span style="display:block;height:100%;width:${pct.toFixed(0)}%;background:${b.spent >= 1 ? 'var(--gold,#d4af37)' : 'rgba(38,166,154,0.75)'};"></span>
+        </span>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;color:var(--muted);">
+        <span>morning range <b>${Math.round(b.amRange)}</b> (${(b.amRange / b.dayExp * 100).toFixed(0)}% of budget)</span>
+        <span>afternoon range <b>${b.inPm ? Math.round(b.pmRange) : '—'}</b>${b.inPm ? ` (${(b.pmRange / b.dayExp * 100).toFixed(0)}%)` : ''}</span>
+      </div>
+      <div style="padding:3px 4px;font-size:10.5px;">${escapeHtml(b.verdict)}</div>
+      <div class="oc-sub" style="margin-top:3px;">The day's expected move is a <b>budget, and it is published</b> — the straddle premium at the open is the market's own forecast of how far price will travel. Nobody decides that range; it gets priced, and the price is public. What makes it useful is that the budget gets <b>spent</b>: by eleven o'clock you can measure what fraction is gone, and that changes what the rest of the day can reasonably do. Most of it spent early means continuation needs fresh information rather than momentum. Little of it spent means premium has been decaying faster than it has been earned, which is the writer's side of the trade. <b>The two halves are tracked separately because they are not comparable:</b> variance is front-loaded, so the first hour carries far more of the day's movement than the lunch hour, and "half the day remains" never means "half the move remains". The room-ahead figure scales the unspent budget by the variance still to come, which is why it falls away sharply after about 2pm even when the budget looks barely touched.</div>`;
+  }
 
   // ══ 0.90-DELTA BOOK ═══════════════════════════════════════════════
   // Deep-ITM book depth at the strike nearest 0.90 delta, on both sides,
