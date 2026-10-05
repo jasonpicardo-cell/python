@@ -18801,15 +18801,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // heavy writing there defines where the market believes price will NOT
     // go, which is a more opinionated statement than deep-ITM depth.
     const TARGETS = [0.90, 0.70, 0.25];
-    const books = d.depth || {};
+    // The adapter keys option depth by STRIKE+SIDE ("22200CE"), not by the
+    // Fyers symbol. Looking it up by symbol returned undefined for every
+    // strike, which is why each one reported "no book" while the data was
+    // sitting there under a different key.
+    const books = (d.depth && d.depth.strikes) || {};
     const side = (k, leg) => {
-      const row = st.find(s => s.strike === k);
-      const symk = row ? row[`${leg}_symbol`] : null;
-      const bk = symk ? books[symk] : null;
-      if (!bk?.bids?.length || !bk?.asks?.length) return null;
-      const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
-      const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
-      return { bid, ask, ratio: ask > 0 ? bid / ask : null, bestB: bk.bids[0]?.p, bestA: bk.asks[0]?.p };
+      const bk = books[`${k}${leg.toUpperCase()}`];
+      if (!bk) return null;
+      // Ladder first; totals second. The five-level ladder needs a DepthUpdate
+      // subscription the broker may not serve for every contract, while the
+      // TOTAL buy and sell quantity rides on the ordinary tick - so the
+      // aggregate you actually want is usually available even when the ladder
+      // is not. Falling back means "no book" now genuinely means no data.
+      if (bk.bids?.length && bk.asks?.length) {
+        const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
+        const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
+        return { bid, ask, ratio: ask > 0 ? bid / ask : null,
+                 bestB: bk.bids[0]?.p, bestA: bk.asks[0]?.p, src: 'L2' };
+      }
+      if (bk.tbq || bk.tsq)
+        return { bid: bk.tbq || 0, ask: bk.tsq || 0,
+                 ratio: bk.tsq > 0 ? bk.tbq / bk.tsq : null, src: 'total' };
+      return null;
     };
     return {
       rows: TARGETS.map(t => {
@@ -18828,17 +18842,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // Current and next series. The far month is the rollover leg, and a
     // lopsided book there near expiry says which way positions are being
     // carried rather than closed.
-    const books = d?.depth || {};
-    const rd = sym => {
-      const bk = sym ? books[sym] : null;
-      if (!bk?.bids?.length || !bk?.asks?.length) return null;
-      const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
-      const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
-      return { bid, ask, ratio: ask > 0 ? bid / ask : null };
+    const fb = (d?.depth && d.depth.futures) || {};
+    const rd = bk => {
+      if (!bk) return null;
+      if (bk.bids?.length && bk.asks?.length) {
+        const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
+        const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
+        return { bid, ask, ratio: ask > 0 ? bid / ask : null };
+      }
+      if (bk.tbq || bk.tsq)
+        return { bid: bk.tbq || 0, ask: bk.tsq || 0, ratio: bk.tsq > 0 ? bk.tbq / bk.tsq : null };
+      return null;
     };
     return {
-      near: { price: d?.futures_price, book: rd(d?.futures_symbol) },
-      far: { price: d?.futures_far_price, book: rd(d?.futures_far_symbol) },
+      near: { price: d?.futures_price, book: rd(fb.near) },
+      far: { price: d?.futures_far_price, book: rd(fb.far) },
     };
   }
 
@@ -18851,7 +18869,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const cell = (lab, leg, bullIfBid) => {
       if (!leg) return `<span style="min-width:150px;color:var(--muted);">${lab} —</span>`;
       const b = leg.book;
-      if (!b) return `<span style="min-width:150px;"><b>${lab} ${fmtInt(leg.k)}</b> <span style="color:var(--muted);">δ${Math.abs(leg.delta).toFixed(2)} · no book</span></span>`;
+      if (!b) {
+        // Say WHY, not just "no book". The three cases need different fixes:
+        // the feed carries no depth at all, this contract was not subscribed,
+        // or it was subscribed and the broker sent nothing for it.
+        const anyDepth = Object.keys((d.depth && d.depth.strikes) || {}).length;
+        // The source matters more than the depth block. Only the Fyers
+        // adapter emits depth at all - when it raises, the server catches it
+        // and serves NSE for that request instead, which has no depth and
+        // never will. "No depth block" then means "the broker path failed",
+        // and the fix is in the server log rather than anywhere on screen.
+        const src = d._source || '(unknown)';
+        const why = src !== 'fyers'
+          ? `source is ${src}, not fyers — only the broker feed carries depth`
+          : !d.depth ? 'fyers responded but sent no depth block'
+          : !anyDepth ? 'depth block present but empty — broker sent none'
+          : `not among the ${anyDepth} strikes with depth`;
+        return `<span style="min-width:214px;"><b>${lab} ${fmtInt(leg.k)}</b> <span style="color:var(--muted);">δ${Math.abs(leg.delta).toFixed(2)} · ${escapeHtml(why)}</span></span>`;
+      }
       const r = b.ratio;
       // 2x either way is the threshold asked for; below it, say so plainly
       let read = '', col = 'var(--muted)';
@@ -18894,7 +18929,40 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span style="color:${heldF ? col : 'var(--muted)'};font-weight:700;">${r != null ? r.toFixed(2) + '×' : ''}</span>
         <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(tk.heldMs)}</span></span>`;
     };
+    // ── one-line verdict ───────────────────────────────────────────
+    // Nine cells is a lot to read under pressure. This states the conclusion
+    // the cells support, using the standard mapping:
+    //
+    //   CE bid-heavy   call buying        BULLISH
+    //   CE ask-heavy   call writing       bearish
+    //   PE bid-heavy   put buying         BEARISH
+    //   PE ask-heavy   put writing        bullish
+    //
+    // The put side is the one people invert: a heavy PUT BID is buyers of
+    // downside protection or outright shorts, which is bearish - the same
+    // direction as a heavy call ASK, not the opposite of it.
+    let verdict = '', vcol = 'var(--muted)';
+    try {
+      let score = 0, counted = 0;
+      for (const r of x.rows) {
+        for (const [leg, bullIfBid] of [[r.ce, true], [r.pe, false]]) {
+          const rt = leg?.book?.ratio;
+          if (rt == null) continue;
+          counted++;
+          if (rt >= 2) score += bullIfBid ? 1 : -1;        // bid-heavy
+          else if (rt <= 0.5) score += bullIfBid ? -1 : 1; // ask-heavy
+        }
+      }
+      if (counted >= 2) {
+        vcol = score >= 2 ? 'var(--pos,#26a69a)' : score <= -2 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+        verdict = score >= 2 ? `BULLISH book — ${score} of ${counted} legs lean that way`
+                : score <= -2 ? `BEARISH book — ${Math.abs(score)} of ${counted} legs lean that way`
+                : `No lean — ${counted} legs quoted, none decisive`;
+      }
+    } catch (_) {}
+
     box.innerHTML = `
+      ${verdict ? `<div style="padding:2px 4px 3px;font-size:11px;color:${vcol};font-weight:700;">${escapeHtml(verdict)}</div>` : ''}
       ${x.rows.map(r => `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;align-items:baseline;">
         <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">δ${r.target.toFixed(2).slice(1)}</span>
         ${cell('CE', r.ce, true)}
@@ -22590,6 +22658,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   function _renkoBuild(cs, box) {
     if (!cs?.length || !(box > 0)) return [];
+    // A brick series is PATH DEPENDENT: every brick is built from the anchor
+    // the previous one left, so one bad bar corrupts everything after it
+    // rather than just itself. A delayed or re-sent broker tick that arrives
+    // out of order, a duplicated minute, or a NaN close would all silently
+    // produce a wrong chart that still looks plausible - which is the worst
+    // kind of wrong.
+    const seen = new Set();
+    cs = cs
+      .filter(c => c && isFinite(c.c) && isFinite(c.h) && isFinite(c.l) && isFinite(c.t))
+      .filter(c => { if (seen.has(c.t)) return false; seen.add(c.t); return true; })
+      .sort((a, b) => a.t - b.t);
+    if (!cs.length) return [];
     const bricks = [];
     let anchor = Math.round(cs[0].c / box) * box;
     let dir = 0;
@@ -22676,7 +22756,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // panel was sized.
     const maxed = document.getElementById('chartPanel')?.classList.contains('chart-maxed');
     const avail = (maxed ? 1600 : 900) - 8 - 74;
-    const MIN_BW = 2.2;                       // below this a brick is a smear
+    // Brick width, and therefore the slot count. 2.2px was the point at which
+    // a brick stops being a smear, but a grid built on it gives 371 slots -
+    // so twelve bricks at half past nine occupy 3% of the panel as hairlines.
+    //
+    // 6px is the smallest width at which the body and its border still read.
+    // The slot count follows from it, and the box auto-enlargement above
+    // targets that count - so instead of many tiny bricks you get fewer,
+    // legible ones covering the same session.
+    const MIN_BW = 6;
     const maxFit = Math.floor(avail / MIN_BW);
     let autoBox = 0;
     if (mode === 'atr' && bricks.length > maxFit) {
@@ -22715,7 +22803,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const half = (autoHi - autoLo) / 2 / (_chart.yZoom || 1);
       lo = mid - half; hi = mid + half;
     }
-    const bw = (W - padL - padR) / show.length;
+    // FIXED SLOTS, filled left to right - not a width divided by however many
+    // bricks exist. Dividing by the count means every new brick shrinks all
+    // the others, so the chart redraws itself at a different scale several
+    // times an hour and nothing holds still long enough to read. A slot grid
+    // behaves like the candle chart: bricks occupy the first N slots from the
+    // session start and the rest of the panel stays empty until they arrive.
+    //
+    // The slot count is what the panel can show at a readable width, and the
+    // box auto-enlargement above already keeps the session inside it.
+    const SLOTS = maxFit;
+    const bw = (W - padL - padR) / SLOTS;
     // EMAs over BRICK CLOSES, not over time. On a Renko chart a moving
     // average of time-based bars is meaningless, because bricks are not
     // evenly spaced in time - the average has to walk the brick sequence,
@@ -22791,6 +22889,43 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <text x="${padL + 3}" y="${(y(v) - 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${pre}${r} ${fmtInt(Math.round(v))}</text>`;
           }
         }
+      }
+    } catch (_) {}
+
+    // ── next-brick probability ─────────────────────────────────────
+    // Which way the NEXT brick prints is a first-passage question: from where
+    // price is now, does it reach the up level or the down level first?
+    //
+    // For a driftless random walk that has an exact answer - the probability
+    // of hitting A before B is the distance to B divided by the total gap.
+    // So sitting close to the up level makes an up brick likely in direct
+    // proportion, which is both intuitive and correct rather than a guess.
+    //
+    // Two honest caveats, stated on the badge itself. It assumes NO DRIFT, so
+    // in a strong trend the true odds favour continuation more than this
+    // shows. And a reversal needs TWO boxes while a continuation needs one,
+    // which is already in the distances and is why the numbers are rarely
+    // symmetric.
+    try {
+      const sp2 = state.lastData?.underlying_value;
+      const lastB = show[show.length - 1];
+      if (sp2 && lastB) {
+        const dir0 = lastB.dir;
+        const upAt = lastB.c + bs * (dir0 >= 0 ? 1 : 2);
+        const dnAt = lastB.c - bs * (dir0 <= 0 ? 1 : 2);
+        const dUp = Math.max(0.01, upAt - sp2);
+        const dDn = Math.max(0.01, sp2 - dnAt);
+        const pUp = Math.round(dDn / (dUp + dDn) * 100);
+        const pDn = 100 - pUp;
+        const bx = padL + (show.length - 1) * bw + bw / 2;
+        const by = y(lastB.c);
+        const w2 = 86, bxx = Math.min(W - padR - w2 - 2, bx + 6);
+        svg += `<rect x="${bxx.toFixed(1)}" y="${(by - 9).toFixed(1)}" width="${w2}" height="18" rx="3"
+            fill="rgba(20,24,32,0.92)" stroke="rgba(255,255,255,0.18)"/>
+          <text x="${(bxx + 5).toFixed(1)}" y="${(by + 4).toFixed(1)}" style="font-size:10px;font-weight:700;">
+            <tspan fill="#26a69a">▲${pUp}%</tspan><tspan fill="var(--muted,#789)"> · </tspan><tspan fill="#ef5350">▼${pDn}%</tspan>
+          </text>
+          <title>Next brick: ${Math.round(dUp)} pts to an up brick at ${fmtInt(Math.round(upAt))}, ${Math.round(dDn)} pts to a down brick at ${fmtInt(Math.round(dnAt))}. Odds assume no drift — in a trend, continuation is more likely than shown. A reversal needs two boxes, a continuation one.</title>`;
       }
     } catch (_) {}
 
@@ -22977,7 +23112,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 6px;font-size:10px;">
         <b style="color:${dirTxt[1]};">${dirTxt[0]} · ${st.curRun} brick${st.curRun === 1 ? '' : 's'} running</b>
-        <span>box <b>${bs}</b> pts${mode === 'atr' ? ' (ATR-14)' : ''}</span>
+        <span>box <b>${bs}</b> pts${mode === 'atr' ? (autoBox ? ` (ATR-14 widened from ${_atr(cs, 14).toFixed(1)} to fit the session)` : ' (ATR-14)') : ''}</span>
         <span style="color:var(--muted);">${st.total} bricks · ${st.up} up / ${st.total - st.up} down · ${st.flips} reversals · longest run ${st.maxRun}</span>
         <span style="color:var(--muted);">median ${st.medianMins} min per brick · slowest ${st.slowest} min</span>
       </div>

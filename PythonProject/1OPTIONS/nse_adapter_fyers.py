@@ -350,6 +350,26 @@ def _on_message(msg) -> None:
                         "tsq": float(msg.get("tot_sell_qty") or msg.get("totalsellqty") or 0),
                     }
 
+        # TOTAL buy and sell quantity, which Fyers sends on the ORDINARY tick
+        # as well as on a depth update. This is the aggregate the bid/offer
+        # panel actually wants, and it arrives without a DepthUpdate
+        # subscription at all - so when the depth ladder is unavailable, or
+        # the broker does not publish it for a contract, the totals are still
+        # there. They were being read only inside the ladder branch and thrown
+        # away otherwise.
+        _tbq = msg.get("tot_buy_qty") or msg.get("totalbuyqty") or msg.get("tbq")
+        _tsq = msg.get("tot_sell_qty") or msg.get("totalsellqty") or msg.get("tsq")
+        if _tbq or _tsq:
+            with _lock:
+                prev = _depth.get(sym) or {}
+                _depth[sym] = {
+                    "bids": prev.get("bids") or [],
+                    "asks": prev.get("asks") or [],
+                    "ts": time.time(),
+                    "tbq": float(_tbq or 0),
+                    "tsq": float(_tsq or 0),
+                }
+
         d["ts"] = time.time()
         with _lock:
             _ticks[sym] = {**_ticks.get(sym, {}), **d}
@@ -632,7 +652,14 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
                         fs = r.get(f"{p}_symbol")
                         if fs:
                             near_syms.append(fs)
-            _subscribe_depth(near_syms + [ysym])
+            # include the futures legs: their book is what the bid/ask panel
+            # reads for the current and next series
+            # `fut` is the futures-quote result; `data` is the chain source
+            # and never carries these keys. Reading them from `data` returned
+            # undefined and the futures legs were silently never subscribed.
+            fut_syms = [x for x in (fut.get("futures_symbol"),
+                                    fut.get("futures_far_symbol")) if x]
+            _subscribe_depth(near_syms + [ysym] + fut_syms)
         except Exception as _e:
             print(f"[fyers] depth subscribe skipped: {_e}")
 
@@ -698,6 +725,13 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
             "strikes": {f'{r["strike"]}{p.upper()}': _depth[r[f"{p}_symbol"]]
                         for r in strikes for p in ("ce", "pe")
                         if r.get(f"{p}_symbol") and r[f"{p}_symbol"] in _depth},
+            # Futures books, keyed plainly. They were absent from the payload
+            # entirely, so the current and next series could never show a
+            # book however the client asked for it.
+            "futures": {
+                "near": _depth.get(fut.get("futures_symbol")),
+                "far": _depth.get(fut.get("futures_far_symbol")),
+            },
         },
         "_tokens": {r[f"{p}_symbol"]: {"sym": sym, "k": r["strike"], "side": p.upper()}
                     for r in strikes for p in ("ce", "pe") if r.get(f"{p}_symbol")},
@@ -808,12 +842,17 @@ def _futures_quote(symbol: str, exp_epochs: List[float]) -> Dict[str, Any]:
                         "futures_price": px,
                         "futures_oi": _f(v, "open_interest", "oi") or None,
                         "futures_oi_chg": _f(v, "oich", "open_interest_change") or None,
+                        # The SYMBOL, so the client can look up this leg's
+                        # depth book. Without it the futures bid/ask panel
+                        # queried depth[undefined] and showed nothing at all.
+                        "futures_symbol": fsym,
                         "futures_prev_close": _f(v, "prev_close_price", "prev_close") or None,
                         "futures_volume": _f(v, "volume", "vol_traded_today") or None,
                     })
                 else:
                     out["futures_far_price"] = px
                     out["futures_far_oi"] = _f(v, "open_interest", "oi") or None
+                    out["futures_far_symbol"] = fsym
         except Exception:
             continue
     return out
