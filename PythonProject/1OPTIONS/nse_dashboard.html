@@ -1885,6 +1885,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
                 <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
+                <label title="Bollinger bands, 20-period with 2 standard deviations. Upper and lower only — the middle band is a 20 SMA, already covered by the moving averages."><input type="checkbox" id="chk_bb"> BB</label>
                 <button id="addAlertBtn" class="mini-btn" style="font-size:9px;padding:1px 6px;" title="Add a price alert. Shift-click the chart (or right-click) to place one at the price under the cursor.">🔔 Alert</button>
                 <span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.05);">
                   <select id="chartDataMode" class="ohlc-inp" style="font-size:9px;padding:1px 3px;" title="Live uses today's session. Historical replays a past date's 1-minute candles through the same chart and indicators.">
@@ -1949,6 +1950,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           
 
           
+
+          <div class="level-panel" id="sentPanel" style="grid-column:1 / -1;border:1px solid rgba(165,94,234,0.4);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🧪 Sentiment — three tiers, by how wrong each can be<i class="hi" data-h="sentiment">i</i></span>
+            </div>
+            <div id="sentBody" style="padding:6px 8px;"><div class="movers-loading">Collecting…</div></div>
+          </div>
 
           <div class="level-panel" id="budgetPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.35);">
             <div class="level-panel-head">
@@ -11005,7 +11013,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // take it to silence. The master mute still silences everything.
       const v = Math.max(0.18, (isFinite(raw) ? raw : 1)) * 0.34;
       const ctx = (typeof _ctx === 'function') ? _ctx() : null;
-      console.log(`[alert] sound: vol ${v.toFixed(2)}, audio ${ctx ? ctx.state : 'no context'}`);
       if (typeof _masterMuted === 'function' && _masterMuted()) {
         console.log('[alert] sound suppressed: master mute is on');
         return;
@@ -11040,7 +11047,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           };
           strike(t0, 1);
           strike(t0 + 0.38, 0.55);       // second, softer strike
-          console.log(`[alert] bell scheduled at ${t0.toFixed(3)}, ${DUR}s`);
         } catch (e) { console.warn('[alert] sound schedule failed:', e); }
       };
       // If speech is already running - another alert, or this one's own
@@ -11099,9 +11105,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // Voice has its own enable toggle, separate from the bell. Silence here
       // is usually that switch rather than a fault, and it is worth saying
       // which so the two are not confused.
-      let vOn = 'unknown';
-      try { vOn = (typeof _canSpeak === 'function') ? String(_canSpeak()) : 'no _canSpeak'; } catch (_) {}
-      console.log(`[alert] voice: enabled=${vOn}, stream=${!!_streamLive}, text="${spoken}"`);
     }
     try {
       if (isPrice) {
@@ -11162,8 +11165,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
       // Visible evaluation: a rule that never fires looks identical to one
       // that fired silently, and they need different fixes.
-      if (r.type === 'touch' || r.type === 'cross' || r.type === 'near')
-        console.log(`[alert] eval ${r.type} @ ${r.value} | prevSpot ${prevSpot ? Math.round(prevSpot) : 'none'} -> spot ${Math.round(spot)} | armed ${r.armed}`);
       let hit = false, msg = '';
       if (r.type === 'near' && Math.abs(spot - r.value) <= (r.pts || 10)) { hit = true; msg = `Spot ${fmtInt(Math.round(spot))} within ${r.pts || 10} pts of ${r.label || r.value}`; }
       else if ((r.type === 'touch' || r.type === 'cross') && (() => {
@@ -14408,6 +14409,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { renderRegime(data); } catch (_) {}
     try { _htfFetch(); renderHtf(data); } catch (_) {}
     try { _maturityCheck(data); } catch (_) {}
+    try { renderSentiment(data); } catch (_) {}
     try { renderBudget(data); } catch (_) {}
     try { renderDelta90(data); } catch (_) {}
     try { renderPositioning(data); } catch (_) {}
@@ -16415,8 +16417,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, bb: false, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, bb: false, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
@@ -16472,6 +16474,30 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return o;
   }
   // ── overlay series: EMAs and a session VWAP ──
+  // Bollinger bands, upper and lower only. The middle band is just a 20-period
+  // SMA and is already covered by the moving averages; drawing it again adds a
+  // line without adding information. No fill either - a shaded channel sits
+  // over the candle bodies and wicks, which is the same objection that removed
+  // the demand and supply zones.
+  //
+  // Returns a value per bar, with nulls until the window is full, so the
+  // caller can map straight onto its own x positions.
+  function _bollinger(closes, period, mult) {
+    const p = period || 20, k = mult || 2;
+    const up = new Array(closes.length).fill(null);
+    const dn = new Array(closes.length).fill(null);
+    for (let i = p - 1; i < closes.length; i++) {
+      const w = closes.slice(i - p + 1, i + 1);
+      const mean = w.reduce((a, b) => a + b, 0) / p;
+      // population standard deviation, the convention Bollinger used
+      const varc = w.reduce((a, b) => a + (b - mean) * (b - mean), 0) / p;
+      const sd = Math.sqrt(varc);
+      up[i] = mean + k * sd;
+      dn[i] = mean - k * sd;
+    }
+    return { up, dn };
+  }
+
   const _EMA_DEFS = [
     { k: 'ema5',   p: 5,   col: '#f7b731' },
     { k: 'ema10',  p: 10,  col: '#26de81' },
@@ -18023,12 +18049,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // right-click and the delete control dead. One handler set, wired once.
   function _alertGeom() {
     const g = _chart._geom;
-    // getElementById, not a descendant selector. #chartBody holds more than
-    // one <svg>, and the first match had a blank id and a different
-    // rectangle - so every pixel-to-price mapping was computed against the
-    // wrong element and no hit test could ever land. That single character
-    // of sloppiness cost three rewrites.
-    const svg = document.getElementById('chartSvg');
+    // Whichever price chart is mounted. #chartBody holds more than one <svg>,
+    // so a descendant selector matches the wrong one - but it is also not
+    // always the candle chart: in Renko mode #chartSvg does not exist at all,
+    // which is why alerts could be SEEN on Renko but never placed or dragged
+    // there. Both renderers publish their geometry the same way, so naming
+    // both ids is the whole fix.
+    const svg = document.getElementById('chartSvg') || document.getElementById('renkoSvg');
     if (!g || !svg) return null;
     const r = svg.getBoundingClientRect();
     if (!r.width || !r.height) return null;
@@ -18051,7 +18078,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // showing 22900-23007, invisible and unreachable. Every interaction now
   // requires the pointer to be inside the price plot itself.
   function _inPlot(ev) {
-    const svg = document.getElementById('chartSvg');
+    const svg = document.getElementById('chartSvg') || document.getElementById('renkoSvg');
     if (!svg) return false;
     const r = svg.getBoundingClientRect();
     if (!r.width || !r.height) return false;
@@ -18096,6 +18123,75 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // stopped earlier in this block - which is exactly the shape of "lines
   // appear but nothing is clickable". Running this from init means an
   // unrelated failure elsewhere cannot silently skip it.
+  // ══ UI STATE PERSISTENCE ══════════════════════════════════════════
+  // Every checkbox, select, number input and the chart zoom, restored on
+  // load. Several controls were already saved individually; many were not,
+  // so a refresh silently reverted part of the setup while keeping the rest -
+  // which is worse than losing all of it, because the inconsistency is hard
+  // to notice.
+  //
+  // Historical mode is now included, at the user's request. It was excluded
+  // on the grounds that reopening on a past date is dangerous; the HISTORICAL
+  // badge is what makes that safe, and it is prominent enough to carry the
+  // warning without also losing the selection on every reload.
+  const _UI_KEY = 'uiStateV1';
+  function _uiSave() {
+    try {
+      const st = { chk: {}, sel: {}, num: {}, zoom: null, hist: window._histDate || '' };
+      document.querySelectorAll('input[type=checkbox][id]').forEach(e => { st.chk[e.id] = e.checked; });
+      document.querySelectorAll('select[id]').forEach(e => { st.sel[e.id] = e.value; });
+      document.querySelectorAll('input[type=number][id], input[type=date][id], input[type=range][id]')
+        .forEach(e => { st.num[e.id] = e.value; });
+      st.zoom = { y: _chart.yZoom, c: _chart.yCenter, iv: _chart.interval, maxed: !!_chart.maxed };
+      localStorage.setItem(_UI_KEY, JSON.stringify(st));
+    } catch (_) {}
+  }
+  function _uiRestore() {
+    let st;
+    try { st = JSON.parse(localStorage.getItem(_UI_KEY) || 'null'); } catch (_) { return; }
+    if (!st) return;
+    const fire = e => {
+      // dispatch both: some controls listen for change, some for input, and
+      // a restored value that never fires its handler looks set but is not
+      e.dispatchEvent(new Event('change', { bubbles: true }));
+      e.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    for (const [id, v] of Object.entries(st.chk || {})) {
+      const e = document.getElementById(id);
+      if (e && e.checked !== v) { e.checked = v; fire(e); }
+    }
+    for (const [id, v] of Object.entries(st.num || {})) {
+      const e = document.getElementById(id);
+      if (e && v != null && e.value !== v) { e.value = v; fire(e); }
+    }
+    // selects last: a select often drives what the others mean
+    for (const [id, v] of Object.entries(st.sel || {})) {
+      const e = document.getElementById(id);
+      if (e && v != null && e.value !== v) { e.value = v; fire(e); }
+    }
+    try {
+      if (st.zoom) {
+        if (st.zoom.y) _chart.yZoom = st.zoom.y;
+        if (st.zoom.c != null) _chart.yCenter = st.zoom.c;
+        if (st.zoom.iv) _chart.interval = st.zoom.iv;
+        _chart.maxed = !!st.zoom.maxed;
+      }
+    } catch (_) {}
+    console.log('[ui] state restored' + (st.hist ? ` — HISTORICAL ${st.hist}` : ''));
+  }
+  function _wireUiPersist() {
+    if (window._uiWired) return;
+    window._uiWired = true;
+    // one delegated listener rather than hundreds of individual ones
+    document.addEventListener('change', ev => {
+      const t = ev.target;
+      if (t && t.id && /^(INPUT|SELECT)$/.test(t.tagName)) _uiSave();
+    }, true);
+    window.addEventListener('beforeunload', _uiSave);
+    // zoom and interval are not form controls, so capture them periodically
+    setInterval(_uiSave, 20000);
+  }
+
   function _wireAlertLayer() {
     if (window._alertLayerWired) return;
     window._alertLayerWired = true;
@@ -18220,7 +18316,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (!G) { console.log('[alert] ctx: _alertGeom() null'); return; }
       const price = G.priceAt(ev.clientY);
       if (!isFinite(price)) { console.log('[alert] ctx: price not finite'); return; }
-      console.log('[alert] ctx: menu opening at', price.toFixed(2));
       _chartMenuClose();
       const hit = _alertHitTest(ev);
       const menu = document.createElement('div');
@@ -18253,9 +18348,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         });
       }
       document.body.appendChild(menu);
-      const r2 = menu.getBoundingClientRect();
-      console.log(`[alert] menu in DOM: ${menu.childElementCount} items, ` +
-                  `${Math.round(r2.width)}x${Math.round(r2.height)} at ${Math.round(r2.left)},${Math.round(r2.top)}`);
       // If the menu has zero size it is in the DOM but not painted — a
       // stacking or CSS problem rather than a logic one, and the numbers
       // above say which.
@@ -18306,7 +18398,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   window.alertDebug = function () {
     const box = document.getElementById('chartBody');
-    const svg = document.getElementById('chartSvg');
+    const svg = document.getElementById('chartSvg') || document.getElementById('renkoSvg');
     const allSvg = document.querySelectorAll('#chartBody svg');
     const g = _chart._geom;
     let rules = [];
@@ -18332,6 +18424,150 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     return 'done';
   };
+
+  // ══ SENTIMENT METER ═══════════════════════════════════════════════
+  // Deliberately NOT one number. Averaging thirty readings produces a score
+  // that feels authoritative and hides the only thing worth knowing - which
+  // of them disagree, and whether the one disagreeing is the reliable kind.
+  //
+  // Three tiers, by how much the reading can be WRONG rather than by topic:
+  //
+  //   MECHANICAL   obligations and arithmetic. Dealer hedging flow, basis,
+  //                variance remaining. These are not opinions: if dealers are
+  //                short gamma they MUST sell into falls, whatever anyone
+  //                thinks. Lowest error rate, and it belongs on top.
+  //   OBSERVED     who holds what, and what actually traded. Participant OI,
+  //                futures quadrant, aggressor-classified prints. Facts about
+  //                positions, though not about intent.
+  //   INFERRED     judgement: confluence votes, divergences, PCR reads. The
+  //                largest tier and the least reliable, which is exactly
+  //                backwards from how most dashboards weight them.
+  //
+  // When the tiers agree, the read is strong. When MECHANICAL disagrees with
+  // INFERRED, trust the mechanical - it is the one with an obligation behind
+  // it rather than an interpretation.
+  function _hedgeFlow(d) {
+    // Greeks as PRESSURE, not as description. Dealers hedge their book, so
+    // their aggregate gamma and charm translate into a quantity of index they
+    // are compelled to trade for a given move - and that flow hits the tape
+    // regardless of anyone's view.
+    const st = d?.strikes || [], spot = d?.underlying_value, iv = (d?.atm_iv || 12) / 100;
+    if (!st.length || !spot) return null;
+    const T = _volT(Math.max(1 / 1440, d.dte ?? 1));
+    const lot = d.lot_size || 75;
+    let gex = 0, charm = 0;
+    for (const s of st) {
+      const K = s.strike;
+      if (!K || Math.abs(K - spot) > spot * 0.06) continue;
+      const sig = ((s.ce_iv || s.pe_iv || iv * 100) / 100) || iv;
+      if (!(sig > 0 && T > 0)) continue;
+      const d1 = (Math.log(spot / K) + (0.07 + sig * sig / 2) * T) / (sig * Math.sqrt(T));
+      const npdf = 0.3989422804 * Math.exp(-d1 * d1 / 2);
+      const g = npdf / (spot * sig * Math.sqrt(T));
+      // convention: dealers short both legs to the street
+      gex += g * ((s.ce_oi || 0) - (s.pe_oi || 0)) * lot * spot * spot * 0.01;
+      // charm: delta drifts purely with time, forcing a hedge even if price
+      // does not move - strongest near expiry and the reason the last hour
+      // of an expiry day trades the way it does
+      const ch = -npdf * (2 * 0.07 * T - d1 * sig * Math.sqrt(T)) / (2 * T * sig * Math.sqrt(T));
+      charm += ch * ((s.ce_oi || 0) - (s.pe_oi || 0)) * lot;
+    }
+    return {
+      gex,
+      // index units dealers must trade per 1% move: positive gex means they
+      // sell rallies and buy dips, damping; negative means they chase
+      perPct: gex / 100,
+      charm,
+      regime: gex > 0 ? 'damping' : 'amplifying',
+    };
+  }
+
+  function _sentiment(d) {
+    const T = { mech: [], obs: [], inf: [] };
+    const add = (tier, src, dir, why) => { if (dir) T[tier].push({ src, dir, why }); };
+
+    // ── MECHANICAL ──
+    try {
+      const h = _hedgeFlow(d);
+      if (h) {
+        add('mech', 'dealer gamma', h.gex > 0 ? 1 : -1,
+            h.gex > 0 ? 'dealers damp moves — ranges hold' : 'dealers amplify moves — breaks run');
+        if (Math.abs(h.charm) > 1e5)
+          add('mech', 'charm drift', h.charm > 0 ? 1 : -1,
+              'time decay alone forces a hedge in this direction');
+      }
+      const p = _positioning(d);
+      if (p && Math.abs(p.excess) > p.spot * 0.0006)
+        add('mech', 'basis vs carry', p.excess > 0 ? 1 : -1, p.carryRead);
+      const b = _sessionBudget(d);
+      if (b && b.spent >= 1.0)
+        add('mech', 'move budget spent', 0, '');
+    } catch (_) {}
+
+    // ── OBSERVED ──
+    try {
+      const p = _positioning(d);
+      if (p?.futBias) add('obs', 'futures positioning', p.futBias, p.quadNote || p.quad);
+      const f = _netPremiumFlow(d);
+      if (f && Math.abs(f.conviction) > 0.15)
+        add('obs', 'capital committed', f.net > 0 ? 1 : -1, 'premium is being paid on one side');
+      const dr = _depthRead?.(d?.depth?.[d?.futures_symbol]);
+      if (dr?.bias) add('obs', 'futures book', dr.bias, 'resting size favours one side');
+    } catch (_) {}
+
+    // ── INFERRED ──
+    try {
+      const c = _confluence(d);
+      if (c && c.dominant !== 'split')
+        add('inf', 'trend confluence', c.dominant === 'bullish' ? 1 : -1, `${c.up} of ${c.total} measures`);
+      const g = _grindRead();
+      if (g?.qualifies) add('inf', 'slow grind', g.dir, `${(g.er * 100).toFixed(0)}% efficient`);
+      const rr = _rsiRange(_rsiSeries((_chart.candles || []).map(x => x.c), 14), 60);
+      if (rr?.regime === 'bull range') add('inf', 'RSI range', 1, rr.note);
+      else if (rr?.regime === 'bear range') add('inf', 'RSI range', -1, rr.note);
+    } catch (_) {}
+
+    const net = t => T[t].reduce((s, v) => s + v.dir, 0);
+    const lean = t => { const n = net(t), c = T[t].filter(v => v.dir).length; return c ? n / c : 0; };
+    const m = lean('mech'), o = lean('obs'), i = lean('inf');
+    const tiers = [m, o, i].filter(x => x !== 0);
+    const agree = tiers.length > 1 && tiers.every(x => Math.sign(x) === Math.sign(tiers[0]));
+    const conflict = m !== 0 && i !== 0 && Math.sign(m) !== Math.sign(i);
+    return { T, m, o, i, agree, conflict };
+  }
+
+  function renderSentiment(d) {
+    const box = document.getElementById('sentBody');
+    if (!box) return;
+    const s = _sentiment(d);
+    if (!s) { box.innerHTML = '<div class="movers-loading">Load the chain.</div>'; return; }
+    const bar = (lab, v, n, note) => {
+      const col = v > 0.15 ? 'var(--pos,#26a69a)' : v < -0.15 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+      const w = Math.min(50, Math.abs(v) * 50);
+      return `<div style="display:flex;gap:8px;align-items:center;padding:2px 4px;font-size:10px;">
+        <b style="min-width:84px;">${lab}</b>
+        <span style="width:120px;height:9px;background:rgba(255,255,255,0.07);border-radius:5px;position:relative;">
+          <span style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,0.25);"></span>
+          <span style="position:absolute;top:0;bottom:0;${v >= 0 ? 'left:50%' : `right:50%`};width:${w}%;background:${col};border-radius:3px;"></span>
+        </span>
+        <span style="min-width:30px;color:${col};font-weight:700;">${v === 0 ? '—' : (v > 0 ? '+' : '') + (v * 100).toFixed(0)}</span>
+        <span style="color:var(--muted);font-size:9px;">${n} input${n === 1 ? '' : 's'}</span>
+        <span style="color:var(--muted);font-size:9px;">${escapeHtml(note)}</span>
+      </div>`;
+    };
+    const top = t => (s.T[t].find(v => v.dir)?.why) || '';
+    box.innerHTML = `
+      ${bar('Mechanical', s.m, s.T.mech.length, top('mech'))}
+      ${bar('Observed', s.o, s.T.obs.length, top('obs'))}
+      ${bar('Inferred', s.i, s.T.inf.length, top('inf'))}
+      <div style="padding:4px;font-size:10.5px;color:${s.conflict ? 'var(--gold,#d4af37)' : s.agree ? 'var(--pos,#26a69a)' : 'var(--muted)'};">
+        ${s.conflict
+          ? '<b>⚠ Mechanical and inferred disagree.</b> Trust the mechanical: dealers hedging have an obligation, while the inferred tier is interpretation. This is the configuration in which the chart looks one way and price goes the other.'
+          : s.agree ? '<b>✓ All tiers agree.</b> The strongest configuration available — the obligation, the positions and the reading all point the same way.'
+          : 'Tiers are mixed or thin. No strong read.'}
+      </div>
+      <div class="oc-sub" style="margin-top:3px;">Deliberately <b>not one number</b>. Averaging thirty readings produces a score that feels authoritative and hides the only thing worth knowing — which of them disagree, and whether the one disagreeing is the reliable kind. The tiers are ordered by <b>how wrong each can be</b>, not by topic. <b>Mechanical</b> is obligation and arithmetic: if dealers are short gamma they must sell into falls whatever anyone believes, and charm forces a hedge from time passing alone even when price does not move. <b>Observed</b> is who holds what and what actually traded — facts about positions, though never about intent. <b>Inferred</b> is judgement, the largest tier and the least reliable, which is exactly backwards from how most dashboards weight them. <b>The disagreement line is the point:</b> when mechanical and inferred conflict, that is the configuration in which the chart looks one way and price goes the other — and it resolves toward the obligation rather than the interpretation more often than not.</div>`;
+  }
 
   // ══ SESSION BUDGET ════════════════════════════════════════════════
   // The day's expected move is a budget, and it is published: the straddle
@@ -19394,9 +19630,53 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
 
     if (votes.length < 4) return null;
-    const gross = votes.reduce((s, v) => s + v.wt, 0);
-    const net = votes.reduce((s, v) => s + v.wt * v.dir, 0);
-    let score = Math.round(net / Math.max(1, gross) * 100);
+
+    // ── independent sources, not independent votes ─────────────────
+    // The nine "families" were not nine pieces of information. Six of them -
+    // structure, the EMA stack, VWAP, RSI range, RSI 50 and RSI divergence -
+    // all read PRICE, so in a trending market they agree automatically. That
+    // is one observation counted six times, and it controlled 58% of the
+    // score: a trend alone could produce a reading near 70 with nothing
+    // independent confirming it, which is precisely how a signal fires late
+    // in a move and looks inaccurate.
+    //
+    // Votes are now grouped by what they actually read, AVERAGED within each
+    // source, and the sources weighted equally-ish. Six price votes agreeing
+    // now say exactly what one price vote says, because that is all they know.
+    const SRC = {
+      'structure': 'price', 'EMA stack': 'price', 'VWAP': 'price',
+      'RSI range': 'price', 'RSI break': 'price', 'RSI 50': 'price',
+      'RSI divergence': 'price', 'RSI hidden divergence': 'price',
+      'CVD': 'volume', 'CVD divergence': 'volume', 'value area': 'volume',
+      'capital flow': 'options', 'gamma': 'options',
+    };
+    const SRC_W = { price: 38, volume: 31, options: 31 };
+    const grp = {};
+    for (const v of votes) {
+      const s = SRC[v.src] || 'price';
+      (grp[s] = grp[s] || []).push(v);
+    }
+    let num = 0, den = 0;
+    const srcLean = {};
+    for (const [s, list] of Object.entries(grp)) {
+      // weighted average WITHIN the source, so adding more price indicators
+      // cannot increase price's say
+      const w = list.reduce((a, v) => a + v.wt, 0);
+      const n = list.reduce((a, v) => a + v.wt * v.dir, 0);
+      const lean = w ? n / w : 0;
+      srcLean[s] = lean;
+      num += lean * (SRC_W[s] || 30);
+      den += (SRC_W[s] || 30);
+    }
+    let score = Math.round(den ? num / den * 100 : 0);
+
+    // Confirmation across sources, not merely a high number. A score built
+    // from one source is a trend reading; a score built from two or three is
+    // evidence. This is the requirement that was missing entirely.
+    const leaning = Object.values(srcLean).filter(x => Math.abs(x) > 0.2);
+    const agreeing = leaning.filter(x => Math.sign(x) === Math.sign(score));
+    const sourcesAgree = agreeing.length;
+    if (sourcesAgree < 2) score = Math.round(score * 0.45);
 
     // ── maturity discount: a late entry is a worse entry ──
     let mat = null, matNote = '';
@@ -19464,7 +19744,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     const dir = score >= 40 ? 1 : score <= -40 ? -1 : 0;
     return {
-      room, stop, target, roomNote,
+      room, stop, target, roomNote, srcLean, sourcesAgree,
       score, dir: veto ? 0 : dir, votes, veto, mat, matNote, reg, px,
       bar: bars[bars.length - 1].t,
       up: votes.filter(v => v.dir > 0).length,
@@ -19552,6 +19832,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <b style="color:${col};font-size:13px;">${label}</b>
         <span>score <b style="color:${col};">${s.score > 0 ? '+' : ''}${s.score}</b></span>
         <span style="color:var(--muted);">${s.up} for · ${s.dn} against</span>
+        <span style="color:${s.sourcesAgree >= 2 ? 'var(--pos,#26a69a)' : 'var(--gold,#d4af37)'};font-weight:700;">
+          ${s.sourcesAgree || 0}/3 sources</span>
+        ${s.srcLean ? `<span style="color:var(--muted);font-size:9px;">${Object.entries(s.srcLean).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}`).join(' · ')}</span>` : ''}
         ${s.matNote ? `<span style="color:var(--gold,#d4af37);">${escapeHtml(s.matNote)}</span>` : ''}
       </div>
       ${s.dir && s.stop != null && s.target != null ? `
@@ -22370,17 +22653,292 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const a = _atr(cs, 14);
       bs = Math.max(2, Math.round((a || 10) * 100) / 100);
     } else bs = +mode;
-    const bricks = _renkoBuild(cs, bs);
+    let bricks = _renkoBuild(cs, bs);
     if (!bricks.length) { box.innerHTML = `<div class="movers-loading">No brick has completed yet at a ${bs}-point box — price has not moved a full box. Choose a smaller box to see structure sooner.</div>`; return; }
     const st = _renkoStats(bricks);
-    const show = bricks.slice(-90);
-    const W = 900, H = _chart.maxed ? 620 : 420, padL = 8, padR = 74, padT = 12, padB = 34;
+    // Show the WHOLE session, not a fixed tail. The old cap of 90 bricks was
+    // roughly two hours on a normal day, so the morning silently disappeared -
+    // and the morning is where the session's structure is set.
+    //
+    // Renko has no time axis: a quiet hour prints no bricks and a violent one
+    // prints forty, so the count cannot be derived from the clock. It is
+    // whatever the session produced, and the brick WIDTH adapts instead.
+    // Fit the WHOLE session by enlarging the box, not by dropping bricks.
+    //
+    // Clipping was the wrong lever: a small box on a choppy day prints well
+    // over a thousand bricks, so any width-based cap throws away the morning
+    // and leaves the last two hours - exactly the symptom. Renko's box size
+    // is a free parameter, so the honest response to "too many bricks" is a
+    // bigger box, which is what a trader would do by hand.
+    // The maximised state is a CSS class on the panel, not a flag on _chart -
+    // _chart.maxed is only ever written by the state-restore code, so it was
+    // always false here and the Renko chart stayed 900px wide however the
+    // panel was sized.
+    const maxed = document.getElementById('chartPanel')?.classList.contains('chart-maxed');
+    const avail = (maxed ? 1600 : 900) - 8 - 74;
+    const MIN_BW = 2.2;                       // below this a brick is a smear
+    const maxFit = Math.floor(avail / MIN_BW);
+    let autoBox = 0;
+    if (mode === 'atr' && bricks.length > maxFit) {
+      // step the box up until the session fits; each step roughly halves the
+      // brick count, so this converges in a handful of iterations
+      let tryBs = bs, guard = 0;
+      while (bricks.length > maxFit && guard++ < 12) {
+        tryBs = Math.round(tryBs * 1.35 * 100) / 100;
+        bricks = _renkoBuild(cs, tryBs);
+      }
+      if (guard) { autoBox = tryBs; bs = tryBs; }
+    }
+    const show = bricks.length > maxFit ? bricks.slice(-maxFit) : bricks;
+    const clipped = bricks.length - show.length;
+    const W = maxed ? 1600 : 900, H = maxed ? 620 : 420,
+          padL = 8, padR = 74, padT = 12, padB = 34;
     const prices = show.flatMap(b => [b.o, b.c]);
     let lo = Math.min(...prices), hi = Math.max(...prices);
     const pad = (hi - lo) * 0.06 || bs; lo -= pad; hi += pad;
+    // ── vertical zoom and pan, same model as the candle chart ──────
+    // The auto-fit range above is the 1x base; zoom scales around a centre
+    // the user can drag. Sharing _chart.yZoom and _chart.yCenter rather than
+    // keeping separate Renko state means a zoom set on one chart is still
+    // there when you switch to the other, which is what you would expect.
+    const autoLo = lo, autoHi = hi;
+    // The ▲▼ pan buttons and the zoom buttons read _lastMid and _lastSpan to
+    // know what a "view" currently is. Only the candle renderer set them, so
+    // on Renko panView() found yCenter null, _lastMid undefined, and returned
+    // immediately - the buttons were wired and did nothing.
+    if (_chart.yZoom === 1 && _chart.yCenter == null) {
+      _chart._lastMid = (lo + hi) / 2;
+      _chart._lastSpan = hi - lo;
+    }
+    if (_chart.yZoom !== 1 || _chart.yCenter != null) {
+      const mid = _chart.yCenter != null ? _chart.yCenter : (autoLo + autoHi) / 2;
+      const half = (autoHi - autoLo) / 2 / (_chart.yZoom || 1);
+      lo = mid - half; hi = mid + half;
+    }
     const bw = (W - padL - padR) / show.length;
+    // EMAs over BRICK CLOSES, not over time. On a Renko chart a moving
+    // average of time-based bars is meaningless, because bricks are not
+    // evenly spaced in time - the average has to walk the brick sequence,
+    // which is the only ordering Renko actually has.
+    const brickEma = n => {
+      const k = 2 / (n + 1); let e = show[0].c; const out = [];
+      for (const b of show) { e = b.c * k + e * (1 - k); out.push(e); }
+      return out;
+    };
+    // The SAME EMA set and the SAME toggles as the candle chart. I had picked
+    // 9/21/50, which are not periods this dashboard uses anywhere - so the
+    // two charts disagreed about what an EMA meant, and the 5 and 10 that are
+    // actually watched were absent.
+    const _brickEmas = _EMA_DEFS
+      .filter(e => _chart.show[e.k])
+      .map(e => ({ ...e, series: brickEma(e.p) }));
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
     let svg = '';
+    // ── price levels ───────────────────────────────────────────────
+    // Pivots, CPR, the opening range, its Fibonacci projections and the
+    // walls are all HORIZONTAL PRICE levels, so they carry over to Renko
+    // unchanged - a price is a price whether the x axis is time or bricks.
+    // Only the time-based overlays need rethinking, which is why they were
+    // missing rather than deliberately excluded.
+    try {
+      const d0 = state.lastData;
+      const lv = d0 ? _chartLevels(d0) : [];
+      const right = W - padR;
+      for (const l of lv) {
+        if (l.v == null || l.v < lo || l.v > hi) continue;
+        svg += `<line x1="${padL}" y1="${y(l.v).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(l.v).toFixed(1)}"
+            stroke="${l.col}" stroke-width="${l.w || 1}" ${l.dash ? `stroke-dasharray="${l.dash}"` : ''} opacity="0.75"/>
+          <text x="${(right + 3).toFixed(1)}" y="${(y(l.v) + 3).toFixed(1)}"
+            style="font-size:8px;fill:${l.col};">${escapeHtml(String(l.lab))}</text>`;
+      }
+    } catch (_) {}
+
+    // ── opening range and its Fib projections ──────────────────────
+    // These were missing from Renko because they are built inside the candle
+    // renderer's ORB block rather than in the shared level builder, so
+    // nothing else could reach them. Recomputed here from the same 9:15-9:20
+    // window and the same rules: body range for the box, wick range for the
+    // projections, round-hundred Fib ratios at or beyond 1.0.
+    try {
+      const istM = t => {
+        const g = new Date(t * 1000);
+        const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+        return i2.getHours() * 60 + i2.getMinutes();
+      };
+      const inOr = cs.filter(k => { const m = istM(k.t); return m >= 555 && m < 560; });
+      if (inOr.length) {
+        const right = W - padR;
+        const bHi = Math.max(...inOr.map(k => Math.max(k.o, k.c)));
+        const bLo = Math.min(...inOr.map(k => Math.min(k.o, k.c)));
+        const wHi = Math.max(...inOr.map(k => k.h));
+        const wLo = Math.min(...inOr.map(k => k.l));
+        // the box itself
+        if (bHi <= hi && bLo >= lo)
+          svg += `<rect x="${padL}" y="${y(bHi).toFixed(1)}" width="${(right - padL).toFixed(1)}"
+            height="${Math.max(1, y(bLo) - y(bHi)).toFixed(1)}" fill="rgba(212,175,55,0.07)"
+            stroke="rgba(212,175,55,0.5)" stroke-width="1"/>
+            <text x="${padL + 3}" y="${(y(bHi) - 3).toFixed(1)}" style="font-size:8px;fill:rgba(212,175,55,0.85);">9:15-9:20 ${Math.round(bHi - bLo)}pt</text>`;
+        // projections, both directions, reachability-filtered as on the candles
+        const span = wHi - wLo;
+        const dSig = (state.lastData?.underlying_value || 0) *
+                     ((state.lastData?.atm_iv || 12) / 100) * Math.sqrt(_volT(1));
+        for (const r of [1, 1.272, 1.618, 2, 2.618]) {
+          if (dSig > 0 && (span * r) / dSig > 1.5) continue;
+          for (const [v, col, pre] of [[wHi - span * r, '#ef5350', '▼'], [wLo + span * r, '#26a69a', '▲']]) {
+            if (v < lo || v > hi) continue;
+            svg += `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(v).toFixed(1)}"
+                stroke="${col}" stroke-width="2.6" opacity="0.7"/>
+              <text x="${padL + 3}" y="${(y(v) - 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${pre}${r} ${fmtInt(Math.round(v))}</text>`;
+          }
+        }
+      }
+    } catch (_) {}
+
+    // ── live price line ────────────────────────────────────────────
+    // Renko only prints a brick when a full box is travelled, so between
+    // bricks the chart shows nothing moving at all - price can run most of a
+    // box and the display stays frozen. The spot line is what makes that
+    // visible, and it matters MORE here than on candles for exactly that
+    // reason: it shows how close the next brick is.
+    try {
+      const sp = state.lastData?.underlying_value;
+      if (sp && sp >= lo && sp <= hi) {
+        const right = W - padR;
+        const lastBrick = show[show.length - 1];
+        // distance to the next brick, which is the question the line answers
+        const upNeed = lastBrick ? (lastBrick.c + bs) : null;
+        const dnNeed = lastBrick ? (lastBrick.c - bs) : null;
+        const toGo = lastBrick ? Math.min(Math.abs(upNeed - sp), Math.abs(sp - dnNeed)) : null;
+        svg += `<line x1="${padL}" y1="${y(sp).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(sp).toFixed(1)}"
+            stroke="#fff" stroke-width="1" stroke-dasharray="2,3" opacity="0.85"/>
+          <rect x="${(right + 1).toFixed(1)}" y="${(y(sp) - 7).toFixed(1)}" width="70" height="14" rx="2" fill="#fff"/>
+          <text x="${(right + 4).toFixed(1)}" y="${(y(sp) + 3.5).toFixed(1)}"
+            style="font-size:9px;fill:#0b0e14;font-weight:700;">${fmtInt(Math.round(sp))}${toGo != null ? ` ·${Math.round(toGo)}` : ''}</text>`;
+      }
+    } catch (_) {}
+
+    // ── strike ladder, price alerts and signal markers ─────────────
+    // All three are price-anchored, so they port unchanged. The ladder lines
+    // are drawn flat here rather than traced across time, because Renko has
+    // no time axis to trace them along - the level is what matters, not its
+    // path.
+    try {
+      const d0 = state.lastData;
+      const right = W - padR;
+      const L2 = d0 ? _strikeLadder(d0) : null;
+      for (const [row, col, lab] of [[L2?.resistance, '#ef5350', 'γ-RES'], [L2?.support, '#26a69a', 'γ-SUP']]) {
+        if (!row || row.k < lo || row.k > hi) continue;
+        svg += `<line x1="${padL}" y1="${y(row.k).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(row.k).toFixed(1)}"
+            stroke="${col}" stroke-width="2" opacity="0.8"/>
+          <text x="${padL + 3}" y="${(y(row.k) - 3).toFixed(1)}" style="font-size:8.5px;fill:${col};font-weight:700;">${lab} ${fmtInt(row.k)}</text>`;
+      }
+      svg += _chartAlertLines(y, lo, hi, W, padL, padR);
+      // signal markers, placed on the brick nearest each signal's price
+      for (const h of (_SIG.hist || [])) {
+        if (h.px < lo || h.px > hi) continue;
+        let bi = show.length - 1;
+        for (let k = 0; k < show.length; k++) if (show[k].t >= h.t) { bi = k; break; }
+        const cx = padL + bi * bw + bw / 2, cy = y(h.px), up = h.dir > 0;
+        const yy = up ? cy + 15 : cy - 15, col = up ? '#26a69a' : '#ef5350';
+        svg += `<path d="${up
+          ? `M${(cx - 5).toFixed(1)},${(yy + 6).toFixed(1)} L${(cx + 5).toFixed(1)},${(yy + 6).toFixed(1)} L${cx.toFixed(1)},${(yy - 4).toFixed(1)} Z`
+          : `M${(cx - 5).toFixed(1)},${(yy - 6).toFixed(1)} L${(cx + 5).toFixed(1)},${(yy - 6).toFixed(1)} L${cx.toFixed(1)},${(yy + 4).toFixed(1)} Z`}"
+          fill="${col}" stroke="#0b0e14" stroke-width="0.8"><title>${up ? 'BUY' : 'SELL'} ${fmtInt(Math.round(h.px))}</title></path>`;
+      }
+    } catch (_) {}
+
+    // ── Bollinger bands over brick closes ──────────────────────────
+    // Computed on the brick sequence, like the EMAs: bricks are not evenly
+    // spaced in time, so a time-based deviation would be measuring something
+    // the x axis does not represent.
+    try {
+      if (_chart.show.bb) {
+        const bb = _bollinger(show.map(b => b.c), 20, 2);
+        for (const arr of [bb.up, bb.dn]) {
+          const pts = [];
+          arr.forEach((v, i2) => {
+            if (v == null || v < lo || v > hi) return;
+            pts.push(`${(padL + i2 * bw + bw / 2).toFixed(1)},${y(v).toFixed(1)}`);
+          });
+          if (pts.length > 1)
+            svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="#2979ff" stroke-width="1.5" opacity="0.9"/>`;
+        }
+        const lastU = [...bb.up].reverse().find(v => v != null);
+        if (lastU != null && lastU >= lo && lastU <= hi)
+          svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(lastU) + 3).toFixed(1)}" style="font-size:8.5px;fill:#2979ff;font-weight:600;">BB</text>`;
+      }
+    } catch (_) {}
+
+    // ── RSI divergence, on the price side ──────────────────────────
+    // The RSI pane shows the momentum half of the claim; this is the half it
+    // makes ABOUT price. Computed over the same brick series the RSI pane
+    // uses, so the two panes mark the same two pivots and read as one claim.
+    try {
+      const dvBars = show.map(b => ({
+        t: b.t, o: b.o, c: b.c,
+        h: b.hi != null ? b.hi : Math.max(b.o, b.c),
+        l: b.lo != null ? b.lo : Math.min(b.o, b.c),
+      }));
+      const dvRsi = _rsiSeries(dvBars.map(b => b.c), 14);
+      for (const dv of (_rsiDivergence(dvBars, dvRsi, 5) || []).slice(0, 4)) {
+        const pa = dv.kind === 'bearish' ? dvBars[dv.a].h : dvBars[dv.a].l;
+        const pb = dv.kind === 'bearish' ? dvBars[dv.b].h : dvBars[dv.b].l;
+        if (pa < lo || pa > hi || pb < lo || pb > hi) continue;
+        const col = dv.kind === 'bullish' ? '#26de81' : '#ff6b81';
+        const xa = padL + dv.a * bw + bw / 2, xb = padL + dv.b * bw + bw / 2;
+        svg += `<line x1="${xa.toFixed(1)}" y1="${y(pa).toFixed(1)}" x2="${xb.toFixed(1)}" y2="${y(pb).toFixed(1)}"
+            stroke="${col}" stroke-width="${dv.hidden ? 1.1 : 1.8}"
+            stroke-dasharray="${dv.hidden ? '2,3' : '5,3'}" opacity="0.9">
+            <title>${dv.hidden ? 'HIDDEN ' : ''}${dv.kind} divergence — price ${dv.kind === 'bearish' ? (dv.hidden ? 'lower high' : 'higher high') : (dv.hidden ? 'higher low' : 'lower low')} while RSI went the other way${dv.hidden ? '; a continuation signal, not a reversal one' : ''}</title></line>`;
+        svg += `<circle cx="${xb.toFixed(1)}" cy="${y(pb).toFixed(1)}" r="2.6" fill="${col}"/>`;
+      }
+    } catch (_) {}
+
+    // ── VWAP at each brick's close time ────────────────────────────
+    // VWAP is weighted by TIME and volume, so it has no native Renko form.
+    // Plotting its value at the moment each brick completed is the honest
+    // translation: the line is still VWAP, read at the instants Renko
+    // happens to mark. It is not evenly spaced, and that is correct.
+    try {
+      // Honour the VWAP checkbox, as the EMAs already do. It was drawn
+      // unconditionally, so unticking it had no effect on Renko while it
+      // worked on the candle chart - the kind of inconsistency that makes a
+      // control feel broken rather than absent.
+      if (!_chart.show.vwap) throw 0;
+      const vw = _vwapSeries(cs);
+      const pts = [];
+      show.forEach((b, i2) => {
+        const ci = cs.findIndex(x => x.t >= b.t);
+        const v = ci >= 0 ? vw[ci] : null;
+        if (v != null && v >= lo && v <= hi)
+          pts.push(`${(padL + i2 * bw + bw / 2).toFixed(1)},${y(v).toFixed(1)}`);
+      });
+      if (pts.length > 1) {
+        // Same cyan, same dash, same width as the candle chart. It was drawn
+        // in plain white, which read as an unlabelled grey line - present but
+        // unidentifiable, which is the same as missing.
+        svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="#00d2d3"
+          stroke-width="2.2" stroke-dasharray="5,3" opacity="0.95"><title>VWAP</title></polyline>`;
+        const lastV = [...vw].reverse().find(v => v != null);
+        if (lastV != null && lastV >= lo && lastV <= hi)
+          svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(lastV) + 3).toFixed(1)}"
+            style="font-size:8.5px;fill:#00d2d3;font-weight:700;">${_chart.hasVolume ? 'VWAP' : 'VWAP*'}</text>`;
+      }
+    } catch (_) {}
+
+    // EMA overlays first, so bricks draw over them
+    // slowest first, so the fast ones draw on top where they overlap
+    for (const e of [..._brickEmas].reverse()) {
+      const pts = e.series.map((v, i2) => `${(padL + i2 * bw + bw / 2).toFixed(1)},${y(v).toFixed(1)}`);
+      if (pts.length > 1) {
+        svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${e.col}" stroke-width="1.6" opacity="0.9"/>`;
+        const last = e.series[e.series.length - 1];
+        if (last >= lo && last <= hi)
+          svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(last) + 3).toFixed(1)}"
+            style="font-size:8.5px;fill:${e.col};font-weight:600;">${e.p}</text>`;
+      }
+    }
+
     show.forEach((b, i) => {
       const x = padL + i * bw;
       const top = y(Math.max(b.o, b.c)), bot = y(Math.min(b.o, b.c));
@@ -22398,7 +22956,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     show.forEach((b, i) => { if (i % tick) return;
       svg += `<text x="${(padL + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
     const dirTxt = st.dir > 0 ? ['UP', 'var(--pos,#26a69a)'] : ['DOWN', 'var(--neg,#ef5350)'];
-    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}</svg>
+    box.innerHTML = `<svg id="renkoSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}
+        <g id="renkoCross" style="display:none;pointer-events:none;">
+          <line id="renkoCrossV" y1="${padT}" y2="${H - padB}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
+          <line id="renkoCrossH" x1="${padL}" x2="${W - padR}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
+          <rect id="renkoCrossPxBg" x="${W - padR}" width="66" height="14" rx="2" fill="rgba(20,24,32,0.95)" stroke="rgba(255,255,255,0.3)"/>
+          <text id="renkoCrossPx" x="${W - padR + 4}" style="font-size:9px;fill:#fff;font-weight:700;"></text>
+          <rect id="renkoCrossTmBg" y="${H - padB + 2}" width="78" height="14" rx="2" fill="rgba(20,24,32,0.95)" stroke="rgba(255,255,255,0.3)"/>
+          <text id="renkoCrossTm" y="${H - padB + 12}" text-anchor="middle" style="font-size:9px;fill:#fff;font-weight:700;"></text>
+        </g></svg>
+      <div id="renkoHover" style="padding:2px 6px;font-size:10px;color:var(--muted);min-height:14px;"></div>
+      <div style="display:flex;gap:10px;align-items:center;padding:2px 6px 5px;font-size:9.5px;color:var(--muted);">
+        <span style="min-width:30px;">zoom</span>
+        <input type="range" id="renkoZoom" min="100" max="800" step="10"
+               value="${Math.round((_chart.yZoom || 1) * 100)}" style="width:130px;">
+        <b id="renkoZoomLbl" style="min-width:34px;color:var(--text,#e6edf3);">${(_chart.yZoom || 1).toFixed(1)}×</b>
+        <span style="min-width:34px;">shift</span>
+        <input type="range" id="renkoPan" min="-100" max="100" step="1" value="0" style="width:130px;">
+        <button id="renkoReset" class="mini-btn" style="font-size:9px;padding:1px 7px;">reset</button>
+      </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 6px;font-size:10px;">
         <b style="color:${dirTxt[1]};">${dirTxt[0]} · ${st.curRun} brick${st.curRun === 1 ? '' : 's'} running</b>
         <span>box <b>${bs}</b> pts${mode === 'atr' ? ' (ATR-14)' : ''}</span>
@@ -22406,6 +22982,172 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span style="color:var(--muted);">median ${st.medianMins} min per brick · slowest ${st.slowest} min</span>
       </div>
       <div class="oc-sub" style="padding:0 6px 6px;">Faded bricks took at least three times the median to form — Renko draws them the same as a fast one, but for a long option they cost far more theta for the same points. <b>${st.flips <= 2 ? 'Few reversals so far: the tape is trending, which is when Renko is most useful.' : st.flips >= 8 ? 'Many reversals: price is chopping around the box size, so the filtering is not working — widen the box.' : 'Moderate reversal count.'}</b> ${st.elapsed} minutes of session are represented here.</div>`;
+    // ── crosshair and hover readout ────────────────────────────────
+    // Ported from the candle chart. On Renko the x axis is a brick sequence,
+    // not a clock, so the time shown is the time the brick under the cursor
+    // COMPLETED - which is the only timestamp a brick actually has.
+    // Publish the same geometry the candle chart does, so the alert
+    // interaction layer works identically here: place, drag, delete.
+    _chart._geom = { lo, hi, W, H, padT, padB, padL, padR };
+
+    // ── RSI pane ───────────────────────────────────────────────────
+    // The pane is filled by the renderPriceChart WRAPPER from _chart._rsiCtx.
+    // Renko never set it, so switching chart type silently emptied the RSI
+    // pane - the feature was not removed, it was starved of its context.
+    //
+    // RSI is computed over BRICK CLOSES here, which is the only sequence
+    // Renko has, and the bricks are mapped to the OHLC shape the divergence
+    // engine expects: it reads .h and .l, while a brick carries .hi and .lo.
+    // Without that rename every divergence would silently find nothing.
+    try {
+      const rsiBars = show.map(b => ({
+        t: b.t, o: b.o, c: b.c,
+        h: b.hi != null ? b.hi : Math.max(b.o, b.c),
+        l: b.lo != null ? b.lo : Math.min(b.o, b.c),
+        v: 0,
+      }));
+      const xBrick = i2 => padL + i2 * bw + bw / 2;
+      _chart._rsiCtx = { cs: rsiBars, x: xBrick, W, padL, padR, H };
+    } catch (_) {}
+    try {
+      const sv = document.getElementById('renkoSvg');
+      const g = document.getElementById('renkoCross');
+      const hv = document.getElementById('renkoHover');
+      if (sv && g) {
+        sv.addEventListener('mousemove', ev => {
+          const r = sv.getBoundingClientRect();
+          const vx = (ev.clientX - r.left) / r.width * W;
+          const vy = (ev.clientY - r.top) / r.height * H;
+          if (vx < padL || vx > W - padR || vy < padT || vy > H - padB) { g.style.display = 'none'; return; }
+          const i2 = Math.max(0, Math.min(show.length - 1, Math.floor((vx - padL) / bw)));
+          const b2 = show[i2];
+          const price = hi - (vy - padT) / (H - padT - padB) * (hi - lo);
+          const cx = padL + i2 * bw + bw / 2;
+          g.style.display = '';
+          document.getElementById('renkoCrossV').setAttribute('x1', cx);
+          document.getElementById('renkoCrossV').setAttribute('x2', cx);
+          document.getElementById('renkoCrossH').setAttribute('y1', vy);
+          document.getElementById('renkoCrossH').setAttribute('y2', vy);
+          document.getElementById('renkoCrossPxBg').setAttribute('y', vy - 7);
+          const px = document.getElementById('renkoCrossPx');
+          px.setAttribute('y', vy + 3.5); px.textContent = fmtInt(Math.round(price));
+          document.getElementById('renkoCrossTmBg').setAttribute('x', cx - 39);
+          const tm = document.getElementById('renkoCrossTm');
+          tm.setAttribute('x', cx);
+          const tstr = new Date(b2.t * 1000).toLocaleTimeString('en-IN',
+            { hour: '2-digit', minute: '2-digit', hour12: true });
+          tm.textContent = tstr;
+          if (hv) hv.innerHTML = `<b>${tstr}</b> &nbsp; O <b>${fmtInt(Math.round(b2.o))}</b> C <b style="color:${b2.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(b2.c))}</b>` +
+            ` &nbsp; brick ${i2 + 1} of ${show.length} &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(price))}</span>`;
+        });
+        sv.addEventListener('mouseleave', () => { g.style.display = 'none'; if (hv) hv.textContent = ''; });
+
+        // ── wheel to zoom, drag to pan ───────────────────────────
+        // Zooms around the CURSOR rather than the centre, so the level you
+        // are looking at stays put as the scale changes - centre-zooming
+        // pushes your point of interest off screen, which is why it feels
+        // wrong on charts that use it.
+        sv.addEventListener('wheel', ev => {
+          ev.preventDefault();
+          const r = sv.getBoundingClientRect();
+          const vy = (ev.clientY - r.top) / r.height * H;
+          const at = hi - (vy - padT) / (H - padT - padB) * (hi - lo);
+          const f = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+          const z = Math.max(1, Math.min(12, (_chart.yZoom || 1) * f));
+          const cur = _chart.yCenter != null ? _chart.yCenter : (lo + hi) / 2;
+          // keep the cursor price fixed while the span changes
+          _chart.yCenter = at - (at - cur) * ((_chart.yZoom || 1) / z);
+          _chart.yZoom = z;
+          if (z === 1) _chart.yCenter = null;
+          // same reason as the drag: a fast scroll fires many events, and
+          // each one would otherwise rebuild every brick
+          if (!_chart._zoomRaf) {
+            _chart._zoomRaf = requestAnimationFrame(() => {
+              _chart._zoomRaf = 0; renderPriceChart();
+            });
+          }
+        }, { passive: false });
+
+        sv.addEventListener('mousedown', ev => {
+          if (ev.button !== 0 || ev.shiftKey) return;     // shift-click places an alert
+          if (typeof _alertHitTest === 'function' && _alertHitTest(ev)) {
+            return;
+          }
+          const r = sv.getBoundingClientRect();
+          const startY = ev.clientY, span = hi - lo;
+          const startC = _chart.yCenter != null ? _chart.yCenter : (lo + hi) / 2;
+          // Throttled to one repaint per animation frame. Every render
+          // rebuilds the whole brick series from the candles, so repainting
+          // on each mousemove queued far more work than the browser could
+          // clear - the drag appeared frozen rather than slow, which is why
+          // it looked like it was not wired at all.
+          let pending = false, lastDy = 0;
+          const paint = () => {
+            pending = false;
+            _chart.yCenter = startC + lastDy / (H - padT - padB) * span;
+            // A pan is only honoured when the range is manual: at exactly 1x
+            // the renderer ignores yCenter and re-fits to the data, so the
+            // drag would compute a new centre and then have it thrown away.
+            if (!_chart.yZoom || _chart.yZoom === 1) _chart.yZoom = 1.0001;
+            renderPriceChart();
+          };
+          const move = e2 => {
+            lastDy = (e2.clientY - startY) / r.height * H;
+            if (!pending) { pending = true; requestAnimationFrame(paint); }
+          };
+          const up = () => {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+            document.body.style.cursor = '';
+          };
+          document.body.style.cursor = 'grabbing';
+          document.addEventListener('mousemove', move);
+          document.addEventListener('mouseup', up);
+        });
+
+        sv.addEventListener('dblclick', () => {
+          _chart.yZoom = 1; _chart.yCenter = null; renderPriceChart();
+        });
+      }
+
+      // ── slider controls ────────────────────────────────────────
+      // The pan slider is expressed as a share of the VISIBLE span, not in
+      // points, so one notch moves the same proportion of the screen however
+      // far you are zoomed in - a points-based pan becomes unusably coarse at
+      // 6x and unusably fine at 1x.
+      const zs = document.getElementById('renkoZoom');
+      const ps = document.getElementById('renkoPan');
+      const baseMid = (autoLo + autoHi) / 2, baseSpan = autoHi - autoLo;
+      if (zs) {
+        zs.addEventListener('input', () => {
+          _chart.yZoom = Math.max(1, (+zs.value || 100) / 100);
+          if (_chart.yZoom === 1) _chart.yCenter = null;
+          else if (_chart.yCenter == null) _chart.yCenter = baseMid;
+          const lbl = document.getElementById('renkoZoomLbl');
+          if (lbl) lbl.textContent = _chart.yZoom.toFixed(1) + '×';
+          if (!_chart._zoomRaf) _chart._zoomRaf = requestAnimationFrame(() => {
+            _chart._zoomRaf = 0; renderPriceChart();
+          });
+        });
+      }
+      if (ps) {
+        ps.addEventListener('input', () => {
+          const frac = (+ps.value || 0) / 100;          // -1 .. +1 of a half-span
+          const half = baseSpan / 2 / (_chart.yZoom || 1);
+          _chart.yCenter = baseMid - frac * half * 2;
+          if (_chart.yZoom === 1) _chart.yZoom = 1.0001;
+          if (!_chart._zoomRaf) _chart._zoomRaf = requestAnimationFrame(() => {
+            _chart._zoomRaf = 0; renderPriceChart();
+          });
+        });
+      }
+      document.getElementById('renkoReset')?.addEventListener('click', () => {
+        _chart.yZoom = 1; _chart.yCenter = null;
+        if (zs) zs.value = 100;
+        if (ps) ps.value = 0;
+        renderPriceChart();
+      });
+    } catch (_) {}
   }
 
   // ══ Multi-horizon expected range ══════════════════════════════════
@@ -23436,8 +24178,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // to be wiped within seconds of opening. Hold the container until the user
     // dismisses it explicitly.
     if (_chart.diagOpen) return;
-    // Renko replaces the candle body entirely; levels and overlays do not
-    // apply because the x-axis is no longer time.
+    // Renko replaces the candle body, but the overlays DO apply: price levels
+    // are price levels whatever the x axis is, and the Renko renderer now
+    // draws the same ones plus EMAs over brick closes and VWAP read at each
+    // brick's completion.
     if ((document.getElementById('chartType')?.value || 'candle') === 'renko') {
       try { return renderRenko(); } catch (e) { console.warn('[renko]', e.message); }
     }
@@ -23797,7 +24541,48 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // Appended here, not in the earlier compose line: ladderSvg is built
     // just above and referencing it before that point is a use-before-declare
     // that node --check accepts and the browser throws on.
+    // ── Bollinger bands, upper and lower ───────────────────────────
+    try {
+      if (_chart.show.bb) {
+        const bb = _bollinger(cs.map(b => b.c), 20, 2);
+        for (const arr of [bb.up, bb.dn]) {
+          const pts = [];
+          arr.forEach((v, i2) => {
+            if (v == null || v < lo || v > hi) return;
+            pts.push(`${x(i2).toFixed(1)},${y(v).toFixed(1)}`);
+          });
+          if (pts.length > 1)
+            svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="#2979ff" stroke-width="1.5" opacity="0.9"/>`;
+        }
+        const lastU = [...bb.up].reverse().find(v => v != null);
+        if (lastU != null && lastU >= lo && lastU <= hi)
+          svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(lastU) + 3).toFixed(1)}" style="font-size:8.5px;fill:#2979ff;font-weight:600;">BB</text>`;
+      }
+    } catch (_) {}
+
     svg += ladderSvg;
+    // ── divergence, drawn on the PRICE side too ────────────────────
+    // It was only ever drawn in the RSI pane, which shows the momentum half
+    // of the claim and hides the half it is making ABOUT price. A divergence
+    // asserts that two price pivots moved one way while RSI moved the other;
+    // seeing only the RSI line means taking the price half on trust, and
+    // makes a correct reading look unsupported.
+    try {
+      const bars0 = _chart.liveBar ? cs.slice(0, -1) : cs;
+      const rsi0 = _rsiSeries(bars0.map(b => b.c), 14);
+      for (const dv of (_rsiDivergence(bars0, rsi0, 5) || []).slice(0, 4)) {
+        const pa = dv.kind === 'bearish' ? bars0[dv.a].h : bars0[dv.a].l;
+        const pb = dv.kind === 'bearish' ? bars0[dv.b].h : bars0[dv.b].l;
+        if (pa < lo || pa > hi || pb < lo || pb > hi) continue;
+        const col = dv.kind === 'bullish' ? '#26de81' : '#ff6b81';
+        svg += `<line x1="${x(dv.a).toFixed(1)}" y1="${y(pa).toFixed(1)}"
+            x2="${x(dv.b).toFixed(1)}" y2="${y(pb).toFixed(1)}"
+            stroke="${col}" stroke-width="${dv.hidden ? 1.1 : 1.8}"
+            stroke-dasharray="${dv.hidden ? '2,3' : '5,3'}" opacity="0.9">
+            <title>${dv.hidden ? 'HIDDEN ' : ''}${dv.kind} divergence — price ${dv.kind === 'bearish' ? (dv.hidden ? 'lower high' : 'higher high') : (dv.hidden ? 'higher low' : 'lower low')} while RSI went the other way${dv.hidden ? '; a continuation signal, not a reversal one' : ''}</title></line>`;
+        svg += `<circle cx="${x(dv.b).toFixed(1)}" cy="${y(pb).toFixed(1)}" r="2.6" fill="${col}"/>`;
+      }
+    } catch (_) {}
     try { svg += _signalSvg(cs, x, y, lo, hi); } catch (_) {}
     // user alerts last, so they sit above the levels they were set against
     try { svg += _chartAlertLines(y, lo, hi, W, padL, padR); } catch (_) {}
@@ -24638,6 +25423,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       'signalScoreV1',
                       // price levels the user set by hand
                       'customLevelsV1',
+                      // the user's own control selections
+                      'uiStateV1',
                       // Price alerts the user placed by hand. These are not a
                       // setting - they are instructions left for the system,
                       // and Reset restoring defaults should never silently
@@ -24727,7 +25514,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       el.checked = !!_chart.show[k];
@@ -24847,6 +25634,10 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // If contextmenu is being swallowed by the browser or an extension, this
     // still works - and it tells us which of the two is at fault.
     _wireAlertLayer();
+    _wireUiPersist();
+    // restored after every control is wired, so each restored value reaches
+    // its handler rather than being set on an element nothing is listening to
+    setTimeout(_uiRestore, 350);
     // On demand only: these change once per session, so a button is the right
     // control and polling would spend requests on data that has not moved.
     document.getElementById('postMktBtn')?.addEventListener('click', () => runPostMarket());
