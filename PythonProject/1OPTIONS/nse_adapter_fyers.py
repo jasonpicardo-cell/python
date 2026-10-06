@@ -513,9 +513,14 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         raise RuntimeError(f"no Fyers symbol mapping for {sym}")
     count = int(os.environ.get("FYERS_STRIKE_COUNT", "25"))
     try:
+        # Fyers validates `timestamp` against ITS OWN expiry list - an epoch
+        # computed from a date string is rejected even when it names the right
+        # day, because it must match their value exactly. So: ask without a
+        # timestamp first, which returns the nearest expiry AND the full
+        # expiryData list, then re-ask with the matching epoch only if a
+        # different expiry was requested. One extra call on a non-default
+        # expiry, and none at all on the default.
         req = {"symbol": ysym, "strikecount": count}
-        if expiry:
-            req["timestamp"] = expiry
         raw = _count_rest("optionchain") or _client.optionchain(data=req)
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"optionchain call failed: {e}") from e
@@ -582,6 +587,49 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
             return float(v)
         except Exception:
             return None
+
+    # ── resolve a requested expiry against the broker's own list ──────
+    # Done here because expiryData only exists after the first response. If
+    # the caller asked for a specific expiry and it is not the one we were
+    # given, re-request with the broker's matching epoch.
+    if expiry:
+        try:
+            want = str(expiry).strip()
+            _cands = []
+            for e in (data.get("expiryData") or []):
+                ep = _exp_epoch(e)
+                if ep:
+                    _cands.append((ep, _exp_str(ep)))
+            match = None
+            for ep, es in _cands:
+                if es == want or str(int(ep)) == want:
+                    match = ep
+                    break
+            if match is None:
+                # tolerate other date spellings by comparing day/month/year
+                import datetime as _dx
+                for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d-%m-%Y", "%d %b %Y"):
+                    try:
+                        d_ = _dx.datetime.strptime(want, fmt).date()
+                    except Exception:
+                        continue
+                    for ep, _es in _cands:
+                        g = time.gmtime(ep + 5 * 3600 + 1800)
+                        if (g.tm_year, g.tm_mon, g.tm_mday) == (d_.year, d_.month, d_.day):
+                            match = ep
+                            break
+                    break
+            cur = _exp_epoch((data.get("expiryData") or [{}])[0]) if data.get("expiryData") else None
+            if match and cur and int(match) != int(cur):
+                raw2 = _count_rest("optionchain") or _client.optionchain(
+                    data={"symbol": ysym, "strikecount": count, "timestamp": str(int(match))})
+                d2 = (raw2 or {}).get("data") or {}
+                if d2.get("optionsChain"):
+                    data = d2
+                else:
+                    print(f"[fyers] expiry {want} not served; using the nearest instead")
+        except Exception as _ee:
+            print(f"[fyers] expiry resolve skipped: {_ee}")
 
     exp_epochs = sorted(x for x in (_exp_epoch(e) for e in (data.get("expiryData") or [])) if x)
     def _exp_str(ep):
