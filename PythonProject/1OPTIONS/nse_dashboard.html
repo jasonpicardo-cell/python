@@ -1854,7 +1854,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 </label>
                 <select id="chartType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Candles show time honestly; Renko strips it out to filter noise">
                   <option value="candle" selected>Candles</option>
-                  <option value="renko">Renko</option>
+                  <option value="ha">Heikin Ashi</option>
+                    <option value="renko">Renko</option>
                 </select>
                 <select id="renkoBox" class="ohlc-inp" style="font-size:9px;padding:1px 4px;display:none;" title="Brick size. ATR adapts to today's volatility; a fixed size keeps bricks comparable across days.">
                   <option value="atr" selected>ATR-14</option>
@@ -1940,6 +1941,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div style="display:flex;gap:6px;align-items:center;padding:2px 6px 4px;font-size:9.5px;">
               <span style="color:var(--muted);">chart</span>
               <button class="mini-btn chart-type-btn" data-ct="candle" style="font-size:9px;padding:1px 9px;">Candles</button>
+              <button class="mini-btn chart-type-btn" data-ct="ha" style="font-size:9px;padding:1px 9px;" title="Heikin Ashi — smoothed candles. The prices shown are averages, not traded prices, and turns appear a bar late.">HA</button>
               <button class="mini-btn chart-type-btn" data-ct="renko" style="font-size:9px;padding:1px 9px;">Renko</button>
               <!-- Box size as radios beside the Renko button: it is the one
                    Renko setting worth changing while reading, and a dropdown
@@ -17722,12 +17724,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // a step line reads more honestly than a smoothed one for a strike level
     const bySlot = new Map();
     for (const x of p) bySlot.set(slotOf(x.t), x[key]);
-    const pts = [];
+    // SPLIT the line where points leave the visible range, rather than
+    // skipping them. Skipping leaves the polyline connecting the last visible
+    // point to the next one, which draws a long diagonal across the chart -
+    // the stray triangles that appear when zoomed in, running from a wall to
+    // the top or bottom edge. They look like structure and are an artefact.
+    const segs = [];
+    let cur = [];
     for (const [sl, v] of [...bySlot.entries()].sort((a, b) => a[0] - b[0])) {
-      if (v < lo || v > hi) continue;
-      pts.push(`${xOf(sl).toFixed(1)},${yOf(v).toFixed(1)}`);
+      if (v < lo || v > hi) {
+        if (cur.length > 1) segs.push(cur);
+        cur = [];
+        continue;
+      }
+      cur.push(`${xOf(sl).toFixed(1)},${yOf(v).toFixed(1)}`);
     }
-    return pts.length > 1 ? pts.join(' ') : '';
+    if (cur.length > 1) segs.push(cur);
+    return segs;
   }
 
   function renderLadder(d) {
@@ -18689,6 +18702,69 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       </div>
       <div style="padding:3px 4px;font-size:10.5px;">${escapeHtml(b.verdict)}</div>
       <div class="oc-sub" style="margin-top:3px;">The day's expected move is a <b>budget, and it is published</b> — the straddle premium at the open is the market's own forecast of how far price will travel. Nobody decides that range; it gets priced, and the price is public. What makes it useful is that the budget gets <b>spent</b>: by eleven o'clock you can measure what fraction is gone, and that changes what the rest of the day can reasonably do. Most of it spent early means continuation needs fresh information rather than momentum. Little of it spent means premium has been decaying faster than it has been earned, which is the writer's side of the trade. <b>The two halves are tracked separately because they are not comparable:</b> variance is front-loaded, so the first hour carries far more of the day's movement than the lunch hour, and "half the day remains" never means "half the move remains". The room-ahead figure scales the unspent budget by the variance still to come, which is why it falls away sharply after about 2pm even when the budget looks barely touched.</div>`;
+  }
+
+  // ══ BRICK PREDICTION SCORING ══════════════════════════════════════
+  // Records what the next-brick panel predicted, then checks it against what
+  // the next brick actually did. Per ROW, not just the final score - because
+  // the question worth answering is which rows carry information, and a
+  // combined hit rate cannot tell you that.
+  //
+  // The outcome needs no judgement here, unlike the signal scorecard: a brick
+  // is green or red, it resolves within minutes, and there is no horizon to
+  // choose or dead band to argue about. That makes this the cleanest
+  // measurement in the whole system.
+  //
+  // My expectation, recorded so it can be proved wrong: distance and
+  // obstruction will beat chance and several of the other rows will not.
+  const _BRICK_SCORE_KEY = 'brickScoreV1';
+  const _brickScore = { pending: null, rows: {} };
+
+  function _bsLoad() {
+    try {
+      const r = JSON.parse(localStorage.getItem(_BRICK_SCORE_KEY) || 'null');
+      if (r && r.rows) _brickScore.rows = r.rows;
+    } catch (_) {}
+  }
+  _bsLoad();
+  function _bsSave() {
+    try {
+      localStorage.setItem(_BRICK_SCORE_KEY,
+        JSON.stringify({ rows: _brickScore.rows, t: Date.now() }));
+    } catch (_) {}
+  }
+
+  // Called by the panel each render with the rows it just computed.
+  function _bsRecord(brickT, rows, finalUp) {
+    const p = _brickScore.pending;
+    if (p && p.t === brickT) return;          // same brick, nothing new to say
+    _brickScore.pending = { t: brickT, rows: rows.map(r => ({ k: r.k, u: r.u })), finalUp };
+  }
+
+  // Called when a NEW brick appears: grade the prediction made against the
+  // previous one.
+  function _bsResolve(newBrick) {
+    const p = _brickScore.pending;
+    if (!p || !newBrick || newBrick.t === p.t) return;
+    const wasUp = newBrick.dir > 0;
+    const bump = (k, pred) => {
+      // a row only counts when it committed: 50/50 is not a prediction
+      if (pred >= 45 && pred <= 55) return;
+      const said = pred > 50;
+      const b = _brickScore.rows[k] || (_brickScore.rows[k] = { n: 0, hit: 0 });
+      b.n++;
+      if (said === wasUp) b.hit++;
+    };
+    for (const r of p.rows) bump(r.k, r.u);
+    bump('FINAL', p.finalUp);
+    _brickScore.pending = null;
+    _bsSave();
+  }
+
+  function _bsStats() {
+    return Object.entries(_brickScore.rows)
+      .map(([k, b]) => ({ k, n: b.n, hit: b.hit, rate: b.n ? b.hit / b.n : null }))
+      .sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0));
   }
 
   // ══ 0.90-DELTA BOOK ═══════════════════════════════════════════════
@@ -22684,6 +22760,40 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return trs.slice(-n).reduce((s, v) => s + v, 0) / n;
   }
 
+  // Heikin Ashi. Each bar is a blend of the real one and the previous HA bar:
+  //   close = average of this bar's O/H/L/C
+  //   open  = average of the previous HA open and close
+  //   high / low = the extremes of the real bar and the two HA values
+  //
+  // Applied as a TRANSFORM on the candle array rather than as a third
+  // renderer, so every overlay, alert, crosshair and the RSI pane work
+  // unchanged - a separate renderer is how Renko ended up missing a dozen
+  // features for days.
+  //
+  // What it costs, which matters for scalping: the prices shown are NOT real
+  // prices. An HA close of 22,431 is an average, and no trade happened there.
+  // The smoothing is backward-looking, so turns appear a bar late - the
+  // cleaner trend is partly an artefact of the averaging rather than a
+  // clearer view of the market.
+  function _heikinAshi(cs) {
+    if (!cs?.length) return cs;
+    const out = [];
+    let pO = null, pC = null;
+    for (const c2 of cs) {
+      const hc = (c2.o + c2.h + c2.l + c2.c) / 4;
+      const ho = pO == null ? (c2.o + c2.c) / 2 : (pO + pC) / 2;
+      out.push({
+        ...c2,
+        o: ho, c: hc,
+        h: Math.max(c2.h, ho, hc),
+        l: Math.min(c2.l, ho, hc),
+        _realC: c2.c,                 // kept so alerts and levels stay honest
+      });
+      pO = ho; pC = hc;
+    }
+    return out;
+  }
+
   function _renkoBuild(cs, box) {
     if (!cs?.length || !(box > 0)) return [];
     // A brick series is PATH DEPENDENT: every brick is built from the anchor
@@ -23087,6 +23197,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const softAvg = soft.length ? soft.reduce((a2, p) => a2 + p.u, 0) / soft.length : 50;
         const finalUp = Math.round(softAvg * 0.6 + pUp * 0.4);
 
+        // record this prediction, and grade the previous one if a new brick
+        // has printed since it was made
+        try {
+          _bsResolve(lastB);
+          _bsRecord(lastB.t, P, finalUp);
+        } catch (_) {}
+
         const rowH2 = 13, boxW = 150;
         const totalH = (P.length + 2) * rowH2 + 8;
         const bx = padL + (show.length - 1) * bw + bw / 2;
@@ -23097,7 +23214,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         P.forEach((p, ix) => {
           const ry = byTop + 11 + ix * rowH2;
           const col = p.u >= 60 ? '#26a69a' : p.u <= 40 ? '#ef5350' : 'var(--muted,#789)';
+          // measured hit rate, once the row has committed enough times to
+          // mean anything. 30 is the point at which a coin-flip row stops
+          // looking skilled by chance alone.
+          const st2 = _brickScore.rows[p.k];
+          const rate = st2 && st2.n >= 30 ? Math.round(st2.hit / st2.n * 100) : null;
+          const rcol = rate == null ? 'var(--muted,#789)'
+                     : rate >= 58 ? '#26a69a' : rate <= 45 ? '#ef5350' : 'var(--muted,#789)';
           svg += `<text x="${(bxx + 6).toFixed(1)}" y="${ry.toFixed(1)}" style="font-size:8.5px;fill:var(--muted,#789);">${escapeHtml(p.k)}${p.hard ? ' *' : ''}</text>
+            ${rate != null ? `<text x="${(bxx + boxW - 44).toFixed(1)}" y="${ry.toFixed(1)}" text-anchor="end"
+              style="font-size:7.5px;fill:${rcol};">${rate}%</text>` : ''}
             <text x="${(bxx + boxW - 6).toFixed(1)}" y="${ry.toFixed(1)}" text-anchor="end"
               style="font-size:8.5px;font-weight:700;fill:${col};">${p.u}/${100 - p.u}</text>`;
         });
@@ -24528,7 +24654,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     const box = document.getElementById('chartBody');
     if (!box) return;
-    const cs = _chart.candles;
+    let cs = _chart.candles;
+    // Heikin Ashi is the candle renderer with TRANSFORMED BARS, not a separate
+    // path - so every overlay, alert, crosshair and the RSI pane work
+    // unchanged. A separate renderer is how Renko ended up missing a dozen
+    // features for days. Applied here, directly after the declaration,
+    // because referencing cs before it exists is a dead-zone error.
+    if ((document.getElementById('chartType')?.value || 'candle') === 'ha') {
+      try { cs = _heikinAshi(cs); } catch (_) {}
+    }
     if (!cs.length) { box.innerHTML = '<div class="movers-loading">No candles yet.</div>'; return; }
     const d = state.lastData;
     const levels = _chartLevels(d);
@@ -24863,16 +24997,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         const m = ist.getHours() * 60 + ist.getMinutes() - (9 * 60 + 15);
         return Math.max(0, Math.min(slots - 1, Math.floor(m / _chart.interval)));
       };
-      const resPts = _ladderSeriesFor('res', slotOfSec, xOf, y, lo, hi, slots);
-      const supPts = _ladderSeriesFor('sup', slotOfSec, xOf, y, lo, hi, slots);
-      if (resPts)
-        ladderSvg += `<polyline points="${resPts}" fill="none" stroke="#ef5350" stroke-width="2" opacity="0.9" stroke-linejoin="round"><title>Gamma-weighted resistance — the strike dealers must defend hardest above spot</title></polyline>`;
-      if (supPts)
-        ladderSvg += `<polyline points="${supPts}" fill="none" stroke="#26a69a" stroke-width="2" opacity="0.9" stroke-linejoin="round"><title>Gamma-weighted support — the strike dealers must defend hardest below spot</title></polyline>`;
-      // label each at its right edge so they identify themselves
-      for (const [pts, col, lab] of [[resPts, '#ef5350', 'γ-RES'], [supPts, '#26a69a', 'γ-SUP']]) {
-        if (!pts) continue;
-        const lastPt = pts.split(' ').pop().split(',');
+      const resSegs = _ladderSeriesFor('res', slotOfSec, xOf, y, lo, hi, slots);
+      const supSegs = _ladderSeriesFor('sup', slotOfSec, xOf, y, lo, hi, slots);
+      for (const [segs, col, lab, tip] of [
+        [resSegs, '#ef5350', 'γ-RES', 'Gamma-weighted resistance — the strike dealers must defend hardest above spot'],
+        [supSegs, '#26a69a', 'γ-SUP', 'Gamma-weighted support — the strike dealers must defend hardest below spot']]) {
+        if (!segs?.length) continue;
+        for (const s of segs)
+          ladderSvg += `<polyline points="${s.join(' ')}" fill="none" stroke="${col}" stroke-width="2" opacity="0.9" stroke-linejoin="round"><title>${tip}</title></polyline>`;
+        // label at the end of the LAST visible segment
+        const lastPt = segs[segs.length - 1].slice(-1)[0].split(',');
         const ly2 = parseFloat(lastPt[1]);
         if (isFinite(ly2))
           ladderSvg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(ly2 + 3).toFixed(1)}" style="font-size:8.5px;fill:${col};font-weight:700;">${lab}</text>`;
@@ -25764,6 +25898,13 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       'signalScoreV1',
                       // price levels the user set by hand
                       'customLevelsV1',
+                      // The 9:20 levels are a RECORD of what the opening
+                      // range was, frozen once and referenced all day - not
+                      // a preference. Clearing them mid-session loses the
+                      // freeze, and they cannot be recomputed after 9:20.
+                      'm920Levels',
+                      // measured outcomes of the brick predictions
+                      'brickScoreV1',
                       // the user's own control selections
                       'uiStateV1',
                       // Price alerts the user placed by hand. These are not a
