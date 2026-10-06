@@ -18861,6 +18861,31 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // ratio swing on one or two lots.
     const hundreds = st.map(s => s.strike).filter(k => k % 100 === 0);
     if (!hundreds.length) return null;
+    // Degenerate inputs make every delta collapse to 1 or 0: a zero or
+    // missing IV divides by zero in d1, and so does an expiry that has
+    // already passed. The picker then "finds" the chain's extremes, which is
+    // the 21,600 / 22,800 reading - strikes nobody trades and that carry no
+    // depth. Guard the inputs rather than the symptom.
+    const ivOk = isFinite(iv) && iv > 0.005;
+    if (!ivOk) {
+      // Fall back to distance in sigma, which needs no greeks: a 0.90-delta
+      // option sits roughly 1.3 sigma in the money, 0.70 about 0.5, and 0.25
+      // about 0.7 out. Approximate, and far better than the extremes.
+      const sig = spot * 0.12 * Math.sqrt(T);
+      const byDist = (put, target) => {
+        const off = target >= 0.85 ? -1.3 * sig : target >= 0.6 ? -0.5 * sig : 0.7 * sig;
+        const want = spot + (put ? -off : off);
+        let best = null, err = 9e9;
+        for (const k of hundreds) {
+          const e2 = Math.abs(k - want);
+          if (e2 < err) { err = e2; best = k; }
+        }
+        return best;
+      };
+      _delta90._fallback = byDist;
+    } else {
+      _delta90._fallback = null;
+    }
     // Several target deltas rather than one. 0.90 is almost a futures
     // substitute; 0.70 still carries real extrinsic value and behaves quite
     // differently, so reading them together shows whether positioning is
@@ -18884,6 +18909,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const DRIFT = 0.055;
     _delta90.held = _delta90.held || {};
     const pick = (put, target) => {
+      if (_delta90._fallback) {
+        const k2 = _delta90._fallback(put, target);
+        return k2 == null ? null : { k: k2, delta: put ? -target : target, target, err: 0, approx: true };
+      }
       const slot = `${put ? 'PE' : 'CE'}|${target}`;
       const prev = _delta90.held[slot];
       if (prev != null && hundreds.includes(prev)) {
@@ -18896,6 +18925,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const err = Math.abs(Math.abs(dlt(k, put)) - target);
         if (err < bestErr) { bestErr = err; best = k; }
       }
+      // If the chosen strike has no depth but a near neighbour does, take the
+      // neighbour. The point of this panel is the BOOK; a strike with the
+      // perfect delta and no quotes tells you nothing, and one 100 points
+      // away with a live book tells you most of what you wanted.
+      try {
+        const bk = (d.depth && d.depth.strikes) || {};
+        const legK = put ? 'PE' : 'CE';
+        if (best != null && !bk[`${best}${legK}`]) {
+          let alt = null, ad = 9e9;
+          for (const k3 of hundreds) {
+            if (!bk[`${k3}${legK}`]) continue;
+            const dd = Math.abs(k3 - best);
+            if (dd < ad && dd <= 400) { ad = dd; alt = k3; }
+          }
+          if (alt != null) best = alt;
+        }
+      } catch (_) {}
       if (best != null) _delta90.held[slot] = best;
       return best == null ? null : { k: best, delta: dlt(best, put), target, err: bestErr, held: false };
     };
@@ -22794,8 +22840,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
+  // Cache. Bricks are a pure function of the candles and the box size, and
+  // they only change when a new candle arrives - yet every pan, zoom, poll
+  // and tick rebuilt the whole series. On a 250-brick session that is the
+  // single heaviest thing the chart does, repeated several times a second.
+  //
+  // Keyed on the LAST CANDLE'S TIMESTAMP, its close, the candle count and the
+  // box. The close matters because the final bar is still forming: its
+  // timestamp does not change while its price does, and keying on the
+  // timestamp alone would serve a stale series for the whole minute.
+  const _renkoCache = { key: null, bricks: null };
+
   function _renkoBuild(cs, box) {
     if (!cs?.length || !(box > 0)) return [];
+    const _last = cs[cs.length - 1];
+    const _key = `${cs.length}|${_last.t}|${_last.c}|${box}`;
+    if (_renkoCache.key === _key && _renkoCache.bricks) return _renkoCache.bricks;
     // A brick series is PATH DEPENDENT: every brick is built from the anchor
     // the previous one left, so one bad bar corrupts everything after it
     // rather than just itself. A delayed or re-sent broker tick that arrives
@@ -22837,6 +22897,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         } else break;
       }
     }
+    _renkoCache.key = _key;
+    _renkoCache.bricks = bricks;
     return bricks;
   }
 
@@ -23204,11 +23266,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           _bsRecord(lastB.t, P, finalUp);
         } catch (_) {}
 
+        // PINNED to the top right, not anchored to the brick. Following the
+        // price meant the panel moved on every tick and jumped whenever the
+        // range rescaled - a block of numbers that will not hold still is
+        // one you stop reading. Only the final score stays beside the brick,
+        // where it is wanted, and the breakdown lives in a fixed place the
+        // eye can return to.
         const rowH2 = 13, boxW = 150;
         const totalH = (P.length + 2) * rowH2 + 8;
-        const bx = padL + (show.length - 1) * bw + bw / 2;
-        let byTop = Math.max(padT + 2, Math.min(H - padB - totalH - 2, y(lastB.c) - totalH / 2));
-        const bxx = Math.min(W - padR - boxW - 2, bx + 8);
+        const bxx = W - padR - boxW - 4;
+        const byTop = padT + 4;
         svg += `<rect x="${bxx.toFixed(1)}" y="${byTop.toFixed(1)}" width="${boxW}" height="${totalH}" rx="4"
             fill="rgba(20,24,32,0.94)" stroke="rgba(255,255,255,0.2)"/>`;
         P.forEach((p, ix) => {
@@ -23232,7 +23299,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         svg += `<line x1="${(bxx + 4).toFixed(1)}" y1="${(fy - 9).toFixed(1)}" x2="${(bxx + boxW - 4).toFixed(1)}" y2="${(fy - 9).toFixed(1)}" stroke="rgba(255,255,255,0.15)"/>
           <text x="${(bxx + 6).toFixed(1)}" y="${(fy + 2).toFixed(1)}" style="font-size:9px;font-weight:700;fill:var(--muted,#789);">next brick</text>
           <text x="${(bxx + boxW - 6).toFixed(1)}" y="${(fy + 2).toFixed(1)}" text-anchor="end" style="font-size:10px;font-weight:700;">
-            <tspan fill="#26a69a">▲${finalUp}</tspan><tspan fill="var(--muted,#789)">/</tspan><tspan fill="#ef5350">▼${100 - finalUp}</tspan></text>
+            <tspan fill="#26a69a">▲${finalUp}</tspan><tspan fill="var(--muted,#789)">/</tspan><tspan fill="#ef5350">▼${100 - finalUp}</tspan></text>`;
+
+        // the score alone, beside the latest brick — small, and it moves with
+        // price because that is where the question is being asked
+        {
+          const sx = padL + (show.length - 1) * bw + bw / 2;
+          const sy = y(lastB.c);
+          const sw = 52;
+          const sxx = Math.min(W - padR - sw - 2, sx + 7);
+          svg += `<rect x="${sxx.toFixed(1)}" y="${(sy - 8).toFixed(1)}" width="${sw}" height="16" rx="3"
+              fill="rgba(20,24,32,0.9)" stroke="${fcol}" stroke-width="1"/>
+            <text x="${(sxx + sw / 2).toFixed(1)}" y="${(sy + 4).toFixed(1)}" text-anchor="middle"
+              style="font-size:10px;font-weight:700;fill:${fcol};">▲${finalUp}/${100 - finalUp}</text>`;
+        }
+        svg += `
           <title>Next brick: ${Math.round(dUp)} pts to an up brick at ${fmtInt(Math.round(upAt))}, ${Math.round(dDn)} pts to a down brick at ${fmtInt(Math.round(dnAt))}. First-passage odds adjusted for measured drift over the last 20 minutes. A reversal needs two boxes, a continuation one, which is why the odds are rarely symmetric.${runNote}</title>`;
       }
     } catch (_) {}
@@ -23298,13 +23379,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (_chart.show.bb) {
         const bb = _bollinger(show.map(b => b.c), 20, 2);
         for (const arr of [bb.up, bb.dn]) {
-          const pts = [];
+          let seg = [];
+          const flush = () => {
+            if (seg.length > 1)
+              svg += `<polyline points="${seg.join(' ')}" fill="none" stroke="#2979ff" stroke-width="1.5" opacity="0.9"/>`;
+            seg = [];
+          };
           arr.forEach((v, i2) => {
-            if (v == null || v < lo || v > hi) return;
-            pts.push(`${(padL + i2 * bw + bw / 2).toFixed(1)},${y(v).toFixed(1)}`);
+            if (v == null || v < lo || v > hi) { flush(); return; }
+            seg.push(`${(padL + i2 * bw + bw / 2).toFixed(1)},${y(v).toFixed(1)}`);
           });
-          if (pts.length > 1)
-            svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="#2979ff" stroke-width="1.5" opacity="0.9"/>`;
+          flush();
         }
         const lastU = [...bb.up].reverse().find(v => v != null);
         if (lastU != null && lastU >= lo && lastU <= hi)
@@ -24968,10 +25053,22 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     } catch (_) {}
     let serSvg = '';
     for (const s of series) {
-      const pts = [];
-      s.vals.forEach((v, i) => { if (v != null && v >= lo && v <= hi) pts.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); });
-      if (pts.length > 1) {
-        serSvg += `<polyline points="${pts.join(' ')}" fill="none" stroke="${s.col}" stroke-width="${s.vwap ? 2.2 : 1.3}" stroke-dasharray="${s.vwap ? '5,3' : ''}" opacity="0.95"><title>${escapeHtml(s.lab)}</title></polyline>`;
+      // Split the line where it leaves the visible range rather than dropping
+      // the points. Dropping them leaves the polyline joining the last
+      // visible point to the next one, which draws a long diagonal across the
+      // chart - most obvious on a 200 EMA when zoomed in, where it reads as a
+      // trend line that was never there.
+      const segs = [];
+      let seg = [];
+      s.vals.forEach((v, i) => {
+        if (v == null || v < lo || v > hi) { if (seg.length > 1) segs.push(seg); seg = []; return; }
+        seg.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+      });
+      if (seg.length > 1) segs.push(seg);
+      const pts = segs.length ? segs[segs.length - 1] : [];
+      if (segs.length) {
+        for (const sg of segs)
+          serSvg += `<polyline points="${sg.join(' ')}" fill="none" stroke="${s.col}" stroke-width="${s.vwap ? 2.2 : 1.3}" stroke-dasharray="${s.vwap ? '5,3' : ''}" opacity="0.95"><title>${escapeHtml(s.lab)}</title></polyline>`;
         // Label every overlay at its right edge. The level lines already carry
         // labels; the EMA and VWAP curves did not, so a chart with seven
         // overlays gave no way to tell which line was which - and identifying
@@ -25020,14 +25117,22 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     try {
       if (_chart.show.bb) {
         const bb = _bollinger(cs.map(b => b.c), 20, 2);
+        // Split at the range edges rather than skipping points. Skipping
+        // leaves the polyline joining the last visible point to the next,
+        // which draws a diagonal across the chart when a band leaves view -
+        // the same artefact the ladder lines had, and it looks like structure.
         for (const arr of [bb.up, bb.dn]) {
-          const pts = [];
+          let seg = [];
+          const flush = () => {
+            if (seg.length > 1)
+              svg += `<polyline points="${seg.join(' ')}" fill="none" stroke="#2979ff" stroke-width="1.5" opacity="0.9"/>`;
+            seg = [];
+          };
           arr.forEach((v, i2) => {
-            if (v == null || v < lo || v > hi) return;
-            pts.push(`${x(i2).toFixed(1)},${y(v).toFixed(1)}`);
+            if (v == null || v < lo || v > hi) { flush(); return; }
+            seg.push(`${x(i2).toFixed(1)},${y(v).toFixed(1)}`);
           });
-          if (pts.length > 1)
-            svg += `<polyline points="${pts.join(' ')}" fill="none" stroke="#2979ff" stroke-width="1.5" opacity="0.9"/>`;
+          flush();
         }
         const lastU = [...bb.up].reverse().find(v => v != null);
         if (lastU != null && lastU >= lo && lastU <= hi)
