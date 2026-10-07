@@ -443,6 +443,51 @@ def _ist_minutes(ts=None):
     g = time.gmtime((ts or time.time()) + 5 * 3600 + 1800)
     return g.tm_hour * 60 + g.tm_min, time.strftime("%Y-%m-%d", g)
 
+def _price_at_920(symbol: str, day: str):
+    """The index price at 09:20 IST today, for a freeze that runs late.
+
+    Returns (price, source) or (None, reason). Tries the 1-minute Fyers
+    history first - one request, once per symbol per day - then the server's
+    own per-minute tick archive.
+    """
+    def _ist_min(ts):
+        g = time.gmtime(ts + 5 * 3600 + 1800)
+        return g.tm_hour * 60 + g.tm_min
+    if RUN_DATA_SOURCE == "fyers":
+        try:
+            import nse_adapter_fyers as _fy9
+            best = None
+            for c in _fy9.fetch_candles(symbol, 1, 1) or []:
+                m = _ist_min(c["t"])
+                if m == 559:                       # the 09:19 bar closes at 09:20
+                    return float(c["c"]), "fyers 09:19 close"
+                if m < 560:
+                    best = float(c["c"])
+            if best:
+                return best, "fyers, last bar before 09:20"
+        except Exception as e:  # noqa: BLE001
+            print(f"[9:20] {symbol}: history lookup failed ({e})")
+    try:
+        path = _os.path.join(_TICK_DIR, f"{symbol}_{day}.csv")
+        best = None
+        with open(path) as f:
+            for line in f:
+                p = line.strip().split(",")
+                if len(p) < 2:
+                    continue
+                ts, px = float(p[0]), float(p[1])
+                m = _ist_min(ts)
+                if 555 <= m < 560:
+                    best = px                      # last sample before 09:20
+                elif m >= 560 and best is None:
+                    return px, "tick archive, first sample after 09:20"
+        if best:
+            return best, "tick archive"
+    except Exception:
+        pass
+    return None, "none"
+
+
 def _m920_levels(symbol: str, data: dict):
     """Freeze the 09:20 reference lines once per day, per symbol."""
     mins, day = _ist_minutes()
@@ -454,13 +499,25 @@ def _m920_levels(symbol: str, data: dict):
     spot, iv = data.get("underlying_value"), data.get("atm_iv")
     if not spot or not iv:
         return None
+    # Anchor on the price AT 09:20, not the price at whatever moment this first
+    # runs. It froze on the first fetch after 09:20, so an index nobody had
+    # opened - or any index after a mid-session restart - got levels built on
+    # the afternoon price (FINNIFTY froze at 14:40 today). Late freezes now
+    # look the 09:20 price up; the live spot is used only when it IS 09:20.
+    src = "live"
+    if mins > 561:
+        px920, src = _price_at_920(symbol, day)
+        if px920:
+            spot = px920
+        else:
+            src = "LATE - no 09:20 price found, using current spot"
     sigma = spot * (iv / 100.0) * (1.0 / 365.0) ** 0.5
-    lv = {"day": day, "spot920": spot, "sigma": sigma, "iv": iv,
+    lv = {"day": day, "spot920": spot, "sigma": sigma, "iv": iv, "src": src,
           "EOR+1": spot + sigma, "EOR": spot + 0.5 * sigma,
           "EOS": spot - 0.5 * sigma, "EOS-1": spot - sigma}
     _m920[symbol] = lv
     print(f"[9:20] {symbol} frozen: spot {spot:.1f} sigma {sigma:.1f} "
-          f"EOR {lv['EOR']:.0f} EOS {lv['EOS']:.0f}")
+          f"EOR {lv['EOR']:.0f} EOS {lv['EOS']:.0f} [{src}]")
     return lv
 
 def _m920_detect(symbol: str, data: dict):
@@ -803,6 +860,11 @@ def _cached_chain(symbol: str, expiry, band: int, client: str = "?"):
     """
     key = _cache_key(symbol, expiry, band)
     now = time.time()
+    # A browser asking for the FULL chain (band >= 12 is the main panel; the
+    # watchlist tiles use band 4) means this symbol is on someone's screen.
+    # The background poller uses this to decide what deserves fast refresh.
+    if client != "poller" and band >= 12:
+        _focus_seen[symbol.upper()] = now
     with _chain_meta_lock:
         _cache_stats["served"] += 1
         _cache_stats["clients"][client] = now
@@ -1870,12 +1932,34 @@ def _watchdog_loop(expected: float):
         last = now
 
 
+# symbol -> last time a browser viewed its full chain
+_focus_seen: dict = {}
+# A background symbol nobody is viewing is refreshed this often instead of
+# every poll. Its server-side alerts (9:20 freeze, level relays) still run,
+# just with up to this much delay - while the focused index keeps full speed.
+_POLL_IDLE_S = float(_os.environ.get("NSE_POLL_IDLE_S", "60"))
+_FOCUS_WINDOW_S = 90.0
+
+
 def _poller_loop(interval: float):
-    """Keep hot symbols warm so browsers essentially always hit cache."""
+    """Keep hot symbols warm so browsers essentially always hit cache.
+
+    FOCUS-AWARE. Every listed symbol used to be refreshed at full speed
+    whether or not anyone was looking at it: with NIFTY on screen, BANKNIFTY's
+    whole chain was still fetched every few seconds - about half of all chain
+    requests, spent on an index nobody was watching. Now an index a browser is
+    viewing keeps the fast cadence and the others drop to _POLL_IDLE_S.
+    """
+    last_poll: dict = {}
     while not _poller_stop.is_set():
+        now = time.time()
         for sym in list(_poller_symbols):
             if _poller_stop.is_set():
                 break
+            focused = now - _focus_seen.get(sym, 0) < _FOCUS_WINDOW_S
+            if not focused and now - last_poll.get(sym, 0) < _POLL_IDLE_S:
+                continue
+            last_poll[sym] = now
             try:
                 _cached_chain(sym, None, 12, client="poller")
             except Exception as e:  # noqa: BLE001
@@ -2830,6 +2914,72 @@ def _get_india_vix(fetcher: NSESession) -> float | None:
 _futures_cache: dict = {}   # symbol -> (ts, (price, dte))
 _FUTURES_TTL = 30.0
 
+# symbol -> epoch until which NSE's intraday chart feed is not retried
+_nse_chart_cooldown: dict = {}
+_NSE_CHART_COOLDOWN_S = int(_os.environ.get("NSE_CHART_COOLDOWN_S", "300"))
+
+_futures_src_logged: set = set()
+
+def _futures_from_snapshot(snap):
+    """(price, dte, extra) from futures rows in the chain payload, in the same
+    shape _fetch_futures_price returns, so every consumer is unchanged.
+    Returns (None, None, {}) when the payload carries no futures."""
+    futs = list(getattr(snap, "futures", None) or [])
+    sym = getattr(snap, "symbol", "?")
+    if sym not in _futures_src_logged:
+        _futures_src_logged.add(sym)
+        print(f"[futures] {sym}: {len(futs)} contract(s) in the chain payload"
+              + ("" if futs else " - falling back to quote-derivative"))
+    if not futs:
+        return None, None, {}
+    from datetime import datetime as _dtf
+    near = futs[0]
+    nxt = futs[1] if len(futs) > 1 else None
+    try:
+        exp = _dtf.strptime(near["expiry"], "%d-%b-%Y").replace(hour=15, minute=30)
+        dte = max(0.0, (exp - _dtf.now()).total_seconds() / 86400.0)
+    except Exception:
+        dte = None
+    prev = near.get("prev_close") or None
+    extra = {
+        "oi": near.get("oi") or None,
+        "oi_chg": near.get("oi_chg") or None,
+        "volume": near.get("volume") or None,
+        "prev_close": prev,
+        "change_pct": ((near["price"] / prev - 1) * 100) if prev else None,
+        "tbq": near.get("tbq") or None,
+        "tsq": near.get("tsq") or None,
+        "far_price": nxt.get("price") if nxt else None,
+        "far_oi": (nxt.get("oi") or None) if nxt else None,
+        "far_tbq": (nxt.get("tbq") or None) if nxt else None,
+        "far_tsq": (nxt.get("tsq") or None) if nxt else None,
+    }
+    return near["price"], dte, extra
+
+
+def _nse_depth_block(strikes, futures_extra) -> dict:
+    """Book totals from the NSE chain, keyed "22300CE" like the broker path.
+
+    Only legs NSE actually quoted are included: a strike with zero on both
+    sides has no book, and an empty entry would read as a 0/0 ratio rather
+    than as missing data.
+    """
+    out = {"index": None, "strikes": {}, "futures": {}}
+    for sd in strikes or []:
+        k = int(round(sd.strike))
+        for p in ("ce", "pe"):
+            tbq = float(getattr(sd, f"{p}_tbq", 0) or 0)
+            tsq = float(getattr(sd, f"{p}_tsq", 0) or 0)
+            if tbq or tsq:
+                out["strikes"][f"{k}{p.upper()}"] = {"bids": [], "asks": [], "tbq": tbq, "tsq": tsq}
+    fx = futures_extra or {}
+    for leg, (b, a) in (("near", ("tbq", "tsq")), ("far", ("far_tbq", "far_tsq"))):
+        tb, ts = fx.get(b), fx.get(a)
+        if tb or ts:
+            out["futures"][leg] = {"bids": [], "asks": [], "tbq": float(tb or 0), "tsq": float(ts or 0)}
+    return out
+
+
 def _fetch_futures_price(fetcher: NSESession, symbol: str):
     sym = symbol.upper()
     now = time.time()
@@ -2866,7 +3016,9 @@ def _fetch_futures_price(fetcher: NSESession, symbol: str):
             mkt = st.get("marketDeptOrderBook", {}) or {}
             tinfo = mkt.get("tradeInfo", {}) or {}
             def _f(*keys):
-                for src in (tinfo, meta, st):
+                # mkt included so the book TOTALS are found: NSE puts
+                # totalBuyQuantity / totalSellQuantity on marketDeptOrderBook
+                for src in (tinfo, meta, st, mkt):
                     for k in keys:
                         v = src.get(k)
                         if v not in (None, "", "-"):
@@ -2881,6 +3033,8 @@ def _fetch_futures_price(fetcher: NSESession, symbol: str):
                 "volume": _f("tradedVolume", "totalTradedVolume", "vmap"),
                 "prev_close": _f("previousClose", "prevClose", "closePrice"),
                 "change_pct": _f("pChange", "percentChange"),
+                "tbq": _f("totalBuyQuantity", "totBuyQuan", "totalBuyQty"),
+                "tsq": _f("totalSellQuantity", "totSellQuan", "totalSellQty"),
             }))
         if not futs:
             raise NSEFetchError("no futures rows in quote-derivative payload")
@@ -2892,6 +3046,8 @@ def _fetch_futures_price(fetcher: NSESession, symbol: str):
         extra = dict(extra or {})
         extra["far_price"] = nxt[1] if nxt else None
         extra["far_oi"] = (nxt[2] or {}).get("oi") if nxt else None
+        extra["far_tbq"] = (nxt[2] or {}).get("tbq") if nxt else None
+        extra["far_tsq"] = (nxt[2] or {}).get("tsq") if nxt else None
         result = (price, dte, extra)
         _futures_cache[sym] = (now, result)
         return result
@@ -3070,7 +3226,13 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
     iv_rank = _compute_iv_rank(symbol, round(atm_iv, 2))
 
     # Nearest-month futures — basis / cost-of-carry card (best-effort, cached 30s)
-    futures_price, futures_dte, futures_extra = _fetch_futures_price(fetcher, symbol)
+    # From the chain payload first: NSE includes the futures in the same
+    # response, so this costs no extra request. The old quote-derivative route
+    # now 404s on every call, so it is only tried if the payload ever stops
+    # carrying futures.
+    futures_price, futures_dte, futures_extra = _futures_from_snapshot(snap)
+    if futures_price is None:
+        futures_price, futures_dte, futures_extra = _fetch_futures_price(fetcher, symbol)
 
     response = {
         "symbol": snap.symbol,
@@ -3110,6 +3272,11 @@ def _build_response(symbol: str, expiry: str | None, band: int) -> dict:
         "ideas": [asdict(i) for i in ideas],
         "flags": flags,
         "strikes": _enrich_strikes_with_oi_delta(symbol, snap.strikes),
+        # Same shape as the broker adapter's depth block, so the bid/offer
+        # panel reads either source with no special-casing. NSE gives totals
+        # rather than a five-level ladder, which is exactly what that panel
+        # aggregates to anyway - so nothing it computes is lost.
+        "depth": _nse_depth_block(snap.strikes, futures_extra),
         "expiries_data": expiries_data,
         "strategies": [asdict(s) for s in strategy_list],
         "india_vix": india_vix,
@@ -4206,6 +4373,41 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "ok"})
             return
 
+        if parsed.path == "/api/feed-status":
+            # The live feed's REAL state. /api/health always answers "ok" while
+            # the server process is up, even when the broker socket has gone
+            # quiet - which is exactly the failure that freezes every index at
+            # once. This reports whether ticks are actually arriving.
+            try:
+                import nse_adapter_fyers as _fyx
+                st = _fyx.status()
+                with _fyx._lock:
+                    last = max((v.get("ts", 0) for v in _fyx._ticks.values()), default=0)
+                    n_sym = len(_fyx._ticks)
+                age = (time.time() - last) if last else None
+                try:
+                    rest = _fyx.rest_usage()
+                except Exception:
+                    rest = None
+                verdict = ("NO TICKS YET" if age is None
+                           else "LIVE" if age < 10
+                           else f"STALLED - last tick {int(age)}s ago")
+                self._send_json({
+                    "verdict": verdict,
+                    "last_tick_age_s": None if age is None else round(age, 1),
+                    "symbols_ticking": n_sym,
+                    "connected": st.get("connected"),
+                    "streaming": st.get("streaming"),
+                    "subscribed": st.get("subscribed"),
+                    "ticks_total": st.get("ticks"),
+                    "last_error": st.get("last_error"),
+                    "token": st.get("token"),
+                    "rest_calls_today": rest,
+                })
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"verdict": "ADAPTER UNAVAILABLE", "error": str(e)})
+            return
+
         if parsed.path == "/api/chain":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             expiry = qs.get("expiry", [None])[0]
@@ -5058,7 +5260,16 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"[fyers] candles unavailable, falling back: {e}")
 
             # 1 ── NSE intraday series (authoritative back-history for today)
-            if symbol in idx_names:
+            # COOLDOWN after a fully empty answer. Each attempt is five calls,
+            # and when NSE's chart feed is down it was retried on every candle
+            # request - many times a minute, every one empty. That is pure load
+            # on NSE, and repeated empty hits are what trips its anti-bot layer,
+            # which would then take the WORKING option chain down with it.
+            # A forced backfill still bypasses the cooldown.
+            _cd = _nse_chart_cooldown.get(symbol, 0)
+            if symbol in idx_names and not force and time.time() < _cd:
+                srcs.append("nse_chart(cooldown)")
+            elif symbol in idx_names:
                 if force:
                     print(f"[candles] FORCED backfill for {symbol} - re-warming session")
                 ftch = _warm_fetcher()
@@ -5156,8 +5367,12 @@ class Handler(BaseHTTPRequestHandler):
                                 break
                             why.append("no-session-points")
                         if not got:
-                            print(f"[candles] chart feed gave nothing for {name}: {', '.join(why[:4])}")
+                            _nse_chart_cooldown[symbol] = time.time() + _NSE_CHART_COOLDOWN_S
+                            print(f"[candles] chart feed gave nothing for {name}: {', '.join(why[:4])}"
+                                  f" - not asking again for {_NSE_CHART_COOLDOWN_S // 60} min")
                             srcs.append("nse_chart(0)")
+                        else:
+                            _nse_chart_cooldown.pop(symbol, None)
                     except Exception as e:  # noqa: BLE001
                         print(f"[candles] chart feed failed: {e}")
 

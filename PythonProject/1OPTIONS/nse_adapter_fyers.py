@@ -84,6 +84,20 @@ def market_open_now() -> bool:
 _client: Optional[Any] = None
 _socket: Optional[Any] = None
 _lock = threading.Lock()
+# Expiry -> broker epoch, learned once per (symbol, expiry). Fyers validates
+# `timestamp` against its own list, so the first request for a non-nearest
+# expiry has to ask without one and look it up; caching the answer means every
+# later poll makes ONE option-chain call instead of two. REST calls are capped
+# per second, per minute and per day, so doubling them on every poll is not free.
+_exp_ts_cache: Dict[str, str] = {}
+# A streamed price older than this is treated as stale and re-fetched.
+_TICK_FRESH_S = float(os.environ.get("FYERS_TICK_FRESH_S", "15"))
+# Futures REST quote is refreshed at most this often; price comes from ticks.
+_FUT_REST_TTL = float(os.environ.get("FYERS_FUT_REST_TTL", "60"))
+_fut_cache: Dict[str, Any] = {}
+# Option-chain REST response reused for this long; prices come from ticks.
+_CHAIN_REST_TTL = float(os.environ.get("FYERS_CHAIN_REST_TTL", "15"))
+_oc_cache: Dict[str, Any] = {}
 _ticks: Dict[str, Dict[str, Any]] = {}      # fyers symbol -> latest tick
 _depth: Dict[str, Dict[str, Any]] = {}      # fyers symbol -> latest L2 book
 _depth_subs: set = set()
@@ -465,12 +479,36 @@ def _f(d: Dict[str, Any], *keys, default=0.0) -> float:
     return default
 
 
+def _tick_usable(t: Dict[str, Any]) -> bool:
+    """Is a streamed price good enough to use instead of a REST quote?
+
+    In session, only if it is fresh: a stalled socket must not freeze prices.
+    OUTSIDE the session ticks simply stop, so every price looks "stale" - yet
+    the last tick IS the closing value and cannot change. Treating it as stale
+    there would spend a REST call on every refresh, all evening, for a number
+    that is already right.
+    """
+    if not t or not t.get("ltp"):
+        return False
+    g = time.gmtime(time.time() + 5 * 3600 + 1800)        # IST, host-independent
+    mins = g.tm_hour * 60 + g.tm_min
+    in_session = g.tm_wday < 5 and 555 <= mins < 930        # 09:15-15:30, Mon-Fri
+    if not in_session:
+        return True
+    return (time.time() - float(t.get("ts", 0) or 0)) < _TICK_FRESH_S
+
+
 def _spot(symbol: str) -> float:
     ysym = FYERS_INDEX.get(symbol.upper())
     if not ysym or not _client:
         return 0.0
     live = _ticks.get(ysym, {})
-    if live.get("ltp"):
+    # Use the streamed price only while it is FRESH. With no age check, a
+    # stalled socket left the last tick in place indefinitely, and every chain
+    # refresh reported that frozen price as spot - a quiet way for every index
+    # to stop moving at once. A fresh tick costs nothing; a stale one falls
+    # through to one REST quote, which is only spent while the stream is down.
+    if _tick_usable(live):
         return float(live["ltp"])
     try:
         r = _count_rest("quotes") or _client.quotes({"symbols": ysym})
@@ -484,19 +522,58 @@ def _spot(symbol: str) -> float:
 
 def india_vix() -> Optional[float]:
     live = _ticks.get(INDIA_VIX, {})
-    if live.get("ltp"):
+    # Fresh tick first, as with spot - a stale one would freeze VIX silently.
+    if _tick_usable(live):
         return round(float(live["ltp"]), 2)
     if not _client:
         return None
+    # REST fallback, cached: VIX moves slowly, and this call was made on EVERY
+    # chain refresh whenever the stream lacked it - and it was not counted, so
+    # it never showed up in the quota figures at all.
+    hit = _fut_cache.get("__vix__")
+    if hit and time.time() - hit[0] < _FUT_REST_TTL:
+        return hit[1]
     try:
-        r = _client.quotes({"symbols": INDIA_VIX})
+        r = _count_rest("quotes") or _client.quotes({"symbols": INDIA_VIX})
         for row in (r.get("d") or []):
             v = row.get("v") or {}
             val = _f(v, "lp", "ltp")
-            return round(val, 2) if val else None
+            out = round(val, 2) if val else None
+            if out:
+                _fut_cache["__vix__"] = (time.time(), out)
+            return out
     except Exception:
-        return None
+        return hit[1] if hit else None
     return None
+
+
+def _optionchain(req: Dict[str, Any]) -> Dict[str, Any]:
+    """Fyers optionchain, reused for _CHAIN_REST_TTL seconds per request.
+
+    The dashboard asks for the same index under several bands and expiries
+    (the tile at band 4, the chain at band 12, a chosen expiry), and each was
+    a separate REST call even though Fyers returns the SAME strike set for
+    all of them - band is applied afterwards, locally. One response now serves
+    every request for that symbol and expiry until it ages out.
+
+    Freshness is unaffected where it matters: strike prices and OI are
+    overlaid from the live stream on every build, so the cached response only
+    supplies the slow fields (IV, OI change, the strike list itself).
+    """
+    key = f"{req.get('symbol')}|{req.get('timestamp', '')}|{req.get('strikecount')}"
+    now = time.time()
+    hit = _oc_cache.get(key)
+    if hit and now - hit[0] < _CHAIN_REST_TTL:
+        return hit[1]
+    raw = _count_rest("optionchain") or _client.optionchain(data=req)
+    if isinstance(raw, dict) and raw.get("s") == "ok":
+        _oc_cache[key] = (now, raw)
+        if len(_oc_cache) > 32:
+            try:                      # threads share this dict; never let
+                _oc_cache.pop(next(iter(_oc_cache)), None)   # eviction raise
+            except Exception:
+                pass
+    return raw
 
 
 # ── option chain ──────────────────────────────────────────────────────
@@ -521,7 +598,10 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         # different expiry was requested. One extra call on a non-default
         # expiry, and none at all on the default.
         req = {"symbol": ysym, "strikecount": count}
-        raw = _count_rest("optionchain") or _client.optionchain(data=req)
+        _ck = f"{ysym}|{str(expiry or '').strip()}"
+        if expiry and _exp_ts_cache.get(_ck):
+            req["timestamp"] = _exp_ts_cache[_ck]
+        raw = _optionchain(req)
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"optionchain call failed: {e}") from e
     if not isinstance(raw, dict) or raw.get("s") != "ok":
@@ -599,7 +679,12 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
             for e in (data.get("expiryData") or []):
                 ep = _exp_epoch(e)
                 if ep:
-                    _cands.append((ep, _exp_str(ep)))
+                    # formatted inline: _exp_str is defined further down this
+                    # function, so calling it here raised "cannot access local
+                    # variable" - silently caught, which meant a chosen
+                    # expiry was ignored and the NEAREST chain served instead
+                    _cands.append((ep, time.strftime("%d-%b-%Y",
+                                                     time.gmtime(ep + 5 * 3600 + 1800))))
             match = None
             for ep, es in _cands:
                 if es == want or str(int(ep)) == want:
@@ -620,9 +705,18 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
                             break
                     break
             cur = _exp_epoch((data.get("expiryData") or [{}])[0]) if data.get("expiryData") else None
+            if match:
+                # The NEAREST expiry is what Fyers serves with no timestamp, so
+                # store it as "" and keep asking that way: the tiles and the
+                # background poller request the default, and pinning the epoch
+                # here put the same data in two cache slots - two calls for one
+                # answer. Only a non-nearest expiry needs its epoch remembered.
+                _exp_ts_cache[f"{ysym}|{want}"] = "" if (cur and int(match) == int(cur)) else str(int(match))
+            # Already served the requested expiry (cache hit): nothing to do.
+            if match and req.get("timestamp") == str(int(match)):
+                match = None
             if match and cur and int(match) != int(cur):
-                raw2 = _count_rest("optionchain") or _client.optionchain(
-                    data={"symbol": ysym, "strikecount": count, "timestamp": str(int(match))})
+                raw2 = _optionchain({"symbol": ysym, "strikecount": count, "timestamp": str(int(match))})
                 d2 = (raw2 or {}).get("data") or {}
                 if d2.get("optionsChain"):
                     data = d2
@@ -645,6 +739,16 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     # months without anyone seeing an error.
     try:
         fut = _futures_quote(sym, exp_epochs)
+        # The futures legs need an ORDINARY tick subscription. Total buy/sell
+        # quantity rides on the regular tick, and they were only ever added to
+        # the depth subscription - which the broker may not serve - so no tick
+        # arrived for them, _depth stayed empty, and both rows showed a dash.
+        # Placed here because `fut` does not exist until this line.
+        try:
+            _subscribe([x for x in ((fut or {}).get("futures_symbol"),
+                                    (fut or {}).get("futures_far_symbol")) if x])
+        except Exception as _fse:
+            print(f"[fyers] futures tick subscribe skipped: {_fse}")
     except Exception as _fe:
         print(f"[fyers] futures quote failed: {_fe}")
 
@@ -765,12 +869,19 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "futures_far_oi": fut.get("futures_far_oi"),
         "futures_dte": round(dte_frac, 4),
         "india_vix": india_vix(),
+        # The index's previous close, from the stream, so a tile can show the
+        # DAY's change rather than the change since its own last refresh.
+        "spot_prev_close": (_ticks.get(ysym) or {}).get("prev_close"),
         "timestamp": time.strftime("%d-%b-%Y %H:%M:%S"),
         "_source": "fyers",
         "_live": bool(_status.get("streaming")),
         "depth": {
             "index": _depth.get(ysym),
-            "strikes": {f'{r["strike"]}{p.upper()}': _depth[r[f"{p}_symbol"]]
+            # Keyed with an INTEGER strike. _f() returns floats, so the key
+            # came out as "22300.0CE" while every consumer asks for "22300CE" -
+            # 102 strikes of depth arrived and none could ever be found. Nifty
+            # and BankNifty strikes are whole numbers, so int() loses nothing.
+            "strikes": {f'{int(round(r["strike"]))}{p.upper()}': _depth[r[f"{p}_symbol"]]
                         for r in strikes for p in ("ce", "pe")
                         if r.get(f"{p}_symbol") and r[f"{p}_symbol"] in _depth},
             # Futures books, keyed plainly. They were absent from the payload
@@ -870,39 +981,91 @@ def _futures_quote(symbol: str, exp_epochs: List[float]) -> Dict[str, Any]:
     base = FUT_SUFFIX.get(symbol.upper())
     if not base or not _client or not exp_epochs:
         return {}
-    out = {}
-    for idx, ep in enumerate(exp_epochs[:2]):
+    # ── which contracts ──────────────────────────────────────────────
+    # The current and next MONTHLY futures. These were derived from the first
+    # two WEEKLY option expiries, so whenever both weeklies fell in the same
+    # month (13 and 20 Oct, say) both legs resolved to the same contract and
+    # "next month" silently showed the current month again.
+    mons = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+            "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+    syms: List[str] = []
+    for ep in exp_epochs:
         g = time.gmtime(ep + 5 * 3600 + 1800)
-        # monthly futures symbol: NSE:NIFTY25AUGFUT
-        yy = str(g.tm_year)[2:]
-        mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-               "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"][g.tm_mon - 1]
-        fsym = f"NSE:{base}{yy}{mon}FUT"
+        fsym = f"NSE:{base}{str(g.tm_year)[2:]}{mons[g.tm_mon - 1]}FUT"
+        if fsym not in syms:
+            syms.append(fsym)
+        if len(syms) == 2:
+            break
+    if len(syms) == 1:
+        # only one month among the listed expiries: derive the next calendar month
+        g = time.gmtime(exp_epochs[0] + 5 * 3600 + 1800)
+        y, m = g.tm_year + (1 if g.tm_mon == 12 else 0), (g.tm_mon % 12) + 1
+        syms.append(f"NSE:{base}{str(y)[2:]}{mons[m - 1]}FUT")
+
+    # ── one request, cached ──────────────────────────────────────────
+    # Both contracts in ONE quotes call (comma-separated) instead of two, and
+    # the result kept for _FUT_REST_TTL seconds rather than re-requested on
+    # every chain refresh. Futures OI and previous close move slowly; the PRICE
+    # moves fast, but that arrives on the live stream and is layered on below,
+    # so caching costs no freshness where it matters.
+    ckey = ",".join(syms)
+    now = time.time()
+    hit = _fut_cache.get(ckey)
+    if hit and now - hit[0] < _FUT_REST_TTL:
+        rows = hit[1]
+    else:
+        rows = {}
         try:
-            r = _count_rest("quotes") or _client.quotes({"symbols": fsym})
+            r = _count_rest("quotes") or _client.quotes({"symbols": ckey})
             for row in (r.get("d") or []):
                 v = row.get("v") or {}
-                px = _f(v, "lp", "ltp")
-                if not px:
-                    continue
-                if idx == 0:
-                    out.update({
-                        "futures_price": px,
-                        "futures_oi": _f(v, "open_interest", "oi") or None,
-                        "futures_oi_chg": _f(v, "oich", "open_interest_change") or None,
-                        # The SYMBOL, so the client can look up this leg's
-                        # depth book. Without it the futures bid/ask panel
-                        # queried depth[undefined] and showed nothing at all.
-                        "futures_symbol": fsym,
-                        "futures_prev_close": _f(v, "prev_close_price", "prev_close") or None,
-                        "futures_volume": _f(v, "volume", "vol_traded_today") or None,
-                    })
-                else:
-                    out["futures_far_price"] = px
-                    out["futures_far_oi"] = _f(v, "open_interest", "oi") or None
-                    out["futures_far_symbol"] = fsym
-        except Exception:
-            continue
+                nm = row.get("n") or v.get("symbol") or v.get("short_name") or ""
+                if nm in syms and _f(v, "lp", "ltp"):
+                    rows[nm] = v
+            # Some responses omit the symbol name; fall back to request order.
+            if not rows:
+                for k2, row in zip(syms, (r.get("d") or [])):
+                    v = row.get("v") or {}
+                    if _f(v, "lp", "ltp"):
+                        rows[k2] = v
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] futures quote failed: {e}")
+        if rows:
+            _fut_cache[ckey] = (now, rows)
+        elif hit:
+            rows = hit[1]            # keep the last good answer through a blip
+
+    def _leg(fsym):
+        v = dict(rows.get(fsym) or {})
+        # live stream overlay: price, OI and volume as fresh as the last tick
+        t = _ticks.get(fsym) or {}
+        if _tick_usable(t):
+            if t.get("ltp"):
+                v["lp"] = t["ltp"]
+            if t.get("oi"):
+                v["open_interest"] = t["oi"]
+            if t.get("volume"):
+                v["volume"] = t["volume"]
+        return v
+
+    out = {}
+    near, far = _leg(syms[0]), _leg(syms[1]) if len(syms) > 1 else {}
+    px = _f(near, "lp", "ltp")
+    if px:
+        out.update({
+            "futures_price": px,
+            "futures_oi": _f(near, "open_interest", "oi") or None,
+            "futures_oi_chg": _f(near, "oich", "open_interest_change") or None,
+            # The SYMBOL, so the client can look up this leg's depth book.
+            "futures_symbol": syms[0],
+            "futures_prev_close": _f(near, "prev_close_price", "prev_close") or None,
+            "futures_volume": _f(near, "volume", "vol_traded_today") or None,
+        })
+    fpx = _f(far, "lp", "ltp")
+    if fpx and len(syms) > 1:
+        out["futures_far_price"] = fpx
+        out["futures_far_oi"] = _f(far, "open_interest", "oi") or None
+        out["futures_far_symbol"] = syms[1]
     return out
 
 
@@ -953,8 +1116,11 @@ def _count_rest(kind: str) -> None:
     today = time.strftime("%Y-%m-%d")
     with _lock:
         if _rest_count["day"] != today:
-            _rest_count.update({"n": 0, "day": today})
+            _rest_count.update({"n": 0, "day": today, "by": {}})
         _rest_count["n"] += 1
+        # per-kind breakdown, so it is visible WHICH calls the quota goes on
+        by = _rest_count.setdefault("by", {})
+        by[kind] = by.get(kind, 0) + 1
         n = _rest_count["n"]
     if n in (1000, 5000, 10000, 25000, 50000, 75000, 90000):
         print(f"[fyers] REST calls today: {n:,} (limit ~100,000)")
@@ -962,7 +1128,9 @@ def _count_rest(kind: str) -> None:
 
 def rest_usage() -> Dict[str, Any]:
     with _lock:
-        return dict(_rest_count)
+        out = dict(_rest_count)
+        out["by"] = dict(_rest_count.get("by", {}))
+        return out
 
 
 def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1,
@@ -991,7 +1159,7 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1,
     # A completed past session never changes, so it can be cached for the
     # whole run rather than for thirty seconds. Today's data still needs the
     # short TTL because its last candle is still forming.
-    ttl = 86400.0 if on_date else float(os.environ.get("FYERS_HISTORY_TTL", "30"))
+    ttl = 86400.0 if on_date else float(os.environ.get("FYERS_HISTORY_TTL", "60"))
     # ── cache, then coalesce ──────────────────────────────────────────
     # A cold history call can take many seconds. The chart polls every five,
     # so without coalescing each poll started ANOTHER call for the same date:

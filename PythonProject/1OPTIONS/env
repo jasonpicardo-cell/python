@@ -132,3 +132,14 @@ NSE_KEEP_BHAV_DAYS=30
 # beyond. Lower it to 1.0 for tighter, near-the-money flow only.
 NSE_FLOW_SIGMA=1.5
 FYERS_DEPTH_STRIKES=10
+
+# ── Fyers API usage (added 2026-10-07, ahead of API charges) ─────────
+# Option-chain REST response is shared across bands/expiries for this long;
+# strike prices and OI between refreshes come from the live stream.
+FYERS_CHAIN_REST_TTL=15
+# Futures OI / prev close refreshed this often (price is streamed live).
+FYERS_FUT_REST_TTL=60
+# A streamed price older than this is treated as stale and re-fetched.
+FYERS_TICK_FRESH_S=15
+# Intraday history cache; the forming candle comes from the stream.
+FYERS_HISTORY_TTL=60

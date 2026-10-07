@@ -14283,6 +14283,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       clearError();
       setStatus('ok');
       state.lastData = data;
+      // Keep the on-screen index's tile in step with the main panel. Tiles now
+      // refresh every two minutes, and the active one reuses this data rather
+      // than fetching - so without this it would lag the price shown beside it.
+      try {
+        if (state.watchlist?.includes(state.symbol) && !data.error) {
+          const prevSpot = state.watchlistData[state.symbol]?.underlying_value;
+          state.watchlistData[state.symbol] = data;
+          data._prevSpot = prevSpot;
+          renderWatchlist();
+        }
+      } catch (_) {}
       try {
         render(data);
       } catch (renderErr) {
@@ -16468,7 +16479,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // to computing locally only when the server has none (offline use).
   let _m920Srv = null, _m920SrvTried = '';
   function _m920FetchServer() {
-    const key = (state.symbol || 'NIFTY') + new Date().toDateString();
+    // Retry every minute until the server answers, rather than once. A single
+    // early miss (server not frozen yet) used to drop to a LOCAL freeze on the
+    // current spot - saved for the whole day - which is how the lines came to
+    // read "frozen at 10:57 am" anchored on a mid-morning price.
+    const key = (state.symbol || 'NIFTY') + new Date().toDateString() + '|' + Math.floor(Date.now() / 60000);
     if (_m920SrvTried === key) return;
     _m920SrvTried = key;
     (async () => {
@@ -16492,12 +16507,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const now = new Date();
     const mins = now.getHours() * 60 + now.getMinutes();
     if (mins < 560) return null;                       // not 9:20 yet
-    const spot = d?.underlying_value, iv = (d?.atm_iv || 0) / 100;
+    let spot = d?.underlying_value, iv = (d?.atm_iv || 0) / 100;
     if (!spot || !iv) return null;
+    // A LATE local freeze anchors on the 09:19 candle's close - the price at
+    // 09:20 - rather than whatever spot happens to be now.
+    let frozenAt = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    if (mins > 561) {
+      const ist = t => { const g = new Date(t * 1000);
+        const x = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+        return x.getHours() * 60 + x.getMinutes(); };
+      const bar = (_chart.candles || []).filter(k => ist(k.t) < 560).pop();
+      if (bar && ist(bar.t) >= 555) { spot = bar.c; frozenAt = '09:20 (from candles)'; }
+      else return null;          // no 09:20 price yet - wait for the server rather than guess
+    }
     const sigma = spot * iv * Math.sqrt(1 / 365);
     const inner = 0.5, outer = 1.0;
     const o = { day: now.toDateString(), sym: state.symbol || 'NIFTY', spot920: spot, sigma,
-      frozenAt: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      frozenAt,
       EOR: spot + inner * sigma, EORp1: spot + outer * sigma,
       EOS: spot - inner * sigma, EOSm1: spot - outer * sigma, inner, outer, iv: iv * 100 };
     try { localStorage.setItem(_M920_KEY, JSON.stringify(o)); } catch (_) {}
@@ -18930,7 +18956,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // perfect delta and no quotes tells you nothing, and one 100 points
       // away with a live book tells you most of what you wanted.
       try {
-        const bk = (d.depth && d.depth.strikes) || {};
+        const bk = {}; for (const [kk, vv] of Object.entries((d.depth && d.depth.strikes) || {})) { const mm = /^(\d+(?:\.\d+)?)(CE|PE)$/i.exec(kk); bk[mm ? `${Math.round(+mm[1])}${mm[2].toUpperCase()}` : kk] = vv; }
         const legK = put ? 'PE' : 'CE';
         if (best != null && !bk[`${best}${legK}`]) {
           let alt = null, ad = 9e9;
@@ -18955,7 +18981,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // Fyers symbol. Looking it up by symbol returned undefined for every
     // strike, which is why each one reported "no book" while the data was
     // sitting there under a different key.
-    const books = (d.depth && d.depth.strikes) || {};
+    // Normalise keys on the way in. The adapter emitted "22300.0CE" (float
+    // strike) while this looked up "22300CE", so every strike missed despite
+    // 102 books being present. Fixed at the source too, but re-keying here
+    // means an older server, or a future change in how strikes are typed,
+    // cannot silently break the panel the same way again.
+    const rawBooks = (d.depth && d.depth.strikes) || {};
+    const books = {};
+    for (const [key, val] of Object.entries(rawBooks)) {
+      const m = /^(\d+(?:\.\d+)?)(CE|PE)$/i.exec(key);
+      if (m) books[`${Math.round(+m[1])}${m[2].toUpperCase()}`] = val;
+      else books[key] = val;
+    }
     const side = (k, leg) => {
       const bk = books[`${k}${leg.toUpperCase()}`];
       if (!bk) return null;
@@ -19030,10 +19067,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // never will. "No depth block" then means "the broker path failed",
         // and the fix is in the server log rather than anywhere on screen.
         const src = d._source || '(unknown)';
-        const why = src !== 'fyers'
-          ? `source is ${src}, not fyers — only the broker feed carries depth`
-          : !d.depth ? 'fyers responded but sent no depth block'
-          : !anyDepth ? 'depth block present but empty — broker sent none'
+        // Both sources now carry book totals - the broker as a ladder plus
+        // totals, NSE as totals from its chain - so the question is whether a
+        // depth block arrived at all, not which source sent it.
+        const why = !d.depth ? `${src} sent no depth block — restart the server with the latest files`
+          : !anyDepth ? (src === 'nse'
+              // Confirmed from the live schema: NSE's derivatives route carries
+              // OI, volume and OHLC per contract but no book of any kind.
+              ? 'NSE publishes no bid/offer quantities — needs DATA_SOURCE=fyers'
+              : 'depth block present but empty — broker sent none')
           : `not among the ${anyDepth} strikes with depth`;
         return `<span style="min-width:214px;"><b>${lab} ${fmtInt(leg.k)}</b> <span style="color:var(--muted);">δ${Math.abs(leg.delta).toFixed(2)} · ${escapeHtml(why)}</span></span>`;
       }
@@ -19064,7 +19106,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(track.heldMs)}</span></span>`;
     };
     const fcell = (lab, o) => {
-      if (!o?.book) return `<span style="min-width:150px;color:var(--muted);">${lab} —</span>`;
+      // Show the futures PRICE even without a book: on NSE the price is real
+      // and useful, and a bare dash made it look as if the futures were
+      // missing entirely rather than only their bid/offer quantities.
+      if (!o?.book) return `<span style="min-width:150px;"><b>${lab}</b>${o?.price ? ` <span style="color:var(--muted);font-size:9px;">${fmtInt(Math.round(o.price))}</span>` : ''} <span style="color:var(--muted);font-size:9px;">${o?.price ? 'no book' : '—'}</span></span>`;
       const r = o.book.ratio;
       const col = r == null ? 'var(--muted)' : r >= 2 ? 'var(--pos,#26a69a)' : r <= 0.5 ? 'var(--neg,#ef5350)' : 'var(--muted)';
       // Futures have no call/put inversion: a heavy bid is simply buyers.
@@ -22840,68 +22885,106 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return out;
   }
 
-  // Cache. Bricks are a pure function of the candles and the box size, and
-  // they only change when a new candle arrives - yet every pan, zoom, poll
-  // and tick rebuilt the whole series. On a 250-brick session that is the
-  // single heaviest thing the chart does, repeated several times a second.
+
+  // ── APPEND-ONLY brick engine ────────────────────────────────────
+  // A printed brick never changes. That is how every real-time Renko
+  // platform works, and the old builder broke it: it rebuilt the entire
+  // series from the candle array on every repaint, and that array is
+  // REPLACED on each history fetch. The broker's official 1-minute candle and
+  // the one assembled from live ticks rarely agree exactly, and because each
+  // brick starts where the previous one ended, a single revised close 25
+  // minutes back rebuilt every brick after it - the last 20-30 minutes of the
+  // chart dissolving and re-forming.
   //
-  // Keyed on the LAST CANDLE'S TIMESTAMP, its close, the candle count and the
-  // box. The close matters because the final bar is still forming: its
-  // timestamp does not change while its price does, and keying on the
-  // timestamp alone would serve a stale series for the whole minute.
-  const _renkoCache = { key: null, bricks: null };
+  // Now: bricks from COMPLETED candles are committed once, into state that
+  // persists across repaints, and each repaint only feeds in candles newer
+  // than the last one committed. Only bricks produced by the still-forming
+  // candle are provisional - recomputed each tick, marked prov, and either
+  // committed when that minute closes or discarded if price falls back.
+  //
+  // A later revision to an already-committed candle is deliberately ignored.
+  // The brick it produced was real when it printed; redrawing history to
+  // match a corrected print is exactly the repaint this exists to stop.
+  const _renkoState = new Map();        // key -> committed state
+
+  function _renkoNewState(first, box) {
+    return {
+      box, bricks: [], lastT: -Infinity, firstT: first.t,
+      anchor: Math.round(first.c / box) * box, dir: 0,
+      openedAt: first.t, hiSince: first.h, loSince: first.l, volSince: 0,
+    };
+  }
+
+  // Feed one candle into a state, appending any bricks it completes.
+  // Volume is accumulated since the last brick, so a brick that took eight
+  // minutes carries more volume than one that took forty seconds - the
+  // distinction PVSRA needs.
+  function _renkoStep(s, c, prov) {
+    const box = s.box;
+    s.hiSince = Math.max(s.hiSince, c.h); s.loSince = Math.min(s.loSince, c.l);
+    s.volSince += (c.v || 0);
+    // A FULL box in the same direction, or two boxes to reverse - the
+    // standard rule, and what stops a wobble printing bricks.
+    let guard = 0;
+    while (guard++ < 40) {
+      const upNeed = s.anchor + box * (s.dir >= 0 ? 1 : 2);
+      const dnNeed = s.anchor - box * (s.dir <= 0 ? 1 : 2);
+      let d = 0;
+      if (c.c >= upNeed) d = 1; else if (c.c <= dnNeed) d = -1; else break;
+      const from = d > 0 ? (s.dir >= 0 ? s.anchor : s.anchor + box)
+                         : (s.dir <= 0 ? s.anchor : s.anchor - box);
+      s.bricks.push({ dir: d, o: from, c: from + d * box, t: c.t,
+                      mins: Math.max(1, Math.round((c.t - s.openedAt) / 60)),
+                      hi: s.hiSince, lo: s.loSince, v: s.volSince, prov: !!prov });
+      s.anchor = from + d * box; s.dir = d;
+      s.openedAt = c.t; s.hiSince = c.h; s.loSince = c.l; s.volSince = 0;
+    }
+  }
 
   function _renkoBuild(cs, box) {
     if (!cs?.length || !(box > 0)) return [];
-    const _last = cs[cs.length - 1];
-    const _key = `${cs.length}|${_last.t}|${_last.c}|${box}`;
-    if (_renkoCache.key === _key && _renkoCache.bricks) return _renkoCache.bricks;
-    // A brick series is PATH DEPENDENT: every brick is built from the anchor
-    // the previous one left, so one bad bar corrupts everything after it
-    // rather than just itself. A delayed or re-sent broker tick that arrives
-    // out of order, a duplicated minute, or a NaN close would all silently
-    // produce a wrong chart that still looks plausible - which is the worst
-    // kind of wrong.
-    const seen = new Set();
-    cs = cs
-      .filter(c => c && isFinite(c.c) && isFinite(c.h) && isFinite(c.l) && isFinite(c.t))
-      .filter(c => { if (seen.has(c.t)) return false; seen.add(c.t); return true; })
-      .sort((a, b) => a.t - b.t);
+    // Sanitise: finite values only, one candle per minute, in time order.
+    // On a duplicate timestamp the LATER entry wins - it is the newer data.
+    const byT = new Map();
+    for (const c of cs)
+      if (c && isFinite(c.c) && isFinite(c.h) && isFinite(c.l) && isFinite(c.t)) byT.set(c.t, c);
+    cs = [...byT.values()].sort((a, b) => a.t - b.t);
     if (!cs.length) return [];
-    const bricks = [];
-    let anchor = Math.round(cs[0].c / box) * box;
-    let dir = 0;
-    let openedAt = cs[0].t, hiSince = cs[0].h, loSince = cs[0].l;
-    for (const c of cs) {
-      hiSince = Math.max(hiSince, c.h); loSince = Math.min(loSince, c.l);
-      // A brick needs a FULL box in the same direction, or two boxes to
-      // reverse - the standard rule, and what stops a wobble printing bricks.
-      let guard = 0;
-      while (guard++ < 40) {
-        const upNeed = anchor + box * (dir >= 0 ? 1 : 2);
-        const dnNeed = anchor - box * (dir <= 0 ? 1 : 2);
-        if (c.c >= upNeed) {
-          const from = dir >= 0 ? anchor : anchor + box;
-          bricks.push({ dir: 1, o: from, c: from + box, t: c.t,
-                        mins: Math.max(1, Math.round((c.t - openedAt) / 60)),
-                        hi: hiSince, lo: loSince });
-          anchor = from + box; dir = 1;
-          openedAt = c.t; hiSince = c.h; loSince = c.l;
-        } else if (c.c <= dnNeed) {
-          const from = dir <= 0 ? anchor : anchor - box;
-          bricks.push({ dir: -1, o: from, c: from - box, t: c.t,
-                        mins: Math.max(1, Math.round((c.t - openedAt) / 60)),
-                        hi: hiSince, lo: loSince });
-          anchor = from - box; dir = -1;
-          openedAt = c.t; hiSince = c.h; loSince = c.l;
-        } else break;
-      }
-    }
-    _renkoCache.key = _key;
-    _renkoCache.bricks = bricks;
-    return bricks;
-  }
 
+    const g = new Date(cs[0].t * 1000);
+    const ist = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+    const key = `${state.symbol || 'NIFTY'}|${ist.getFullYear()}-${ist.getMonth() + 1}-${ist.getDate()}|${box}`;
+
+    let s = _renkoState.get(key);
+    // Rebuild from scratch only when EARLIER history has arrived than the
+    // state was built from - e.g. the page opened mid-session and the full
+    // morning loaded afterwards. That is a one-off, not a per-tick repaint.
+    if (!s || cs[0].t < s.firstT) {
+      s = _renkoNewState(cs[0], box);
+      _renkoState.set(key, s);
+      if (_renkoState.size > 8) _renkoState.delete(_renkoState.keys().next().value);
+    }
+
+    // The last candle is still forming. Everything before it is final.
+    const done = cs.slice(0, -1);
+    for (const c of done) {
+      if (c.t <= s.lastT) continue;      // already committed - never revisited
+      _renkoStep(s, c, false);
+      s.lastT = c.t;
+    }
+
+    // Provisional bricks from the forming candle, on a throwaway copy, so a
+    // tick that reverses cannot touch anything already committed.
+    const live = cs[cs.length - 1];
+    if (live.t > s.lastT) {
+      const tmp = { ...s, bricks: [] };
+      _renkoStep(tmp, live, true);
+      return tmp.bricks.length ? s.bricks.concat(tmp.bricks) : s.bricks.slice();
+    }
+    // A COPY, never the internal array: the committed list grows in place,
+    // and a caller holding a previous result would otherwise watch it change.
+    return s.bricks.slice();
+  }
   function _renkoStats(bricks) {
     if (!bricks.length) return null;
     let flips = 0, run = 1, maxRun = 1;
@@ -22929,9 +23012,48 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (cs.length < 5) { box.innerHTML = '<div class="movers-loading">Not enough candles yet for Renko.</div>'; return; }
     const mode = document.getElementById('renkoBox')?.value || 'atr';
     let bs;
+    // ── a STABLE box in ATR mode ───────────────────────────────────
+    // The box was recomputed on every repaint from ATR-14 over the last 14
+    // candles - INCLUDING the one still forming. Its high and low move on
+    // every tick, so the box moved on every tick (11.28, 11.71, 12.14...),
+    // and because every brick is built from the box, each change rebuilt the
+    // whole chart at a different size. That was the shrink-and-expand every
+    // two or three seconds.
+    //
+    // Three changes, each closing one way it could move:
+    //   1. ATR over COMPLETED candles only - the forming bar is excluded.
+    //   2. Rounded to a whole point, so small ATR drift cannot change it.
+    //   3. LOCKED for the session, per symbol and day, and persisted so a
+    //      refresh lands on the same box. It may only ever grow, and only
+    //      when the session no longer fits the panel.
+    //
+    // A Renko box that changes mid-session also means a brick at 10:00 and
+    // one at 14:00 represent different distances, so structure stops being
+    // comparable across the day. Locking fixes that as well as the flicker.
+    const _sessDay = (() => {
+      const g = new Date(cs[0].t * 1000);
+      const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+      return `${i2.getFullYear()}-${i2.getMonth() + 1}-${i2.getDate()}`;
+    })();
+    const _lockKey = `${state.symbol || 'NIFTY'}|${_sessDay}`;
+    let _lock = null;
+    try { _lock = JSON.parse(localStorage.getItem('renkoBoxLockV1') || 'null'); } catch (_) {}
+    if (_lock && _lock.key !== _lockKey) _lock = null;
     if (mode === 'atr') {
-      const a = _atr(cs, 14);
-      bs = Math.max(2, Math.round((a || 10) * 100) / 100);
+      if (_lock && _lock.bs > 0) {
+        bs = _lock.bs;
+      } else {
+        // the last candle is still forming in live mode; dropping it in
+        // replay too costs one bar of history and keeps the two paths identical
+        const done = cs.slice(0, -1);
+        const a = _atr(done.length >= 15 ? done : cs, 14);
+        bs = Math.max(2, Math.round(a || 10));
+        // Only lock once there is enough history for ATR-14 to mean anything;
+        // before that the box is provisional and allowed to settle.
+        if (done.length >= 15) {
+          try { localStorage.setItem('renkoBoxLockV1', JSON.stringify({ key: _lockKey, bs })); } catch (_) {}
+        }
+      }
     } else bs = +mode;
     let bricks = _renkoBuild(cs, bs);
     if (!bricks.length) { box.innerHTML = `<div class="movers-loading">No brick has completed yet at a ${bs}-point box — price has not moved a full box. Choose a smaller box to see structure sooner.</div>`; return; }
@@ -22972,10 +23094,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // brick count, so this converges in a handful of iterations
       let tryBs = bs, guard = 0;
       while (bricks.length > maxFit && guard++ < 12) {
-        tryBs = Math.round(tryBs * 1.35 * 100) / 100;
+        // whole points here too, so the enlarged box is as stable as the base
+        tryBs = Math.max(tryBs + 1, Math.round(tryBs * 1.35));
         bricks = _renkoBuild(cs, tryBs);
       }
-      if (guard) { autoBox = tryBs; bs = tryBs; }
+      if (guard) {
+        autoBox = tryBs; bs = tryBs;
+        // the lock only ever grows: shrinking back would re-draw the morning
+        // at a smaller size, which is the flicker this exists to stop
+        try { localStorage.setItem('renkoBoxLockV1', JSON.stringify({ key: _lockKey, bs })); } catch (_) {}
+      }
     }
     const show = bricks.length > maxFit ? bricks.slice(-maxFit) : bricks;
     const clipped = bricks.length - show.length;
@@ -23262,8 +23390,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // record this prediction, and grade the previous one if a new brick
         // has printed since it was made
         try {
-          _bsResolve(lastB);
-          _bsRecord(lastB.t, P, finalUp);
+          // Score against COMMITTED bricks only. A provisional brick can
+          // appear and vanish within the same minute; grading a prediction
+          // against one would record an outcome that never happened.
+          const lastC = [...show].reverse().find(b => !b.prov);
+          if (lastC) {
+            _bsResolve(lastC);
+            _bsRecord(lastC.t, P, finalUp);
+          }
         } catch (_) {}
 
         // PINNED to the top right, not anchored to the brick. Following the
@@ -23470,11 +23604,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     show.forEach((b, i) => {
       const x = padL + i * bw;
       const top = y(Math.max(b.o, b.c)), bot = y(Math.min(b.o, b.c));
-      const col = b.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+      // ── PVSRA on bricks ────────────────────────────────────────
+      // Each brick now carries the volume traded while it formed, so the same
+      // classifier the candle chart uses applies here unchanged. A brick is
+      // compared against the ten bricks before it, which is the right
+      // baseline: comparing a brick to candle volumes would mix two different
+      // units of time.
+      //
+      // Ordinary bricks keep the plain green/red at full strength, as on the
+      // candle chart - only the 150%+ bricks are distinguished.
+      const bpv = _pvsraOn() ? _pvsraClass(show, i) : null;
+      const bHot = bpv && bpv.kind !== 'normal';
+      const col = bHot ? bpv.col : (b.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)');
       // slow bricks are dimmed: a brick that took 20 minutes cost real theta,
       // and Renko would otherwise draw it identically to a 30-second one
       const slow = b.mins >= (st.medianMins * 3);
-      svg += `<rect x="${(x + bw * 0.12).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * 0.76).toFixed(1)}" height="${Math.max(2, bot - top).toFixed(1)}" fill="${col}" opacity="${slow ? 0.42 : 0.95}" stroke="${col}" stroke-width="0.6"><title>${b.dir > 0 ? 'UP' : 'DOWN'} ${Math.round(b.o)}→${Math.round(b.c)} · took ${b.mins} min · ${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}${slow ? ' · SLOW: heavy theta for a single box' : ''}</title></rect>`;
+      const inset = bHot ? 0.02 : 0.12;
+      // A provisional brick - one the still-forming minute has printed but
+      // not yet confirmed - is drawn hollow. It can still vanish if price
+      // falls back before the minute closes, and a solid brick that later
+      // disappears is exactly the flicker this engine exists to remove.
+      svg += `<rect x="${(x + bw * inset).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * (1 - inset * 2)).toFixed(1)}" height="${Math.max(2, bot - top).toFixed(1)}" fill="${b.prov ? 'none' : col}" opacity="${slow ? 0.42 : 1}" stroke="${col}" stroke-width="${b.prov ? 1.4 : bHot ? (bpv.kind === 'climax' ? 1.8 : 1.2) : 0.6}" ${b.prov ? 'stroke-dasharray="2,2"' : ''}><title>${b.dir > 0 ? 'UP' : 'DOWN'} ${Math.round(b.o)}→${Math.round(b.c)} · took ${b.mins} min · ${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}${slow ? ' · SLOW: heavy theta for a single box' : ''}</title></rect>`;
     });
     for (let g = 0; g <= 4; g++) {
       const v = lo + (hi - lo) * g / 4;
@@ -23513,7 +23663,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 6px;font-size:10px;">
         <b style="color:${dirTxt[1]};">${dirTxt[0]} · ${st.curRun} brick${st.curRun === 1 ? '' : 's'} running</b>
-        <span>box <b>${bs}</b> pts${mode === 'atr' ? (autoBox ? ` (ATR-14 widened from ${_atr(cs, 14).toFixed(1)} to fit the session)` : ' (ATR-14)') : ''}</span>
+        <span>box <b>${bs}</b> pts${mode === 'atr' ? (autoBox ? ' (ATR-14, widened to fit the session, locked)' : ' (ATR-14, locked for the session)') : ''}</span>
         <span style="color:var(--muted);">${st.total} bricks · ${st.up} up / ${st.total - st.up} down · ${st.flips} reversals · longest run ${st.maxRun}</span>
         <span style="color:var(--muted);">median ${st.medianMins} min per brick · slowest ${st.slowest} min</span>
       </div>
@@ -24976,8 +25126,22 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // carries volume. A null result means not enough history or no volume,
       // and falling back to the plain colours is correct there - a candle
       // coloured "ordinary" because volume is missing would be a lie.
-      const pv = (_pvsraOn() && _chart.hasVolume) ? _pvsraClass(cs, i) : null;
-      const col = pv ? pv.col : (up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)');
+      // Gate on the BARS, not on the server's has_volume flag. In historical
+      // replay that flag is not set even when the candles carry real volume,
+      // so PVSRA silently switched off and every bar came out plain. The
+      // classifier already returns null when a bar has no volume or there is
+      // too little history to compare against, so it is its own gate - the
+      // extra flag only ever suppressed a working calculation.
+      const pv = _pvsraOn() ? _pvsraClass(cs, i) : null;
+      // Ordinary bars render as plain green/red at full opacity. They were
+      // drawn in a pale PVSRA tint at 0.34 opacity so the climax bars would
+      // stand out by contrast - but on a 1-minute chart almost every bar is
+      // ordinary, so almost the whole chart was washed out and hard to read.
+      // The significant bars keep their own colour, wider body, heavier
+      // outline and margin marker, which is already more than enough to find
+      // them; dimming everything else was paying for that twice.
+      const pvHot = pv && pv.kind !== 'normal';
+      const col = pvHot ? pv.col : (up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)');
       // Colour alone is not enough to pick a climax bar out of 300 candles.
       // Contrast comes from making the ORDINARY recede, not only from making
       // the exceptional brighter: on a 1-minute chart most bars are ordinary,
@@ -24994,9 +25158,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // a dim monitor and peripheral vision alike. A 200% bar is drawn 1.8x
       // wider than an ordinary one and a 150% bar 1.35x, so the significant
       // bars are physically bigger objects rather than merely different ones.
-      const pvOp = pv ? (pv.kind === 'climax' ? 1 : pv.kind === 'rising' ? 1 : 0.34) : 1;
-      const pvStroke = pv ? (pv.kind === 'climax' ? 1.8 : pv.kind === 'rising' ? 1.2 : 0.3) : 0.6;
-      const pvW = pv ? (pv.kind === 'climax' ? 1.8 : pv.kind === 'rising' ? 1.35 : 1) : 1;
+      const pvOp = 1;
+      const pvStroke = pvHot ? (pv.kind === 'climax' ? 1.8 : 1.2) : 0.6;
+      const pvW = pvHot ? (pv.kind === 'climax' ? 1.8 : 1.35) : 1;
       const cwP = Math.max(1, cw * pvW);
       const cx = x(i);
       const yo = y(c.o), yc = y(c.c), yh = y(c.h), yl = y(c.l);
@@ -25312,7 +25476,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         ${_chart.gapMins ? `<span style="color:var(--gold,#d4af37);" title="Shaded bands mark minutes with no recorded data — the server was not running then. NSE's own feed fills these when reachable; press ⤢ fill from 9:15 to retry.">⚠ ${_chart.gapMins} min not recorded</span>` : ''}
         ${!_chart.optionMeta && _chart.coverage && !/^09:1[0-9]/.test(_chart.coverage) ? `<span style="color:var(--gold,#d4af37);cursor:pointer;" id="chartFillHint" title="The chart does not reach back to the open — click to pull the morning from NSE's own feed">⤢ starts ${escapeHtml(String(_chart.coverage).split('-')[0])} — fill from 9:15</span>` : ''}
         <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'}</span>
-        ${_pvsraOn() && _chart.hasVolume ? `<span style="display:inline-flex;gap:7px;align-items:center;" title="PVSRA: candle colour by volume against the 10-bar average. Ordinary bars are dimmed so the exceptional ones stand out; climax bars carry a triangle above the wick.">
+        ${_pvsraOn() && cs.some(b => b.v > 0) ? `<span style="display:inline-flex;gap:7px;align-items:center;" title="PVSRA: candle colour by volume against the 10-bar average. Ordinary bars are dimmed so the exceptional ones stand out; climax bars carry a triangle above the wick.">
           <b style="color:#00E676;">▼200%</b><b style="color:#FF1744;">▼</b>
           <b style="color:#2979FF;">□150%</b><b style="color:#E040FB;">□</b>
           <span style="color:#A5D6A7;opacity:.4;">▏</span><span style="color:#F48FB1;opacity:.4;">▏ord</span>
@@ -29285,12 +29449,21 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // and much less aggressively than the main 5s chain poll (these are
   // secondary symbols, not the one you're actively analyzing).
   // ====================================================================
-  const WATCHLIST_POLL_MS = 30000;
+  const WATCHLIST_POLL_MS = 120000;   // tiles show PCR and sentiment, which move slowly; each refresh is a full chain per index
   state.watchlistData = {};
 
   async function fetchWatchlistData() {
     const base = els.serverUrl.value.replace(/\/+$/, '');
     for (const sym of state.watchlist) {
+      // The index on screen is already loaded in full - reuse it rather than
+      // fetching its chain a second time just to draw a tile.
+      if (sym === state.symbol && state.lastData && !state.lastData.error) {
+        const prevSpot = state.watchlistData[sym]?.underlying_value;
+        state.watchlistData[sym] = state.lastData;
+        state.watchlistData[sym]._prevSpot = prevSpot;
+        renderWatchlist();
+        continue;
+      }
       try {
         const resp = await fetch(`${base}/api/chain?symbol=${sym}&band=4`, { signal: AbortSignal.timeout(15000) });
         const data = await resp.json();
@@ -29310,7 +29483,13 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     els.watchlistStrip.innerHTML = state.watchlist.map(sym => {
       const d = state.watchlistData[sym];
       if (!d) return `<div class="watch-card" data-watch-symbol="${sym}"><div class="wc-symbol">${sym}</div><div class="wc-loading">Loading…</div></div>`;
-      const chg = d._prevSpot ? ((d.underlying_value - d._prevSpot) / d._prevSpot * 100) : 0;
+      // DAY change against the previous close. It was the change since this
+      // tile's own last refresh, which only looked like a day figure while
+      // refreshes were 30s apart; at two minutes the same number would have
+      // meant something quite different under the same label.
+      const pc = +(d.spot_prev_close || d.session_ohlc?.prev_close || 0);
+      const chg = pc > 0 ? ((d.underlying_value - pc) / pc * 100)
+                : d._prevSpot ? ((d.underlying_value - d._prevSpot) / d._prevSpot * 100) : 0;
       const sentimentLower = (d.sentiment || '').toLowerCase();
       const sentCls = sentimentLower.includes('bullish') ? 'pos-txt' : (sentimentLower.includes('bearish') ? 'neg-txt' : '');
       const isActive = sym === state.symbol;

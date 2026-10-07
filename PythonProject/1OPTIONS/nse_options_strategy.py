@@ -196,6 +196,13 @@ class StrikeData:
     pe_volume: int = 0
     pe_bid: float = 0.0
     pe_ask: float = 0.0
+    # Total resting buy and sell quantity across the whole book, as NSE
+    # publishes them per leg. This is the aggregate the bid/offer panel reads;
+    # it was dropped here, so that panel only ever worked on the broker feed.
+    ce_tbq: float = 0.0
+    ce_tsq: float = 0.0
+    pe_tbq: float = 0.0
+    pe_tsq: float = 0.0
 
 
 @dataclass
@@ -206,11 +213,75 @@ class ChainSnapshot:
     timestamp: str
     strikes: list[StrikeData] = field(default_factory=list)
     all_expiries: list[str] = field(default_factory=list)
+    # Futures parsed from the same payload: one dict per contract, nearest
+    # expiry first. Empty when NSE sends none, so callers can fall back.
+    futures: list[dict] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
 # Step 1: NSE session + fetch
 # --------------------------------------------------------------------------
+
+def _qty(leg: dict, *keys) -> float:
+    """First numeric value among `keys`. NSE's classic chain and its NextApi
+    route spell these differently, and a renamed field should degrade to 0
+    rather than raise and take the whole chain down with it."""
+    for k in keys:
+        v = leg.get(k)
+        if v in (None, "", "-"):
+            continue
+        try:
+            return float(str(v).replace(",", ""))
+        except Exception:
+            continue
+    return 0.0
+
+
+_book_keys_logged = set()
+
+def _book_qty(leg: dict, side: str, tag: str = "") -> float:
+    """Total resting BUY or SELL quantity from a chain row, by FIELD PATTERN.
+
+    Exact names failed: NSE's newer gateway does not use the classic
+    totalBuyQuantity spelling, so every leg came back zero and the bid/offer
+    panel showed an empty book. Rather than guess another spelling, match on
+    meaning - a key mentioning buy/bid (or sell/ask/offer) AND qty/quantity -
+    preferring a TOTAL over a single price level. The chosen key is printed
+    once, so the match is visible in the log instead of assumed.
+    """
+    want = ("buy", "bid") if side == "buy" else ("sell", "ask", "offer")
+    best_k, best_score = None, -1
+    for k, v in leg.items():
+        lk = k.lower()
+        if not any(w in lk for w in want):
+            continue
+        if not any(q in lk for q in ("qty", "quan", "quantity", "vol")):
+            continue
+        if any(p in lk for p in ("price", "prc", "rate")):
+            continue
+        # prefer totals, then unnumbered fields, over level-1 quantities
+        score = (2 if "tot" in lk else 0) + (0 if any(c.isdigit() for c in lk) else 1)
+        if score > best_score:
+            best_k, best_score = k, score
+    if best_k is None:
+        return 0.0
+    key = (tag, side)
+    if key not in _book_keys_logged:
+        _book_keys_logged.add(key)
+        print(f"[book] {tag or 'row'} {side} quantity read from field '{best_k}'")
+    return _qty(leg, best_k)
+
+
+_row_keys_logged = set()
+
+def _log_row_keys(tag: str, row: dict) -> None:
+    """Print one row's field names once per row type, so a schema change is
+    diagnosable from the server log rather than from a blank panel."""
+    if tag in _row_keys_logged or not isinstance(row, dict):
+        return
+    _row_keys_logged.add(tag)
+    print(f"[schema] {tag} row fields: {', '.join(sorted(row.keys()))[:600]}")
+
 
 class NSEFetchError(RuntimeError):
     pass
@@ -256,6 +327,20 @@ def _normalize_nextapi_payload(raw: dict) -> dict:
 
     combined: dict[tuple, dict] = {}
     expiry_set: set[str] = set()
+    # FUTURES. This same payload carries the index futures as rows with
+    # optionType "XX" (no strike). They were dropped here along with every
+    # other non-option row, while the server made a SEPARATE call for futures
+    # to NSE's old quote-derivative route - which now 404s on every request.
+    # So the futures were fetched, discarded, and then asked for again from an
+    # endpoint that no longer exists. Keep them.
+    futures_rows: list[dict] = []
+    for entry in raw["data"]:
+        ot = entry.get("optionType")
+        inst = str(entry.get("instrumentType") or entry.get("instrument") or "").upper()
+        if ot in ("XX", "-", "", None) and ("FUT" in inst or ot == "XX"):
+            if entry.get("expiryDate"):
+                futures_rows.append(entry)
+            continue
     for entry in raw["data"]:
         sp = _to_float(entry.get("strikePrice"))
         ed = entry.get("expiryDate")
@@ -301,6 +386,7 @@ def _normalize_nextapi_payload(raw: dict) -> dict:
             "expiryDates": expiry_dates,
             "underlyingValue": underlying_value,
             "timestamp": timestamp,
+            "futures": futures_rows,
         }
     }
 
@@ -522,6 +608,9 @@ def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> 
             sd.ce_volume = int(ce.get("totalTradedVolume", 0) or 0)
             sd.ce_bid = float(ce.get("buyPrice1", ce.get("bidprice", 0.0)) or 0.0)
             sd.ce_ask = float(ce.get("sellPrice1", ce.get("askPrice", 0.0)) or 0.0)
+            _log_row_keys("option", ce)
+            sd.ce_tbq = _book_qty(ce, "buy", "option")
+            sd.ce_tsq = _book_qty(ce, "sell", "option")
 
         pe = row.get("PE")
         if pe:
@@ -532,6 +621,9 @@ def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> 
             sd.pe_volume = int(pe.get("totalTradedVolume", 0) or 0)
             sd.pe_bid = float(pe.get("buyPrice1", pe.get("bidprice", 0.0)) or 0.0)
             sd.pe_ask = float(pe.get("sellPrice1", pe.get("askPrice", 0.0)) or 0.0)
+            _log_row_keys("option", pe)
+            sd.pe_tbq = _book_qty(pe, "buy", "option")
+            sd.pe_tsq = _book_qty(pe, "sell", "option")
 
     strikes = sorted(by_strike.values(), key=lambda s: s.strike)
     if not strikes:
@@ -548,6 +640,29 @@ def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> 
         if sd.pe_iv <= 0 and sd.pe_ltp > 0:
             sd.pe_iv = _bs_implied_vol(underlying_value, sd.strike, T_iv, sd.pe_ltp, "PE")
 
+    futs = []
+    for fr in records.get("futures", []) or []:
+        _log_row_keys("futures", fr)
+        try:
+            exp_dt = datetime.strptime(fr.get("expiryDate", ""), "%d-%b-%Y")
+        except ValueError:
+            continue
+        px = _qty(fr, "lastPrice", "ltp", "closePrice")
+        if not px:
+            continue
+        futs.append({
+            "expiry": fr.get("expiryDate"), "_dt": exp_dt, "price": px,
+            "oi": _qty(fr, "openInterest", "opnInterest"),
+            "oi_chg": _qty(fr, "changeinOpenInterest", "changeInOpenInterest"),
+            "volume": _qty(fr, "totalTradedVolume", "tradedVolume", "volume"),
+            "prev_close": _qty(fr, "prevClose", "previousClose", "closePrice"),
+            "tbq": _book_qty(fr, "buy", "futures"),
+            "tsq": _book_qty(fr, "sell", "futures"),
+        })
+    futs.sort(key=lambda f: f["_dt"])
+    for f in futs:
+        f.pop("_dt", None)
+
     return ChainSnapshot(
         symbol=symbol,
         expiry=target_expiry,
@@ -555,6 +670,7 @@ def parse_chain(raw: dict, symbol: str, expiry_filter: Optional[str] = None) -> 
         timestamp=timestamp,
         strikes=strikes,
         all_expiries=all_expiries,
+        futures=futs,
     )
 
 
