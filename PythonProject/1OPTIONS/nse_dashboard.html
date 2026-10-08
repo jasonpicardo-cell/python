@@ -1859,6 +1859,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 </select>
                 <select id="renkoBox" class="ohlc-inp" style="font-size:9px;padding:1px 4px;display:none;" title="Brick size. ATR adapts to today's volatility; a fixed size keeps bricks comparable across days.">
                   <option value="atr" selected>ATR-14</option>
+                  <option value="atrs">ATR scalp</option>
+                  <option value="5">5 pts</option>
+                  <option value="8">8 pts</option>
                   <option value="10">10 pts</option>
                   <option value="15">15 pts</option>
                   <option value="20">20 pts</option>
@@ -1887,6 +1890,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_pivots"> Pivots</label>
                 <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
                 <label title="Bollinger bands, 20-period with 2 standard deviations. Upper and lower only — the middle band is a 20 SMA, already covered by the moving averages."><input type="checkbox" id="chk_bb"> BB</label>
+                <label title="VWAP ±1σ / ±2σ / ±3σ bands, with the range-or-trend day read at 9:45. Range day: fade ±2σ back to VWAP. Trend day: never fade ±2σ; buy pullbacks that hold ±1σ."><input type="checkbox" id="chk_vwapBand"> VWAP σ</label>
+                <label title="Previous day's high, low and close — the first targets and anchors of the session."><input type="checkbox" id="chk_pdhl"> PDH/L</label>
+                <label title="Today's point of control and 70% value area. Real volume at price when the feed has it, otherwise time at price (TPO)."><input type="checkbox" id="chk_vprof"> POC/VA</label>
+                <label title="Heikin Ashi only: a dot where a streak of three strong bars (no wick against the trend) begins, amber ring when a run is ageing, and colour flips marked confirmed (▲▼) only when the real close agrees with VWAP — a × otherwise."><input type="checkbox" id="chk_haMarks"> HA marks</label>
                 <button id="addAlertBtn" class="mini-btn" style="font-size:9px;padding:1px 6px;" title="Add a price alert. Shift-click the chart (or right-click) to place one at the price under the cursor.">🔔 Alert</button>
                 <span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.05);">
                   <select id="chartDataMode" class="ohlc-inp" style="font-size:9px;padding:1px 3px;" title="Live uses today's session. Historical replays a past date's 1-minute candles through the same chart and indicators.">
@@ -1949,12 +1956,28 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                    since it means nothing on candles. -->
               <span id="renkoBoxRadios" style="display:none;gap:9px;align-items:center;font-size:9px;color:var(--muted);margin-left:4px;">
                 <span>box</span><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
-                  <input type="radio" name="renkoBoxR" value="atr" style="margin:0;" checked>ATR-14</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
+                  <input type="radio" name="renkoBoxR" value="atr" style="margin:0;" checked>ATR-14</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;" title="ATR-14 measured at 10:00 from bars after 9:30 — the opening rush excluded — locked for the day and never widened. Usually 6-10 pts on Nifty 1-minute bars.">
+                  <input type="radio" name="renkoBoxR" value="atrs" style="margin:0;">ATR scalp</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;" title="Too noisy for the index on 1-minute bars; meant for option-premium charts (CE/PE).">
+                  <input type="radio" name="renkoBoxR" value="5" style="margin:0;">5</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;" title="Quiet days (VIX under ~12).">
+                  <input type="radio" name="renkoBoxR" value="8" style="margin:0;">8</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
                   <input type="radio" name="renkoBoxR" value="10" style="margin:0;">10 pts</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
                   <input type="radio" name="renkoBoxR" value="15" style="margin:0;">15 pts</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
                   <input type="radio" name="renkoBoxR" value="20" style="margin:0;">20 pts</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
                   <input type="radio" name="renkoBoxR" value="25" style="margin:0;">25 pts</label><label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
                   <input type="radio" name="renkoBoxR" value="50" style="margin:0;">50 pts</label>
+                <!-- Pro-style Renko options: reversal multiple, wicks, a
+                     larger-box bias strip and Weis wave volume. -->
+                <span style="margin-left:6px;" title="Boxes needed to reverse. 2× is classic Renko; 3× is the UniRenko-style setting (e.g. 6-6-18) that keeps continuation quick but makes a wobble work much harder to flip the chart.">rev</span>
+                <select id="renkoRev" class="ohlc-inp" style="font-size:9px;padding:0 2px;">
+                  <option value="2" selected>2×</option>
+                  <option value="3">3×</option>
+                </select>
+                <label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;" title="Wicks: a move against the brick past the prior close that failed to reverse it — usually where stops were run.">
+                  <input type="checkbox" id="renkoWicks" style="margin:0;" checked>wicks</label>
+                <label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;" title="Bias strip from bricks 2.5× the entry box (25 pts over 10). Trade entry bricks in the strip's direction only.">
+                  <input type="checkbox" id="renkoBias" style="margin:0;" checked>bias</label>
+                <label style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;" title="Weis wave volume: total volume of each run of same-colour bricks, compared with the previous wave the same way. ⚠ = as far on much less effort; ◆ = heavy effort, no further.">
+                  <input type="checkbox" id="renkoWeis" style="margin:0;" checked>Weis</label>
               </span>
             </div>
             <div id="rsiPaneBody" style="padding:0 6px 4px;"></div>
@@ -16598,6 +16621,126 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return vol ? pv / vol : null;
     });
   }
+  // ── VWAP standard-deviation bands ──────────────────────────────────
+  // The volume-weighted spread of typical price around VWAP, using the SAME
+  // weights as _vwapSeries (real volume when the feed has it, tick count
+  // otherwise), so the bands sit around exactly the line that is drawn.
+  // Sums are taken relative to the first bar's price: squaring raw index
+  // levels (~25,000) and subtracting two near-equal totals is where float
+  // error would otherwise creep into the variance.
+  function _vwapBands(cs) {
+    const out = { vw: [], sd: [] };
+    if (!cs?.length) return out;
+    const useV = _chart.hasVolume && cs.some(c => c.v > 0);
+    const ref = (cs[0].h + cs[0].l + cs[0].c) / 3;
+    let sw = 0, s1 = 0, s2 = 0;
+    for (const c of cs) {
+      const tp = (c.h + c.l + c.c) / 3 - ref;
+      const w = useV ? (c.v || 0) : (c.n || 1);
+      sw += w; s1 += w * tp; s2 += w * tp * tp;
+      if (!sw) { out.vw.push(c.c); out.sd.push(0); continue; }
+      const m = s1 / sw;
+      out.vw.push(m + ref);
+      out.sd.push(Math.sqrt(Math.max(0, s2 / sw - m * m)));
+    }
+    return out;
+  }
+
+  // ── range day or trend day ────────────────────────────────────────
+  // The read futures desks make in the first half hour, because it decides
+  // what the VWAP bands MEAN for the rest of the day. If price crosses VWAP
+  // in 9:15-9:45 the session is rotating (balance): a ±2σ tag is a fade back
+  // toward VWAP. If it never crosses, it is trending: fading ±2σ is the
+  // classic losing trade, and the entry is a pullback that holds ±1σ.
+  //
+  // Counted from 9:20 with a 0.25σ hysteresis. In the first minutes VWAP is
+  // the price, so every wobble would "cross" it and almost every day would
+  // read as a range day; a cross has to clear VWAP by a margin to count.
+  function _dayType(cs) {
+    if (!cs?.length) return null;
+    const istMin = t => {
+      const g = new Date(t * 1000);
+      const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+      return i2.getHours() * 60 + i2.getMinutes();
+    };
+    const b = _vwapBands(cs);
+    const lastI = cs.length - 1;
+    const z = b.sd[lastI] > 0 ? (cs[lastI].c - b.vw[lastI]) / b.sd[lastI] : 0;
+    if (istMin(cs[0].t) > 560)
+      return { kind: 'unknown', z, label: 'Day type: unknown', advice: 'the 9:15-9:45 window is not loaded — fill from 9:15 to classify' };
+    let side = 0, crosses = 0, crossT = null, done = false, winSide = 0;
+    let laterCross = null;
+    for (let i = 0; i < cs.length; i++) {
+      const m = istMin(cs[i].t);
+      if (m < 560) continue;
+      const sd = b.sd[i] || 0, dv = cs[i].c - b.vw[i];
+      const s = dv > 0.25 * sd ? 1 : dv < -0.25 * sd ? -1 : 0;
+      if (!s) continue;
+      if (m < 585) {
+        if (side && s !== side) { crosses++; crossT = cs[i].t; }
+        side = s; winSide = s;
+      } else {
+        done = true;
+        if (side && s !== side && laterCross == null) laterCross = cs[i].t;
+        if (!laterCross) side = s;
+      }
+    }
+    const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (!done)
+      return { kind: 'forming', z, crosses,
+               label: 'Day type: forming', advice: `classifies at 9:45 · ${crosses} VWAP cross${crosses === 1 ? '' : 'es'} so far` };
+    if (!winSide)
+      return { kind: 'range', z, crosses,
+               label: 'RANGE DAY', advice: 'price hugged VWAP through 9:45 — balance; fade ±2σ back toward VWAP' };
+    if (crosses >= 1)
+      return { kind: 'range', z, crosses,
+               label: 'RANGE DAY', advice: `VWAP crossed ${crosses}× by 9:45 — fade ±2σ back toward VWAP; stop ~0.5σ beyond` };
+    const dir = side >= 0 ? 1 : -1;
+    // `side` was frozen at the first post-9:45 cross, so it is still the
+    // trend's own side here
+    if (laterCross)
+      return { kind: 'trend-broken', z, dir,
+               label: `TREND ${dir > 0 ? '▲' : '▼'} BROKEN`, advice: `lost VWAP at ${hhmm(laterCross)} — treat as a range from here` };
+    return { kind: 'trend', z, dir,
+             label: `TREND DAY ${dir > 0 ? '▲' : '▼'}`,
+             advice: dir > 0 ? 'no VWAP cross by 9:45 — do not short +2σ; buy pullbacks that hold +1σ'
+                             : 'no VWAP cross by 9:45 — do not buy −2σ; sell rallies that fail at −1σ' };
+  }
+  function _dayTypeBadge(dt) {
+    if (!dt) return '';
+    const tone = dt.kind === 'trend' ? (dt.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)')
+               : dt.kind === 'range' ? '#00d2d3' : dt.kind === 'trend-broken' ? '#ffb300' : 'var(--muted,#789)';
+    const zs = isFinite(dt.z) ? `${dt.z >= 0 ? '+' : ''}${dt.z.toFixed(1)}σ` : '';
+    return `<span style="display:inline-flex;gap:6px;align-items:center;font-size:10px;" title="Range or trend day, from VWAP crosses between 9:20 and 9:45 (a cross must clear VWAP by 0.25σ). It decides what the VWAP bands mean: on a range day ±2σ is a fade, on a trend day ±1σ is the pullback entry and ±2σ is not a reversal.">
+      <b style="padding:2px 8px;border-radius:4px;border:1px solid ${tone};color:${tone};font-size:10px;letter-spacing:0.3px;">${dt.label}</b>
+      <span style="color:#cdd;">${escapeHtml(dt.advice)}</span>
+      ${zs ? `<span style="color:var(--muted,#789);">price at <b style="color:#00d2d3;">${zs}</b> from VWAP</span>` : ''}
+    </span>`;
+  }
+
+  // ── today's profile: POC and value area ───────────────────────────
+  // Real volume at price when the feed has it; otherwise time at price
+  // (TPO), the original Market Profile method, which is what an index with
+  // no traded volume honestly supports. Bucket of ~0.02% of price: 5 points
+  // on Nifty, 10 on BankNifty.
+  let _profCache = { key: '', p: null };
+  function _sessionProfile(cs) {
+    if (!cs || cs.length < 15) return null;
+    const last = cs[cs.length - 1];
+    const key = `${cs.length}|${cs[0].t}|${last.t}|${Math.round(last.c)}|${_chart.hasVolume}`;
+    if (_profCache.key === key) return _profCache.p;
+    const px = last.c || 1;
+    const raw = px * 0.0002;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const bucket = [1, 2, 5, 10].map(k => k * mag).find(s => s >= raw) || 10 * mag;
+    const useV = _chart.hasVolume && cs.filter(c => c.v > 0).length >= 5;
+    let p = null;
+    try { p = _volumeProfile(useV ? cs : cs.map(c => ({ ...c, v: 1 })), bucket); } catch (_) {}
+    if (p) p.tpo = !useV;
+    _profCache = { key, p };
+    return p;
+  }
+
   // ── keep the candle array to ONE session ──────────────────────────
   // x() maps a candle's TIME to a slot in the 09:15-15:40 axis, so any candle
   // from another day lands on top of today's. The candles overlap and look
@@ -16682,7 +16825,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (cs.length < 2) continue;
       out.push({ lab: 'EMA' + e.p, col: e.col, vals: _emaSeries(closes, e.p), period: e.p, short: cs.length < e.p });
     }
-    if (_chart.show.vwap) out.push({ lab: _chart.hasVolume ? 'VWAP' : 'VWAP*', col: '#00d2d3', vals: _vwapSeries(cs), vwap: true, approx: !_chart.hasVolume });
+    // VWAP from the REAL candles even on Heikin Ashi: it is the average
+    // price actually paid, and HA prices are averages that never traded.
+    const vwSrc = (_chart.candles?.length === cs.length) ? _chart.candles : cs;
+    if (_chart.show.vwap) out.push({ lab: _chart.hasVolume ? 'VWAP' : 'VWAP*', col: '#00d2d3', vals: _vwapSeries(vwSrc), vwap: true, approx: !_chart.hasVolume });
     return out;
   }
 
@@ -22907,11 +23053,38 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // match a corrected print is exactly the repaint this exists to stop.
   const _renkoState = new Map();        // key -> committed state
 
-  function _renkoNewState(first, box) {
+  // Reversal multiple: how many boxes against the last brick it takes to
+  // print the other colour. 2 is classic Renko. 3 is the UniRenko-style
+  // setting futures scalpers use (6-6-18, 4-4-12): continuation still prints
+  // after one box, but a wobble needs a much larger counter-move to flip the
+  // chart. Bricks stay on the same box grid either way.
+  // Which series the bricks are built from. The committed-brick state and the
+  // ATR lock were keyed by symbol and day only, so switching the chart to an
+  // option contract - or from 1m to 5m bars - fed those candles into the
+  // index's state, appending option prices after index bricks. Every key now
+  // carries the instrument and the bar interval.
+  function _renkoInstTag() {
+    let m = 'index';
+    try { m = _chartMode(); if (m !== 'index') m += _chartStrikeSel(); } catch (_) {}
+    return `${m}|${_chart.interval || '1m'}`;
+  }
+
+  function _renkoRev() {
+    const v = +(document.getElementById('renkoRev')?.value || 2);
+    return v === 3 ? 3 : 2;
+  }
+
+  function _renkoNewState(first, box, rev) {
+    const a = Math.round(first.c / box) * box;
     return {
-      box, bricks: [], lastT: -Infinity, firstT: first.t,
-      anchor: Math.round(first.c / box) * box, dir: 0,
+      box, rev: rev || 2, bricks: [], lastT: -Infinity, firstT: first.t,
+      anchor: a, dir: 0,
       openedAt: first.t, hiSince: first.h, loSince: first.l, volSince: 0,
+      // Wick extremes, tracked separately from hiSince/loSince. Those keep
+      // the full candle range for the divergence engine; these restart at
+      // the brick close, so a second brick printed by the same minute does
+      // not inherit the first brick's excursion as a false wick.
+      wHi: first.h, wLo: first.l,
     };
   }
 
@@ -22920,29 +23093,43 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // minutes carries more volume than one that took forty seconds - the
   // distinction PVSRA needs.
   function _renkoStep(s, c, prov) {
-    const box = s.box;
+    const box = s.box, R = s.rev || 2;
     s.hiSince = Math.max(s.hiSince, c.h); s.loSince = Math.min(s.loSince, c.l);
+    s.wHi = Math.max(s.wHi, c.h); s.wLo = Math.min(s.wLo, c.l);
     s.volSince += (c.v || 0);
-    // A FULL box in the same direction, or two boxes to reverse - the
-    // standard rule, and what stops a wobble printing bricks.
+    // A FULL box in the same direction, or R boxes to reverse (2 classic,
+    // 3 UniRenko-style) - what stops a wobble printing bricks. A reversal
+    // brick is drawn from the prior brick's open, so with R=3 the reversal
+    // prints two bricks at once: price travelled three boxes from the close,
+    // which is two boxes beyond the prior brick's open.
     let guard = 0;
     while (guard++ < 40) {
-      const upNeed = s.anchor + box * (s.dir >= 0 ? 1 : 2);
-      const dnNeed = s.anchor - box * (s.dir <= 0 ? 1 : 2);
+      const upNeed = s.anchor + box * (s.dir >= 0 ? 1 : R);
+      const dnNeed = s.anchor - box * (s.dir <= 0 ? 1 : R);
       let d = 0;
       if (c.c >= upNeed) d = 1; else if (c.c <= dnNeed) d = -1; else break;
       const from = d > 0 ? (s.dir >= 0 ? s.anchor : s.anchor + box)
                          : (s.dir <= 0 ? s.anchor : s.anchor - box);
       s.bricks.push({ dir: d, o: from, c: from + d * box, t: c.t,
                       mins: Math.max(1, Math.round((c.t - s.openedAt) / 60)),
-                      hi: s.hiSince, lo: s.loSince, v: s.volSince, prov: !!prov });
+                      hi: s.hiSince, lo: s.loSince, v: s.volSince, prov: !!prov,
+                      // the excursion AGAINST this brick that did not become
+                      // a reversal - TradingView's definition of a Renko wick.
+                      // Measured past the PRIOR close (s.anchor): for a
+                      // reversal brick that is the overshoot before the turn,
+                      // not the whole prior brick, which every reversal
+                      // would otherwise show.
+                      wick: d > 0 ? (s.wLo < s.anchor ? s.wLo : null)
+                                  : (s.wHi > s.anchor ? s.wHi : null) });
       s.anchor = from + d * box; s.dir = d;
       s.openedAt = c.t; s.hiSince = c.h; s.loSince = c.l; s.volSince = 0;
+      s.wHi = s.anchor; s.wLo = s.anchor;
     }
   }
 
-  function _renkoBuild(cs, box) {
+  function _renkoBuild(cs, box, rev) {
     if (!cs?.length || !(box > 0)) return [];
+    rev = rev === 3 ? 3 : rev === 2 ? 2 : _renkoRev();
     // Sanitise: finite values only, one candle per minute, in time order.
     // On a duplicate timestamp the LATER entry wins - it is the newer data.
     const byT = new Map();
@@ -22953,16 +23140,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     const g = new Date(cs[0].t * 1000);
     const ist = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
-    const key = `${state.symbol || 'NIFTY'}|${ist.getFullYear()}-${ist.getMonth() + 1}-${ist.getDate()}|${box}`;
+    const key = `${state.symbol || 'NIFTY'}|${ist.getFullYear()}-${ist.getMonth() + 1}-${ist.getDate()}|${box}|r${rev}|${_renkoInstTag()}`;
 
     let s = _renkoState.get(key);
     // Rebuild from scratch only when EARLIER history has arrived than the
     // state was built from - e.g. the page opened mid-session and the full
     // morning loaded afterwards. That is a one-off, not a per-tick repaint.
     if (!s || cs[0].t < s.firstT) {
-      s = _renkoNewState(cs[0], box);
+      s = _renkoNewState(cs[0], box, rev);
       _renkoState.set(key, s);
-      if (_renkoState.size > 8) _renkoState.delete(_renkoState.keys().next().value);
+      // 12, not 8: the bias strip keeps a second box size live alongside the
+      // entry chart, and the ATR widening probes a few more
+      if (_renkoState.size > 12) _renkoState.delete(_renkoState.keys().next().value);
     }
 
     // The last candle is still forming. Everything before it is final.
@@ -23011,6 +23200,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!box) return;
     if (cs.length < 5) { box.innerHTML = '<div class="movers-loading">Not enough candles yet for Renko.</div>'; return; }
     const mode = document.getElementById('renkoBox')?.value || 'atr';
+    const R = _renkoRev();
+    const _rkOn = id => { const e = document.getElementById(id); return e ? e.checked : true; };
+    const wicksOn = _rkOn('renkoWicks'), biasOn = _rkOn('renkoBias'), weisOn = _rkOn('renkoWeis');
     let bs;
     // ── a STABLE box in ATR mode ───────────────────────────────────
     // The box was recomputed on every repaint from ATR-14 over the last 14
@@ -23035,7 +23227,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
       return `${i2.getFullYear()}-${i2.getMonth() + 1}-${i2.getDate()}`;
     })();
-    const _lockKey = `${state.symbol || 'NIFTY'}|${_sessDay}`;
+    const _lockKey = `${state.symbol || 'NIFTY'}|${_sessDay}|${_renkoInstTag()}`;
+    let scalpNote = '';
     let _lock = null;
     try { _lock = JSON.parse(localStorage.getItem('renkoBoxLockV1') || 'null'); } catch (_) {}
     if (_lock && _lock.key !== _lockKey) _lock = null;
@@ -23052,6 +23245,52 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // before that the box is provisional and allowed to settle.
         if (done.length >= 15) {
           try { localStorage.setItem('renkoBoxLockV1', JSON.stringify({ key: _lockKey, bs })); } catch (_) {}
+        }
+      }
+    } else if (mode === 'atrs') {
+      // ── ATR scalp ──────────────────────────────────────────────
+      // Same ATR-14, measured at a better moment and never widened.
+      //
+      // ATR-14 is the near-universal default period; the period was never
+      // the problem. The plain ATR mode measures whatever 14 bars precede
+      // its first lock - often the opening rush, the most volatile quarter
+      // hour of the day - and then enlarges the box whenever the session
+      // overflows the panel. Both make it bigger, and so later, than the
+      // midday tape warrants.
+      //
+      // This mode takes ATR-14 as of 10:00, from bars after 9:30, so the
+      // opening rush is excluded and every refresh lands on the same number.
+      // It never widens: an overflowing session scrolls to the newest bricks
+      // instead, the way the fixed sizes already do.
+      const LK = 'renkoBoxLockScalpV1';
+      let lk = null;
+      try { lk = JSON.parse(localStorage.getItem(LK) || 'null'); } catch (_) {}
+      if (lk && lk.key !== _lockKey) lk = null;
+      if (lk && lk.bs > 0) {
+        bs = lk.bs; scalpNote = lk.note || 'ATR-14 at 10:00';
+      } else {
+        const istMin = t => {
+          const g = new Date(t * 1000);
+          const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+          return i2.getHours() * 60 + i2.getMinutes();
+        };
+        const done = cs.slice(0, -1);
+        const win = done.filter(c => { const m = istMin(c.t); return m >= 570 && m < 600; });
+        const after10 = done.some(c => istMin(c.t) >= 600);
+        let a = null;
+        if (win.length >= 15) a = _atr(win, 14);
+        else if (win.length >= 5 && !after10) a = _atr(win, 14);   // still settling
+        else a = _atr(done.length >= 15 ? done.slice(0, 15) : done, 14);
+        bs = Math.max(3, Math.round(a || 8));
+        if (after10 || win.length >= 30) {
+          // the window is complete (or the morning is missing, in which case
+          // the earliest 14 bars available stand in) - lock it for the day
+          const note = win.length >= 15 ? 'ATR-14 at 10:00, opening excluded'
+                                        : 'ATR-14 of the earliest bars available';
+          scalpNote = note;
+          try { localStorage.setItem(LK, JSON.stringify({ key: _lockKey, bs, note })); } catch (_) {}
+        } else {
+          scalpNote = 'settling — locks at 10:00';
         }
       }
     } else bs = +mode;
@@ -23108,7 +23347,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const show = bricks.length > maxFit ? bricks.slice(-maxFit) : bricks;
     const clipped = bricks.length - show.length;
     const W = maxed ? 1600 : 900, H = maxed ? 620 : 420,
-          padL = 8, padR = 74, padT = 12, padB = 34;
+          padL = 8, padR = 74, padT = 12, padB = biasOn ? 46 : 34;
     const prices = show.flatMap(b => [b.o, b.c]);
     let lo = Math.min(...prices), hi = Math.max(...prices);
     const pad = (hi - lo) * 0.06 || bs; lo -= pad; hi += pad;
@@ -23142,6 +23381,73 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // box auto-enlargement above already keeps the session inside it.
     const SLOTS = maxFit;
     const bw = (W - padL - padR) / SLOTS;
+
+    // ── bias bricks: a larger box for direction ────────────────────
+    // The two-chart method futures Renko traders use: a big box decides
+    // which way to trade, the small box times the entry, and only entries in
+    // the big box's direction are taken. The usual ratio is about 2.5-3x
+    // (ES: 6-point bias over 2-point entries), so 10-point bricks get a
+    // 25-point bias. Built by the same append-only engine, so its history
+    // never repaints either.
+    const biasBs = Math.max(bs + 1, Math.round(bs * 2.5 / 5) * 5);
+    let biasBricks = [], biasAt = [], biasNow = 0, biasRun = 0;
+    if (biasOn) {
+      try {
+        biasBricks = _renkoBuild(cs, biasBs, R);
+        // the bias in force when each entry brick printed
+        let j = -1;
+        for (const b of show) {
+          while (j + 1 < biasBricks.length && biasBricks[j + 1].t <= b.t) j++;
+          biasAt.push(j >= 0 ? biasBricks[j] : null);
+        }
+        const lb = biasBricks[biasBricks.length - 1];
+        if (lb) {
+          biasNow = lb.dir;
+          for (let q = biasBricks.length - 1; q >= 0 && biasBricks[q].dir === lb.dir; q--) biasRun++;
+        }
+      } catch (_) { biasBricks = []; biasAt = []; }
+    }
+
+    // ── Weis waves ─────────────────────────────────────────────────
+    // David Weis's method: a wave is a run of same-colour bricks, and its
+    // volume is summed for the whole run. Comparing a wave with the previous
+    // wave in the SAME direction is the read - a push that travels as far on
+    // much less volume is running out of effort, and one that absorbs heavy
+    // volume without travelling is being met.
+    //
+    // Bricks already carry the volume traded while they formed. Where the
+    // feed has no genuine volume (NSE spot), the minutes each wave took are
+    // used instead and labelled as such - time is the only effort measure
+    // left, and a fabricated volume would be worse than an honest proxy.
+    const weisVol = _chart.hasVolume && show.some(b => b.v > 0);
+    const waves = [];
+    {
+      let cur = null;
+      show.forEach((b, i) => {
+        const eff = weisVol ? (b.v || 0) : (b.mins || 1);
+        if (!cur || cur.dir !== b.dir) {
+          cur = { dir: b.dir, a: i, b: i, eff: 0, n: 0, cum: [] };
+          waves.push(cur);
+        }
+        cur.b = i; cur.n++; cur.eff += eff; cur.cum.push(cur.eff);
+        // A brick with no volume on a volume feed is missing data - the
+        // forming minute, or a gap in the history - not a quiet brick.
+        // Comparing such a wave would read the gap as exhaustion.
+        if (weisVol && !(b.v > 0)) cur.unk = true;
+      });
+      // effort against result versus the previous wave the same way
+      for (let w = 0; w < waves.length; w++) {
+        const wv = waves[w];
+        if (wv.unk) continue;
+        let pv = null;
+        for (let q = w - 2; q >= 0; q -= 2) { if (waves[q].dir === wv.dir) { pv = waves[q]; break; } }
+        if (!pv || pv.eff <= 0 || pv.unk) continue;
+        const effR = wv.eff / pv.eff, resR = wv.n / pv.n;
+        if (resR >= 1 && effR < 0.7) wv.flag = 'weak';         // as far, on much less
+        else if (resR <= 1 && effR > 1.5) wv.flag = 'absorb';  // heavy, but not further
+        wv.effR = effR;
+      }
+    }
     // EMAs over BRICK CLOSES, not over time. On a Renko chart a moving
     // average of time-based bars is meaningless, because bricks are not
     // evenly spaced in time - the average has to walk the brick sequence,
@@ -23239,8 +23545,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const lastB = show[show.length - 1];
       if (sp2 && lastB) {
         const dir0 = lastB.dir;
-        const upAt = lastB.c + bs * (dir0 >= 0 ? 1 : 2);
-        const dnAt = lastB.c - bs * (dir0 <= 0 ? 1 : 2);
+        const upAt = lastB.c + bs * (dir0 >= 0 ? 1 : R);
+        const dnAt = lastB.c - bs * (dir0 <= 0 ? 1 : R);
         const dUp = Math.max(0.01, upAt - sp2);
         const dDn = Math.max(0.01, sp2 - dnAt);
 
@@ -23374,6 +23680,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           }
         } catch (_) {}
 
+        try {                       // the bigger box's direction
+          if (biasOn && biasNow)
+            P.push({ k: `bias ${biasBs}`, u: pct(biasNow * Math.min(0.7, 0.35 + biasRun * 0.1)),
+                     why: `${biasRun} ${biasNow > 0 ? 'up' : 'down'}` });
+        } catch (_) {}
+        try {                       // Weis: effort of this wave against the last one
+          const cw = waves[waves.length - 1];
+          if (weisOn && cw && cw.effR != null) {
+            // a wave out-pacing its predecessor on effort favours carrying on;
+            // one doing it on less favours the turn
+            const v = cw.flag === 'weak' ? -0.45 : cw.flag === 'absorb' ? -0.35
+                    : cw.effR >= 1 ? 0.4 : 0;
+            if (v) P.push({ k: 'weis', u: pct(cw.dir * v),
+                            why: `${cw.flag || 'effort'} ${Math.round(cw.effR * 100)}%` });
+          }
+        } catch (_) {}
+
         try {                       // dealer obligation
           const gx = _computeGex(state.lastData);
           if (gx && isFinite(gx.flip))
@@ -23448,7 +23771,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               style="font-size:10px;font-weight:700;fill:${fcol};">▲${finalUp}/${100 - finalUp}</text>`;
         }
         svg += `
-          <title>Next brick: ${Math.round(dUp)} pts to an up brick at ${fmtInt(Math.round(upAt))}, ${Math.round(dDn)} pts to a down brick at ${fmtInt(Math.round(dnAt))}. First-passage odds adjusted for measured drift over the last 20 minutes. A reversal needs two boxes, a continuation one, which is why the odds are rarely symmetric.${runNote}</title>`;
+          <title>Next brick: ${Math.round(dUp)} pts to an up brick at ${fmtInt(Math.round(upAt))}, ${Math.round(dDn)} pts to a down brick at ${fmtInt(Math.round(dnAt))}. First-passage odds adjusted for measured drift over the last 20 minutes. A reversal needs ${R} boxes, a continuation one, which is why the odds are rarely symmetric.${runNote}</title>`;
       }
     } catch (_) {}
 
@@ -23464,8 +23787,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const right = W - padR;
         const lastBrick = show[show.length - 1];
         // distance to the next brick, which is the question the line answers
-        const upNeed = lastBrick ? (lastBrick.c + bs) : null;
-        const dnNeed = lastBrick ? (lastBrick.c - bs) : null;
+        // continuation is one box, a reversal R - the line showed one box
+        // both ways, understating how far a reversal actually is
+        const upNeed = lastBrick ? (lastBrick.c + bs * (lastBrick.dir >= 0 ? 1 : R)) : null;
+        const dnNeed = lastBrick ? (lastBrick.c - bs * (lastBrick.dir <= 0 ? 1 : R)) : null;
         const toGo = lastBrick ? Math.min(Math.abs(upNeed - sp), Math.abs(sp - dnNeed)) : null;
         svg += `<line x1="${padL}" y1="${y(sp).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(sp).toFixed(1)}"
             stroke="#fff" stroke-width="1" stroke-dasharray="2,3" opacity="0.85"/>
@@ -23588,6 +23913,69 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
     } catch (_) {}
 
+    // ── Weis wave volume, in the bottom band ───────────────────────
+    // Each bar is the wave's CUMULATIVE effort up to that brick, so a wave
+    // reads as a rising staircase and its last step is the wave total. The
+    // total is printed at the end of every wave of two or more bricks, and
+    // flagged when it disagrees with the result against the previous wave
+    // the same way.
+    if (weisOn && waves.length) {
+      try {
+        const vh = Math.round((H - padT - padB) * 0.18);
+        const vTop = H - padB - vh;
+        const eMax = Math.max(...waves.map(w => w.eff)) || 1;
+        const abbr = v => !weisVol ? `${Math.round(v)}m`
+          : v >= 1e7 ? (v / 1e7).toFixed(1) + 'Cr' : v >= 1e5 ? (v / 1e5).toFixed(1) + 'L'
+          : v >= 1e3 ? (v / 1e3).toFixed(0) + 'k' : String(Math.round(v));
+        for (const wv of waves) {
+          const col = wv.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+          wv.cum.forEach((ev, k) => {
+            const i2 = wv.a + k;
+            const h2 = Math.max(1, ev / eMax * vh);
+            svg += `<rect x="${(padL + i2 * bw + bw * 0.1).toFixed(1)}" y="${(H - padB - h2).toFixed(1)}" width="${(bw * 0.8).toFixed(1)}" height="${h2.toFixed(1)}" fill="${col}" opacity="${k === wv.cum.length - 1 ? 0.55 : 0.3}"/>`;
+          });
+          if (wv.n >= 2 || wv.flag) {
+            const xe = padL + wv.b * bw + bw / 2;
+            const ye = H - padB - Math.max(1, wv.eff / eMax * vh) - 3;
+            const fcol = wv.flag === 'weak' ? '#ffb300' : wv.flag === 'absorb' ? '#ab47bc' : 'var(--muted,#789)';
+            svg += `<text x="${xe.toFixed(1)}" y="${ye.toFixed(1)}" text-anchor="middle" style="font-size:7.5px;fill:${fcol};font-weight:${wv.flag ? 700 : 400};">${wv.flag === 'weak' ? '⚠' : wv.flag === 'absorb' ? '◆' : ''}${abbr(wv.eff)}${wv.unk ? '…' : ''}<title>${wv.dir > 0 ? 'Up' : 'Down'} wave${wv.unk ? ' (volume still arriving — not compared)' : ''} · ${wv.n} brick${wv.n === 1 ? '' : 's'} · ${weisVol ? 'volume' : 'minutes'} ${abbr(wv.eff)}${wv.effR != null ? ` · ${Math.round(wv.effR * 100)}% of the previous ${wv.dir > 0 ? 'up' : 'down'} wave` : ''}${wv.flag === 'weak' ? ' — travelled as far on much less effort: the push is tiring' : wv.flag === 'absorb' ? ' — heavy effort without more distance: being absorbed' : ''}</title></text>`;
+          }
+        }
+        svg += `<line x1="${padL}" y1="${vTop.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${vTop.toFixed(1)}" stroke="rgba(255,255,255,0.08)"/>
+          <text x="${(W - padR + 3).toFixed(1)}" y="${(vTop + 9).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">Weis ${weisVol ? 'vol' : 'min*'}</text>`;
+      } catch (_) {}
+    }
+
+    // ── VWAP bands at each brick's close time ──────────────────────
+    // The same reading as the VWAP line above: the band values in force at
+    // the moment each brick completed.
+    let renkoDay = null;
+    try {
+      const vb2 = _vwapBands(cs);
+      if (_chart.show.vwapBand !== false) {
+        const ciOf = show.map(b => cs.findIndex(x2 => x2.t >= b.t));
+        for (const [k, w, op, dash] of [[1, 1, 0.55, '2,3'], [2, 1.4, 0.8, '6,3'], [3, 1, 0.4, '1,4']]) {
+          for (const sgn of [1, -1]) {
+            let seg = [];
+            const flush = () => {
+              if (seg.length > 1)
+                svg += `<polyline points="${seg.join(' ')}" fill="none" stroke="#00d2d3" stroke-width="${w}" stroke-dasharray="${dash}" opacity="${op}"><title>VWAP ${sgn > 0 ? '+' : '−'}${k}σ</title></polyline>`;
+              seg = [];
+            };
+            show.forEach((b, i2) => {
+              const ci = ciOf[i2];
+              if (ci < 5 || !(vb2.sd[ci] > 0)) { flush(); return; }
+              const v = vb2.vw[ci] + sgn * k * vb2.sd[ci];
+              if (v < lo || v > hi) { flush(); return; }
+              seg.push(`${(padL + i2 * bw + bw / 2).toFixed(1)},${y(v).toFixed(1)}`);
+            });
+            flush();
+          }
+        }
+      }
+      if (!_chart.optionMeta) renkoDay = _dayType(cs);
+    } catch (_) {}
+
     // EMA overlays first, so bricks draw over them
     // slowest first, so the fast ones draw on top where they overlap
     for (const e of [..._brickEmas].reverse()) {
@@ -23599,6 +23987,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(last) + 3).toFixed(1)}"
             style="font-size:8.5px;fill:${e.col};font-weight:600;">${e.p}</text>`;
       }
+    }
+
+    // ── wicks ──────────────────────────────────────────────────────
+    // A move against the brick that went past the prior close but fell short
+    // of a reversal. Without these, Renko hides every failed reversal - and
+    // a failed reversal is usually where the stops were run. Drawn before
+    // the bodies so the body covers the join.
+    if (wicksOn) {
+      show.forEach((b, i) => {
+        if (b.wick == null) return;
+        const ex = Math.max(lo, Math.min(hi, b.wick));
+        const cx = padL + i * bw + bw / 2;
+        const col = b.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+        svg += `<line x1="${cx.toFixed(1)}" y1="${y(b.o).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${y(ex).toFixed(1)}" stroke="${col}" stroke-width="${Math.max(1, Math.min(2, bw * 0.18)).toFixed(1)}" opacity="0.85"><title>wick ${fmtInt(Math.round(b.wick))} — ${Math.round(Math.abs(b.wick - b.o))} pts against the brick, rejected</title></line>`;
+      });
     }
 
     show.forEach((b, i) => {
@@ -23626,6 +24029,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // disappears is exactly the flicker this engine exists to remove.
       svg += `<rect x="${(x + bw * inset).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * (1 - inset * 2)).toFixed(1)}" height="${Math.max(2, bot - top).toFixed(1)}" fill="${b.prov ? 'none' : col}" opacity="${slow ? 0.42 : 1}" stroke="${col}" stroke-width="${b.prov ? 1.4 : bHot ? (bpv.kind === 'climax' ? 1.8 : 1.2) : 0.6}" ${b.prov ? 'stroke-dasharray="2,2"' : ''}><title>${b.dir > 0 ? 'UP' : 'DOWN'} ${Math.round(b.o)}→${Math.round(b.c)} · took ${b.mins} min · ${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}${slow ? ' · SLOW: heavy theta for a single box' : ''}</title></rect>`;
     });
+    // ── bias strip ─────────────────────────────────────────────────
+    // One cell per entry brick, coloured by the bias box's direction at the
+    // moment that brick printed. An entry brick whose colour disagrees with
+    // the strip under it is a counter-trend trade by this method; a change
+    // of colour in the strip is a bias flip and is marked with a tick.
+    if (biasOn) {
+      try {
+        const sy = H - padB + 19, sh = 6;
+        let prevDir = null;
+        biasAt.forEach((bb, i) => {
+          const x = padL + i * bw;
+          const col = !bb ? 'rgba(255,255,255,0.12)'
+                    : bb.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+          const agree = bb && show[i].dir === bb.dir;
+          svg += `<rect x="${x.toFixed(1)}" y="${sy}" width="${Math.max(1, bw).toFixed(1)}" height="${sh}" fill="${col}" opacity="${bb ? (agree ? 0.95 : 0.5) : 1}"${bb && bb.prov ? ' stroke="#fff" stroke-width="0.4" stroke-dasharray="1,1"' : ''}/>`;
+          if (bb && prevDir != null && bb.dir !== prevDir)
+            svg += `<line x1="${x.toFixed(1)}" y1="${sy - 3}" x2="${x.toFixed(1)}" y2="${sy + sh + 1}" stroke="#fff" stroke-width="1.2"/>`;
+          if (bb) prevDir = bb.dir;
+        });
+        const bcol = biasNow > 0 ? 'var(--pos,#26a69a)' : biasNow < 0 ? 'var(--neg,#ef5350)' : 'var(--muted,#789)';
+        svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${sy + sh}" style="font-size:8.5px;font-weight:700;fill:${bcol};">bias ${biasBs} ${biasNow > 0 ? '▲' : biasNow < 0 ? '▼' : '–'}<title>Bias from ${biasBs}-point bricks (${(biasBs / bs).toFixed(1)}× the entry box). Trade entry bricks in this direction only; a dim cell marks an entry brick against it.</title></text>`;
+      } catch (_) {}
+    }
     for (let g = 0; g <= 4; g++) {
       const v = lo + (hi - lo) * g / 4;
       svg += `<text x="${(W - padR + 4).toFixed(1)}" y="${(y(v) + 3).toFixed(1)}" style="font-size:9px;fill:var(--muted,#789);">${fmtInt(Math.round(v))}</text>`;
@@ -23634,7 +24060,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     show.forEach((b, i) => { if (i % tick) return;
       svg += `<text x="${(padL + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
     const dirTxt = st.dir > 0 ? ['UP', 'var(--pos,#26a69a)'] : ['DOWN', 'var(--neg,#ef5350)'];
-    box.innerHTML = `<svg id="renkoSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}
+    box.innerHTML = (renkoDay ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:2px 6px 5px;">${_dayTypeBadge(renkoDay)}</div>` : '') + `<svg id="renkoSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}
         <g id="renkoCross" style="display:none;pointer-events:none;">
           <line id="renkoCrossV" y1="${padT}" y2="${H - padB}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
           <line id="renkoCrossH" x1="${padL}" x2="${W - padR}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
@@ -23663,7 +24089,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 6px;font-size:10px;">
         <b style="color:${dirTxt[1]};">${dirTxt[0]} · ${st.curRun} brick${st.curRun === 1 ? '' : 's'} running</b>
-        <span>box <b>${bs}</b> pts${mode === 'atr' ? (autoBox ? ' (ATR-14, widened to fit the session, locked)' : ' (ATR-14, locked for the session)') : ''}</span>
+        <span>box <b>${bs}</b> pts${mode === 'atr' ? (autoBox ? ' (ATR-14, widened to fit the session, locked)' : ' (ATR-14, locked for the session)') : mode === 'atrs' ? ` (ATR scalp: ${scalpNote}${clipped ? `; showing the latest ${show.length}` : ''})` : clipped ? ` (showing the latest ${show.length})` : ''} · reversal ${R}× (${bs * R} pts)</span>
+        ${biasOn ? `<span>bias <b style="color:${biasNow > 0 ? 'var(--pos,#26a69a)' : biasNow < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)'};">${biasNow > 0 ? 'UP' : biasNow < 0 ? 'DOWN' : 'none yet'}</b> on ${biasBs}-pt bricks${biasNow ? ` · ${biasRun} running` : ''}${biasNow && st.dir !== biasNow ? ' · <b style="color:#ffb300;">entry bricks against the bias</b>' : ''}</span>` : ''}
+        ${weisOn && waves.length ? (() => { const cw = waves[waves.length - 1]; return `<span style="color:var(--muted);">Weis: current ${cw.dir > 0 ? 'up' : 'down'} wave ${cw.n} brick${cw.n === 1 ? '' : 's'}${cw.effR != null ? `, ${Math.round(cw.effR * 100)}% of the last ${cw.dir > 0 ? 'up' : 'down'} wave's ${weisVol ? 'volume' : 'time'}` : ''}${cw.flag === 'weak' ? ' — <b style="color:#ffb300;">tiring</b>' : cw.flag === 'absorb' ? ' — <b style="color:#ab47bc;">absorbed</b>' : ''}</span>`; })() : ''}
         <span style="color:var(--muted);">${st.total} bricks · ${st.up} up / ${st.total - st.up} down · ${st.flips} reversals · longest run ${st.maxRun}</span>
         <span style="color:var(--muted);">median ${st.medianMins} min per brick · slowest ${st.slowest} min</span>
       </div>
@@ -23740,6 +24168,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             { hour: '2-digit', minute: '2-digit', hour12: true });
           tm.textContent = tstr;
           if (hv) hv.innerHTML = `<b>${tstr}</b> &nbsp; O <b>${fmtInt(Math.round(b2.o))}</b> C <b style="color:${b2.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${fmtInt(Math.round(b2.c))}</b>` +
+            (b2.wick != null ? ` &nbsp; wick <b>${fmtInt(Math.round(b2.wick))}</b>` : '') +
+            (biasOn && biasAt[i2] ? ` &nbsp; bias <b style="color:${biasAt[i2].dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${biasAt[i2].dir > 0 ? '▲' : '▼'}</b>` : '') +
             ` &nbsp; brick ${i2 + 1} of ${show.length} &nbsp; <span style="color:var(--muted);">cursor ${fmtInt(Math.round(price))}</span>`;
         });
         sv.addEventListener('mouseleave', () => { g.style.display = 'none'; if (hv) hv.textContent = ''; });
@@ -24586,6 +25016,36 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         }
       } catch (_) {}
     }
+    // ── previous day's high, low and close ────────────────────────
+    // Drawn as levels in their own right. The pivots are computed FROM them
+    // but never showed them, and PDH/PDL are the first targets and anchors
+    // an intraday desk marks. Skipped in historical replay: the stored
+    // previous-day set belongs to TODAY, so it would be the wrong day.
+    if (_chart.show.pdhl !== false) {
+      try {
+        const hist = typeof _isHistorical === 'function' && _isHistorical();
+        let fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
+        if (!fr && d.prev_high && d.prev_low && d.prev_close)
+          fr = { H: d.prev_high, L: d.prev_low, C: d.prev_close };
+        if (fr && !hist) {
+          L.push({ v: fr.H, lab: 'PDH', col: '#ff9f43', dash: '8,3', wide: true });
+          L.push({ v: fr.L, lab: 'PDL', col: '#48dbfb', dash: '8,3', wide: true });
+          if (fr.C) L.push({ v: fr.C, lab: 'PDC', col: '#c8d6e5', dash: '1,3' });
+        }
+      } catch (_) {}
+    }
+    // ── today's POC and value area ────────────────────────────────
+    if (_chart.show.vprof !== false) {
+      try {
+        const p = _sessionProfile(_chart.candles);
+        if (p) {
+          const t = p.tpo ? ' (time)' : '';
+          L.push({ v: p.poc, lab: `POC${t}`, col: '#feca57', dash: '', wide: true });
+          L.push({ v: p.vah, lab: 'VAH', col: '#feca57', dash: '5,4', minor: true });
+          L.push({ v: p.val, lab: 'VAL', col: '#feca57', dash: '5,4', minor: true });
+        }
+      } catch (_) {}
+    }
     return L.filter(x => x.v && isFinite(x.v));
   }
   // ── keep the newest candle growing between server polls ──
@@ -25118,6 +25578,44 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
 
     let svg = orbSvg + volSvg + gapSvg;
+    // Real candles at the same indices as cs. On Heikin Ashi cs is the
+    // transformed series, and anything about traded prices - VWAP, its
+    // bands, the day type - has to come from the real one.
+    const rawCs = (_chart.candles?.length === cs.length) ? _chart.candles : cs;
+    const vb = (_chart.show.vwapBand !== false || (_chart.show.haMarks !== false && (document.getElementById('chartType')?.value === 'ha')))
+      ? _vwapBands(rawCs) : null;
+
+    // ── VWAP ±1/2/3σ bands ─────────────────────────────────────────
+    // ±1σ the normal range and the trend-day pullback line, ±2σ the decision
+    // zone, ±3σ the extreme. Drawn under the candles. Split at the visible
+    // range edges, as the other lines are, so a band leaving view cannot draw
+    // a diagonal across the chart.
+    if (vb && _chart.show.vwapBand !== false) {
+      try {
+        for (const [k, w, op, dash] of [[1, 1, 0.55, '2,3'], [2, 1.4, 0.8, '6,3'], [3, 1, 0.4, '1,4']]) {
+          for (const sgn of [1, -1]) {
+            let seg = [];
+            const flush = () => {
+              if (seg.length > 1)
+                svg += `<polyline points="${seg.join(' ')}" fill="none" stroke="#00d2d3" stroke-width="${w}" stroke-dasharray="${dash}" opacity="${op}"><title>VWAP ${sgn > 0 ? '+' : '−'}${k}σ</title></polyline>`;
+              seg = [];
+            };
+            vb.vw.forEach((v, i2) => {
+              const sd = vb.sd[i2];
+              // the first few bars have almost no spread to measure
+              if (i2 < 5 || !(sd > 0)) { flush(); return; }
+              const b = v + sgn * k * sd;
+              if (b < lo || b > hi) { flush(); return; }
+              seg.push(`${x(i2).toFixed(1)},${y(b).toFixed(1)}`);
+            });
+            flush();
+            const li = vb.vw.length - 1, lb = vb.vw[li] + sgn * k * vb.sd[li];
+            if (k === 2 && vb.sd[li] > 0 && lb >= lo && lb <= hi)
+              svg += `<text x="${(W - padR + 3).toFixed(1)}" y="${(y(lb) + 3).toFixed(1)}" style="font-size:8px;fill:#00d2d3;opacity:0.9;">V${sgn > 0 ? '+' : '−'}2σ</text>`;
+          }
+        }
+      } catch (_) {}
+    }
     cs.forEach((c, i) => {
       // colour by body; for a flat body fall back to change vs the previous close
       const prevC = i > 0 ? cs[i - 1].c : c.o;
@@ -25193,6 +25691,78 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       if (i === cs.length - 1 && _chart.liveBar)
         svg += `<rect x="${(cx - cw / 2 - 1).toFixed(2)}" y="${(bodyTop - 1).toFixed(2)}" width="${cw + 2}" height="${(bodyH + 2).toFixed(2)}" fill="none" stroke="#fff" stroke-width="0.7" opacity="0.55"/>`;
     });
+
+    // ── Heikin Ashi reading aids ───────────────────────────────────
+    // HA is a trend filter, and its rules are about SHAPE:
+    //   strong   - a green bar with no lower wick (red: no upper wick). The
+    //              smoothing has not been able to find any selling at all.
+    //   ageing   - in an established run, three shrinking bodies and a wick
+    //              appearing against the trend. The usual cue for partial
+    //              profit, earlier than the colour flip, which comes late.
+    //   flip     - a colour change after a run of three or more. Marked as
+    //              confirmed only when the REAL close is on the same side of
+    //              VWAP as the new colour; a flip against VWAP is drawn as a
+    //              faint cross, because in chop those are mostly noise.
+    // Entries and stops belong on real prices, never on HA values - the
+    // marks say what the trend is doing, not where to put an order.
+    let haInfo = null;
+    if ((document.getElementById('chartType')?.value || 'candle') === 'ha' && _chart.show.haMarks !== false) {
+      try {
+        const N = _chart.liveBar ? cs.length - 1 : cs.length;     // completed bars only
+        const upOf = c => c.c >= c.o;
+        let run = 0, lastFlip = null, ageAt = null, strongRun = 0;
+        for (let i = 0; i < N; i++) {
+          const c = cs[i], up = upOf(c), cx = x(i);
+          const rng = Math.max(1e-9, c.h - c.l);
+          const tol = Math.max(0.05, rng * 0.03);
+          const lowW = Math.min(c.o, c.c) - c.l, upW = c.h - Math.max(c.o, c.c);
+          const strong = up ? lowW <= tol : upW <= tol;
+          const prevUp = i > 0 ? upOf(cs[i - 1]) : up;
+          if (i > 0 && up !== prevUp) {
+            // a flip: judge it only if the trend it ends was a real one
+            if (run >= 3) {
+              const agree = vb && (up ? rawCs[i].c > vb.vw[i] : rawCs[i].c < vb.vw[i]);
+              const col = up ? '#26de81' : '#ff6b81';
+              if (agree) {
+                const yy = up ? y(c.l) + 12 : y(c.h) - 12;
+                svg += `<path d="${up
+                  ? `M${(cx - 4.5).toFixed(1)},${(yy + 4).toFixed(1)} L${(cx + 4.5).toFixed(1)},${(yy + 4).toFixed(1)} L${cx.toFixed(1)},${(yy - 4).toFixed(1)} Z`
+                  : `M${(cx - 4.5).toFixed(1)},${(yy - 4).toFixed(1)} L${(cx + 4.5).toFixed(1)},${(yy - 4).toFixed(1)} L${cx.toFixed(1)},${(yy + 4).toFixed(1)} Z`}"
+                  fill="${col}" stroke="#0b0e14" stroke-width="0.7"><title>HA flip ${up ? 'UP' : 'DOWN'} after a ${run}-bar run, real close ${up ? 'above' : 'below'} VWAP — confirmed</title></path>`;
+              } else {
+                const yy = up ? y(c.l) + 10 : y(c.h) - 10;
+                svg += `<text x="${cx.toFixed(1)}" y="${(yy + 3).toFixed(1)}" text-anchor="middle" style="font-size:9px;fill:#9aa;opacity:0.7;">×<title>HA flip ${up ? 'up' : 'down'} AGAINST VWAP — the real close is on the wrong side; usually noise</title></text>`;
+              }
+              lastFlip = { t: c.t, up, agree: !!agree };
+            }
+            run = 1; ageAt = null; strongRun = 0;
+          } else run++;
+          strongRun = strong ? strongRun + 1 : 0;
+          // Marked once per streak, when it reaches three: in a trend almost
+          // every HA bar is wickless, and a dot on each one buries the chart.
+          // Three in a row is the point at which "strong" is a state.
+          if (strongRun === 3) {
+            const yy = up ? y(c.l) + 4 : y(c.h) - 4;
+            svg += `<circle cx="${cx.toFixed(1)}" cy="${yy.toFixed(1)}" r="1.5" fill="${up ? '#26de81' : '#ff6b81'}" opacity="0.9"><title>strong ${up ? 'up' : 'down'} — three bars in a row with no ${up ? 'lower' : 'upper'} wick</title></circle>`;
+          }
+          // ageing: once per run
+          if (ageAt == null && run >= 4 && i >= 2) {
+            const bd = k => Math.abs(cs[k].c - cs[k].o);
+            const opp = up ? lowW > tol : upW > tol;
+            if (bd(i) < bd(i - 1) && bd(i - 1) < bd(i - 2) && opp) {
+              ageAt = c.t;
+              const yy = up ? y(c.h) - 7 : y(c.l) + 7;
+              svg += `<circle cx="${cx.toFixed(1)}" cy="${yy.toFixed(1)}" r="3" fill="none" stroke="#ffb300" stroke-width="1.3"><title>trend ageing — three shrinking bodies and a wick against the run: partial profit, trail tighter</title></circle>`;
+            }
+          }
+        }
+        const lc = cs[Math.max(0, N - 1)];
+        const lRng = Math.max(1e-9, lc.h - lc.l);
+        const indecision = Math.abs(lc.c - lc.o) < lRng * 0.2 &&
+          (Math.min(lc.o, lc.c) - lc.l) > lRng * 0.15 && (lc.h - Math.max(lc.o, lc.c)) > lRng * 0.15;
+        haInfo = { up: upOf(lc), run, strongRun, lastFlip, ageing: ageAt != null, indecision };
+      } catch (_) { haInfo = null; }
+    }
     // EMA / VWAP polylines
     // The candle data checked out clean, so the next question is whether the
     // SERIES array holds one VWAP or several. This reports it once per change
@@ -25416,7 +25986,24 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // The context pane sits between the regime bar and the candles: reading
     // "SHIFTING" and then immediately seeing PCR, VIX and IV over the same
     // period is the pairing that makes the label mean something.
-    box.innerHTML = regBar + 
+    // range-or-trend day and the HA status, read before the chart itself
+    let dayBar = '';
+    try {
+      const dt = _chart.optionMeta ? null : _dayType(rawCs);
+      const ha = haInfo ? (() => {
+        const c = haInfo.up ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+        const fl = haInfo.lastFlip;
+        const parts = [`<b style="color:${c};">HA ${haInfo.up ? '▲' : '▼'} ${haInfo.run} bar${haInfo.run === 1 ? '' : 's'}</b>`];
+        if (haInfo.strongRun) parts.push(`<span style="color:${c};">${haInfo.strongRun} strong (no ${haInfo.up ? 'lower' : 'upper'} wick)</span>`);
+        if (haInfo.ageing) parts.push('<b style="color:#ffb300;">ageing — partial profit</b>');
+        if (haInfo.indecision) parts.push('<span style="color:#9ab;">last bar: indecision</span>');
+        if (fl) parts.push(`<span style="color:var(--muted,#789);">last flip ${new Date(fl.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })} ${fl.up ? '▲' : '▼'} ${fl.agree ? '<b style="color:#26de81;">VWAP-confirmed</b>' : 'against VWAP'}</span>`);
+        return `<span style="display:inline-flex;gap:8px;align-items:center;font-size:10px;" title="Heikin Ashi is a trend filter: take entries and stops from real candles, not from HA prices.">${parts.join(' · ')}</span>`;
+      })() : '';
+      if (dt || ha)
+        dayBar = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:2px 4px 5px;">${_dayTypeBadge(dt)}${ha}</div>`;
+    } catch (_) {}
+    box.innerHTML = regBar + dayBar +
       `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
@@ -26265,9 +26852,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
+      // new overlays default ON: a saved config predates them, and its
+      // missing key must not read as a deliberate "off"
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
     }
@@ -26416,6 +27006,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         renderPriceChart();
       });
     });
+    for (const id of ['renkoRev', 'renkoWicks', 'renkoBias', 'renkoWeis'])
+      document.getElementById(id)?.addEventListener('change', () => renderPriceChart());
     document.getElementById('chartType')?.addEventListener('change', _syncRenkoUi);
     document.getElementById('renkoBox')?.addEventListener('change', _syncRenkoUi);
     document.querySelectorAll('.chart-type-btn').forEach(b =>
@@ -32456,7 +33048,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   });
 
   document.addEventListener('click', e => {
-    if (!e.target.closest('.lookup-input-wrap')) lookupDropdown.style.display = 'none';
+    if (lookupDropdown && !e.target.closest('.lookup-input-wrap')) lookupDropdown.style.display = 'none';
   });
 
   document.querySelectorAll('input[name="lookupMode"]').forEach(r => {
