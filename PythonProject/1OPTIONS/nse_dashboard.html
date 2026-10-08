@@ -16718,6 +16718,279 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     </span>`;
   }
 
+  // ══ DESK SIGNALS ════════════════════════════════════════════════
+  // Buy/sell signals built from the futures-desk VWAP playbook, replacing
+  // the old vote-count markers on the charts. Three setups, each allowed
+  // only on the kind of day it works on:
+  //
+  //   BAND FADE      range day only (or a trend day that has lost VWAP).
+  //                  A bar tags ±2σ and closes back inside the band, with
+  //                  VWAP flat. Target VWAP, stop 0.5σ beyond the band.
+  //                  Never on a trend day: fading ±2σ there is the classic
+  //                  losing trade.
+  //   TREND PULLBACK trend day only, in the trend's direction. A pullback
+  //                  that tags ±1σ without losing VWAP and closes back
+  //                  beyond ±1σ. Target the ±2σ walk, stop under the bar.
+  //   VWAP RECLAIM   any day after 9:45. Five closes on one side of VWAP,
+  //   / LOSS         a close through it by 0.25σ, then a retest within four
+  //                  bars that holds. Target ±1.5σ, stop beyond the retest.
+  //
+  // Each trigger is then graded on the confirmations a desk would look for:
+  // Heikin Ashi colour agreeing, order flow (CVD) agreeing, volume behaving
+  // as the setup needs (drying up into a fade, expanding on a reclaim or a
+  // trend bounce), a known level within 0.35σ (PDH/PDL/PDC, the opening
+  // range, POC/VAH/VAL as they stood AT THAT BAR), and for fades the
+  // 10:00-11:30 window where mean reversion is strongest. Grade A or B is
+  // drawn; C is computed but not shown. A setup with less than 1:1 reward to
+  // risk is discarded outright.
+  //
+  // Everything is causal - each bar is judged only on data up to that bar,
+  // including the profile levels, which are recomputed as the session goes -
+  // and only completed bars can trigger. Outcomes (target or stop first) are
+  // then read off the bars that followed, so the chart grades its own calls.
+  let _deskCache = { key: '', out: null };
+  function _deskSignals(cs) {
+    if (!cs || cs.length < 40) return null;
+    const N = _chart.liveBar ? cs.length - 1 : cs.length;
+    const last = cs[cs.length - 1];
+    const key = `${cs.length}|${cs[0].t}|${last.t}|${N}|${Math.round(cs[N - 1]?.c || 0)}|${_chart.hasVolume}|${window._histDate || ''}`;
+    if (_deskCache.key === key) return _deskCache.out;
+    const istMin = t => {
+      const g = new Date(t * 1000);
+      const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+      return i2.getHours() * 60 + i2.getMinutes();
+    };
+    const bands = _vwapBands(cs);
+    const useV = _chart.hasVolume && cs.filter(c => c.v > 0).length >= cs.length * 0.5;
+    let cvd = null;
+    try { if (useV) cvd = _cvdSeries(cs); } catch (_) {}
+    const ha = _heikinAshi(cs);
+    const haUp = i => ha[i].c >= ha[i].o;
+
+    // fixed levels known before the bar: previous day, opening range
+    const fixed = [];
+    try {
+      const hist = typeof _isHistorical === 'function' && _isHistorical();
+      const d = state.lastData || {};
+      let fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
+      if (!fr && d.prev_high && d.prev_low) fr = { H: d.prev_high, L: d.prev_low, C: d.prev_close };
+      if (fr && !hist) {
+        fixed.push({ v: fr.H, k: 'PDH' }, { v: fr.L, k: 'PDL' });
+        if (fr.C) fixed.push({ v: fr.C, k: 'PDC' });
+      }
+    } catch (_) {}
+    const orb = cs.filter(c => { const m = istMin(c.t); return m >= 555 && m < 560; });
+    const orbHi = orb.length ? Math.max(...orb.map(c => c.h)) : null;
+    const orbLo = orb.length ? Math.min(...orb.map(c => c.l)) : null;
+
+    // profile levels as they stood, refreshed every 15 bars
+    let prof = null, profAt = -99;
+    const px0 = cs[0].c || 1, raw0 = px0 * 0.0002;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw0)));
+    const bucket = [1, 2, 5, 10].map(k => k * mag).find(s => s >= raw0) || 10 * mag;
+
+    // incremental day type, identical rules to _dayType
+    let side = 0, crosses = 0, winSide = 0, laterCross = false, decided = false;
+    const sigs = [];
+    const lastAt = {};
+    const morningLoaded = istMin(cs[0].t) <= 560;
+
+    for (let i = 1; i < N; i++) {
+      const c = cs[i], m = istMin(c.t);
+      const vw = bands.vw[i], sd = bands.sd[i];
+      if (m >= 560 && sd > 0) {
+        const dv = c.c - vw;
+        const s = dv > 0.25 * sd ? 1 : dv < -0.25 * sd ? -1 : 0;
+        if (s) {
+          if (m < 585) { if (side && s !== side) crosses++; side = s; winSide = s; }
+          else {
+            decided = true;
+            if (side && s !== side && !laterCross && winSide && !crosses) laterCross = true;
+            if (!laterCross) side = s;
+          }
+        }
+      }
+      if (m >= 585) decided = true;
+      if (!decided || !morningLoaded || m >= 915 || !(sd > 0) || i < 20) continue;
+      const trendDir = (!crosses && winSide && !laterCross) ? winSide : 0;
+      const dayKind = trendDir ? 'trend' : 'range';
+
+      if (i - profAt >= 15) {
+        try { const sl = cs.slice(0, i + 1); prof = _volumeProfile(useV ? sl : sl.map(b => ({ ...b, v: 1 })), bucket); } catch (_) { prof = null; }
+        profAt = i;
+      }
+      const lvls = fixed.slice();
+      if (orbHi != null && m >= 560) lvls.push({ v: orbHi, k: 'ORB high' }, { v: orbLo, k: 'ORB low' });
+      if (prof) lvls.push({ v: prof.poc, k: 'POC' }, { v: prof.vah, k: 'VAH' }, { v: prof.val, k: 'VAL' });
+      const near = p => lvls.find(l => l.v && Math.abs(l.v - p) <= 0.35 * sd);
+
+      const rng = Math.max(1e-9, c.h - c.l);
+      const avgV = useV ? (cs.slice(Math.max(0, i - 10), i).reduce((a, b) => a + (b.v || 0), 0) / Math.min(10, i)) : 0;
+      const cvdUp = cvd && i >= 5 ? (cvd[i].cum - cvd[i - 5].cum) : null;
+      const slope = i >= 10 && sd > 0 ? (vw - bands.vw[i - 10]) / sd : 0;
+
+      const cands = [];
+      // ── band fade ──
+      if (dayKind === 'range' && Math.abs(slope) < 0.5 && m < 900) {
+        for (const dir of [1, -1]) {
+          const band = vw - dir * 2 * sd;
+          const tagged = dir > 0 ? c.l <= band : c.h >= band;
+          const back = dir > 0 ? c.c > band : c.c < band;
+          const wick = dir > 0 ? (Math.min(c.o, c.c) - c.l) : (c.h - Math.max(c.o, c.c));
+          const reject = (dir > 0 ? c.c > c.o : c.c < c.o) || wick >= 0.4 * rng;
+          if (!(tagged && back && reject)) continue;
+          const stop = dir > 0 ? Math.min(c.l, vw - 2.5 * sd) : Math.max(c.h, vw + 2.5 * sd);
+          cands.push({ dir, setup: 'band fade', stop, target: vw,
+            conf: [
+              ['HA', dir > 0 ? haUp(i) : !haUp(i)],
+              useV && ['volume drying up', (c.v || 0) < avgV],
+              cvdUp != null && ['CVD turning', dir > 0 ? cvdUp > 0 : cvdUp < 0],
+              ['level', !!near(dir > 0 ? c.l : c.h), near(dir > 0 ? c.l : c.h)?.k],
+              ['10:00-11:30', m >= 600 && m <= 690],
+            ].filter(Boolean) });
+        }
+      }
+      // ── trend pullback ──
+      if (dayKind === 'trend') {
+        const dir = trendDir;
+        const b1 = vw + dir * sd;
+        const tagged = dir > 0 ? c.l <= b1 + 0.2 * sd : c.h >= b1 - 0.2 * sd;
+        const heldVwap = dir > 0 ? c.l > vw : c.h < vw;
+        const back = dir > 0 ? (c.c >= b1 && c.c > c.o) : (c.c <= b1 && c.c < c.o);
+        // it has to be a pullback FROM somewhere: price was out beyond 1.5σ recently
+        let wasOut = false;
+        for (let k = Math.max(0, i - 15); k < i; k++) {
+          const sdk = bands.sd[k], vk = bands.vw[k];
+          if (dir > 0 ? cs[k].h >= vk + 1.5 * sdk : cs[k].l <= vk - 1.5 * sdk) { wasOut = true; break; }
+        }
+        if (tagged && heldVwap && back && wasOut) {
+          const stop = dir > 0 ? c.l - 0.5 * sd : c.h + 0.5 * sd;
+          cands.push({ dir, setup: 'trend pullback', stop, target: vw + dir * 2 * sd,
+            conf: [
+              ['HA', dir > 0 ? haUp(i) : !haUp(i)],
+              useV && ['volume on the bounce', (c.v || 0) > avgV],
+              cvdUp != null && ['CVD with trend', dir > 0 ? cvdUp > 0 : cvdUp < 0],
+              ['level', !!near(dir > 0 ? c.l : c.h), near(dir > 0 ? c.l : c.h)?.k],
+              ['VWAP sloping', dir > 0 ? slope >= 0.3 : slope <= -0.3],
+            ].filter(Boolean) });
+        }
+      }
+      // ── VWAP reclaim / loss ──
+      for (const dir of [1, -1]) {
+        // find the reclaim bar j within the last four bars
+        for (let j = i - 1; j >= Math.max(6, i - 4); j--) {
+          const vj = bands.vw[j], sj = bands.sd[j];
+          const thru = dir > 0 ? cs[j].c > vj + 0.25 * sj : cs[j].c < vj - 0.25 * sj;
+          if (!thru) continue;
+          let before = true;
+          for (let k = j - 5; k < j; k++) if (dir > 0 ? cs[k].c >= bands.vw[k] : cs[k].c <= bands.vw[k]) { before = false; break; }
+          if (!before) break;
+          // bars between j and i must not have closed back through
+          let held = true;
+          for (let k = j + 1; k < i; k++) if (dir > 0 ? cs[k].c < bands.vw[k] : cs[k].c > bands.vw[k]) { held = false; break; }
+          const retest = dir > 0 ? (c.l <= vw + 0.35 * sd && c.c > vw && c.c > c.o)
+                                 : (c.h >= vw - 0.35 * sd && c.c < vw && c.c < c.o);
+          if (held && retest) {
+            const stop = dir > 0 ? Math.min(c.l, vw) - 0.25 * sd : Math.max(c.h, vw) + 0.25 * sd;
+            cands.push({ dir, setup: dir > 0 ? 'VWAP reclaim' : 'VWAP loss', stop, target: vw + dir * 1.5 * sd,
+              conf: [
+                ['HA', dir > 0 ? haUp(i) : !haUp(i)],
+                useV && ['volume on the reclaim', (cs[j].v || 0) > avgV],
+                cvdUp != null && ['CVD agreeing', dir > 0 ? cvdUp > 0 : cvdUp < 0],
+                ['level', !!near(vw), near(vw)?.k],
+                ['with the day', trendDir ? trendDir === dir : true],
+              ].filter(Boolean) });
+          }
+          break;
+        }
+      }
+
+      for (const cd of cands) {
+        const entry = c.c;
+        const risk = Math.abs(entry - cd.stop), reward = (cd.target - entry) * cd.dir;
+        if (!(risk > 0) || reward < risk) continue;           // under 1:1 - not a trade
+        const ck = `${cd.setup}|${cd.dir}`;
+        if (lastAt[ck] != null && i - lastAt[ck] < 8) continue;  // one per setup per 8 bars
+        const hits = cd.conf.filter(x => x[1]).length, avail = cd.conf.length;
+        const grade = hits >= 3 || (avail && hits / avail >= 0.75 && hits >= 2) ? 'A'
+                    : hits >= 2 || (avail && hits / avail >= 0.5) ? 'B' : 'C';
+        lastAt[ck] = i;
+        // outcome from the bars that followed
+        let outcome = 'open', outT = null;
+        for (let k = i + 1; k < N; k++) {
+          const hitStop = cd.dir > 0 ? cs[k].l <= cd.stop : cs[k].h >= cd.stop;
+          const hitTgt = cd.dir > 0 ? cs[k].h >= cd.target : cs[k].l <= cd.target;
+          if (hitStop) { outcome = 'stop'; outT = cs[k].t; break; }   // same bar: assume the stop
+          if (hitTgt) { outcome = 'target'; outT = cs[k].t; break; }
+        }
+        sigs.push({ i, t: c.t, dir: cd.dir, setup: cd.setup, day: dayKind, entry, stop: cd.stop, target: cd.target,
+                    rr: reward / risk, grade, hits, avail, outcome, outT,
+                    reasons: cd.conf.map(x => `${x[1] ? '✓' : '·'} ${x[0]}${x[1] && x[2] ? ' (' + x[2] + ')' : ''}`) });
+      }
+    }
+    const shown = sigs.filter(s => s.grade !== 'C');
+    const out = { sigs: shown, all: sigs.length,
+      won: shown.filter(s => s.outcome === 'target').length,
+      lost: shown.filter(s => s.outcome === 'stop').length,
+      open: shown.filter(s => s.outcome === 'open').length };
+    _deskCache = { key, out };
+    return out;
+  }
+
+  // Markers: an arrow at the trigger bar with BUY/SELL and the grade, the
+  // outcome appended once known, and entry/stop/target drawn for the latest
+  // signal while it is still open. xOf(i) and the bar extremes come from the
+  // caller so the same drawing serves candles, HA and Renko.
+  function _deskSignalSvg(ds, xOf, barHi, barLo, y, lo, hi, rightX) {
+    if (!ds?.sigs?.length) return '';
+    let out = '';
+    const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    ds.sigs.forEach((s, n) => {
+      const cx = xOf(s);
+      if (cx == null || !isFinite(cx)) return;
+      const up = s.dir > 0;
+      const anchor = up ? barLo(s) : barHi(s);
+      if (anchor < lo || anchor > hi) return;
+      const yy = up ? y(anchor) + 14 : y(anchor) - 14;
+      const col = up ? '#00e676' : '#ff1744';
+      const op = s.grade === 'A' ? 1 : 0.7;
+      const res = s.outcome === 'target' ? ' ✓' : s.outcome === 'stop' ? ' ✗' : '';
+      const tip = `${up ? 'BUY' : 'SELL'} ${s.grade} · ${s.setup} (${s.day} day) · ${hhmm(s.t)}\n` +
+        `entry ${fmtInt(Math.round(s.entry))} · stop ${fmtInt(Math.round(s.stop))} · target ${fmtInt(Math.round(s.target))} · ${s.rr.toFixed(1)}R\n` +
+        `confirmations ${s.hits}/${s.avail}: ${s.reasons.join(', ')}\n` +
+        (s.outcome === 'open' ? 'still open' : `${s.outcome === 'target' ? 'TARGET' : 'STOP'} hit at ${hhmm(s.outT)}`);
+      out += `<g opacity="${op}"><path d="${up
+        ? `M${(cx - 6).toFixed(1)},${(yy + 7).toFixed(1)} L${(cx + 6).toFixed(1)},${(yy + 7).toFixed(1)} L${cx.toFixed(1)},${(yy - 5).toFixed(1)} Z`
+        : `M${(cx - 6).toFixed(1)},${(yy - 7).toFixed(1)} L${(cx + 6).toFixed(1)},${(yy - 7).toFixed(1)} L${cx.toFixed(1)},${(yy + 5).toFixed(1)} Z`}"
+        fill="${col}" stroke="#0b0e14" stroke-width="0.9"><title>${escapeHtml(tip)}</title></path>
+        <text x="${cx.toFixed(1)}" y="${(up ? yy + 18 : yy - 10).toFixed(1)}" text-anchor="middle"
+          style="font-size:8.5px;fill:${col};font-weight:800;">${up ? 'BUY' : 'SELL'} ${s.grade}${res}<title>${escapeHtml(tip)}</title></text></g>`;
+      // live trade levels for the most recent signal while it is open
+      if (n === ds.sigs.length - 1 && s.outcome === 'open') {
+        for (const [v, c2, lab, dash] of [[s.entry, '#ffffff', 'entry', '2,2'], [s.stop, '#ff1744', 'stop', '4,3'], [s.target, '#00e676', 'target', '4,3']]) {
+          if (v < lo || v > hi) continue;
+          out += `<line x1="${cx.toFixed(1)}" y1="${y(v).toFixed(1)}" x2="${rightX.toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${c2}" stroke-width="1.2" stroke-dasharray="${dash}" opacity="0.85"/>
+            <text x="${(rightX - 3).toFixed(1)}" y="${(y(v) - 3).toFixed(1)}" text-anchor="end" style="font-size:8.5px;fill:${c2};font-weight:700;">${lab} ${fmtInt(Math.round(v))}</text>`;
+        }
+      }
+    });
+    return out;
+  }
+
+  function _deskSignalLine(ds) {
+    if (!ds) return '';
+    const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (!ds.sigs.length)
+      return `<span style="font-size:10px;color:var(--muted,#789);" title="Desk signals: band fade (range days), trend pullback to ±1σ (trend days), VWAP reclaim/loss with a held retest. Graded A/B on HA, CVD, volume, nearby levels and timing; under 1:1 reward-to-risk is discarded.">Desk signals: none yet today${ds.all ? ` (${ds.all} grade-C setups not shown)` : ''}</span>`;
+    const s = ds.sigs[ds.sigs.length - 1];
+    const up = s.dir > 0;
+    return `<span style="display:inline-flex;gap:8px;align-items:center;font-size:10px;" title="Desk signals: band fade (range days), trend pullback to ±1σ (trend days), VWAP reclaim/loss with a held retest. Graded A/B on HA, CVD, volume, nearby levels and timing; under 1:1 reward-to-risk is discarded. Outcome = which of target and stop the later bars hit first.">
+      <b style="color:${up ? '#00e676' : '#ff1744'};">last: ${up ? 'BUY' : 'SELL'} ${s.grade}</b>
+      <span style="color:#cdd;">${escapeHtml(s.setup)} ${hhmm(s.t)} @ ${fmtInt(Math.round(s.entry))} · stop ${fmtInt(Math.round(s.stop))} · target ${fmtInt(Math.round(s.target))} (${s.rr.toFixed(1)}R)${s.outcome === 'open' ? ' · <b>open</b>' : s.outcome === 'target' ? ' · <b style="color:#00e676;">target hit</b>' : ' · <b style="color:#ff1744;">stopped</b>'}</span>
+      <span style="color:var(--muted,#789);">today ${ds.sigs.length}: ${ds.won} target · ${ds.lost} stop · ${ds.open} open</span>
+    </span>`;
+  }
+
   // ── today's profile: POC and value area ───────────────────────────
   // Real volume at price when the feed has it; otherwise time at price
   // (TPO), the original Market Profile method, which is what an index with
