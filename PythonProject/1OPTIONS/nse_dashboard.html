@@ -4164,6 +4164,20 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 </div>
 
 <script>
+  // ── fast HH:MM ────────────────────────────────────────────────────
+  // toLocaleTimeString builds a new Intl formatter on every call, and the
+  // charts call it for every brick title, axis label and signal tooltip on
+  // every repaint - it showed up in the profile on its own. One formatter,
+  // and a cache, because the same minute is formatted again and again.
+  window._hm = (() => {
+    const f = new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const m = new Map();
+    return tSec => {
+      let s2 = m.get(tSec);
+      if (s2 === undefined) { s2 = f.format(new Date(tSec * 1000)); m.set(tSec, s2); if (m.size > 4000) m.clear(); }
+      return s2;
+    };
+  })();
   // ── build stamp ───────────────────────────────────────────────────
   // Printed on load so "did my copy actually take?" is answerable in one
   // glance. A 1.8 MB file is exactly the kind a browser caches hard, and
@@ -7333,7 +7347,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const stripVisible = strip && !_isPanelHidden('dualStrip');
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
-      const res = await fetch(`${base}/api/chain?symbol=${other}`);
+      const res = await fetch(`${base}/api/chain?symbol=${other}&maxage=60`);
       if (!res.ok) throw new Error(String(res.status));
       const d = await res.json();
       _checkDualAlerts(other, d);          // ← alerts fire even if strip hidden
@@ -7428,7 +7442,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!_replay.stamps.length) return;
     _replay.idx = Math.max(0, Math.min(_replay.stamps.length - 1, i));
     const lbl = document.getElementById('replayTimeLbl');
-    if (lbl) lbl.textContent = new Date(_replay.stamps[_replay.idx] * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (lbl) lbl.textContent = _hm(_replay.stamps[_replay.idx]);
     let snap = _replay.cache[_replay.idx];
     if (!snap) {
       try {
@@ -11805,8 +11819,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _tickRaf = 0;
       try {
         if (spot != null) {
-          _safe(() => renderPriceChart(), 'renderPriceChart');                       // chart + all level lines
-          _paint('home', () => renderMarketPulse(data), 'pulse');
+          _chartOnTick();          // forming candle + price line in place; full rebuild ≤1/s
+          // the pulse panel is a summary - once a second is plenty, and it
+          // was the next-largest per-tick cost after the chart
+          const nowP = performance.now();
+          if (!(nowP - (window._pulseAt || 0) < 1000)) {
+            window._pulseAt = nowP;
+            _paint('home', () => renderMarketPulse(data), 'pulse');
+          }
           _safe(() => checkLevelTouches(_lastLevels || [], data.underlying_value), 'levelTouch');
         }
         if (touchedChain) {
@@ -11957,8 +11977,86 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // The server keeps ONE fired-history and broadcasts to every system, so a
   // level touch is announced once network-wide instead of depending on each
   // browser's private cooldown map.
+  // ══ CENTRAL VOICE GATE ══════════════════════════════════════════
+  // Every family throttled itself, but only level touches and option flow
+  // went through the hourly budget - the other eleven families bypassed it,
+  // so on a busy day the cap that was meant to protect your attention
+  // covered the two LEAST important families. And nothing stopped two
+  // families talking over each other in opposite directions a minute apart.
+  //
+  // Every spoken alert now passes one gate, on both the relayed and the
+  // local path:
+  //   1. your own alerts (price alerts you set, the voice test) always pass
+  //   2. market hours only - nothing between 15:31 and 09:14, or at weekends
+  //   3. the hourly budget, by priority: high always passes, normal until
+  //      the cap, low only while under 70% of it
+  //   4. no contradiction: a directional call opposite to one spoken in the
+  //      last three minutes is held back unless it is high priority
+  //   5. on a TREND day, a "resistance touched" in an uptrend (support in a
+  //      downtrend) is not spoken - the level is in the trend's path, price
+  //      tends to go straight through, and the phrase invites a fade
+  // Whatever is held back is written to the voice diagnostics with the
+  // reason, so a silent alert is explainable rather than lost.
+  const _VG = { lastDir: null, recentText: new Map() };
+  function _voicePriority(key) {
+    const k = String(key);
+    if (/^(alert|custom|voicetest)\|/.test(k)) return 'user';
+    if (/^(level|flow)\|/.test(k)) return 'governed';      // budgeted at source
+    if (/^(shock|daytype|trendbrk)\|/.test(k) || /^desk\|A\|/.test(k)) return 'high';
+    if (/^lead\|[^|]+\|(regime|gflip)/.test(k)) return 'high';
+    // short-average crossovers on 1-minute bars happen every few minutes
+    if (/^emax\|[^|]+\|ema(5|10|15|20)\|/.test(k)) return 'low';
+    if (/^pxma\|[^|]+\|ema(5|10|15|20)\|/.test(k)) return 'low';
+    return 'normal';
+  }
+  function _voiceDirOf(text) {
+    const t = String(text);
+    const bull = /\b(BULLISH|bullish|BUY|buy signal|TREND DAY UP|trend day up)\b/.test(t);
+    const bear = /\b(BEARISH|bearish|SELL|sell signal|TREND DAY DOWN|trend day down)\b/.test(t);
+    return bull && !bear ? 1 : bear && !bull ? -1 : 0;
+  }
+  function _voiceGate(key, text) {
+    const pri = _voicePriority(key);
+    if (pri === 'user') return true;
+    const now = Date.now();
+    // the same announcement reaching the local path after a failed relay
+    // has already been judged; do not judge (or count) it twice
+    for (const [t2, ts] of _VG.recentText) if (now - ts > 30000) _VG.recentText.delete(t2);
+    if (_VG.recentText.has(text)) return true;
+    try {
+      const g = new Date(now), ist = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+      const m = ist.getHours() * 60 + ist.getMinutes(), wd = ist.getDay();
+      if (wd === 0 || wd === 6 || m < 554 || m > 931) { _voiceDiag(key, 'held: outside market hours'); return false; }
+    } catch (_) {}
+    if (pri === 'governed') {
+      // level touches: on a trend day, do not announce levels in the trend's path
+      try {
+        if (/^level\|/.test(key) && !(typeof _isHistorical === 'function' && _isHistorical()) && !_chart.optionMeta) {
+          const dt = _dayType(_chart.candles || []);
+          if (dt && dt.kind === 'trend' &&
+              ((dt.dir > 0 && /^RESISTANCE/.test(text)) || (dt.dir < 0 && /^SUPPORT/.test(text)))) {
+            _voiceDiag(key, `held: ${dt.label} — a level in the trend's path`);
+            return false;
+          }
+        }
+      } catch (_) {}
+    } else {
+      const dir = _voiceDirOf(text);
+      if (dir && pri !== 'high' && _VG.lastDir && _VG.lastDir.dir === -dir && now - _VG.lastDir.t < 180000) {
+        _voiceDiag(key, `held: contradicts "${_VG.lastDir.text.slice(0, 40)}" ${Math.round((now - _VG.lastDir.t) / 1000)}s ago`);
+        return false;
+      }
+      if (!_alertAllowed(pri)) { _voiceDiag(key, `held: hourly alert budget (${pri})`); return false; }
+      if (dir) _VG.lastDir = { dir, t: now, text: String(text) };
+    }
+    _VG.recentText.set(text, now);
+    return true;
+  }
+
   async function _relayAlert(key, text, kind, cooldownSec, symOverride) {
     if (!_streamLive) return false;          // offline: caller speaks locally
+    // held by the gate = handled: the caller must not fall back to speaking
+    if (!_voiceGate(key, text)) return true;
     // Gate BEFORE relaying. Relaying an alert for a muted index broadcasts it
     // to every connected machine, and any machine with a different filter will
     // then announce it - so filtering only on the receive side is too late.
@@ -12027,6 +12125,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _voiceDiag(key, 'skipped: voice off on this browser');
       return false;
     }
+    // gate after the voice check, so a muted browser does not spend the budget
+    if (!_voiceGate(key, text)) return false;
     const granted = await _voiceClaim(key, ttlSec);
     if (!granted) { _voiceDiag(key, 'another browser/tab is announcing this'); return false; }
     _flowSpeak(text);
@@ -14373,6 +14473,33 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     window._atCache = { t, at: now };
     return t;
   }
+  // ── paint only what can be seen ───────────────────────────────────
+  // About twenty panels on Home re-rendered on every poll, most of them
+  // below the fold, plus the Flow and Paper tabs while hidden. Pure
+  // renderers (they draw and nothing else - no history, alerts or saved
+  // state) now skip while their box is off screen and run the moment it
+  // scrolls into view or its tab opens, using the latest data. Anything
+  // that records or alerts is NOT routed through here and runs every poll.
+  const _pv = { io: null, seen: new Map(), pend: new Map() };
+  function _paintVis(boxId, fn, name) {
+    const el = document.getElementById(boxId);
+    if (!el || typeof IntersectionObserver === 'undefined') { try { fn(); } catch (e) { console.warn(`[pipeline] ${name} failed:`, e); } return; }
+    if (!_pv.io) {
+      _pv.io = new IntersectionObserver(entries => {
+        for (const en of entries) {
+          _pv.seen.set(en.target.id, en.isIntersecting);
+          if (en.isIntersecting && _pv.pend.has(en.target.id)) {
+            const f = _pv.pend.get(en.target.id); _pv.pend.delete(en.target.id);
+            try { f(); } catch (e) { console.warn('[pipeline] deferred paint failed:', e); }
+          }
+        }
+      }, { rootMargin: '400px 0px' });
+    }
+    if (!_pv.seen.has(boxId)) { _pv.io.observe(el); _pv.seen.set(boxId, true); }   // first time: paint
+    if (_pv.seen.get(boxId) === false) { _pv.pend.set(boxId, fn); return; }
+    _pv.pend.delete(boxId);
+    try { fn(); } catch (e) { console.warn(`[pipeline] ${name} failed:`, e); }
+  }
   function _paint(tab, fn, name) {
     try {
       if (tab && _activeTabNow() && _activeTabNow() !== tab) return;
@@ -14464,42 +14591,45 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _alertsCheck(data); } catch (_) {}
     try { _freshFlowCheck(data); } catch (_) {}
     try { _leadingCheck(data); } catch (_) {}
-    try { renderDepth(data); } catch (_) {}
-    try { renderVolumeProfile(); } catch (_) {}
+    _paintVis('depthBody', () => renderDepth(data), 'renderDepth');
+    _paintVis('vpBody', () => renderVolumeProfile(), 'renderVolumeProfile');
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
-    try { _ladderRecord(data); renderLadder(data); } catch (_) {}
-    try { renderRegime(data); } catch (_) {}
-    try { _htfFetch(); renderHtf(data); } catch (_) {}
+    try { _ladderRecord(data); } catch (_) {}
+    _paintVis('ladderBody', () => renderLadder(data), 'renderLadder');
+    _paintVis('regimeMapBody', () => renderRegime(data), 'renderRegime');
+    try { _htfFetch(); } catch (_) {}
+    _paintVis('htfBody', () => renderHtf(data), 'renderHtf');
     try { _maturityCheck(data); } catch (_) {}
-    try { renderSentiment(data); } catch (_) {}
-    try { renderBudget(data); } catch (_) {}
+    _paintVis('sentBody', () => renderSentiment(data), 'renderSentiment');
+    _paintVis('budgetBody', () => renderBudget(data), 'renderBudget');
     try { renderDelta90(data); } catch (_) {}
-    try { renderPositioning(data); } catch (_) {}
+    _paintVis('posnBody', () => renderPositioning(data), 'renderPositioning');
     try { _signalCheck(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
-    try { _driftRecord(data); renderDrift(data); } catch (_) {}
+    try { _driftRecord(data); } catch (_) {}
+    _paintVis('driftBody', () => renderDrift(data), 'renderDrift');
     try {
       _scoreResolve(data?.underlying_value, state.symbol, data?.atm_iv, data?.dte);
       _confluence(data);          // records each vote for scoring
       renderScorecard();
     } catch (_) {}
-    try { renderCapitalFlow(data); } catch (_) {}
+    _paintVis('capFlowBody', () => renderCapitalFlow(data), 'renderCapitalFlow');
     try { renderSurfaceArb(data); } catch (_) {}
     try { _pcrBandCheck(data); } catch (_) {}
     try { _shockCheck(data); } catch (_) {}
-    try { renderHeroZero(data); } catch (_) {}
-    try { renderAggressor(data); } catch (_) {}
+    _paintVis('hzBody', () => renderHeroZero(data), 'renderHeroZero');
+    _paintVis('aggrBody', () => renderAggressor(data), 'renderAggressor');
     try { _trendCheck(data); } catch (_) {}
-    try { renderFlowRange(data); } catch (_) {}
-    try { renderRegimeSignals(data); } catch (_) {}
-    try { renderChainAnalytics(data); } catch (_) {}
-    try { renderVolPanel(data); } catch (_) {}
-    try { renderRangeForecast(data); } catch (_) {}
+    _paintVis('flowRangeBody', () => renderFlowRange(data), 'renderFlowRange');
+    _paintVis('regimeBody', () => renderRegimeSignals(data), 'renderRegimeSignals');
+    _paintVis('chainAnalytics', () => renderChainAnalytics(data), 'renderChainAnalytics');
+    _paintVis('volAnalytics', () => renderVolPanel(data), 'renderVolPanel');
+    _paintVis('rangeFc', () => renderRangeForecast(data), 'renderRangeForecast');
     try { renderAttribution(data); } catch (_) {}
-    try { renderTradeStats(); } catch (_) {}
-    try { renderVolSurfaceTerm(data); } catch (_) {}
+    _paintVis('tjStatsBox', () => renderTradeStats(), 'renderTradeStats');
+    _paintVis('volSurface', () => renderVolSurfaceTerm(data), 'renderVolSurfaceTerm');
     try {
       if (_chart.candles.length) {
         _chartLiveExtend(data?.underlying_value);
@@ -14508,6 +14638,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
     try { _populateStrikeList(); } catch (_) {}
     try { _m920TouchCheck(data); } catch (_) {}
+    try { _mqFetch(); } catch (_) {}
+    try { _deskVoiceCheck(); } catch (_) {}
     try {
       _paint('home', () => renderMarketPulse(data), 'renderMarketPulse');
       const ps = document.getElementById('pulseStamp');
@@ -15173,10 +15305,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return;
     }
     if (_alertVolume() <= 0.01) console.warn('[voice] volume slider is at 0 — speech will be near-silent. Raise the 🔊 slider.');
-    let text = label;
-    if (/^R(\d+)$/.test(label)) text = `Resistance ${label.slice(1)} touched at ${Math.round(price)}`;
-    else if (/^S(\d+)$/.test(label)) text = `Support ${label.slice(1)} touched at ${Math.round(price)}`;
-    else text = `${label} touched at ${Math.round(price)}`;
+    // Same phrasing as the relayed path, and through the same gate - the
+    // local path built its own text and spoke it directly, so with the
+    // stream down level touches skipped every rule the relay applied.
+    const text = _lvlPhrase(label, price);
+    if (!_voiceGate(`level|${state.symbol || 'NIFTY'}|${label}|${Math.round(price)}`, text)) return;
     _voiceEnqueue(text);
     while (_voiceQ.length > 3) {           // cap backlog: keep newest 3
       const dropped = _voiceQ.shift();
@@ -15330,7 +15463,28 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // generate false crosses from position vs. new levels.
   let _prevSpotForAlerts = null;
 
+  // Levels the desk playbook trades off, added to the touch alerts. The
+  // touch list was the day's pivots only, so the first targets an intraday
+  // desk marks - yesterday's high and low, and today's value area - never
+  // announced themselves.
+  function _deskTouchLevels() {
+    if (_chart.optionMeta || (typeof _isHistorical === 'function' && _isHistorical())) return [];
+    const out = [];
+    try {
+      const d = state.lastData || {};
+      let fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
+      if (!fr && d.prev_high && d.prev_low) fr = { H: d.prev_high, L: d.prev_low };
+      if (fr) out.push(['Previous day high', fr.H, 'r'], ['Previous day low', fr.L, 's']);
+      const p = _sessionProfile(_chart.candles || []);
+      // the value area only means something once the session has built one
+      if (p && (_chart.candles || []).length >= 60)
+        out.push(['Value area high', p.vah, 'r'], ['Point of control', p.poc, 'p'], ['Value area low', p.val, 's']);
+    } catch (_) {}
+    return out.filter(l => l[1] && isFinite(l[1]));
+  }
+
   function checkLevelTouches(levels, spot) {
+    levels = (levels || []).concat(_deskTouchLevels());
     // Index filter applies to DETECTION, not just to the voice: a muted index
     // should not fill the history either. The baseline still advances so that
     // re-enabling the index does not fire a burst of stale crossings.
@@ -16685,7 +16839,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         if (!laterCross) side = s;
       }
     }
-    const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const hhmm = t => _hm(t);
     if (!done)
       return { kind: 'forming', z, crosses,
                label: 'Day type: forming', advice: `classifies at 9:45 · ${crosses} VWAP cross${crosses === 1 ? '' : 'es'} so far` };
@@ -16793,6 +16947,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let side = 0, crosses = 0, winSide = 0, laterCross = false, decided = false;
     const sigs = [];
     const lastAt = {};
+    // A fade that was stopped out blocks further fades the same way until
+    // price trades back to VWAP: two strikes into a market that is walking
+    // the band is how a range-day playbook loses money on the day the range
+    // turns into a trend.
+    const fadeLive = { 1: null, '-1': null }, fadeBlock = { 1: false, '-1': false };
     const morningLoaded = istMin(cs[0].t) <= 560;
 
     for (let i = 1; i < N; i++) {
@@ -16814,6 +16973,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (!decided || !morningLoaded || m >= 915 || !(sd > 0) || i < 20) continue;
       const trendDir = (!crosses && winSide && !laterCross) ? winSide : 0;
       const dayKind = trendDir ? 'trend' : 'range';
+      // fade bookkeeping, before this bar is judged
+      if (c.l <= vw && c.h >= vw) { fadeLive[1] = fadeLive[-1] = null; fadeBlock[1] = fadeBlock[-1] = false; }
+      for (const fd of [1, -1]) {
+        const f = fadeLive[fd];
+        if (f && (fd > 0 ? c.l <= f : c.h >= f)) { fadeBlock[fd] = true; fadeLive[fd] = null; }
+      }
+      // band walk: most of the last 20 closes beyond ±1σ on one side. That is
+      // a trend in progress whatever the morning said, and it is not faded.
+      let walkUp = 0, walkDn = 0;
+      for (let k = Math.max(0, i - 20); k < i; k++) {
+        if (cs[k].c > bands.vw[k] + bands.sd[k]) walkUp++;
+        else if (cs[k].c < bands.vw[k] - bands.sd[k]) walkDn++;
+      }
 
       if (i - profAt >= 15) {
         try { const sl = cs.slice(0, i + 1); prof = _volumeProfile(useV ? sl : sl.map(b => ({ ...b, v: 1 })), bucket); } catch (_) { prof = null; }
@@ -16839,6 +17011,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           const wick = dir > 0 ? (Math.min(c.o, c.c) - c.l) : (c.h - Math.max(c.o, c.c));
           const reject = (dir > 0 ? c.c > c.o : c.c < c.o) || wick >= 0.4 * rng;
           if (!(tagged && back && reject)) continue;
+          if (fadeBlock[dir]) continue;
+          if (dir < 0 ? walkUp >= 12 : walkDn >= 12) continue;
           const stop = dir > 0 ? Math.min(c.l, vw - 2.5 * sd) : Math.max(c.h, vw + 2.5 * sd);
           cands.push({ dir, setup: 'band fade', stop, target: vw,
             conf: [
@@ -16878,13 +17052,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // ── VWAP reclaim / loss ──
       for (const dir of [1, -1]) {
         // find the reclaim bar j within the last four bars
-        for (let j = i - 1; j >= Math.max(6, i - 4); j--) {
+        for (let j = i - 1; j >= Math.max(9, i - 4); j--) {
           const vj = bands.vw[j], sj = bands.sd[j];
           const thru = dir > 0 ? cs[j].c > vj + 0.25 * sj : cs[j].c < vj - 0.25 * sj;
           if (!thru) continue;
-          let before = true;
-          for (let k = j - 5; k < j; k++) if (dir > 0 ? cs[k].c >= bands.vw[k] : cs[k].c <= bands.vw[k]) { before = false; break; }
-          if (!before) break;
+          // j must be the FIRST decisive close through VWAP, after a spell on
+          // the other side: at least five of the eight closes before it on
+          // the far side, and none of them already through by 0.25σ. (The
+          // close just before a reclaim usually sits a hair over VWAP, so
+          // demanding five in a row on the far side almost never matched.)
+          let far = 0, already = false;
+          for (let k = j - 8; k < j; k++) {
+            const vk = bands.vw[k], sk = bands.sd[k];
+            if (dir > 0 ? cs[k].c < vk : cs[k].c > vk) far++;
+            if (dir > 0 ? cs[k].c > vk + 0.25 * sk : cs[k].c < vk - 0.25 * sk) already = true;
+          }
+          if (far < 5 || already) break;
           // bars between j and i must not have closed back through
           let held = true;
           for (let k = j + 1; k < i; k++) if (dir > 0 ? cs[k].c < bands.vw[k] : cs[k].c > bands.vw[k]) { held = false; break; }
@@ -16915,6 +17098,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const grade = hits >= 3 || (avail && hits / avail >= 0.75 && hits >= 2) ? 'A'
                     : hits >= 2 || (avail && hits / avail >= 0.5) ? 'B' : 'C';
         lastAt[ck] = i;
+        if (cd.setup === 'band fade') fadeLive[cd.dir] = cd.stop;
         // outcome from the bars that followed
         let outcome = 'open', outT = null;
         for (let k = i + 1; k < N; k++) {
@@ -16944,7 +17128,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _deskSignalSvg(ds, xOf, barHi, barLo, y, lo, hi, rightX) {
     if (!ds?.sigs?.length) return '';
     let out = '';
-    const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const hhmm = t => _hm(t);
     ds.sigs.forEach((s, n) => {
       const cx = xOf(s);
       if (cx == null || !isFinite(cx)) return;
@@ -16979,7 +17163,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   function _deskSignalLine(ds) {
     if (!ds) return '';
-    const hhmm = t => new Date(t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const hhmm = t => _hm(t);
     if (!ds.sigs.length)
       return `<span style="font-size:10px;color:var(--muted,#789);" title="Desk signals: band fade (range days), trend pullback to ±1σ (trend days), VWAP reclaim/loss with a held retest. Graded A/B on HA, CVD, volume, nearby levels and timing; under 1:1 reward-to-risk is discarded.">Desk signals: none yet today${ds.all ? ` (${ds.all} grade-C setups not shown)` : ''}</span>`;
     const s = ds.sigs[ds.sigs.length - 1];
@@ -16991,6 +17175,529 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     </span>`;
   }
 
+  // ══ LEAD SIGNALS — liquidity sweep and reclaim ═════════════════════
+  // The chart's BUY/SELL markers. Every previous signal here waited for a
+  // trend to show itself - an average to cross, a band to be held, a VWAP
+  // to be reclaimed - so it arrived after the turn by construction.
+  //
+  // This one fires AT the turn. Above every obvious high (a swing high, the
+  // day's high, yesterday's high, the opening-range high) sit buy stops and
+  // breakout orders; below every obvious low, sell stops. Desks and other
+  // large traders need that liquidity to fill size, so price is driven
+  // through the level to trigger it - and when the triggered orders are
+  // absorbed instead of followed, price snaps back inside. The snap-back is
+  // the signal: breakout traders are now trapped on the wrong side and
+  // their exits fuel the reversal. It is the failed auction of Market
+  // Profile and the stop run of order-flow trading.
+  //
+  //   TRIGGER   a bar pokes beyond a liquidity pool and closes back inside
+  //             it in the same bar, or one bar after a small break. The poke
+  //             must be modest (at most 1.2 ATR) - a large range bar through
+  //             a level is a breakout, not a sweep.
+  //   PRICE     confirmations, computed for every bar: a strong rejection
+  //             close, a volume spike on the sweep (the stops were hit and
+  //             absorbed), CVD failing to confirm the new extreme, a key
+  //             level or a cluster of levels, price stretched to ±1.5σ from
+  //             VWAP, and the day type agreeing.
+  //   FLOW      confirmations, read LIVE at the moment of the sweep - the
+  //             parts that move before price:
+  //               synthetic basis  ATM call minus put (put-call parity gives
+  //                                the futures price the OPTIONS imply). If
+  //                                it drops against spot at a high sweep,
+  //                                option traders are selling into the move.
+  //               futures book     resting bids against offers in the near
+  //                                future.
+  //               futures basis    futures leading spot over the last minute.
+  //             These exist only in real time, so they are recorded at the
+  //             moment of detection and kept for the day; a sweep found
+  //             later from history is graded on price evidence alone.
+  //
+  // Stop 0.15 ATR beyond the sweep extreme, target 2R. A sweep AGAINST a
+  // trend day must clear a higher bar. Grade A or B is drawn and spoken.
+  // Outcomes are read off the bars that followed. An unconfirmed sweep on
+  // the forming bar is drawn hollow as an early warning only.
+  const _LF = { s: [], at: 0 };
+  function _leadSample(d) {
+    try {
+      const now = Date.now();
+      if (now - _LF.at < 1000 || !d?.strikes?.length || !d.underlying_value) return;
+      _LF.at = now;
+      const spot = d.underlying_value;
+      let row = null, best = Infinity;
+      for (const r of d.strikes) { const dd = Math.abs(r.strike - spot); if (dd < best) { best = dd; row = r; } }
+      if (!row || !(row.ce_ltp > 0) || !(row.pe_ltp > 0)) return;
+      _LF.s.push({ t: now, spot, K: row.strike, ce: row.ce_ltp, pe: row.pe_ltp, sym: d.symbol || state.symbol });
+      while (_LF.s.length && now - _LF.s[0].t > 300000) _LF.s.shift();
+    } catch (_) {}
+  }
+  function _leadPremLead() {
+    const s = _LF.s, s1 = s[s.length - 1];
+    if (!s1) return null;
+    let s0 = null;
+    for (const x of s) {
+      if (x.K !== s1.K || x.sym !== s1.sym) continue;
+      if (s1.t - x.t >= 45000) s0 = x; else break;
+    }
+    if (!s0) return null;
+    const b = x => (x.K + x.ce - x.pe) - x.spot;           // synthetic basis
+    return { v: b(s1) - b(s0), secs: Math.round((s1.t - s0.t) / 1000) };
+  }
+  function _leadFlowNow(d, dir) {
+    const spot = d?.underlying_value || 0;
+    const thr = Math.max(1, spot * 0.00008);
+    const out = [];
+    try {
+      const p = _leadPremLead();
+      if (p) out.push({ k: 'synthetic basis', ok: dir > 0 ? p.v >= thr : p.v <= -thr,
+                        why: `${p.v >= 0 ? '+' : ''}${p.v.toFixed(1)} pts in ${p.secs}s` });
+    } catch (_) {}
+    try {
+      const fb = _futBooks(d)?.near?.book;
+      if (fb && fb.ratio != null && isFinite(fb.ratio))
+        out.push({ k: 'futures book', ok: dir > 0 ? fb.ratio >= 1.3 : fb.ratio <= 1 / 1.3,
+                   why: `bids/offers ${fb.ratio.toFixed(2)}` });
+    } catch (_) {}
+    try {
+      const fr = _futuresRead(d);
+      if (fr && fr.basisDelta != null)
+        out.push({ k: 'futures basis', ok: dir > 0 ? fr.basisDelta >= 1 : fr.basisDelta <= -1,
+                   why: `${fr.basisDelta >= 0 ? '+' : ''}${fr.basisDelta.toFixed(1)} pts in 1 min` });
+    } catch (_) {}
+    return out;
+  }
+  let _leadRecVer = 0;
+  // Flow readings are kept for ten trading days, not just today, so a
+  // session you traded live still shows its live-flow grades when you open
+  // it later in historical mode. Keys carry the bar time, so days never mix.
+  function _leadRec() {
+    const day = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+    let o = null;
+    try { o = JSON.parse(localStorage.getItem('leadFlowV1') || 'null'); } catch (_) {}
+    if (!o || !o.m) o = { day, m: {} };
+    if (o.day !== day) {
+      const cut = Date.now() / 1000 - 14 * 86400;
+      for (const k of Object.keys(o.m)) { const t = +String(k).split('|')[1]; if (!(t > cut)) delete o.m[k]; }
+      o.day = day;
+    }
+    return o;
+  }
+  function _leadRecPut(k, flow) {
+    const o = _leadRec();
+    o.m[k] = flow;
+    try { localStorage.setItem('leadFlowV1', JSON.stringify(o)); } catch (_) {}
+    _leadRecVer++;
+  }
+
+  let _leadCache = { key: '', out: null };
+  function _leadSignals(cs) {
+    if (!cs || cs.length < 30) return null;
+    const N = _chart.liveBar ? cs.length - 1 : cs.length;
+    const sym = state.symbol || 'NIFTY';
+    const lastC = cs[N - 1], live = _chart.liveBar ? cs[cs.length - 1] : null;
+    // Keyed on COMPLETED bars only: the history pass runs once a minute.
+    // The forming bar only feeds the early-warning check at the end, which
+    // reuses the pools this pass leaves behind.
+    const key = `${sym}|${N}|${cs[0].t}|${lastC.t}|${lastC.c}|${lastC.h}|${lastC.l}|${_chart.hasVolume}|${_leadRecVer}|${window._histDate || ''}`;
+    if (_leadCache.key === key && _leadCache.core) return _leadForming(_leadCache, cs, live);
+    const istMin = t => {
+      const g = new Date(t * 1000);
+      const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+      return i2.getHours() * 60 + i2.getMinutes();
+    };
+    const bands = _vwapBands(cs);
+    const useV = _chart.hasVolume && cs.filter(c => c.v > 0).length >= cs.length * 0.5;
+    let cvd = null;
+    try { if (useV) cvd = _cvdSeries(cs); } catch (_) {}
+    // ATR-14 per bar from the bars before it (prefix sums, no allocation)
+    const trPre = [0];
+    for (let i = 1; i < cs.length; i++) {
+      const c = cs[i], pc = cs[i - 1].c;
+      trPre.push(trPre[i - 1] + Math.max(c.h - c.l, Math.abs(c.h - pc), Math.abs(c.l - pc)));
+    }
+    const atrAt = i => {
+      const a = Math.max(1, i - 14), n = i - a;
+      return n > 0 ? (trPre[i] - trPre[a]) / n : ((cs[i].h - cs[i].l) || 1);
+    };
+    const rec = _leadRec().m;
+    const hist = typeof _isHistorical === 'function' && _isHistorical();
+
+    // known levels: previous day, opening range
+    const fixed = [];
+    try {
+      const d = state.lastData || {};
+      let fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
+      if (!fr && d.prev_high && d.prev_low) fr = { H: d.prev_high, L: d.prev_low };
+      if (fr && !hist) fixed.push({ v: fr.H, side: 1, kind: 'previous day high', key: true }, { v: fr.L, side: -1, kind: 'previous day low', key: true });
+    } catch (_) {}
+    const orb = cs.filter(c => { const m = istMin(c.t); return m >= 555 && m < 560; });
+    let orbAdded = false;
+
+    const pools = fixed.map(p => ({ ...p, alive: true, k: -1, above: 0 }));
+    // The day's own high and low are the most watched levels of all. Kept as
+    // two moving pools: each new extreme (set at least three bars ago, so a
+    // high made a minute ago is not yet "liquidity") replaces the old one.
+    const dayHi = { v: null, side: 1, kind: 'day high', key: true, alive: false, k: -1, above: 0 };
+    const dayLo = { v: null, side: -1, kind: 'day low', key: true, alive: false, k: -1, above: 0 };
+    pools.push(dayHi, dayLo);
+    let runHi = -Infinity, runLo = Infinity, runHiK = -1, runLoK = -1;
+    let side = 0, crosses = 0, winSide = 0, laterCross = false;
+    const sigs = [];
+    const lastAt = { 1: -99, '-1': -99 };
+    const sweepAt = (i, c, sideP) => {
+      // pools on this side the bar has poked through and closed back inside
+      const atr = atrAt(i), tol = Math.max(0.5, 0.05 * atr), hits = [];
+      for (const p of pools) {
+        if (!p.alive || p.side !== sideP) continue;
+        const beyond = sideP > 0 ? c.h - p.v : p.v - c.l;
+        const back = sideP > 0 ? c.c < p.v : c.c > p.v;
+        if (beyond >= tol && beyond <= 1.2 * atr && back) hits.push({ p, two: false });
+        else if (i > 0) {
+          const pc = cs[i - 1];
+          const prevOut = sideP > 0 ? pc.c > p.v : pc.c < p.v;
+          const ext = sideP > 0 ? Math.max(pc.h, c.h) - p.v : p.v - Math.min(pc.l, c.l);
+          const turn = sideP > 0 ? (c.c < p.v && c.c < c.o) : (c.c > p.v && c.c > c.o);
+          if (prevOut && turn && ext <= 1.2 * atr && p.above <= 1) hits.push({ p, two: true });
+        }
+      }
+      return hits;
+    };
+
+    for (let i = 1; i < N; i++) {
+      const c = cs[i], m = istMin(c.t), vw = bands.vw[i], sd = bands.sd[i];
+      // day type, incrementally (same rules as _dayType)
+      if (m >= 560 && sd > 0) {
+        const dv = c.c - vw, s = dv > 0.25 * sd ? 1 : dv < -0.25 * sd ? -1 : 0;
+        if (s) {
+          if (m < 585) { if (side && s !== side) crosses++; side = s; winSide = s; }
+          else { if (side && s !== side && !laterCross && winSide && !crosses) laterCross = true; if (!laterCross) side = s; }
+        }
+      }
+      const trendDir = (m >= 585 && !crosses && winSide && !laterCross) ? winSide : 0;
+      // day extremes from bars up to three back
+      const j3 = i - 3;
+      if (j3 >= 0 && istMin(cs[j3].t) >= 555) {
+        if (cs[j3].h > runHi) { runHi = cs[j3].h; runHiK = j3; }
+        if (cs[j3].l < runLo) { runLo = cs[j3].l; runLoK = j3; }
+        if (dayHi.v !== runHi && m >= 570) { Object.assign(dayHi, { v: runHi, k: runHiK, alive: true, above: 0 }); }
+        if (dayLo.v !== runLo && m >= 570) { Object.assign(dayLo, { v: runLo, k: runLoK, alive: true, above: 0 }); }
+      }
+      // opening range becomes a pool once it is complete
+      if (!orbAdded && orb.length && m >= 560) {
+        pools.push({ v: Math.max(...orb.map(x => x.h)), side: 1, kind: 'opening-range high', key: true, alive: true, k: -1, above: 0 });
+        pools.push({ v: Math.min(...orb.map(x => x.l)), side: -1, kind: 'opening-range low', key: true, alive: true, k: -1, above: 0 });
+        orbAdded = true;
+      }
+      // swing pivots confirmed three bars later
+      const k = i - 4;
+      if (k >= 3) {
+        const hk = cs[k].h, lk = cs[k].l;
+        let isH = true, isL = true;
+        for (let j = k - 3; j <= k + 3; j++) {
+          if (j === k) continue;
+          if (j < k ? cs[j].h >= hk : cs[j].h > hk) isH = false;
+          if (j < k ? cs[j].l <= lk : cs[j].l < lk) isL = false;
+        }
+        if (isH) pools.push({ v: hk, side: 1, kind: 'swing high', key: false, alive: true, k, above: 0 });
+        if (isL) pools.push({ v: lk, side: -1, kind: 'swing low', key: false, alive: true, k, above: 0 });
+      }
+
+      const atr = atrAt(i);
+      if (m >= 560 && m < 915 && i >= 15) {
+        for (const sideP of [1, -1]) {
+          const dir = -sideP;
+          if (i - lastAt[dir] < 5) continue;
+          const hits = sweepAt(i, c, sideP);
+          if (!hits.length) continue;
+          // the most meaningful pool swept; several at once is confluence
+          hits.sort((a, b) => (b.p.key - a.p.key) || (sideP > 0 ? b.p.v - a.p.v : a.p.v - b.p.v));
+          const h0 = hits[0], two = h0.two;
+          const ext = sideP > 0 ? Math.max(c.h, two ? cs[i - 1].h : -Infinity) : Math.min(c.l, two ? cs[i - 1].l : Infinity);
+          // Beyond the sweep extreme plus a buffer - and never closer than
+          // 0.6 ATR to entry. A stop a few points past the wick sits inside
+          // ordinary one-minute noise, and the first wobble takes it; that
+          // was most of the early losses when tested.
+          const entry = c.c;
+          const stop = sideP > 0 ? Math.max(ext + 0.15 * atr, entry + 0.6 * atr)
+                                 : Math.min(ext - 0.15 * atr, entry - 0.6 * atr);
+          const risk = Math.abs(stop - entry);
+          if (!(risk > 0) || risk > 2.2 * atr) continue;
+          const target = entry + dir * 2 * risk;
+          const rng = Math.max(1e-9, c.h - c.l);
+          const avgV = useV ? cs.slice(Math.max(0, i - 10), i).reduce((a, b) => a + (b.v || 0), 0) / Math.min(10, i) : 0;
+          const sweepV = useV ? (c.v || 0) + (two ? (cs[i - 1].v || 0) : 0) : 0;
+          const against = trendDir && trendDir !== dir;
+          const conf = [
+            ['rejection close', sideP > 0 ? (c.h - c.c) / rng >= 0.65 : (c.c - c.l) / rng >= 0.65],
+            useV && ['volume on the sweep', sweepV >= 1.3 * avgV * (two ? 2 : 1)],
+            cvd && h0.p.k >= 0 && ['CVD did not confirm', sideP > 0 ? cvd[i].cum < cvd[h0.p.k].cum : cvd[i].cum > cvd[h0.p.k].cum],
+            ['key level', h0.p.key || hits.length >= 2, h0.p.key ? h0.p.kind : hits.length >= 2 ? `${hits.length} levels` : ''],
+            sd > 0 && ['stretched from VWAP', sideP > 0 ? ext >= vw + 1.5 * sd : ext <= vw - 1.5 * sd],
+            ['day type', !against, trendDir ? (trendDir === dir ? 'with the trend' : 'AGAINST the trend') : 'range day'],
+          ].filter(Boolean);
+          const rk = `${sym}|${c.t}|${dir}`;
+          const flow = rec[rk] || null;
+          for (const f of (flow || [])) conf.push([`${f.k} (live)`, !!f.ok, f.why]);
+          const hitsN = conf.filter(x => x[1]).length;
+          const flowHits = (flow || []).filter(f => f.ok).length;
+          let grade = hitsN >= 4 || (hitsN >= 3 && flowHits >= 1) ? 'A' : hitsN >= 2 ? 'B' : 'C';
+          if (against && grade !== 'A') grade = 'C';            // fading a trend day needs the best evidence
+          for (const hh of hits) hh.p.alive = false;            // a pool is consumed by its sweep
+          lastAt[dir] = i;
+          let outcome = 'open', outT = null;
+          for (let q = i + 1; q < N; q++) {
+            const hs = dir > 0 ? cs[q].l <= stop : cs[q].h >= stop;
+            const ht = dir > 0 ? cs[q].h >= target : cs[q].l <= target;
+            if (hs) { outcome = 'stop'; outT = cs[q].t; break; }
+            if (ht) { outcome = 'target'; outT = cs[q].t; break; }
+          }
+          sigs.push({ i, t: c.t, dir, setup: `sweep of ${h0.p.kind}${two ? ' (failed breakout)' : ''}`, day: trendDir ? 'trend' : 'range',
+                      entry, stop, target, rr: 2, grade, hits: hitsN, avail: conf.length, outcome, outT, rk, hasFlow: !!flow,
+                      reasons: conf.map(x => `${x[1] ? '✓' : '·'} ${x[0]}${x[2] ? ' (' + x[2] + ')' : ''}`) });
+        }
+      }
+      // pools that price has ACCEPTED beyond (two closes through) are gone
+      for (const p of pools) {
+        if (!p.alive) continue;
+        const out = p.side > 0 ? c.c > p.v : c.c < p.v;
+        p.above = out ? p.above + 1 : 0;
+        if (p.above >= 2) p.alive = false;
+        if (Math.abs(p.v - c.c) > 4 * atr && p.k >= 0 && i - p.k > 60) p.alive = false;
+      }
+    }
+    const shown = sigs.filter(s => s.grade !== 'C');
+    const core = { sigs: shown, raw: sigs, all: sigs.length,
+      won: shown.filter(s => s.outcome === 'target').length,
+      lost: shown.filter(s => s.outcome === 'stop').length,
+      open: shown.filter(s => s.outcome === 'open').length };
+    _leadCache = { key, core, pools: pools.filter(p => p.alive && p.v != null), atr: atrAt(N - 1), hist, fKey: '', fOut: null };
+    return _leadForming(_leadCache, cs, live);
+  }
+
+  // The early warning: has the forming bar poked a live pool and come back
+  // inside? Same single-bar test as the confirmed signal, against the pools
+  // the history pass left alive - a few comparisons per tick.
+  function _leadForming(C, cs, live) {
+    const fKey = live ? `${live.t}|${live.h}|${live.l}|${live.c}` : '-';
+    if (C.fKey === fKey && C.fOut) return C.fOut;
+    let forming = null;
+    if (live && !C.hist) {
+      const atr = C.atr || 1, tol = Math.max(0.5, 0.05 * atr);
+      for (const p of C.pools) {
+        const beyond = p.side > 0 ? live.h - p.v : p.v - live.l;
+        const back = p.side > 0 ? live.c < p.v : live.c > p.v;
+        if (beyond >= tol && beyond <= 1.2 * atr && back) {
+          forming = { dir: -p.side, t: live.t, i: cs.length - 1, kind: p.kind, v: p.v };
+          if (p.key) break;
+        }
+      }
+    }
+    C.fKey = fKey;
+    C.fOut = Object.assign({}, C.core, { forming });
+    return C.fOut;
+  }
+
+  // Live bookkeeping: sample the option chain for the synthetic basis, and
+  // stamp the flow readings onto a sweep the moment it is first seen.
+  function _leadLiveCheck(d) {
+    try { _leadSample(d); } catch (_) {}
+    if (_chart.optionMeta || (typeof _isHistorical === 'function' && _isHistorical())) return;
+    const cs = _chart.candles || [];
+    const ls = _leadSignals(cs);
+    if (!ls) return;
+    const N = _chart.liveBar ? cs.length - 1 : cs.length;
+    if (N < 1) return;
+    const lastDoneT = cs[N - 1].t, barSec = (_chart.interval || 1) * 60;
+    if (Date.now() / 1000 - (lastDoneT + barSec) > barSec * 2) return;   // too late to be "live"
+    const rec = _leadRec().m;
+    let stamped = false;
+    // every grade, not only A/B: a C on price evidence may be lifted by flow
+    for (const sg of (ls.raw || [])) {
+      if (sg.t !== lastDoneT || rec[sg.rk]) continue;
+      _leadRecPut(sg.rk, _leadFlowNow(d, sg.dir));
+      stamped = true;
+    }
+    if (stamped) { try { renderPriceChart(); } catch (_) {} }
+  }
+
+  function _leadSignalLine(ds) {
+    if (!ds) return '';
+    const help = 'Lead signals: liquidity sweep and reclaim. Price pokes beyond a high or low where stops sit (swing, day, previous-day or opening-range extreme) and closes straight back inside - the stops were taken and absorbed, and breakout traders are trapped. Fires at the turn, not after it. Graded on rejection, volume, CVD, level, VWAP stretch and day type, plus live option and futures flow recorded at the moment of the sweep. Stop beyond the sweep, target 2R.';
+    const form = ds.forming ? `<span style="color:#ffd54f;font-weight:700;" title="The forming bar has swept the ${escapeHtml(ds.forming.kind)} at ${fmtInt(Math.round(ds.forming.v))} and is back inside. Not a signal until the bar closes that way.">◇ ${ds.forming.dir > 0 ? 'bullish' : 'bearish'} sweep forming at ${escapeHtml(ds.forming.kind)}</span>` : '';
+    if (!ds.sigs.length)
+      return `<span style="display:inline-flex;gap:10px;font-size:10px;color:var(--muted,#789);" title="${escapeHtml(help)}">Lead signals: none yet today${ds.all ? ` (${ds.all} weak sweeps not shown)` : ''} ${form}</span>`;
+    const s = ds.sigs[ds.sigs.length - 1], up = s.dir > 0;
+    return `<span style="display:inline-flex;gap:8px;align-items:center;font-size:10px;flex-wrap:wrap;" title="${escapeHtml(help)}">
+      <b style="color:${up ? '#00e676' : '#ff1744'};">last: ${up ? 'BUY' : 'SELL'} ${s.grade}</b>
+      <span style="color:#cdd;">${escapeHtml(s.setup)} ${_hm(s.t)} @ ${fmtInt(Math.round(s.entry))} · stop ${fmtInt(Math.round(s.stop))} · target ${fmtInt(Math.round(s.target))}${s.outcome === 'open' ? ' · <b>open</b>' : s.outcome === 'target' ? ' · <b style="color:#00e676;">target hit</b>' : ' · <b style="color:#ff1744;">stopped</b>'}</span>
+      <span style="color:var(--muted,#789);">today ${ds.sigs.length}: ${ds.won} target · ${ds.lost} stop · ${ds.open} open</span> ${form}
+    </span>`;
+  }
+  function _leadFormingSvg(ds, xOf, y, lo, hi) {
+    const f = ds?.forming;
+    if (!f) return '';
+    const cx = xOf(f);
+    if (cx == null || f.v < lo || f.v > hi) return '';
+    const yy = y(f.v) + (f.dir > 0 ? 12 : -12);
+    return `<path d="M${cx.toFixed(1)},${(yy - 6).toFixed(1)} L${(cx + 6).toFixed(1)},${yy.toFixed(1)} L${cx.toFixed(1)},${(yy + 6).toFixed(1)} L${(cx - 6).toFixed(1)},${yy.toFixed(1)} Z"
+      fill="none" stroke="#ffd54f" stroke-width="1.4" stroke-dasharray="2,1.5"><title>${f.dir > 0 ? 'Bullish' : 'Bearish'} sweep FORMING: the ${escapeHtml(f.kind)} at ${fmtInt(Math.round(f.v))} was taken and price is back inside. Confirms only if the bar closes this way.</title></path>`;
+  }
+
+  // ── desk voice ────────────────────────────────────────────────────
+  // The new playbook speaks for itself: the day-type call at 9:45, a trend
+  // day losing VWAP, each new A or B signal on the bar that triggers it,
+  // and the outcome of the A signals. Only on the LIVE index chart - a
+  // historical replay or an option-premium chart must never announce.
+  // Announced keys persist for the day, so a refresh does not repeat them.
+  function _deskVoiceSeen() {
+    const day = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+    let o = null;
+    try { o = JSON.parse(localStorage.getItem('deskVoiceV1') || 'null'); } catch (_) {}
+    if (!o || o.day !== day) o = { day, keys: [] };
+    return o;
+  }
+  function _deskVoiceMark(o, k) {
+    o.keys.push(k); if (o.keys.length > 200) o.keys = o.keys.slice(-200);
+    try { localStorage.setItem('deskVoiceV1', JSON.stringify(o)); } catch (_) {}
+  }
+  function _deskSay(key, text) {
+    try {
+      if (_streamLive) _relayAlert(key, text, 'level', 600);
+      else _speakOnce(key, text, 600);
+    } catch (_) {}
+  }
+  function _deskVoiceCheck() {
+    if (_chart.optionMeta || (typeof _isHistorical === 'function' && _isHistorical())) return;
+    const cs = _chart.candles || [];
+    if (cs.length < 40) return;
+    const sym = state.symbol || 'NIFTY';
+    const seen = _deskVoiceSeen();
+    const has = k => seen.keys.includes(k);
+    const say = (k, text, toast) => {
+      if (has(k)) return;
+      _deskVoiceMark(seen, k);
+      _deskSay(k, text);
+      if (toast && typeof showToast === 'function') showToast(toast);
+    };
+    // the day type, once it is decided, and the break of a trend day
+    try {
+      const dt = _dayType(cs);
+      if (dt && (dt.kind === 'range' || dt.kind === 'trend'))
+        say(`daytype|${sym}|${seen.day}`,
+          dt.kind === 'range'
+            ? `${sym} range day. VWAP was crossed by 9 45. Fade the two sigma bands back toward VWAP.`
+            : `${sym} trend day ${dt.dir > 0 ? 'up' : 'down'}. No VWAP cross by 9 45. Do not fade the two sigma band; ${dt.dir > 0 ? 'buy pullbacks that hold plus one sigma' : 'sell rallies that fail at minus one sigma'}.`,
+          `${dt.kind === 'range' ? '↔ RANGE DAY' : dt.dir > 0 ? '⬆ TREND DAY UP' : '⬇ TREND DAY DOWN'}`);
+      if (dt && dt.kind === 'trend-broken')
+        say(`trendbrk|${sym}|${seen.day}`,
+          `${sym} trend day ${dt.dir > 0 ? 'up' : 'down'} has lost VWAP. Treat the rest of the session as a range.`,
+          '⚠ TREND DAY BROKEN — now a range');
+    } catch (_) {}
+    // move quality: warn once per leg when a sizeable move looks likely to
+    // reverse - calibrated probability of 70%+, or, before calibration, the
+    // evidence lopsided against it by five or more
+    try {
+      const mq = _mqView();
+      const L = mq?.leg;
+      if (L && L.qualified) {
+        const hot = mq.p_fake != null ? mq.p_fake >= 0.7 : (mq.against - mq.for >= 5);
+        if (hot) {
+          const word = L.dir > 0 ? 'Rally' : 'Fall';
+          const what = mq.p_fake != null ? `reversal probability ${Math.round(mq.p_fake * 100)} percent`
+                                         : `${mq.against} of the signals say it is fake`;
+          say(`move|${sym}|${L.start_t}|${L.dir}`,
+              `${word} of ${Math.round(L.ext_size)} points on ${sym} looks weak: ${what}.`,
+              `⚠ ${word} ${Math.round(L.ext_size)} pts looks weak — ${mq.p_fake != null ? Math.round(mq.p_fake * 100) + '% reversal' : mq.against + ' fake signals'}`);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // ══ MOVE QUALITY — is this rally or fall real? ═════════════════════
+  // Replaces the BUY/SELL markers. The server scores the current leg on
+  // nine pieces of evidence (futures OI, option writers, futures and
+  // option-implied basis, VIX, efficiency, momentum, acceptance, VWAP/day
+  // type) read at the leg's extreme, and turns them into a reversal
+  // probability calibrated on your own earlier recorded days. Until enough
+  // labelled moves exist it shows the evidence count only - a percentage
+  // with nothing behind it would be a guess dressed as a number.
+  // Read from the replay archive: no broker calls.
+  const _MQ = { d: null, at: 0, key: '', busy: false };
+  async function _mqFetch(force) {
+    if (_chart.optionMeta) { _MQ.d = null; return; }
+    const sym = state.symbol || 'NIFTY', date = window._histDate || '';
+    const key = `${sym}|${date}`;
+    const now = Date.now();
+    if (_MQ.busy) return;
+    if (!force && key === _MQ.key && now - _MQ.at < (date ? 600000 : 20000)) return;
+    _MQ.busy = true;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const spot = date ? '' : (state.lastData?.underlying_value || '');
+      const j = await (await fetch(`${base}/api/move-quality?symbol=${encodeURIComponent(sym)}` +
+        (date ? `&date=${date}` : '') + (spot ? `&spot=${spot}` : ''), { signal: AbortSignal.timeout(8000) })).json();
+      _MQ.d = j; _MQ.key = key; _MQ.at = Date.now();
+      // calibration builds in the background on first use: ask again soon
+      if (j?.calib?.building) _MQ.at = Date.now() - 15000;
+      try { renderPriceChart(); } catch (_) {}
+    } catch (_) { /* keep the last reading */ }
+    finally { _MQ.busy = false; }
+  }
+  function _mqView() {
+    const m = _MQ.d;
+    if (!m || m.error || !m.leg || m.symbol !== (state.symbol || 'NIFTY')) return null;
+    if ((window._histDate || '') !== (m.date === new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10) ? '' : m.date)) return null;
+    return m;
+  }
+  // the leg itself: start to the latest price, labelled at its end
+  function _mqLegSvg(m, xStart, xNow, y, lo, hi) {
+    const L = m.leg;
+    if (xStart == null || xNow == null || !L.qualified) return '';
+    const a = L.start_px, b = L.now_px;
+    if (a < lo || a > hi || b < lo || b > hi) return '';
+    const col = m.p_fake != null ? (m.p_fake >= 0.6 ? '#ffb300' : m.p_fake <= 0.4 ? '#00e676' : '#9ab')
+              : (m.against - m.for >= 2 ? '#ffb300' : m.for - m.against >= 2 ? '#00e676' : '#9ab');
+    return `<line x1="${xStart.toFixed(1)}" y1="${y(a).toFixed(1)}" x2="${xNow.toFixed(1)}" y2="${y(b).toFixed(1)}"
+        stroke="${col}" stroke-width="1.6" stroke-dasharray="6,3" opacity="0.9"/>
+      <circle cx="${xStart.toFixed(1)}" cy="${y(a).toFixed(1)}" r="2.6" fill="${col}"/>`;
+  }
+  // the small box, bottom-right of the plot
+  function _mqBoxSvg(m, W, H, padR, padB) {
+    const L = m.leg, up = L.dir > 0;
+    const bw = 236, rowH = 10.5;
+    const feats = m.features || [];
+    const rows = Math.ceil(feats.length / 2);
+    const bh = 44 + rows * rowH + 4;
+    const x0 = W - padR - bw - 4, y0 = H - padB - bh - 4;
+    const word = up ? 'RALLY' : 'FALL';
+    const head = `${word} ${up ? '+' : '−'}${Math.round(L.ext_size)} pts · ${L.mins} min`;
+    let pLine, pCol, sub;
+    if (!L.qualified) {
+      pLine = `too small to score (needs ${Math.round(L.qual)} pts)`; pCol = '#9ab'; sub = '';
+    } else if (m.p_fake != null) {
+      const pc = Math.round(m.p_fake * 100);
+      pLine = `Reversal ${pc}%`; pCol = pc >= 60 ? '#ffb300' : pc <= 40 ? '#00e676' : '#cfd8dc';
+      sub = `calibrated · ${m.calib.samples} moves / ${m.calib.days} days`;
+    } else {
+      pLine = `Evidence ${m.for} real · ${m.against} fake`;
+      pCol = m.against - m.for >= 2 ? '#ffb300' : m.for - m.against >= 2 ? '#00e676' : '#cfd8dc';
+      sub = m.calib.building ? 'building calibration from recorded days…' : `calibrating · ${m.calib.samples}/30 moves`;
+    }
+    const retr = L.retraced > 0.02 ? ` · ${Math.round(L.retraced * 100)}% given back` : '';
+    let out = `<g><rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="4"
+        fill="rgba(14,17,23,0.93)" stroke="rgba(255,255,255,0.18)"/>
+      <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 12).toFixed(1)}" style="font-size:9.5px;font-weight:800;fill:${up ? '#26a69a' : '#ef5350'};">${head}<tspan style="font-weight:400;fill:#9ab;">${retr}</tspan></text>
+      <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 26).toFixed(1)}" style="font-size:11px;font-weight:800;fill:${pCol};">${escapeHtml(pLine)}</text>
+      <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 37).toFixed(1)}" style="font-size:7.5px;fill:#789;">${escapeHtml(sub)}</text>`;
+    feats.forEach((f, k) => {
+      const cx = x0 + 7 + (k % 2) * (bw / 2 - 2), cy = y0 + 49 + Math.floor(k / 2) * rowH;
+      const mark = f.v > 0 ? '✓' : f.v < 0 ? '✗' : '·';
+      const col = f.v > 0 ? '#26a69a' : f.v < 0 ? '#ffb300' : '#789';
+      out += `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" style="font-size:8px;fill:${col};">${mark} ${escapeHtml(f.name)}<title>${escapeHtml(f.name)}: ${escapeHtml(f.why)} — ${f.v > 0 ? 'supports the move' : f.v < 0 ? 'says it is fake' : 'neutral'}</title></text>`;
+    });
+    out += `<title>Is this ${up ? 'rally' : 'fall'} real? Evidence read at the leg's ${up ? 'high' : 'low'} (${fmtInt(Math.round(L.ext_px))}), from ${fmtInt(Math.round(L.start_px))} at ${_hm(L.start_t)}. FAKE = gives back 61.8% before extending 50%. ✓ supports the move, ✗ says it is fake. ${m.p_fake != null ? 'The probability is naive Bayes over the nine signals, fitted on your earlier recorded days only.' : 'No probability until 30 labelled moves (10 of each kind) exist from earlier recorded days.'}</title></g>`;
+    return out;
+  }
+
   // ── today's profile: POC and value area ───────────────────────────
   // Real volume at price when the feed has it; otherwise time at price
   // (TPO), the original Market Profile method, which is what an index with
@@ -16999,8 +17706,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   let _profCache = { key: '', p: null };
   function _sessionProfile(cs) {
     if (!cs || cs.length < 15) return null;
+    // Completed bars only. Keyed on the forming bar's price, the profile was
+    // rebuilt from scratch on every tick; the forming minute adds nothing a
+    // POC or value area should move on, and it is in the next minute's build.
+    if (_chart.liveBar && cs === _chart.candles) cs = cs.slice(0, -1);
     const last = cs[cs.length - 1];
-    const key = `${cs.length}|${cs[0].t}|${last.t}|${Math.round(last.c)}|${_chart.hasVolume}`;
+    const key = `${cs.length}|${cs[0].t}|${last.t}|${last.c}|${last.v || 0}|${_chart.hasVolume}`;
     if (_profCache.key === key) return _profCache.p;
     const px = last.c || 1;
     const raw = px * 0.0002;
@@ -18196,6 +18907,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const W = 100;   // percent units for the bars
     const bar = (v, col, title) =>
       `<span title="${escapeHtml(title)}" style="display:inline-block;height:8px;width:${(v * W).toFixed(1)}%;background:${col};border-radius:2px;vertical-align:middle;"></span>`;
+    // `say` was referenced here but never defined, so this panel threw on
+    // every poll and the error was swallowed - it has been blank. Restored:
+    // the level, its distance, its strength, and whether dealers there damp
+    // or amplify a move.
+    const say = (r, lab) => {
+      if (!r) return `<span style="color:var(--muted);">${lab}: none in range</span>`;
+      const col = lab === 'Resistance' ? '#ef5350' : '#26a69a';
+      const dist = Math.round(Math.abs(r.k - (L.spot || 0)));
+      return `<span><b style="color:${col};">${lab} ${fmtInt(r.k)}</b>
+        <span style="color:var(--muted);">${dist} pts away · strength ${Math.round((r.strength || 0) * 100)}%</span>
+        <b style="color:${r.kind === 'pin' ? '#9ab' : '#fd9644'};">${r.kind === 'pin' ? 'PINS (dealers damp moves here)' : 'ACCELERATES (dealers chase through it)'}</b></span>`;
+    };
     // The bars are gone. They required mentally mapping strikes onto price
     // before they meant anything, and that mapping was the work — the lines
     // on the chart do it directly. What remains here is the reading itself
@@ -18355,7 +19078,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const base = (els.serverUrl?.value || '').replace(/\/+$/, '');
       const r = await fetch(`${base}/api/replay-ohlc?symbol=${encodeURIComponent(sym)}`);
       const j = await r.json();
-      const rows = (j.days || j.ohlc || j || []).filter(x => x && x.close);
+      // The server sends each day as {day, O, H, L, C}; this read .close, so
+      // every row was filtered out and Daily Context never had any data.
+      const raw = Array.isArray(j?.days) ? j.days : Array.isArray(j?.ohlc) ? j.ohlc : Array.isArray(j) ? j : [];
+      const rows = raw.map(x => x && ({
+        day: x.day, open: x.open ?? x.O, high: x.high ?? x.H, low: x.low ?? x.L, close: x.close ?? x.C,
+      })).filter(x => x && x.close);
       _HTF.days = rows.slice(-30);
       _HTF.sym = sym;
       _HTF.fetched = now;
@@ -20463,12 +21191,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   .map(v => v.src).join(' and ');
     const txt = `${s.dir > 0 ? 'BULLISH' : 'BEARISH'}. ${word} signal on ${sym} at ${Math.round(s.px)}, ` +
                 `score ${Math.abs(s.score)}, led by ${top}.`;
-    try {
-      if (_streamLive) _relayAlert(`signal|${sym}|${s.dir}`, txt, 'level', 300);
-      else _speakOnce(`signal|${sym}|${s.dir}`, txt, 300);
-    } catch (_) {}
-    if (typeof showToast === 'function')
-      showToast(`${s.dir > 0 ? '🟢 BUY' : '🔴 SELL'} ${fmtInt(Math.round(s.px))} · score ${Math.abs(s.score)}`);
+    // Not spoken or toasted any more. Its chart markers were replaced by the
+    // desk signals, and a voice saying BUY with no matching mark on any
+    // chart - often while the desk engine said the opposite - is worse than
+    // silence. It still records to the scorecard, so its hit rate can be
+    // compared with the desk signals before it is retired for good.
+    void txt;
     try { _scoreRecord('signal engine', s.dir > 0 ? 'bullish' : 'bearish', s.px, sym, `score ${s.score}`); } catch (_) {}
     try { renderPriceChart(); } catch (_) {}
   }
@@ -21331,9 +22059,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     normalDn:  '#F48FB1',   // light pink
   };
 
+  // Cached per candle OBJECT: a completed bar and the ten before it never
+  // change, so its class is computed once instead of twice per repaint for
+  // every bar on the chart. The signature catches the forming bar (whose
+  // volume and range grow) and a refetch (which brings new objects).
+  const _pvMemo = new WeakMap();
   function _pvsraClass(cs, i) {
     const c = cs[i];
     if (!c || !(c.v > 0)) return null;
+    const p1 = cs[i - 1];
+    const sig = `${c.v}|${c.h}|${c.l}|${c.c}|${c.o}|${i}|${p1 ? p1.t : 0}|${_pvsraSpreadOn() ? 1 : 0}`;
+    const hit = _pvMemo.get(c);
+    if (hit && hit.sig === sig) return hit.res;
+    const res = _pvsraClassRaw(cs, i);
+    _pvMemo.set(c, { sig, res });
+    return res;
+  }
+  function _pvsraClassRaw(cs, i) {
+    const c = cs[i];
     const from = Math.max(0, i - 10);
     const prev = cs.slice(from, i).filter(x => x.v > 0);
     if (prev.length < 5) return null;                 // not enough to compare against
@@ -21368,9 +22111,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     };
   }
 
-  function _pvsraSpreadOn() {
-    try { return localStorage.getItem('pvsraSpread') === '1'; } catch (_) { return false; }
+  // Both settings were read from localStorage once per candle per repaint -
+  // hundreds of synchronous storage reads per frame. Cached for a second.
+  const _pvSet = { at: 0, spread: false, on: true };
+  function _pvSettings() {
+    const now = Date.now();
+    if (now - _pvSet.at > 1000) {
+      _pvSet.at = now;
+      try { _pvSet.spread = localStorage.getItem('pvsraSpread') === '1'; } catch (_) { _pvSet.spread = false; }
+      try { const v = localStorage.getItem('pvsraOn'); _pvSet.on = v === null ? true : v === '1'; } catch (_) { _pvSet.on = true; }
+    }
+    return _pvSet;
   }
+  function _pvsraSpreadOn() { return _pvSettings().spread; }
 
   function _pvsraOn() {
     // ON by default. Reading volume relative to recent bars is more useful
@@ -21378,10 +22131,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // absent (NSE) the colouring falls back on its own rather than misleading.
     // An explicit '0' turns it off; an absent key means never chosen, so the
     // default applies.
-    try {
-      const v = localStorage.getItem('pvsraOn');
-      return v === null ? true : v === '1';
-    } catch (_) { return true; }
+    return _pvSettings().on;
   }
 
   // ══ CONTEXT CHART ═════════════════════════════════════════════════
@@ -22684,14 +23434,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   //   price up   + OI down = short covering    (a squeeze, less durable)
   //   price down + OI up   = short buildup     (conviction, bearish)
   //   price down + OI down = long unwinding    (giving up, less durable)
+  // The basis CHANGE was measured against whatever the previous call saw.
+  // Two panels call this on every render (leading signals first, then the
+  // Trend Engine), so the second call always compared the snapshot with
+  // itself: the Trend Engine's "Basis direction" input was permanently zero.
+  // The result is now memoised per snapshot, and the change is measured
+  // against the basis about a minute earlier, which is also what "widening"
+  // means to a trader - one poll to the next is mostly quote noise.
+  function _ago(hist, now, sec) {
+    let best = null;
+    for (const h of hist) if (now - h.t >= sec * 1000) best = h;
+    return best;
+  }
   function _futuresRead(d) {
     const fp = d?.futures_price, spot = d?.underlying_value;
     if (!fp || !spot) return null;
+    if (_futState.memoD === d && _futState.memoF) return _futState.memoF;
     const basis = fp - spot;
     const basisPct = basis / spot * 100;
-    const prev = _futState.prevBasis;
-    _futState.prevBasis = basis;
-    const basisDelta = prev == null ? null : basis - prev;
+    const now = Date.now();
+    _futState.bHist.push({ t: now, v: basis });
+    _futState.bHist = _futState.bHist.filter(h => now - h.t < 600000);
+    const prevH = _ago(_futState.bHist, now, 60);
+    const basisDelta = prevH ? basis - prevH.v : null;
 
     const oi = d.futures_oi, oiChg = d.futures_oi_chg;
     const fpc = d.futures_prev_close;
@@ -22709,10 +23474,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // being abandoned rather than positions being closed
     const far = d.futures_far_oi;
     const roll = (oi && far) ? far / (oi + far) * 100 : null;
-    return { fp, basis, basisPct, basisDelta, oi, oiChg, buildup, buildupBias, roll,
+    const out = { fp, basis, basisPct, basisDelta, oi, oiChg, buildup, buildupBias, roll,
              cost: (d.dte ? basisPct / Math.max(0.5, d.dte) * 365 : null) };
+    _futState.memoD = d; _futState.memoF = out;
+    return out;
   }
-  const _futState = { prevBasis: null, prevSkew: null };
+  const _futState = { prevBasis: null, prevSkew: null, bHist: [], sHist: [], vHist: [], memoD: null, memoF: null, memoSD: null, memoS: null };
 
   // ══ IV SKEW DYNAMICS ══════════════════════════════════════════════
   // The LEVEL of skew is structural and says little day to day. Its CHANGE is
@@ -22726,11 +23493,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const near = k => st.find(s => Math.abs(s.strike - k) < gap / 2);
     const otmPut = near(spot - gap * 4), otmCall = near(spot + gap * 4);
     if (!otmPut?.pe_iv || !otmCall?.ce_iv) return null;
+    if (_futState.memoSD === d && _futState.memoS) return _futState.memoS;
     const skew = otmPut.pe_iv - otmCall.ce_iv;
-    const prev = _futState.prevSkew;
-    _futState.prevSkew = skew;
-    return { skew, delta: prev == null ? null : skew - prev,
-             putIv: otmPut.pe_iv, callIv: otmCall.ce_iv };
+    // change over ~2 minutes, not poll to poll (same reasoning as the basis)
+    const now = Date.now();
+    _futState.sHist.push({ t: now, v: skew });
+    _futState.sHist = _futState.sHist.filter(h => now - h.t < 900000);
+    const prevH = _ago(_futState.sHist, now, 120);
+    const out = { skew, delta: prevH ? skew - prevH.v : null,
+                  putIv: otmPut.pe_iv, callIv: otmCall.ce_iv };
+    _futState.memoSD = d; _futState.memoS = out;
+    return out;
   }
 
   // ══ SCALPER TREND ENGINE ══════════════════════════════════════════
@@ -22765,7 +23538,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (score == null || !isFinite(score)) return;
       arr.push({ name, w, score: Math.max(-1, Math.min(1, score)), why });
     };
-    const cs = _chart.candles || [];
+    // Price action is read from the chart's candles - which are an OPTION's
+    // premium when the chart is switched to a CE/PE, and a past session in
+    // historical replay. Either way they are not today's index, and mixing
+    // them with live option positioning produced readings like "VWAP 23,000
+    // points below spot". The price family stands down instead and says why.
+    const hist = typeof _isHistorical === 'function' && _isHistorical();
+    const paOff = _chart.optionMeta ? 'chart is showing an option contract — switch it to the index'
+                : hist ? 'chart is in historical replay — switch it to Live' : null;
+    const cs = paOff ? [] : (_chart.candles || []);
+    let dayT = null;
 
     // ── PRICE ACTION ───────────────────────────────────────────────
     if (cs.length >= 12) {
@@ -22784,14 +23566,32 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         add(P, 'EMA 9/21', 3, Math.max(-1, Math.min(1, sep / 0.08)),
             `fast EMA ${sep >= 0 ? 'above' : 'below'} slow by ${Math.abs(sep).toFixed(3)}%`);
       }
-      // 3. VWAP position - the intraday fair-value reference
-      const vw = _vwapSeries(cs);
-      const v1 = vw[vw.length - 1];
-      if (v1) {
-        const dv = (spot - v1) / spot * 100;
-        add(P, 'VWAP position', 2, Math.max(-1, Math.min(1, dv / 0.15)),
-            `${Math.abs(dv).toFixed(2)}% ${dv >= 0 ? 'above' : 'below'} VWAP`);
-      }
+      // 3. VWAP, read in sigma and BY DAY TYPE. A fixed 0.15% scale said
+      //    the same thing at +2σ on a range day (stretched - a fade) as on a
+      //    trend day (a band walk - stay with it). The desk reading inverts
+      //    between the two, so the input now does too.
+      try {
+        dayT = _dayType(cs);
+        const vb = _vwapBands(cs);
+        const li = vb.vw.length - 1, sd = vb.sd[li];
+        if (sd > 0) {
+          const z = (spot - vb.vw[li]) / sd;
+          if (dayT?.kind === 'trend') {
+            add(P, 'VWAP bands', 2, Math.max(-1, Math.min(1, z / 1.5)),
+                `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ on a trend day — ${Math.sign(z) === dayT.dir ? 'riding the band, with the trend' : 'on the wrong side of VWAP'}`);
+          } else if (Math.abs(z) >= 1.5) {
+            // range / broken trend: stretched far from VWAP leans back toward it
+            add(P, 'VWAP bands', 2, Math.max(-1, Math.min(1, -(z - Math.sign(z) * 1) / 1.5)),
+                `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ on a range day — stretched, odds favour a return toward VWAP`);
+          } else {
+            add(P, 'VWAP bands', 1, Math.max(-1, Math.min(1, z / 1.5)),
+                `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ — ${z >= 0 ? 'above' : 'below'} VWAP, inside the bands`);
+          }
+        }
+        // 3a. the day type itself: the single biggest context a desk sets
+        if (dayT?.kind === 'trend')
+          add(P, 'Day type', 3, dayT.dir, `trend day ${dayT.dir > 0 ? 'up' : 'down'} — no VWAP cross by 9:45`);
+      } catch (_) {}
       // 4. momentum: rate of change over the last few bars
       const n = Math.min(6, closes.length - 1);
       const roc = (closes[closes.length - 1] - closes[closes.length - 1 - n]) / spot * 100;
@@ -22804,6 +23604,64 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         add(P, 'Day range position', 1, (pos - 0.5) * 2,
             `${(pos * 100).toFixed(0)}% of today's range`);
       }
+      // 5a. previous day's range: accepted outside it is a breakout context
+      try {
+        const d0 = state.lastData || {};
+        let fr = (typeof _frozenOhlc !== 'undefined') ? _frozenOhlc[state.symbol] : null;
+        if (!fr && d0.prev_high && d0.prev_low) fr = { H: d0.prev_high, L: d0.prev_low };
+        if (fr?.H && fr?.L) {
+          const last3 = cs.slice(-3);
+          if (last3.every(c => c.c > fr.H))
+            add(P, 'Previous day range', 2, 0.8, `holding above PDH ${fmtInt(Math.round(fr.H))} — breakout accepted`);
+          else if (last3.every(c => c.c < fr.L))
+            add(P, 'Previous day range', 2, -0.8, `holding below PDL ${fmtInt(Math.round(fr.L))} — breakdown accepted`);
+        }
+      } catch (_) {}
+      // 5b. opening range: which side of the first five minutes price lives on
+      try {
+        const istMin = t => { const g = new Date(t * 1000); const i2 = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000); return i2.getHours() * 60 + i2.getMinutes(); };
+        const orb = cs.filter(c => { const m = istMin(c.t); return m >= 555 && m < 560; });
+        if (orb.length && istMin(cs[cs.length - 1].t) >= 560) {
+          const oh = Math.max(...orb.map(c => c.h)), ol = Math.min(...orb.map(c => c.l));
+          if (spot > oh) add(P, 'Opening range', 1, 0.6, `above the 9:15-9:20 high ${fmtInt(Math.round(oh))}`);
+          else if (spot < ol) add(P, 'Opening range', 1, -0.6, `below the 9:15-9:20 low ${fmtInt(Math.round(ol))}`);
+        }
+      } catch (_) {}
+      // 5c. Heikin Ashi trend state, from the real candles
+      try {
+        // the full array, so the incremental HA cache shared with the chart
+        // is hit rather than thrashed by a fresh slice
+        const haAll = _heikinAshi(cs);
+        const ha = (_chart.liveBar ? haAll.slice(0, -1) : haAll).slice(-40);
+        if (ha.length >= 6) {
+          const up = c => c.c >= c.o;
+          const last = ha[ha.length - 1], dir = up(last) ? 1 : -1;
+          let run = 0, strong = 0;
+          for (let k = ha.length - 1; k >= 0 && up(ha[k]) === up(last); k--) {
+            run++;
+            const c = ha[k], rng = Math.max(1e-9, c.h - c.l), tol = Math.max(0.05, rng * 0.03);
+            const opp = dir > 0 ? Math.min(c.o, c.c) - c.l : c.h - Math.max(c.o, c.c);
+            if (k >= ha.length - 3 && opp <= tol) strong++;
+          }
+          const bd = k => Math.abs(ha[k].c - ha[k].o);
+          const n = ha.length - 1;
+          const ageing = run >= 4 && bd(n) < bd(n - 1) && bd(n - 1) < bd(n - 2);
+          const sc = dir * (strong >= 3 ? 0.8 : run >= 3 ? 0.5 : 0.25) * (ageing ? 0.4 : 1);
+          add(P, 'Heikin Ashi', 2, sc,
+              `${dir > 0 ? 'green' : 'red'} run of ${run}${strong >= 3 ? ', last 3 without a wick against it' : ''}${ageing ? ' — bodies shrinking, trend ageing' : ''}`);
+        }
+      } catch (_) {}
+      // 5d. move quality: a leg likely to reverse argues against its own
+      //     direction; a well-supported one argues for it
+      try {
+        const mq = _mqView();
+        const L = mq?.leg;
+        if (L && L.qualified) {
+          const sc = mq.p_fake != null ? (0.5 - mq.p_fake) * 2 : Math.max(-1, Math.min(1, (mq.for - mq.against) / 5));
+          add(P, 'Move quality', 3, L.dir * sc,
+              `${L.dir > 0 ? 'rally' : 'fall'} ${Math.round(L.ext_size)} pts — ${mq.p_fake != null ? `reversal ${Math.round(mq.p_fake * 100)}%` : `evidence ${mq.for} real / ${mq.against} fake`}`);
+        }
+      } catch (_) {}
     }
 
     // ── OPTIONS POSITIONING ────────────────────────────────────────
@@ -22859,14 +23717,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
     } catch (_) {}
     // 11. VIX direction: rising vol usually accompanies downside
+    // Over five minutes, not poll to poll: a VIX tick of 0.03 is quote
+    // noise, and comparing consecutive calls also made the reading depend on
+    // how often the engine happened to run.
     if (d.india_vix) {
-      const prev = _trendState.prevVix;
-      _trendState.prevVix = d.india_vix;
-      if (prev) {
-        const dv = d.india_vix - prev;
-        if (Math.abs(dv) > 0.02)
-          add(O, 'India VIX', 1, Math.max(-1, Math.min(1, -dv / 0.3)),
-              `${dv >= 0 ? 'rising' : 'falling'} ${Math.abs(dv).toFixed(2)} — ${dv >= 0 ? 'fear bid' : 'fear easing'}`);
+      const now = Date.now();
+      _futState.vHist.push({ t: now, v: d.india_vix });
+      _futState.vHist = _futState.vHist.filter(h => now - h.t < 1200000);
+      const prevH = _ago(_futState.vHist, now, 300);
+      if (prevH) {
+        const dv = d.india_vix - prevH.v;
+        if (Math.abs(dv) > 0.1)
+          add(O, 'India VIX', 1, Math.max(-1, Math.min(1, -dv / 0.5)),
+              `${dv >= 0 ? 'rising' : 'falling'} ${Math.abs(dv).toFixed(2)} in 5 min — ${dv >= 0 ? 'fear bid' : 'fear easing'}`);
       }
     }
     // 12. futures basis and its direction
@@ -22879,7 +23742,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             `${fr.basis >= 0 ? 'premium' : 'DISCOUNT'} ${Math.abs(fr.basis).toFixed(1)} pts${fr.basisDelta != null ? `, ${fr.basisDelta >= 0 ? 'widening' : 'narrowing'}` : ''}`);
         if (fr.basisDelta != null && Math.abs(fr.basisDelta) > 1)
           add(O, 'Basis direction', 2, Math.max(-1, Math.min(1, fr.basisDelta / 4)),
-              `${fr.basisDelta >= 0 ? 'expanding' : 'contracting'} ${Math.abs(fr.basisDelta).toFixed(1)} pts this tick`);
+              `${fr.basisDelta >= 0 ? 'expanding' : 'contracting'} ${Math.abs(fr.basisDelta).toFixed(1)} pts in the last minute`);
         if (fr.buildup)
           add(O, 'Futures OI buildup', 3, fr.buildupBias, fr.buildup);
       }
@@ -22890,7 +23753,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     //      work. That single distinction changes how every other signal should
     //      be traded, so leaving it out of the synthesis was the biggest gap.
     try {
-      const vp3 = _volumeProfile(_chart.candles || [], (d.symbol === 'BANKNIFTY') ? 10 : 5);
+      // time-at-price when the index carries no volume, so this input
+      // exists on every feed rather than only on volume feeds
+      const vp3 = cs.length >= 30 ? _sessionProfile(cs) : null;
       if (vp3) {
         if (spot > vp3.vah) {
           add(P, 'Value area', 3, Math.min(1, (spot - vp3.vah) / Math.max(1, vp3.vah - vp3.val)),
@@ -22909,8 +23774,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
     // 12c. CVD divergence — price making a high the volume does not support
     try {
-      const cvd3 = _cvdSeries(_chart.candles || []);
-      const dv = _cvdDivergence(cvd3, _chart.candles || []);
+      const cvd3 = _cvdSeries(cs);
+      const dv = _cvdDivergence(cvd3, cs);
       if (dv) add(P, 'CVD divergence', 2, dv.dir === 'bullish' ? 0.7 : -0.7,
                   dv.dir === 'bullish' ? 'selling not following through at the lows'
                                        : 'buying not backing the push to highs');
@@ -22958,7 +23823,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const raw = (pScore * 0.55 + oScore * 0.45) * 100;
     const score = Math.round(raw);
     return { score, pScore: Math.round(pScore * 100), oScore: Math.round(oScore * 100),
-             agree, price: P, options: O,
+             agree, price: P, options: O, paOff, dayT,
              label: score >= 45 ? 'BULLISH' : score <= -45 ? 'BEARISH'
                   : score >= 20 ? 'MILD BULL' : score <= -20 ? 'MILD BEAR' : 'NEUTRAL' };
   }
@@ -22968,13 +23833,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!cfg.on && !_enableAll()) return;
     const t = _trendCompute(d);
     if (!t) return;
+    // On a range day a trend call needs more evidence: the playbook there is
+    // fading, and a borderline "bullish trend" at +2σ is exactly the reading
+    // a range day punishes. Ten points more is enough to filter the
+    // borderline calls without silencing a genuine breakout.
+    const rangeDay = t.dayT && (t.dayT.kind === 'range' || t.dayT.kind === 'trend-broken');
+    t.need = (cfg.minScore || 45) + (rangeDay ? 10 : 0);
     renderTrendPanel(t);
-    const strong = Math.abs(t.score) >= (cfg.minScore || 45);
+    const strong = Math.abs(t.score) >= t.need;
     const ok = strong && (!cfg.requireBoth || t.agree);
-    if (!ok) return;
+    const now = Date.now();
+    if (!ok) { _trendState.pend = null; return; }
     const dir = t.score > 0 ? 'BULLISH' : 'BEARISH';
-    if (_trendState.last === dir && Date.now() - _trendState.lastAt < (cfg.cooldownMin || 5) * 60000) return;
-    _trendState.last = dir; _trendState.lastAt = Date.now();
+    // Persistence: the call must hold for 30 seconds before it is spoken.
+    // The score is recomputed on every poll and tick, and a reading that
+    // clears the bar once and falls back is the flicker that made the
+    // engine announce BULLISH, BEARISH, BULLISH inside a few minutes.
+    if (!_trendState.pend || _trendState.pend.dir !== dir) { _trendState.pend = { dir, since: now }; return; }
+    if (now - _trendState.pend.since < 30000) return;
+    if (_trendState.last === dir && now - _trendState.lastAt < (cfg.cooldownMin || 5) * 60000) return;
+    // a reversal of the last call within three minutes is held: either the
+    // first was wrong or this one is, and saying both teaches you to ignore it
+    if (_trendState.last && _trendState.last !== dir && now - _trendState.lastAt < 180000) return;
+    _trendState.last = dir; _trendState.lastAt = now;
     const top = [...t.price, ...t.options]
       .sort((a, b) => Math.abs(b.w * b.score) - Math.abs(a.w * a.score)).slice(0, 2)
       .map(x => x.name).join(' and ');
@@ -23015,7 +23896,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span style="font-size:10.5px;">options ${t.oScore >= 0 ? '+' : ''}${t.oScore}</span>
         <span style="font-size:10.5px;color:${t.agree ? 'var(--pos,#26a69a)' : 'var(--gold,#d4af37)'};font-weight:700;">
           ${t.agree ? '✓ both families agree' : '⚠ price and options disagree — no trade signal'}</span>
+        ${t.need ? `<span style="font-size:10px;color:var(--muted);">announces at ±${t.need}${t.need > 45 ? ' (raised on a range day)' : ''}, held 30 s</span>` : ''}
       </div>
+      ${t.dayT ? `<div style="padding:2px 4px;">${_dayTypeBadge(t.dayT)}</div>` : ''}
+      ${t.paOff ? `<div style="padding:3px 4px;font-size:10.5px;color:var(--gold,#d4af37);font-weight:700;">Price action off: ${escapeHtml(t.paOff)}. Options alone cannot clear the agreement rule, so nothing is announced.</div>` : ''}
       <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">Price action</div>${rows(t.price) || '<span class="oc-sub">waiting for candles</span>'}
       <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">Options positioning</div>${rows(t.options) || '<span class="oc-sub">waiting for chain data</span>'}
       <div class="oc-sub" style="margin-top:4px;">A signal is only announced when <b>both families agree</b> and the score clears your threshold. Price-action-only signals whipsaw in chop; options-only signals are early but often wrong about timing. Demanding agreement costs a few points of entry and removes most false starts — the right trade for a scalper, because a whipsawed scalp costs more than a late one. <b>Weights are judgement, not fitted:</b> they have not been optimised on history, and treating the number as precise would be a mistake. Use it to confirm what you already see, not as a reason to trade something you do not.</div>`;
@@ -23285,8 +24169,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // The smoothing is backward-looking, so turns appear a bar late - the
   // cleaner trend is partly an artefact of the averaging rather than a
   // clearer view of the market.
+  // Incremental: the same candle array comes back on every tick with only
+  // the last bar changed (or one bar appended), so the bars before it are
+  // reused from the previous call instead of rebuilt. Reusing the OBJECTS
+  // also lets the PVSRA cache recognise them, which a fresh array defeats.
+  const _haMemo = { src: null, n: 0, out: null };
   function _heikinAshi(cs) {
     if (!cs?.length) return cs;
+    const M = _haMemo;
+    if (M.src === cs && M.out && (cs.length === M.n || cs.length === M.n + 1) && M.n >= 2) {
+      const keep = M.n - 1;                       // last cached bar may have changed
+      const out = M.out.slice(0, keep);
+      let pO = out[keep - 1].o, pC = out[keep - 1].c;
+      for (let i = keep; i < cs.length; i++) {
+        const c2 = cs[i];
+        const hc = (c2.o + c2.h + c2.l + c2.c) / 4, ho = (pO + pC) / 2;
+        out.push({ ...c2, o: ho, c: hc, h: Math.max(c2.h, ho, hc), l: Math.min(c2.l, ho, hc), _realC: c2.c });
+        pO = ho; pC = hc;
+      }
+      M.n = cs.length; M.out = out;
+      return out;
+    }
     const out = [];
     let pO = null, pC = null;
     for (const c2 of cs) {
@@ -23301,6 +24204,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       });
       pO = ho; pC = hc;
     }
+    M.src = cs; M.n = cs.length; M.out = out;
     return out;
   }
 
@@ -24065,10 +24969,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const upNeed = lastBrick ? (lastBrick.c + bs * (lastBrick.dir >= 0 ? 1 : R)) : null;
         const dnNeed = lastBrick ? (lastBrick.c - bs * (lastBrick.dir <= 0 ? 1 : R)) : null;
         const toGo = lastBrick ? Math.min(Math.abs(upNeed - sp), Math.abs(sp - dnNeed)) : null;
-        svg += `<line x1="${padL}" y1="${y(sp).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(sp).toFixed(1)}"
+        _chart._rkFast = { upNeed, dnNeed };
+        svg += `<line id="rkLn" x1="${padL}" y1="${y(sp).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(sp).toFixed(1)}"
             stroke="#fff" stroke-width="1" stroke-dasharray="2,3" opacity="0.85"/>
-          <rect x="${(right + 1).toFixed(1)}" y="${(y(sp) - 7).toFixed(1)}" width="70" height="14" rx="2" fill="#fff"/>
-          <text x="${(right + 4).toFixed(1)}" y="${(y(sp) + 3.5).toFixed(1)}"
+          <rect id="rkBg" x="${(right + 1).toFixed(1)}" y="${(y(sp) - 7).toFixed(1)}" width="70" height="14" rx="2" fill="#fff"/>
+          <text id="rkTx" x="${(right + 4).toFixed(1)}" y="${(y(sp) + 3.5).toFixed(1)}"
             style="font-size:9px;fill:#0b0e14;font-weight:700;">${fmtInt(Math.round(sp))}${toGo != null ? ` ·${Math.round(toGo)}` : ''}</text>`;
       }
     } catch (_) {}
@@ -24089,19 +24994,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <text x="${padL + 3}" y="${(y(row.k) - 3).toFixed(1)}" style="font-size:8.5px;fill:${col};font-weight:700;">${lab} ${fmtInt(row.k)}</text>`;
       }
       svg += _chartAlertLines(y, lo, hi, W, padL, padR);
-      // signal markers, placed on the brick nearest each signal's price
-      for (const h of (_SIG.hist || [])) {
-        if (h.px < lo || h.px > hi) continue;
-        let bi = show.length - 1;
-        for (let k = 0; k < show.length; k++) if (show[k].t >= h.t) { bi = k; break; }
-        const cx = padL + bi * bw + bw / 2, cy = y(h.px), up = h.dir > 0;
-        const yy = up ? cy + 15 : cy - 15, col = up ? '#26a69a' : '#ef5350';
-        svg += `<path d="${up
-          ? `M${(cx - 5).toFixed(1)},${(yy + 6).toFixed(1)} L${(cx + 5).toFixed(1)},${(yy + 6).toFixed(1)} L${cx.toFixed(1)},${(yy - 4).toFixed(1)} Z`
-          : `M${(cx - 5).toFixed(1)},${(yy - 6).toFixed(1)} L${(cx + 5).toFixed(1)},${(yy - 6).toFixed(1)} L${cx.toFixed(1)},${(yy + 4).toFixed(1)} Z`}"
-          fill="${col}" stroke="#0b0e14" stroke-width="0.8"><title>${up ? 'BUY' : 'SELL'} ${fmtInt(Math.round(h.px))}</title></path>`;
-      }
     } catch (_) {}
+    // ── desk signals, on the brick in force when each one triggered ──
+    // Computed from the candles (the signal is a fact about traded prices),
+    // then placed on the first brick that printed at or after its bar.
+    // ── move quality on Renko: the leg mapped onto bricks, and the box ──
+    let renkoMqBox = '';
+    try {
+      const mq = _mqView();
+      if (mq) {
+        const brickAt = t => {
+          if (clipped && t < show[0].t) return null;
+          for (let k = 0; k < show.length; k++) if (show[k].t >= t) return padL + k * bw + bw / 2;
+          return padL + (show.length - 1) * bw + bw / 2;
+        };
+        svg += _mqLegSvg(mq, brickAt(mq.leg.start_t), brickAt(mq.leg.now_t), y, lo, hi);
+        renkoMqBox = _mqBoxSvg(mq, W, H, padR, padB);
+      }
+    } catch (e) { console.warn('[mq]', e.message); }
 
     // ── Bollinger bands over brick closes ──────────────────────────
     // Computed on the brick sequence, like the EMAs: bricks are not evenly
@@ -24300,7 +25210,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // not yet confirmed - is drawn hollow. It can still vanish if price
       // falls back before the minute closes, and a solid brick that later
       // disappears is exactly the flicker this engine exists to remove.
-      svg += `<rect x="${(x + bw * inset).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * (1 - inset * 2)).toFixed(1)}" height="${Math.max(2, bot - top).toFixed(1)}" fill="${b.prov ? 'none' : col}" opacity="${slow ? 0.42 : 1}" stroke="${col}" stroke-width="${b.prov ? 1.4 : bHot ? (bpv.kind === 'climax' ? 1.8 : 1.2) : 0.6}" ${b.prov ? 'stroke-dasharray="2,2"' : ''}><title>${b.dir > 0 ? 'UP' : 'DOWN'} ${Math.round(b.o)}→${Math.round(b.c)} · took ${b.mins} min · ${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}${slow ? ' · SLOW: heavy theta for a single box' : ''}</title></rect>`;
+      svg += `<rect x="${(x + bw * inset).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * (1 - inset * 2)).toFixed(1)}" height="${Math.max(2, bot - top).toFixed(1)}" fill="${b.prov ? 'none' : col}" opacity="${Math.min(slow ? 0.42 : 1, bpv && bpv.kind === 'normal' ? 0.5 : 1)}" stroke="${col}" stroke-width="${b.prov ? 1.4 : bHot ? (bpv.kind === 'climax' ? 1.8 : 1.2) : 0.6}" ${b.prov ? 'stroke-dasharray="2,2"' : ''}><title>${b.dir > 0 ? 'UP' : 'DOWN'} ${Math.round(b.o)}→${Math.round(b.c)} · took ${b.mins} min · ${_hm(b.t)}${slow ? ' · SLOW: heavy theta for a single box' : ''}</title></rect>`;
     });
     // ── bias strip ─────────────────────────────────────────────────
     // One cell per entry brick, coloured by the bias box's direction at the
@@ -24331,9 +25241,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     const tick = Math.max(1, Math.floor(show.length / 8));
     show.forEach((b, i) => { if (i % tick) return;
-      svg += `<text x="${(padL + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(b.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+      svg += `<text x="${(padL + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${_hm(b.t)}</text>`; });
     const dirTxt = st.dir > 0 ? ['UP', 'var(--pos,#26a69a)'] : ['DOWN', 'var(--neg,#ef5350)'];
-    box.innerHTML = (renkoDay ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:2px 6px 5px;">${_dayTypeBadge(renkoDay)}</div>` : '') + `<svg id="renkoSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}
+    box.innerHTML = (renkoDay ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:2px 6px 5px;">${_dayTypeBadge(renkoDay)}</div>` : '') +
+      `<svg id="renkoSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}${renkoMqBox}
         <g id="renkoCross" style="display:none;pointer-events:none;">
           <line id="renkoCrossV" y1="${padT}" y2="${H - padB}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
           <line id="renkoCrossH" x1="${padL}" x2="${W - padR}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
@@ -25168,7 +26079,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!box) return;
     box.innerHTML = _emaxLog.slice(-8).reverse().map(x =>
       `<div style="display:flex;gap:8px;font-size:9.5px;padding:2px 4px;border-bottom:1px solid rgba(255,255,255,0.04);">
-        <span style="color:var(--muted);min-width:52px;">${new Date(x.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
+        <span style="color:var(--muted);min-width:52px;">${_hm(x.t)}</span>
         <b style="min-width:82px;">${escapeHtml(x.lab)}</b>
         <span style="color:${x.dir === 'bull' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};font-weight:700;">${x.dir === 'bull' ? '▲ bull' : '▼ bear'}</span>
         <span style="color:var(--muted);">${escapeHtml(x.sym || '')} ${x.iv}m @ ${fmtInt(Math.round(x.spot))}</span>
@@ -25537,7 +26448,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                                  : _todaySessionOnly(j.candles || []);
       _chart.src = j.source; _chart.coverage = j.coverage || null;
       _chart.gaps = j.gaps || []; _chart.gapMins = j.gap_mins || 0;
-      _chart.hasVolume = !!j.has_volume;
+      // trust the bars as well as the flag: an older server omitted it on
+      // historical responses even though the candles carry real volume
+      _chart.hasVolume = !!j.has_volume || (_chart.candles || []).filter(c => c.v > 0).length >= 5;
       try { _emaCrossCheck(); } catch (_) {}
       try { _priceMaCheck(); } catch (_) {}
       renderPriceChart();
@@ -25578,7 +26491,90 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // destroyed several times a second. Wrapping the function means every
   // caller refills it, without threading a call through 400 lines of render
   // code where an insertion can land inside a nested callback.
+  // ══ CHART ON TICKS ══════════════════════════════════════════════
+  // The live feed delivers several price updates a second, and each one
+  // rebuilt the entire chart - two thousand SVG elements, every overlay,
+  // the RSI and context panes - to move one candle and one line. At ~50 ms
+  // a rebuild that was most of every second, which is the lag.
+  //
+  // Now a tick moves only what a tick can change: the forming candle's
+  // body and wicks and the price line, edited in place. The full rebuild
+  // still happens - at most once a second while ticks stream, and at once
+  // whenever a tick changes something the fast path cannot express: a new
+  // bar, a price outside the drawn range (the scale must change), a Renko
+  // brick about to print, or an open drag. Nothing about what is fetched
+  // changes; this is purely how often the same data is redrawn.
+  function _chartScheduleFull(minGap) {
+    if (_chart._fullTimer) return;
+    const wait = Math.max(0, minGap - (performance.now() - (_chart._lastFull || 0)));
+    _chart._fullTimer = setTimeout(() => {
+      _chart._fullTimer = 0;
+      _safe(() => renderPriceChart(), 'renderPriceChart');
+    }, wait);
+  }
+  function _chartOnTick() {
+    const since = performance.now() - (_chart._lastFull || 0);
+    if (since < 1000 && _chartFastTick()) { _chartScheduleFull(1000); return; }
+    if (since >= 250) { _safe(() => renderPriceChart(), 'renderPriceChart'); return; }
+    _chartScheduleFull(250);
+  }
+  function _chartFastTick() {
+    try {
+      const G = _chart._geom, cs = _chart.candles;
+      const spot = state.lastData?.underlying_value;
+      if (!G || !cs?.length || !isFinite(spot) || _chart.drag || _chart.diagOpen || _chart.optionMeta) return false;
+      if (spot > G.hi || spot < G.lo) return false;
+      const y = v => G.padT + (G.hi - v) / (G.hi - G.lo) * (G.H - G.padT - G.padB);
+      const type = document.getElementById('chartType')?.value || 'candle';
+      if (type === 'renko') {
+        const R = _chart._rkFast;
+        const ln = document.getElementById('rkLn'), bg = document.getElementById('rkBg'), tx = document.getElementById('rkTx');
+        if (!R || !ln || !bg || !tx) return false;
+        if (spot >= R.upNeed || spot <= R.dnNeed) return false;     // a brick may print
+        const yy = y(spot);
+        ln.setAttribute('y1', yy.toFixed(1)); ln.setAttribute('y2', yy.toFixed(1));
+        bg.setAttribute('y', (yy - 7).toFixed(1)); tx.setAttribute('y', (yy + 3.5).toFixed(1));
+        tx.textContent = `${fmtInt(Math.round(spot))} ·${Math.round(Math.min(Math.abs(R.upNeed - spot), Math.abs(spot - R.dnNeed)))}`;
+        return true;
+      }
+      const F = _chart._fast, c = cs[cs.length - 1];
+      if (!F || F.type !== type || F.n !== cs.length || F.t !== c.t) return false;
+      let o = c.o, h = c.h, l = c.l, cl = c.c;
+      if (type === 'ha') {
+        const hc = (c.o + c.h + c.l + c.c) / 4;
+        o = F.haO; cl = hc; h = Math.max(c.h, o, hc); l = Math.min(c.l, o, hc);
+      }
+      if (h > G.hi || l < G.lo) return false;
+      const B = document.getElementById('lcB');
+      const WU = document.getElementById('lcWU'), WL = document.getElementById('lcWL'), OUT = document.getElementById('lcOut');
+      const ln = document.getElementById('spLn'), bg = document.getElementById('spBg'), tx = document.getElementById('spTx');
+      if (!B || !ln || !bg || !tx) return false;
+      const yo = y(o), yc = y(cl), yh = y(h), yl = y(l);
+      const top = Math.min(yo, yc), bot = Math.max(yo, yc), bh = Math.max(1, bot - top);
+      B.setAttribute('y', top.toFixed(2)); B.setAttribute('height', bh.toFixed(2));
+      if (WU) { WU.setAttribute('y', yh.toFixed(2)); WU.setAttribute('height', Math.max(0, top - yh).toFixed(2)); }
+      if (WL) { WL.setAttribute('y', bot.toFixed(2)); WL.setAttribute('height', Math.max(0, yl - bot).toFixed(2)); }
+      if (OUT) { OUT.setAttribute('y', (top - 1).toFixed(2)); OUT.setAttribute('height', (bh + 2).toFixed(2)); }
+      // colour follows direction for ordinary bars; a PVSRA-coloured bar
+      // keeps its class until the next full repaint re-reads its volume
+      if (!F.pvHot) {
+        const col = cl >= o ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+        B.setAttribute('fill', col); B.setAttribute('stroke', col);
+        if (WU) WU.setAttribute('fill', col);
+        if (WL) WL.setAttribute('fill', col);
+      }
+      const yy = y(spot);
+      ln.setAttribute('y1', yy.toFixed(1)); ln.setAttribute('y2', yy.toFixed(1));
+      bg.setAttribute('y', (yy - 7).toFixed(1)); tx.setAttribute('y', (yy + 3.5).toFixed(1));
+      tx.textContent = fmtInt(Math.round(spot));
+      return true;
+    } catch (_) { return false; }
+  }
+
   function renderPriceChart(...a) {
+    _chart._lastFull = performance.now();
+    if (_chart._fullTimer) { clearTimeout(_chart._fullTimer); _chart._fullTimer = 0; }
+    _chart._rkFast = null;
     const r = _renderPriceChartInner(...a);
     try { renderCtxChart(); } catch (_) {}
     try {
@@ -25929,20 +26925,31 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // a dim monitor and peripheral vision alike. A 200% bar is drawn 1.8x
       // wider than an ordinary one and a 150% bar 1.35x, so the significant
       // bars are physically bigger objects rather than merely different ones.
-      const pvOp = 1;
+      // Ordinary-volume bars (PVSRA "normal", under 150% of the 10-bar
+      // average) at half opacity, so the 150% and 200% bars stand out at
+      // full strength. Bars with no volume to classify stay solid - dimming
+      // them would claim a reading that was never made.
+      const pvOp = (pv && pv.kind === 'normal') ? 0.5 : 1;
       const pvStroke = pvHot ? (pv.kind === 'climax' ? 1.8 : 1.2) : 0.6;
       const pvW = pvHot ? (pv.kind === 'climax' ? 1.8 : 1.35) : 1;
       const cwP = Math.max(1, cw * pvW);
       const cx = x(i);
       const yo = y(c.o), yc = y(c.c), yh = y(c.h), yl = y(c.l);
       const bodyTop = Math.min(yo, yc), bodyBot = Math.max(yo, yc);
+      // The forming bar's three parts carry ids, and are always emitted, so
+      // a tick can move them in place (see _chartFastTick) instead of
+      // rebuilding two thousand elements to change one candle.
+      const isLast = i === cs.length - 1;
+      const wW = wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1);
       // upper wick: high -> top of body; lower wick: bottom of body -> low
-      if (yh < bodyTop - 0.2)
-        svg += `<rect x="${(cx - (wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)) / 2).toFixed(2)}" y="${yh.toFixed(2)}" width="${(wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)).toFixed(2)}" height="${(bodyTop - yh).toFixed(2)}" fill="${col}" opacity="${pvOp}"/>`;
-      if (yl > bodyBot + 0.2)
-        svg += `<rect x="${(cx - (wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)) / 2).toFixed(2)}" y="${bodyBot.toFixed(2)}" width="${(wickW * (pv && pv.kind !== 'normal' ? 1.6 : 1)).toFixed(2)}" height="${(yl - bodyBot).toFixed(2)}" fill="${col}" opacity="${pvOp}"/>`;
+      if (yh < bodyTop - 0.2 || isLast)
+        svg += `<rect${isLast ? ' id="lcWU"' : ''} x="${(cx - wW / 2).toFixed(2)}" y="${yh.toFixed(2)}" width="${wW.toFixed(2)}" height="${Math.max(0, bodyTop - yh).toFixed(2)}" fill="${col}" opacity="${pvOp}"/>`;
+      if (yl > bodyBot + 0.2 || isLast)
+        svg += `<rect${isLast ? ' id="lcWL"' : ''} x="${(cx - wW / 2).toFixed(2)}" y="${bodyBot.toFixed(2)}" width="${wW.toFixed(2)}" height="${Math.max(0, yl - bodyBot).toFixed(2)}" fill="${col}" opacity="${pvOp}"/>`;
       const bodyH = Math.max(1, bodyBot - bodyTop);
-      svg += `<rect x="${(cx - cwP / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${cwP.toFixed(2)}" height="${bodyH.toFixed(2)}" fill="${col}" stroke="${col}" stroke-width="${pvStroke}" opacity="${pvOp}" shape-rendering="crispEdges"><title>${
+      if (isLast) _chart._fast = { t: c.t, n: cs.length, pvHot: !!pvHot, col0: col, haO: c.o,
+                                   type: document.getElementById('chartType')?.value || 'candle' };
+      svg += `<rect${isLast ? ' id="lcB"' : ''} x="${(cx - cwP / 2).toFixed(2)}" y="${bodyTop.toFixed(2)}" width="${cwP.toFixed(2)}" height="${bodyH.toFixed(2)}" fill="${col}" stroke="${col}" stroke-width="${pvStroke}" opacity="${pvOp}" shape-rendering="crispEdges"><title>${
         pv ? `${pv.label}\n${up ? 'up' : 'down'} bar` : ''}</title></rect>`;
       // A climax bar also gets a marker in the margin above the wick. A colour
       // difference is invisible in peripheral vision; a shape is not, and it
@@ -25962,7 +26969,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       }
       // live bar: outline it so the forming candle is obvious
       if (i === cs.length - 1 && _chart.liveBar)
-        svg += `<rect x="${(cx - cw / 2 - 1).toFixed(2)}" y="${(bodyTop - 1).toFixed(2)}" width="${cw + 2}" height="${(bodyH + 2).toFixed(2)}" fill="none" stroke="#fff" stroke-width="0.7" opacity="0.55"/>`;
+        svg += `<rect id="lcOut" x="${(cx - cw / 2 - 1).toFixed(2)}" y="${(bodyTop - 1).toFixed(2)}" width="${cw + 2}" height="${(bodyH + 2).toFixed(2)}" fill="none" stroke="#fff" stroke-width="0.7" opacity="0.55"/>`;
     });
 
     // ── Heikin Ashi reading aids ───────────────────────────────────
@@ -26156,8 +27163,15 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // makes a correct reading look unsupported.
     try {
       const bars0 = _chart.liveBar ? cs.slice(0, -1) : cs;
-      const rsi0 = _rsiSeries(bars0.map(b => b.c), 14);
-      for (const dv of (_rsiDivergence(bars0, rsi0, 5) || []).slice(0, 4)) {
+      // completed bars only, so the answer changes once a minute - cache it
+      // rather than rerunning RSI and the pivot search on every tick
+      const dk = `${bars0.length}|${bars0[0]?.t}|${bars0[bars0.length - 1]?.t}|${bars0[bars0.length - 1]?.c}|${bars0[bars0.length - 1]?.h}|${bars0[bars0.length - 1]?.l}`;
+      if (_chart._divKey !== dk) {
+        const rsi0 = _rsiSeries(bars0.map(b => b.c), 14);
+        _chart._divRes = (_rsiDivergence(bars0, rsi0, 5) || []).slice(0, 4);
+        _chart._divKey = dk;
+      }
+      for (const dv of _chart._divRes) {
         const pa = dv.kind === 'bearish' ? bars0[dv.a].h : bars0[dv.a].l;
         const pb = dv.kind === 'bearish' ? bars0[dv.b].h : bars0[dv.b].l;
         if (pa < lo || pa > hi || pb < lo || pb > hi) continue;
@@ -26170,7 +27184,19 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         svg += `<circle cx="${x(dv.b).toFixed(1)}" cy="${y(pb).toFixed(1)}" r="2.6" fill="${col}"/>`;
       }
     } catch (_) {}
-    try { svg += _signalSvg(cs, x, y, lo, hi); } catch (_) {}
+    // Desk signals replace the old vote-count markers here. They are judged
+    // on the REAL candles - on Heikin Ashi too - and anchored outside both
+    // the drawn bar and the real one so the arrow never sits on a wick.
+    let deskSig = null;
+    try {
+      // BUY/SELL markers removed: the move-quality leg and box replace them
+      const mq = _mqView();
+      if (mq) {
+        const xAt = t => { const k = cs.findIndex(c => c.t >= t); return k < 0 ? (cs.length ? x(cs.length - 1) : null) : x(k); };
+        svg += _mqLegSvg(mq, xAt(mq.leg.start_t), xAt(mq.leg.now_t), y, lo, hi);
+        _chart._mqBox = _mqBoxSvg(mq, W, H, padR, padB);
+      } else _chart._mqBox = '';
+    } catch (e) { console.warn('[desk]', e.message); }
     // user alerts last, so they sit above the levels they were set against
     try { svg += _chartAlertLines(y, lo, hi, W, padL, padR); } catch (_) {}
     // hand the pane the same x-mapping and geometry the candles used, so the
@@ -26212,9 +27238,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // live price line
     let spotSvg = '';
     if (spot && spot >= lo && spot <= hi) {
-      spotSvg = `<line x1="${padL}" y1="${y(spot).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y(spot).toFixed(1)}" stroke="#fff" stroke-width="1" opacity="0.55"/>
-        <rect x="${(W - padR + 1).toFixed(1)}" y="${(y(spot) - 7).toFixed(1)}" width="56" height="14" rx="3" fill="#fff"/>
-        <text x="${(W - padR + 4).toFixed(1)}" y="${(y(spot) + 3.5).toFixed(1)}" style="font-size:9.5px;fill:#111;font-weight:800;">${fmtInt(Math.round(spot))}</text>`;
+      spotSvg = `<line id="spLn" x1="${padL}" y1="${y(spot).toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${y(spot).toFixed(1)}" stroke="#fff" stroke-width="1" opacity="0.55"/>
+        <rect id="spBg" x="${(W - padR + 1).toFixed(1)}" y="${(y(spot) - 7).toFixed(1)}" width="56" height="14" rx="3" fill="#fff"/>
+        <text id="spTx" x="${(W - padR + 4).toFixed(1)}" y="${(y(spot) + 3.5).toFixed(1)}" style="font-size:9.5px;fill:#111;font-weight:800;">${fmtInt(Math.round(spot))}</text>`;
     }
     // time axis
     // hourly gridlines across the whole session, independent of how many
@@ -26270,14 +27296,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         if (haInfo.strongRun) parts.push(`<span style="color:${c};">${haInfo.strongRun} strong (no ${haInfo.up ? 'lower' : 'upper'} wick)</span>`);
         if (haInfo.ageing) parts.push('<b style="color:#ffb300;">ageing — partial profit</b>');
         if (haInfo.indecision) parts.push('<span style="color:#9ab;">last bar: indecision</span>');
-        if (fl) parts.push(`<span style="color:var(--muted,#789);">last flip ${new Date(fl.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })} ${fl.up ? '▲' : '▼'} ${fl.agree ? '<b style="color:#26de81;">VWAP-confirmed</b>' : 'against VWAP'}</span>`);
+        if (fl) parts.push(`<span style="color:var(--muted,#789);">last flip ${_hm(fl.t)} ${fl.up ? '▲' : '▼'} ${fl.agree ? '<b style="color:#26de81;">VWAP-confirmed</b>' : 'against VWAP'}</span>`);
         return `<span style="display:inline-flex;gap:8px;align-items:center;font-size:10px;" title="Heikin Ashi is a trend filter: take entries and stops from real candles, not from HA prices.">${parts.join(' · ')}</span>`;
       })() : '';
-      if (dt || ha)
-        dayBar = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:2px 4px 5px;">${_dayTypeBadge(dt)}${ha}</div>`;
+      const dsl = '';
+      if (dt || ha || dsl)
+        dayBar = `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:2px 4px 5px;">${_dayTypeBadge(dt)}${ha}</div>` +
+          (dsl ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:0 4px 5px;">${dsl}</div>` : '');
     } catch (_) {}
     box.innerHTML = regBar + dayBar +
-      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}
+      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}${_chart._mqBox || ''}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
         <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
@@ -26417,7 +27445,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         const tx = Math.max(padL + 26, Math.min(W - padR - 26, x(i)));
         tb.setAttribute('x', tx - 26); tb.setAttribute('y', H - padB + 4);
         tt.setAttribute('x', tx); tt.setAttribute('y', H - padB + 15);
-        tt.textContent = new Date(c2.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        tt.textContent = _hm(c2.t);
         // nearest level line under the pointer -> floating label with its value
         const tip = document.getElementById('lvlTip'), tBg = document.getElementById('ltBg'), tTx = document.getElementById('ltTx');
         if (tip && tBg && tTx) {
@@ -27201,6 +28229,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       pvT.checked = _pvsraOn();
       pvT.addEventListener('change', () => {
         try { localStorage.setItem('pvsraOn', pvT.checked ? '1' : '0'); } catch (_) {}
+        _pvSet.at = 0;                        // take effect on this repaint, not in a second
         if (pvT.checked && !_chart.hasVolume)
           showToast?.('PVSRA needs traded volume — switch DATA_SOURCE to fyers. NSE gives one spot sample a minute with no volume.');
         renderPriceChart();
@@ -27512,7 +28541,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
     const tick = Math.max(1, Math.floor(rows.length / 8));
     rows.forEach((r, i) => { if (i % tick) return;
-      svg += `<text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(r.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+      svg += `<text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${_hm(r.t)}</text>`; });
     const chg = _pcrHist.chg, sp = _pcrHist.spread_now;
     const dirTxt = chg > 0.05 ? ['PUT-SIDE BUILDING', 'var(--pos,#26a69a)', 'put writers have been adding through the session, which is support forming — unless price is falling with it, in which case they are buying protection instead']
       : chg < -0.05 ? ['CALL-SIDE BUILDING', 'var(--neg,#ef5350)', 'call writers have been adding, which caps rallies — the mirror image of the same logic']
@@ -27601,7 +28630,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
           // in change mode a NEGATIVE change is drawn faded, because OI
           // leaving a strike is the opposite signal to OI arriving
           const col = sd === 'ce' ? `rgba(239,83,80,${a})` : `rgba(38,166,154,${a})`;
-          svg += `<rect x="${(padL + ci * cw).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, cw - 0.4).toFixed(1)}" height="${hh.toFixed(1)}" fill="${col}"${mode === 'chg' && v < 0 ? ' opacity="0.45"' : ''}><title>${fmtInt(k)} ${sd.toUpperCase()} @ ${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}: ${mode === 'level' ? 'OI ' + fmtInt(Math.round(v)) : (v >= 0 ? '+' : '') + fmtInt(Math.round(v))}</title></rect>`;
+          svg += `<rect x="${(padL + ci * cw).toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(1, cw - 0.4).toFixed(1)}" height="${hh.toFixed(1)}" fill="${col}"${mode === 'chg' && v < 0 ? ' opacity="0.45"' : ''}><title>${fmtInt(k)} ${sd.toUpperCase()} @ ${_hm(c.t)}: ${mode === 'level' ? 'OI ' + fmtInt(Math.round(v)) : (v >= 0 ? '+' : '') + fmtInt(Math.round(v))}</title></rect>`;
         });
       });
     });
@@ -27615,7 +28644,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     svg += `<polyline points="${sp}" fill="none" stroke="#fff" stroke-width="1.4" opacity="0.7"/>`;
     const tick = Math.max(1, Math.floor(cols.length / 8));
     cols.forEach((c, ci) => { if (ci % tick) return;
-      svg += `<text x="${(padL + ci * cw + cw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+      svg += `<text x="${(padL + ci * cw + cw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${_hm(c.t)}</text>`; });
     const s = _oiHist.summary || [];
     const builds = s.filter(x => x.chg > 0).slice(0, 3);
     const decays = s.filter(x => x.chg < 0).slice(0, 3);
@@ -27709,7 +28738,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         if (!v) return;
         const a = Math.min(0.9, Math.abs(v) / maxAbs);
         const col = v > 0 ? `rgba(38,166,154,${a})` : `rgba(239,83,80,${a})`;
-        svg += `<rect x="${(padL + ci * cw).toFixed(1)}" y="${y}" width="${Math.max(1, cw - 0.5).toFixed(1)}" height="${rowH - 1}" fill="${col}"><title>${fmtInt(k)} @ ${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}: GEX ${fmtInt(Math.round(v))}</title></rect>`;
+        svg += `<rect x="${(padL + ci * cw).toFixed(1)}" y="${y}" width="${Math.max(1, cw - 0.5).toFixed(1)}" height="${rowH - 1}" fill="${col}"><title>${fmtInt(k)} @ ${_hm(c.t)}: GEX ${fmtInt(Math.round(v))}</title></rect>`;
       });
     });
     // king node and spot traces over the grid
@@ -27728,7 +28757,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     if (kingPts) svg += `<polyline points="${kingPts}" fill="none" stroke="var(--gold,#d4af37)" stroke-width="1.6" stroke-dasharray="4,3"/>`;
     const tick = Math.max(1, Math.floor(cols.length / 8));
     cols.forEach((c, ci) => { if (ci % tick) return;
-      svg += `<text x="${(padL + ci * cw + cw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${new Date(c.t * 1000).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}</text>`; });
+      svg += `<text x="${(padL + ci * cw + cw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${_hm(c.t)}</text>`; });
     const first = cols[0], last = cols[cols.length - 1];
     const kingMoved = first.king !== last.king;
     box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}</svg>
@@ -30330,7 +31359,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         continue;
       }
       try {
-        const resp = await fetch(`${base}/api/chain?symbol=${sym}&band=4`, { signal: AbortSignal.timeout(15000) });
+        // maxage=60: a tile is a glance, so any snapshot of this symbol under a
+        // minute old - including one another PC's chart fetched - will do
+        const resp = await fetch(`${base}/api/chain?symbol=${sym}&band=4&maxage=60`, { signal: AbortSignal.timeout(15000) });
         const data = await resp.json();
         if (!data.error) {
           const prevSpot = state.watchlistData[sym]?.underlying_value;
@@ -33883,7 +34914,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'pcr-bands':         '<strong>PCR by horizon</strong>One put-call ratio hides which strikes produced it. Computed over the whole chain it includes strikes price cannot reach this week - that open interest is positional and barely moves intraday, so it dilutes a genuine shift near the money into something that looks like nothing happened. The bands here are defined in <b>sigma</b> - the expected move - rather than in strike counts, and that distinction matters more than it sounds. Nifty uses 50-point steps near the money and 100-point steps further out, so a fixed count like \'±12 strikes\' covers ±600 points in one part of the chain and ±1200 in another: the band silently changes meaning depending on where the money is. A fixed count also means different risk on different instruments, because BankNifty\'s higher volatility needs a wider net for the same reachability. Measuring in sigma removes both problems - each band self-adjusts to strike spacing, to the instrument and to today\'s volatility, and the strike COUNT becomes an output worth reading rather than a number to guess at. On a quiet Nifty day the rest-of-day band might be ±111 points and five strikes; on a high-volatility day the same band widens to ±195 points and seven. <b>The divergence between the near and wide bands is the actionable part:</b> when they disagree, positioning is shifting where price actually is, and the wide ratio will not reflect it for some time. The three columns are the same ratio computed on open interest, traded volume, and CHANGE in open interest - and ΔOI is the most immediate of the three, because it counts only what was added or removed today rather than the standing book. <b>Only the ±3 band is announced.</b> The wider ones move slowly by design, so alerting on them would mostly report the passage of time; the near band is the one that can change what you do in the next few minutes. Rising PCR means puts building relative to calls, which is support being written and conventionally bullish - but above 1.6 or below 0.6 the reading inverts and is called out as contrarian, because when everyone is positioned one way there is nobody left to push it further.',
     'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
     'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
-    'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP position, momentum, position in the day range) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
+    'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP bands read by day type — stretched on a range day leans back to VWAP, riding the band on a trend day leans with it — the day type itself, momentum, position in the day range, acceptance outside the previous-day range, the opening range, the Heikin Ashi trend state, and move quality — whether the current leg looks real or likely to reverse) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
     'leading-signals':   '<strong>Leading signals</strong>Five conditions that change before price does, because each is <b>mechanical rather than predictive</b>. None of them forecasts direction; what they mark is a moment when a move becomes more likely or more violent, which is a claim that can actually be defended. <b>Gamma flip cross</b> is the strongest of them: dealer hedging literally reverses sign at that level, from damping moves to amplifying them, so crossing it changes the character of the tape as arithmetic rather than opinion. <b>Wall abandonment</b> fires when writers pull open interest out of a level while price approaches it - the defence stops before the break, not after, which is why it leads. <b>Straddle expansion on a flat tape</b> means the market is paying up for a move that has not happened yet. <b>Volume-PCR divergence</b> catches today\'s conviction pulling away from the standing book, visible well before open interest reflects it. <b>Regime flips</b> - WTT, WTB, bull run, bloodbath - were already being computed on the OI Flow tab but never announced, so they only helped if you happened to be looking at that panel. <b>Honest limits:</b> each of these can fire and be followed by nothing. They identify conditions, not outcomes, and the wall and straddle detectors in particular will fire on ordinary repositioning in a quiet market - raise their thresholds if that happens. Everything here routes through the same voice, index filter and Enable-All controls as the rest.',
     'price-ma-cross':    '<strong>Price crossing an EMA or VWAP</strong>Distinct from the EMA crossover alerts above, which watch one average crossing ANOTHER. This watches <b>price</b> crossing a moving average - the more common scalping trigger, and the one you actually see happening on the chart. It covers EMA 5, 10, 15, 20, 50, 100 and 200 plus VWAP, announcing only the ones you have switched on for the chart, so the alert set follows what you are looking at rather than a separate list you have to remember to keep in sync. <b>Two rules make it usable rather than maddening.</b> <b>Close only:</b> price wanders across a nearby average constantly inside a bar, so alerting on the forming candle produces a stream of reversals that all undo themselves - waiting for the close costs one interval and removes nearly all of it. <b>Minimum clearance:</b> a close half a point past an EMA is not a crossing, it is noise, so the bar must close clear of the line by a set share of price. The spoken alert names whether the average is short-term, intermediate or trend-defining, because a close through EMA 5 and a close through EMA 200 mean very different things and the number alone does not make that obvious by ear. <b>Honest note:</b> on a 1-minute chart with EMA 5 switched on, this will fire often - that is the nature of a fast average, not a fault. Raise the clearance or switch the fast EMAs off the chart if it chatters.',
     'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',

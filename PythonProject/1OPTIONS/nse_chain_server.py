@@ -551,6 +551,79 @@ def _m920_detect(symbol: str, data: dict):
             "text": f"Price touching {spoken} at {int(round(v))}, the nine twenty {kind} line",
         })
 
+# ── candle helpers shared by every client ─────────────────────────────
+def _aggregate_candles(rows, interval: int):
+    """Build N-minute candles from 1-minute ones (buckets aligned to the epoch,
+    which puts 09:15 IST on a boundary for 3, 5 and 15 minutes)."""
+    if not rows or interval <= 1:
+        return rows or []
+    step = interval * 60
+    out, cur = [], None
+    for cd in rows:
+        b = int(cd["t"]) // step * step
+        if cur is None or cur["t"] != b:
+            if cur:
+                out.append(cur)
+            cur = {"t": b, "o": cd["o"], "h": cd["h"], "l": cd["l"], "c": cd["c"],
+                   "v": cd.get("v", 0) or 0, "n": cd.get("n", 1) or 1}
+        else:
+            cur["h"] = max(cur["h"], cd["h"]); cur["l"] = min(cur["l"], cd["l"])
+            cur["c"] = cd["c"]; cur["v"] = (cur["v"] or 0) + (cd.get("v", 0) or 0)
+            cur["n"] += cd.get("n", 1) or 1
+    if cur:
+        out.append(cur)
+    return out
+
+
+_archive_lock = threading.Lock()
+_archive_last: dict = {}      # symbol -> (day, last minute written, last close)
+
+def _archive_minutes(symbol: str, rows) -> None:
+    """Keep the on-disk minute archive current from the 1-minute history.
+
+    It used to be rewritten by EVERY /api/intraday-candles request - so each
+    open browser rewrote the whole file every five seconds, two requests at
+    once raced on the same temp file, and a chart on 5-minute bars wrote
+    5-minute closes into minute slots. Now: 1-minute data only, under a lock,
+    a unique temp file, and only when a new minute (or a changed last close)
+    has actually arrived.
+    """
+    if not rows:
+        return
+    try:
+        day = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 3600 + 1800))
+        today = [cd for cd in rows
+                 if time.strftime("%Y-%m-%d", time.gmtime(cd["t"] + 5 * 3600 + 1800)) == day]
+        if not today:
+            return
+        last_m, last_c = int(today[-1]["t"] // 60), today[-1]["c"]
+        with _archive_lock:
+            if _archive_last.get(symbol) == (day, last_m, last_c):
+                return
+            apath_f = _os.path.join(_TICK_DIR, f"{symbol}_{day}.csv")
+            _os.makedirs(_TICK_DIR, exist_ok=True)
+            existing = {}
+            if _os.path.exists(apath_f):
+                with open(apath_f) as fh:
+                    for line in fh:
+                        p = line.strip().split(",")
+                        if len(p) >= 2:
+                            try:
+                                existing[int(float(p[0]) // 60)] = float(p[1])
+                            except Exception:
+                                pass
+            for cd in today:
+                existing[int(cd["t"] // 60)] = cd["c"]
+            tmp = f"{apath_f}.{threading.get_ident()}.tmp"
+            with open(tmp, "w") as fh:
+                for m in sorted(existing):
+                    fh.write(f"{m * 60},{existing[m]}\n")
+            _os.replace(tmp, apath_f)
+            _archive_last[symbol] = (day, last_m, last_c)
+    except Exception as e:  # noqa: BLE001
+        print(f"[fyers] archive write failed: {e}")
+
+
 def _sse_broadcast_ticks(event: dict) -> None:
     """Fan price ticks out to every connected tab.
 
@@ -561,9 +634,17 @@ def _sse_broadcast_ticks(event: dict) -> None:
     """
     with _sse_lock:
         targets = list(_sse_clients)
+    if not targets:
+        return
+    # Serialised ONCE for all clients. Each tab's thread used to json.dumps
+    # the same batch itself, four times a second, so every extra browser
+    # added a full encode of the whole tick batch - under the GIL, competing
+    # with the thread receiving ticks from Fyers.
+    raw = f"data: {json.dumps(event)}\n\n".encode()
+    ev2 = {"__raw": raw}
     for cl in targets:
         try:
-            cl["q"].put_nowait(event)
+            cl["q"].put_nowait(ev2)
         except Exception:
             pass
 
@@ -852,18 +933,45 @@ _cache_stats = {"served": 0, "from_cache": 0, "fetches": 0, "coalesced": 0, "cli
 def _cache_key(symbol: str, expiry, band: int) -> str:
     return f"{symbol}|{expiry or 'near'}|{band}"
 
-def _cached_chain(symbol: str, expiry, band: int, client: str = "?"):
+def _cached_chain(symbol: str, expiry, band: int, client: str = "?", max_age: float = 0.0):
     """Return a chain response, fetching from NSE only when genuinely needed.
 
     Returns (data, meta) where meta describes how the request was served so
     the UI can show whether it hit cache and how old the data is.
+
+    max_age > 0 marks a BACKGROUND request (watchlist tiles, the paired-index
+    strip): any snapshot of the same symbol and expiry younger than max_age
+    is good enough, including one fetched for a wider band. Each extra PC
+    used to add its own tile and strip fetches on its own timer - and since
+    those timers are not aligned, the 8-second cache rarely caught them.
+    Background requests also never mark a symbol as focused.
     """
     key = _cache_key(symbol, expiry, band)
     now = time.time()
+    if max_age and max_age > 0:
+        with _chain_meta_lock:
+            best = None
+            pre = f"{symbol}|{expiry or 'near'}|"
+            for k2, e2 in _chain_cache.items():
+                if not k2.startswith(pre):
+                    continue
+                try:
+                    b2 = int(k2.rsplit("|", 1)[1])
+                except Exception:
+                    continue
+                if b2 >= band and (now - e2["ts"]) < max_age and (best is None or e2["ts"] > best["ts"]):
+                    best = e2
+            if best is not None:
+                best["hits"] += 1
+                _cache_stats["served"] += 1
+                _cache_stats["from_cache"] += 1
+                _cache_stats["clients"][client] = now
+                return best["data"], {"cache": "shared", "age": round(now - best["ts"], 2),
+                                      "ttl": max_age, "shared_hits": best["hits"]}
     # A browser asking for the FULL chain (band >= 12 is the main panel; the
     # watchlist tiles use band 4) means this symbol is on someone's screen.
     # The background poller uses this to decide what deserves fast refresh.
-    if client != "poller" and band >= 12:
+    if client != "poller" and band >= 12 and not max_age:
         _focus_seen[symbol.upper()] = now
     with _chain_meta_lock:
         _cache_stats["served"] += 1
@@ -3418,7 +3526,32 @@ def _ohlc_from_history(symbol: str) -> dict | None:
     return None
 
 
+_replay_ohlc_cache: dict = {}     # path -> ((path, size, mtime), summary row)
+_prev_ohlc_cache: dict = {}       # symbol -> (IST day, result)
+
+
 def _fetch_prev_day_ohlc(symbol: str, verbose: bool = True) -> dict:
+    """Previous session's OHLC, cached for the day once a good answer exists.
+
+    The answer cannot change during a session, yet every call re-read the
+    CSV and, when that missed, walked the NSE fallbacks with retries - per
+    request, per browser. A refresh of several PCs at once (after a restart,
+    say) multiplied that by the number of screens.
+    """
+    day = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 3600 + 1800))
+    hit = _prev_ohlc_cache.get(symbol)
+    if hit and hit[0] == day:
+        return hit[1]
+    res = _fetch_prev_day_ohlc_raw(symbol, verbose)
+    try:
+        if res and float(res.get("high") or 0) > 0 and float(res.get("close") or 0) > 0:
+            _prev_ohlc_cache[symbol] = (day, res)
+    except Exception:
+        pass
+    return res
+
+
+def _fetch_prev_day_ohlc_raw(symbol: str, verbose: bool = True) -> dict:
     """
     Fetch the previous trading day's OHLC from NSE APIs (with CSV as the
     fastest/most-reliable first check). When verbose=True (default), prints
@@ -4442,7 +4575,11 @@ class Handler(BaseHTTPRequestHandler):
 
             client = self.client_address[0] if self.client_address else "?"
             try:
-                data, meta = _cached_chain(symbol, expiry, band, client=client)
+                max_age = max(0.0, min(300.0, float(qs.get("maxage", ["0"])[0] or 0)))
+            except ValueError:
+                max_age = 0.0
+            try:
+                data, meta = _cached_chain(symbol, expiry, band, client=client, max_age=max_age)
                 # tell the UI how this was served (cache hit vs live fetch)
                 try:
                     data = dict(data)
@@ -5090,9 +5227,13 @@ class Handler(BaseHTTPRequestHandler):
                     g = time.gmtime(int(ts) + 5 * 3600 + 1800)
                     return f"{g.tm_hour:02d}:{g.tm_min:02d}"
                 cov = f"{_hm(rows[0]['t'])}-{_hm(rows[-1]['t'])}" if rows else ""
+                # has_volume was missing here, so a replayed day was drawn as if
+                # it had no volume: VWAP fell back to equal weights and every
+                # volume-based check silently switched off.
                 self._send_json({"candles": rows, "source": f"fyers-history {on_date}",
                                  "historical": True, "date": on_date,
-                                 "coverage": cov, "gaps": []})
+                                 "coverage": cov, "gaps": [],
+                                 "has_volume": any((r.get("v") or 0) > 0 for r in rows)})
                 return
             idx_names = {"NIFTY": "NIFTY 50", "BANKNIFTY": "NIFTY BANK",
                          "FINNIFTY": "NIFTY FIN SERVICE", "MIDCPNIFTY": "NIFTY MID SELECT"}
@@ -5188,7 +5329,13 @@ class Handler(BaseHTTPRequestHandler):
             if RUN_DATA_SOURCE == "fyers":
                 try:
                     import nse_adapter_fyers as _fy
-                    fc = _fy.fetch_candles(symbol, interval, 1)
+                    # ONE history series per symbol: the 1-minute bars, which
+                    # every interval is built from here. Each chart interval
+                    # used to be its own Fyers history call, so PCs on 1m, 3m
+                    # and 5m cost three calls a minute for one symbol.
+                    fc1 = _fy.fetch_candles(symbol, 1, 1)
+                    _archive_minutes(symbol, fc1)
+                    fc = _aggregate_candles(fc1, interval) if interval > 1 else fc1
                     if fc:
                         today_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday
                         for cd in fc:
@@ -5220,32 +5367,8 @@ class Handler(BaseHTTPRequestHandler):
                                     fgaps.append({"from": a["t"], "to": b["t"],
                                                   "mins": miss * interval,
                                                   "from_px": a["c"], "to_px": b["o"]})
-                        # ── keep the tick archive current under Fyers too ──
-                        # The branch used to return before the archive write, so
-                        # the on-disk history simply stopped growing - which the
-                        # reconciler, the coverage indicator and tomorrow's
-                        # restart all depend on.
-                        try:
-                            apath_f = _os.path.join(_TICK_DIR, f"{symbol}_{time.strftime('%Y-%m-%d')}.csv")
-                            _os.makedirs(_TICK_DIR, exist_ok=True)
-                            existing = {}
-                            if _os.path.exists(apath_f):
-                                for line in open(apath_f):
-                                    p = line.strip().split(",")
-                                    if len(p) >= 2:
-                                        try:
-                                            existing[int(float(p[0]) // 60)] = float(p[1])
-                                        except Exception:
-                                            pass
-                            for cd in out:
-                                existing[int(cd["t"] // 60)] = cd["c"]
-                            tmp = apath_f + ".tmp"
-                            with open(tmp, "w") as f:
-                                for m in sorted(existing):
-                                    f.write(f"{m * 60},{existing[m]}\n")
-                            _os.replace(tmp, apath_f)
-                        except Exception as e:  # noqa: BLE001
-                            print(f"[fyers] archive write failed: {e}")
+                        # (the tick archive is kept current by _archive_minutes
+                        # above, from the 1-minute series only)
                         if out:
                             first = _ist_hm_g(out[0]["t"]); last = _ist_hm_g(out[-1]["t"])
                             self._send_json({"symbol": symbol, "interval": interval,
@@ -5564,7 +5687,10 @@ class Handler(BaseHTTPRequestHandler):
                 while True:
                     try:
                         ev = cl["q"].get(timeout=15)
-                        self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
+                        if "__raw" in ev:
+                            self.wfile.write(ev["__raw"])      # pre-encoded tick batch
+                        else:
+                            self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
                     except Exception:
                         self.wfile.write(b": keepalive\n\n")   # keeps proxies from closing
                     self.wfile.flush()
@@ -6454,6 +6580,20 @@ class Handler(BaseHTTPRequestHandler):
                 out = []
                 for day in _replay_dates(symbol):
                     path = _os.path.join(_REPLAY_DIR, f"{symbol}_{day}.jsonl")
+                    # Each day's file was re-read and every snapshot re-parsed
+                    # on every request, from every browser. A past day never
+                    # changes, so the summary is cached against the file's
+                    # size and mtime and only today's file is ever re-read.
+                    try:
+                        st_ = _os.stat(path)
+                        ck = (path, st_.st_size, int(st_.st_mtime))
+                    except Exception:
+                        ck = None
+                    if ck and _replay_ohlc_cache.get(path, (None,))[0] == ck:
+                        row = _replay_ohlc_cache[path][1]
+                        if row:
+                            out.append(row)
+                        continue
                     vals, ts0 = [], None
                     try:
                         with open(path) as f:
@@ -6467,12 +6607,37 @@ class Handler(BaseHTTPRequestHandler):
                                     continue
                     except Exception:
                         continue
-                    if len(vals) >= 3:
-                        out.append({"day": day, "O": vals[0], "H": max(vals), "L": min(vals),
-                                    "C": vals[-1], "n": len(vals)})
+                    row = ({"day": day, "O": vals[0], "H": max(vals), "L": min(vals),
+                            "C": vals[-1], "n": len(vals)} if len(vals) >= 3 else None)
+                    if ck:
+                        _replay_ohlc_cache[path] = (ck, row)
+                    if row:
+                        out.append(row)
                 self._send_json({"symbol": symbol, "days": out, "count": len(out)})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": str(e), "days": []})
+            return
+
+        if parsed.path == "/api/move-quality":
+            # Is the current rally/fall real, or likely to reverse? Scored on
+            # the replay archive (one chain snapshot a minute) and calibrated
+            # on earlier recorded days. Reads files only - no broker calls.
+            symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
+            day = (qs.get("date", [""])[0] or time.strftime("%Y-%m-%d")).strip()
+            try:
+                spot = float(qs.get("spot", ["0"])[0] or 0)
+            except ValueError:
+                spot = 0.0
+            import re as _re3
+            if not _re3.match(r"^\d{4}-\d{2}-\d{2}$", day):
+                self._send_json({"error": "date must be YYYY-MM-DD"}, status=400)
+                return
+            try:
+                import nse_move_quality as _mq
+                self._send_json(_mq.current(_REPLAY_DIR, symbol, day,
+                                            spot if day == time.strftime("%Y-%m-%d") else None))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": f"move-quality failed: {e}"})
             return
 
         if parsed.path == "/api/replay-index":
