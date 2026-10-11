@@ -1684,22 +1684,163 @@ def _fetch_index_weights(symbol: str, fetcher=None) -> dict:
             "fetched": time.strftime("%Y-%m-%d %H:%M")}
 
 
-def _refresh_all_weights(symbols=("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")) -> dict:
+# Official constituent lists, published by NSE as plain CSV files. These need
+# no session cookies, so membership refreshes even when the NSE API (which
+# needs a warmed browser-like session) refuses us.
+_MEMBER_CSV = {
+    "NIFTY": "ind_nifty50list.csv",
+    "BANKNIFTY": "ind_niftybanklist.csv",
+    "FINNIFTY": "ind_niftyfinancelist.csv",
+    "MIDCPNIFTY": "ind_niftymidcapselect_list.csv",
+}
+
+
+def _fetch_index_members(symbol: str) -> list:
+    """Current constituents from NSE's published index list, or [] on failure."""
+    fn = _MEMBER_CSV.get(symbol.upper())
+    if not fn:
+        return []
+    import csv as _csv, io as _io
+    import requests as _rq
+    for base in ("https://nsearchives.nseindia.com/content/indices/",
+                 "https://archives.nseindia.com/content/indices/"):
+        try:
+            r = _rq.get(base + fn, timeout=15, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                "Accept": "text/csv,*/*"})
+            if r.status_code != 200 or "Symbol" not in r.text[:300]:
+                print(f"[weights] {symbol} list: HTTP {r.status_code} from {base}")
+                continue
+            rows = list(_csv.DictReader(_io.StringIO(r.text)))
+            syms = [str(x.get("Symbol") or "").strip().upper() for x in rows]
+            syms = [x for x in syms if x]
+            if len(syms) >= 5:
+                return syms
+        except Exception as e:  # noqa: BLE001
+            print(f"[weights] {symbol} list fetch failed from {base}: {e}")
+    return []
+
+
+def _warm_nse_fetcher():
+    """A warmed NSE session for the weights API. The old code reused the
+    shared fetcher, which never exists when the chain comes from Fyers - so
+    the refresh printed 'no NSE session' and quietly changed nothing."""
+    global _shared_fetcher, _shared_fetcher_ts
+    f = _shared_fetcher
+    if f is not None and getattr(f, "_warmed", False):
+        return f
+    try:
+        from nse_options_strategy import NSESession
+        f = NSESession()
+        f._warm_up()
+        _shared_fetcher, _shared_fetcher_ts = f, time.time()
+        return f
+    except Exception as e:  # noqa: BLE001
+        print(f"[weights] could not open an NSE session: {e}")
+        return None
+
+
+def _write_member_txt(symbol: str, members: list) -> str:
+    """Rewrite ../nifty50.txt (the list other tools in the project read) in
+    the SAME format it already has: one per line or comma-separated, with or
+    without a suffix such as .NS. The previous file is kept as .bak."""
+    if symbol.upper() != "NIFTY" or not members:
+        return ""
+    path = _os.path.abspath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                          _os.pardir, "nifty50.txt"))
+    sep, suffix, header = "\n", "", ""
+    try:
+        if _os.path.exists(path):
+            old = open(path, encoding="utf-8", errors="ignore").read()
+            lines = [x for x in old.splitlines() if x.strip()]
+            if len(lines) <= 2 and old.count(",") >= 10:
+                sep = ","
+            toks = [t.strip() for t in (old.split(",") if sep == "," else lines)]
+            if toks and not any(ch.isdigit() for ch in toks[0]) and toks[0].lower() in ("symbol", "symbols", "ticker"):
+                header = toks[0]
+                toks = toks[1:]
+            dotted = [t for t in toks if "." in t]
+            if toks and len(dotted) >= len(toks) * 0.8:
+                suffix = "." + dotted[0].rsplit(".", 1)[1]
+            import shutil as _sh
+            _sh.copyfile(path, path + ".bak")
+        body = sep.join(([header] if header else []) + [m + suffix for m in members])
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(body + ("\n" if sep == "\n" else ""))
+        _os.replace(tmp, path)
+        print(f"[weights] wrote {len(members)} names to {path}")
+        return path
+    except Exception as e:  # noqa: BLE001
+        print(f"[weights] could not write {path}: {e}")
+        return ""
+
+
+def _refresh_all_weights(symbols=("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"),
+                         report: dict = None) -> dict:
+    """Refresh constituents and weights for each index.
+
+    Membership comes from NSE's published list (reliable, no session).
+    Weights come from the NSE index API when it answers; when it does not,
+    weights of continuing members are carried over and a new member gets the
+    median weight until a real figure is available - labelled as such, never
+    passed off as measured.
+    """
     data = dict(_load_index_weights())
+    report = report if report is not None else {}
+    fetcher = None
     changed = 0
     for sym in symbols:
-        got = _fetch_index_weights(sym)
+        rep_ = report.setdefault(sym, {})
+        members = _fetch_index_members(sym)
+        rep_["members"] = len(members)
+        if fetcher is None:
+            fetcher = _warm_nse_fetcher() or False
+        got = _fetch_index_weights(sym, fetcher or None) if fetcher else {}
+        prev = dict((data.get(sym) or {}).get("weights") or {})
         if got.get("weights"):
-            old = set((data.get(sym) or {}).get("weights", {}))
-            new = set(got["weights"])
-            if old and old != new:
-                added, gone = new - old, old - new
-                print(f"[weights] {sym} membership changed: "
-                      f"+{sorted(added)[:5]} -{sorted(gone)[:5]}")
-            data[sym] = got
-            changed += 1
+            w = dict(got["weights"])
+            method = got.get("method", "nse")
+        else:
+            w, method = {}, ""
+        if members:
+            mset = set(members)
+            # the published list decides membership; the API decides weights
+            w = {k: v for k, v in w.items() if k in mset}
+            missing = [m for m in members if m not in w]
+            if missing:
+                carried = {m: prev[m] for m in missing if m in prev}
+                w.update(carried)
+                still = [m for m in missing if m not in w]
+                if still:
+                    pool = sorted(w.values()) or sorted(prev.values()) or [100.0 / len(members)]
+                    med = pool[len(pool) // 2]
+                    for m in still:
+                        w[m] = med
+                method = (method + " + " if method else "") + (
+                    "carried-over weights" if not still else f"carried-over weights, {len(still)} new name(s) at median weight")
+        if not w:
+            rep_["error"] = "neither the constituent list nor the weights API answered"
+            continue
+        tot = sum(w.values()) or 1.0
+        w = {k: round(v / tot * 100, 3) for k, v in sorted(w.items(), key=lambda kv: -kv[1])}
+        old, new = set(prev), set(w)
+        rep_.update({"added": sorted(new - old) if old else [], "removed": sorted(old - new) if old else [],
+                     "method": method or "nse", "count": len(w)})
+        if old and old != new:
+            print(f"[weights] {sym} membership changed: +{sorted(new - old)} -{sorted(old - new)}")
+        data[sym] = {"weights": w, "method": method or "nse", "count": len(w),
+                     "fetched": time.strftime("%Y-%m-%d %H:%M")}
+        changed += 1
+        if sym == "NIFTY" and members:
+            rep_["txt"] = _write_member_txt(sym, members)
     if changed:
         _save_index_weights(data)
+        try:
+            _nifty_cache.clear()          # the constituents widget re-reads at once
+        except Exception:
+            pass
     return data
 
 
@@ -5068,13 +5209,16 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/refresh-weights":
             try:
                 _weights_cache.clear()
-                data = _refresh_all_weights()
-                self._send_json({"ok": True,
+                report: dict = {}
+                data = _refresh_all_weights(report=report)
+                ok = any(not r.get("error") for r in report.values())
+                # Say what actually happened per index. This used to answer
+                # ok:true with the OLD data when nothing had been fetched.
+                self._send_json({"ok": ok,
                                  "updated": data.get("_updated"),
-                                 "indices": {k: {"count": v.get("count"),
-                                                 "method": v.get("method")}
-                                             for k, v in data.items()
-                                             if not k.startswith("_")}})
+                                 "indices": report,
+                                 "nifty50": (data.get("NIFTY") or {}).get("weights", {}) and
+                                            list((data.get("NIFTY") or {}).get("weights", {}).keys())})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"ok": False, "error": str(e)})
             return
@@ -7771,14 +7915,12 @@ def main():
             # The refresh needs a live NSE session. Build one here rather than
             # assuming a helper exists: an undefined name in a startup path is
             # a crash, and a startup convenience must never stop the server.
-            global _shared_fetcher
-            if _shared_fetcher is None:
-                from nse_options_strategy import NSESession
-                _f = NSESession()
-                if hasattr(_f, "warm_up"):
-                    _f.warm_up()
-                _shared_fetcher = _f
-            _refresh_all_weights()
+            # (the session is opened inside the refresh now - this called a
+            # warm_up() that does not exist, so the session was never warmed)
+            _rep: dict = {}
+            _refresh_all_weights(report=_rep)
+            for _s, _r in _rep.items():
+                print(f"[weights] {_s}: {_r}")
         except Exception as e:  # noqa: BLE001
             print(f"[weights] refresh failed ({type(e).__name__}: {e}) "
                   f"- using whatever is on disk")
