@@ -1006,6 +1006,24 @@ def _cached_chain(symbol: str, expiry, band: int, client: str = "?", max_age: fl
         with _chain_meta_lock:
             _chain_cache[key] = {"data": data, "ts": time.time(), "hits": 0}
             _cache_stats["fetches"] += 1
+        # ── replay recording on the broker path ──────────────────────
+        # Snapshots were only ever SCHEDULED inside the NSE response builder,
+        # so with DATA_SOURCE=fyers the archive silently stopped growing:
+        # nothing for move quality, Daily Context, the backtester or any
+        # multi-day panel. Scheduled here for adapter sources - full-chain
+        # requests on the nearest expiry only, so a watchlist tile or a
+        # far-expiry view never becomes the day's record. Still one snapshot
+        # a minute per symbol, however many browsers ask.
+        try:
+            if RUN_DATA_SOURCE in ("fyers", "arrow") and band >= 12 and isinstance(data, dict):
+                exps = data.get("all_expiries") or []
+                near = exps[0] if exps else None
+                asked_near = not expiry or not near or str(expiry) == str(near)
+                got_near = not near or not data.get("expiry") or data.get("expiry") == near
+                if asked_near and got_near:
+                    _record_replay_snapshot(symbol)
+        except Exception:
+            pass
         try:
             _write_replay_snapshot(symbol, data)
         except Exception:

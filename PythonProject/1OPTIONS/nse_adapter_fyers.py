@@ -105,6 +105,80 @@ _subscribed: set = set()
 _tick_sink = None
 _last_push = 0.0
 _dirty: Dict[str, Dict[str, Any]] = {}
+
+# ── aggressor flow: who is taking liquidity ──────────────────────────────
+# Every trade is either a buyer lifting the offer or a seller hitting the
+# bid, and that - not the resting bid/ask quantity - is what desks weigh.
+# Resting size is passive and cancellable (deep in the money it is mostly
+# market-maker inventory); a print is commitment. Classified here, on every
+# raw tick rather than the 4 Hz batches the browsers get, with the quote that
+# stood BEFORE the trade (the Lee-Ready rule): at or above the prior offer is
+# a buy, at or below the prior bid a sell, in between by the tick test.
+# Minute buckets for the session; nothing extra is requested from Fyers.
+_flow: Dict[str, Dict[str, Any]] = {}       # fyers symbol -> {"v","ltp","bid","ask","sgn","m":{minute:[buy,sell]}}
+
+
+def _flow_update(sym: str, d: Dict[str, Any]) -> None:
+    vol, ltp = d.get("volume"), d.get("ltp")
+    if vol is None or ltp is None:
+        return
+    try:
+        vol, ltp = float(vol), float(ltp)
+    except Exception:
+        return
+    f = _flow.get(sym)
+    if f is None:
+        _flow[sym] = {"v": vol, "ltp": ltp, "bid": d.get("bid"), "ask": d.get("ask"), "sgn": 0, "m": {}}
+        return
+    dv = vol - f["v"]
+    if dv < 0:                        # a new session's counter
+        f.update({"v": vol, "m": {}})
+        return
+    if dv > 0:
+        bid, ask = f.get("bid"), f.get("ask")
+        if ask and ltp >= float(ask):
+            sg = 1
+        elif bid and ltp <= float(bid):
+            sg = -1
+        elif ltp > f["ltp"]:
+            sg = 1
+        elif ltp < f["ltp"]:
+            sg = -1
+        else:
+            sg = f["sgn"] or 0
+        if sg:
+            mnt = int(time.time() // 60)
+            b = f["m"].setdefault(mnt, [0.0, 0.0])
+            b[0 if sg > 0 else 1] += dv
+            f["sgn"] = sg
+            if len(f["m"]) > 420:
+                for k in sorted(f["m"])[:-400]:
+                    f["m"].pop(k, None)
+    f["v"], f["ltp"] = vol, ltp
+    if d.get("bid") is not None:
+        f["bid"] = d.get("bid")
+    if d.get("ask") is not None:
+        f["ask"] = d.get("ask")
+
+
+def _flow_read(sym: Optional[str]) -> Optional[Dict[str, Any]]:
+    f = _flow.get(sym or "")
+    if not f or not f["m"]:
+        return None
+    now = int(time.time() // 60)
+    b5 = s5 = b15 = s15 = bd = sd = 0.0
+    # list() of a dict is taken in one step under the GIL, so the socket
+    # thread adding a minute mid-read cannot break the loop
+    first = None
+    for mnt, (b, s_) in list(f["m"].items()):
+        first = mnt if first is None else min(first, mnt)
+        bd += b; sd += s_
+        if now - mnt < 15:
+            b15 += b; s15 += s_
+        if now - mnt < 5:
+            b5 += b; s5 += s_
+    return {"b5": b5, "s5": s5, "b15": b15, "s15": s15, "bd": bd, "sd": sd,
+            "since": first * 60}
 _status: Dict[str, Any] = {
     "connected": False, "streaming": False, "last_error": "",
     "ticks": 0, "subscribed": 0, "last_chain": 0.0, "token_age_h": None,
@@ -386,6 +460,10 @@ def _on_message(msg) -> None:
 
         d["ts"] = time.time()
         with _lock:
+            try:
+                _flow_update(sym, d)
+            except Exception:
+                pass
             _ticks[sym] = {**_ticks.get(sym, {}), **d}
             _status["ticks"] += 1
             _status["streaming"] = True
@@ -894,8 +972,23 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         },
         "_tokens": {r[f"{p}_symbol"]: {"sym": sym, "k": r["strike"], "side": p.upper()}
                     for r in strikes for p in ("ce", "pe") if r.get(f"{p}_symbol")},
+        # aggressor flow per contract, keyed like depth ("22300CE"), plus the
+        # two futures - buy/sell volume taken in the last 5 and 15 minutes
+        # and over the session
+        "flow": {
+            "strikes": {k: v for k, v in
+                        ((f'{int(round(r["strike"]))}{p.upper()}', _flow_read(r.get(f"{p}_symbol")))
+                         for r in strikes for p in ("ce", "pe")) if v},
+            "futures": {"near": _flow_read(fut.get("futures_symbol")),
+                        "far": _flow_read(fut.get("futures_far_symbol"))},
+        },
     }
     out["_tokens"][ysym] = {"sym": sym, "spot": True}
+    # futures ticks were streamed but had no token entry, so the browser
+    # dropped them and the futures price only moved once per poll
+    for _which, _fs in (("near", fut.get("futures_symbol")), ("far", fut.get("futures_far_symbol"))):
+        if _fs:
+            out["_tokens"][_fs] = {"sym": sym, "fut": _which}
     with _lock:
         _status["last_chain"] = time.time()
     return out

@@ -473,10 +473,41 @@ def test_env():
     check("only one settings file", len(present) == 1, f"found {present}")
 
 
+def test_aggressor_flow():
+    # Every print is a buyer lifting the offer or a seller hitting the bid,
+    # judged against the quote that stood BEFORE the trade.
+    sys.path.insert(0, HERE)
+    import types
+    if "fyers_apiv3" not in sys.modules:
+        try:
+            import fyers_apiv3  # noqa: F401
+        except Exception:
+            sys.modules["fyers_apiv3"] = types.ModuleType("fyers_apiv3")
+    try:
+        import nse_adapter_fyers as A
+    except Exception as e:  # noqa: BLE001
+        warn("aggressor flow: adapter not importable here", str(e)[:120])
+        return
+    A._flow.pop("T", None)
+    u = A._flow_update
+    u("T", {"ltp": 100, "volume": 1000, "bid": 99.5, "ask": 100.5})
+    check("flow: first tick only seeds", A._flow_read("T") is None)
+    u("T", {"ltp": 100.5, "volume": 1050, "bid": 100, "ask": 101})    # at prior offer
+    u("T", {"ltp": 100, "volume": 1080, "bid": 99.5, "ask": 100.5})   # at prior bid
+    u("T", {"ltp": 100.2, "volume": 1090})                            # inside, uptick
+    u("T", {"ltp": 100.2, "volume": 1090, "bid": 100.1, "ask": 100.3})  # quote only
+    x = A._flow_read("T")
+    check("flow: trade at the offer is a buy, at the bid a sell, inside by tick test",
+          x and x["b5"] == 60 and x["s5"] == 30, str(x))
+    u("T", {"ltp": 100, "volume": 5})
+    check("flow: volume counter reset starts a new session", A._flow_read("T") is None)
+    A._flow.pop("T", None)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
-               test_pcr_bands_scale, test_index_weights, test_env):
+               test_pcr_bands_scale, test_aggressor_flow, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

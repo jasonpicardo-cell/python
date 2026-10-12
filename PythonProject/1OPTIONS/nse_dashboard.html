@@ -11792,6 +11792,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const meta = _tokMap[tok];
       if (!meta) continue;
       if (meta.vix) { if (data && v.ltp != null) data.india_vix = v.ltp; continue; }
+      // futures ticks: the price moves live instead of once per poll
+      if (meta.fut) {
+        if (data && v.ltp != null) {
+          if (meta.fut === 'near') data.futures_price = v.ltp; else data.futures_far_price = v.ltp;
+        }
+        continue;
+      }
       if (meta.spot) { spot = v.ltp ?? spot; continue; }
       if (!data?.strikes) continue;
       const row = data.strikes.find(s => s.strike === meta.k);
@@ -17637,8 +17644,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const spot = date ? '' : (state.lastData?.underlying_value || '');
-      const j = await (await fetch(`${base}/api/move-quality?symbol=${encodeURIComponent(sym)}` +
-        (date ? `&date=${date}` : '') + (spot ? `&spot=${spot}` : ''), { signal: AbortSignal.timeout(8000) })).json();
+      const r = await fetch(`${base}/api/move-quality?symbol=${encodeURIComponent(sym)}` +
+        (date ? `&date=${date}` : '') + (spot ? `&spot=${spot}` : ''), { signal: AbortSignal.timeout(8000) });
+      // an older server has no such endpoint: say so on the chart
+      let j;
+      try { j = await r.json(); } catch (_) { j = null; }
+      if (!r.ok || !j) j = { symbol: sym, error: r.status === 404 ? 'server is missing move-quality — copy nse_move_quality.py beside the server and restart it' : `move-quality: HTTP ${r.status}` };
       _MQ.d = j; _MQ.key = key; _MQ.at = Date.now();
       // calibration builds in the background on first use: ask again soon
       if (j?.calib?.building) _MQ.at = Date.now() - 15000;
@@ -17648,14 +17659,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _mqView() {
     const m = _MQ.d;
-    if (!m || m.error || !m.leg || m.symbol !== (state.symbol || 'NIFTY')) return null;
-    if ((window._histDate || '') !== (m.date === new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10) ? '' : m.date)) return null;
+    // An error or a day with no move yet still returns the reading, so the
+    // box can SAY why it is empty. It used to vanish without a word, which
+    // is how a server that was not recording looked like a missing feature.
+    if (!m || (m.symbol && m.symbol !== (state.symbol || 'NIFTY'))) return null;
+    if (m.date && (window._histDate || '') !== (m.date === new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10) ? '' : m.date)) return null;
     return m;
   }
   // the leg itself: start to the latest price, labelled at its end
   function _mqLegSvg(m, xStart, xNow, y, lo, hi) {
     const L = m.leg;
-    if (xStart == null || xNow == null || !L.qualified) return '';
+    if (!L || xStart == null || xNow == null || !L.qualified) return '';
     const a = L.start_px, b = L.now_px;
     if (a < lo || a > hi || b < lo || b > hi) return '';
     const col = m.p_fake != null ? (m.p_fake >= 0.6 ? '#ffb300' : m.p_fake <= 0.4 ? '#00e676' : '#9ab')
@@ -17666,6 +17680,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   // the small box, bottom-right of the plot
   function _mqBoxSvg(m, W, H, padR, padB) {
+    if (m.error || !m.leg) {
+      const bw2 = 236, bh2 = 34, x2 = W - padR - bw2 - 4, y2 = H - padB - bh2 - 4;
+      const msg = m.error
+        ? (/no replay/.test(m.error) ? 'no recording for this day yet — the server records one snapshot a minute; scoring starts ~20 min after recording does' : m.error)
+        : 'no move yet today — waiting for the first swing';
+      return `<g><rect x="${x2}" y="${y2}" width="${bw2}" height="${bh2}" rx="4" fill="rgba(14,17,23,0.93)" stroke="rgba(255,255,255,0.18)"/>
+        <text x="${x2 + 7}" y="${y2 + 12}" style="font-size:9px;font-weight:800;fill:#9ab;">MOVE QUALITY</text>
+        <text x="${x2 + 7}" y="${y2 + 25}" style="font-size:7.5px;fill:#789;">${escapeHtml(msg.length > 62 ? msg.slice(0, 60) + '…' : msg)}<title>${escapeHtml(msg)}</title></text></g>`;
+    }
     const L = m.leg, up = L.dir > 0;
     const bw = 236, rowH = 10.5;
     const feats = m.features || [];
@@ -20198,12 +20221,164 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     };
   }
 
+  // ══ DESK READ for the delta book ══════════════════════════════════
+  // Pro desks weigh TRADES over QUOTES. Resting bid/ask size is passive and
+  // cancellable - deep in the money it is mostly market-maker inventory, and
+  // it can be stacked and pulled to paint a picture. What was actually taken
+  // is commitment. So each leg is read on:
+  //   takers      share of the last 15 minutes' volume that lifted the offer
+  //               (classified on the server, tick by tick, Lee-Ready rule)
+  //   OI build    today's premium change with today's OI change: long build,
+  //               short build (writing), short cover, long unwind
+  //   IV / prem   implied vol and its 15-minute change; premium change over
+  //               5 minutes beyond what delta explains (being paid up)
+  //   book check  a 2x book CONFIRMED by takers on the same side, or PASSIVE
+  //               (takers on the other side), or FLICKERING (the heavy side
+  //               flipping - the pattern of size being stacked and pulled)
+  // and the verdict counts trades and positioning first, the book last.
+  const _DH = { sym: null, s: [] };              // per-poll samples, ~30 minutes
+  function _dhRecord(d) {
+    const sym = d?.symbol || state.symbol;
+    if (!d?.strikes?.length || !d.underlying_value) return;
+    if (_DH.sym !== sym) { _DH.sym = sym; _DH.s = []; }
+    const now = Date.now();
+    const last = _DH.s[_DH.s.length - 1];
+    if (last && now - last.t < 4000) return;
+    const legs = {};
+    for (const r of d.strikes) {
+      const k = Math.round(r.strike);
+      if (r.ce_ltp) legs[`${k}CE`] = [r.ce_ltp, r.ce_iv || 0];
+      if (r.pe_ltp) legs[`${k}PE`] = [r.pe_ltp, r.pe_iv || 0];
+    }
+    _DH.s.push({ t: now, spot: d.underlying_value, fut: d.futures_price, far: d.futures_far_price, legs, rr: null });
+    while (_DH.s.length && now - _DH.s[0].t > 32 * 60000) _DH.s.shift();
+  }
+  function _dhAgo(sec) {
+    const now = Date.now();
+    let best = null;
+    for (const x of _DH.s) if (now - x.t >= sec * 1000) best = x; else break;
+    return best;
+  }
+  function _oiBuild(pchg, oichg) {
+    if (pchg == null || oichg == null || !isFinite(pchg) || !isFinite(oichg) || oichg === 0) return null;
+    return pchg >= 0 ? (oichg > 0 ? 'long build' : 'short cover') : (oichg > 0 ? 'short build' : 'long unwind');
+  }
+  const _bookFlips = {};
+  function _bookFlipCount(key, side) {
+    const now = Date.now();
+    const h = _bookFlips[key] || (_bookFlips[key] = []);
+    const last = h[h.length - 1];
+    if (side && (!last || last.side !== side)) h.push({ side, t: now });
+    while (h.length && now - h[0].t > 300000) h.shift();
+    return Math.max(0, h.length - 1);
+  }
+  function _deskLeg(d, leg, LEG) {
+    if (!leg) return null;
+    const key = `${leg.k}${LEG}`;
+    const row = (d.strikes || []).find(r => Math.round(r.strike) === leg.k) || {};
+    const p = LEG === 'CE' ? 'ce' : 'pe';
+    const out = { key };
+    const f = d.flow?.strikes?.[key];
+    if (f && f.b15 + f.s15 > 0) { out.vol15 = f.b15 + f.s15; out.buy15 = f.b15 / out.vol15; }
+    const ltp = row[p + '_ltp'], pc = row[p + '_prev_close'];
+    out.build = _oiBuild(ltp && pc ? ltp - pc : null, row[p + '_oi_chg']);
+    out.iv = row[p + '_iv'] || null;
+    const a15 = _dhAgo(900), a5 = _dhAgo(300);
+    const o15 = a15?.legs?.[key], o5 = a5?.legs?.[key];
+    if (o15 && out.iv && o15[1]) out.div15 = out.iv - o15[1];
+    if (o5 && ltp && d.underlying_value) {
+      const dS = d.underlying_value - a5.spot;
+      out.excess5 = (ltp - o5[0]) - leg.delta * dS;        // delta is signed (puts negative)
+    }
+    // book check
+    const r = leg.book?.ratio;
+    const bookSide = r == null ? 0 : r >= 2 ? 1 : r <= 0.5 ? -1 : 0;
+    out.flips = _bookFlipCount(`${LEG}|${leg.target}`, bookSide);
+    if (bookSide && out.buy15 != null && out.vol15) {
+      const tk = out.buy15 >= 0.55 ? 1 : out.buy15 <= 0.45 ? -1 : 0;
+      out.bookCheck = out.flips >= 3 ? 'flickering' : tk === bookSide ? 'confirmed' : tk === -bookSide ? 'passive' : 'untraded';
+    } else if (bookSide && out.flips >= 3) out.bookCheck = 'flickering';
+    // directional contribution (+ bullish for the index)
+    const sg = LEG === 'CE' ? 1 : -1;
+    let sc = 0; const why = [];
+    if (out.buy15 != null && out.vol15) {
+      const t = (out.buy15 - 0.5) * 2;
+      if (Math.abs(t) >= 0.1) { sc += sg * t; why.push(`${LEG} takers ${Math.round(out.buy15 * 100)}% buy`); }
+    }
+    const bmap = { 'long build': 1, 'short build': -1, 'short cover': 0.5, 'long unwind': -0.5 };
+    if (out.build) { sc += sg * bmap[out.build]; why.push(`${LEG} ${out.build}`); }
+    if (out.excess5 != null && Math.abs(out.excess5) >= Math.max(0.5, (ltp || 0) * 0.01)) {
+      sc += sg * (out.excess5 > 0 ? 0.5 : -0.5); why.push(`${LEG} premium ${out.excess5 > 0 ? 'paid up' : 'offered'}`);
+    }
+    if (out.bookCheck === 'confirmed') { sc += sg * bookSide * 0.5; why.push(`${LEG} book confirmed`); }
+    out.score = sc; out.why = why;
+    return out;
+  }
+  function _deskFut(d, which) {
+    const isNear = which === 'near';
+    const fp = isNear ? d.futures_price : d.futures_far_price;
+    if (!fp) return null;
+    const out = {};
+    const f = d.flow?.futures?.[which];
+    if (f && f.b15 + f.s15 > 0) { out.vol15 = f.b15 + f.s15; out.buy15 = f.b15 / out.vol15; }
+    if (isNear) {
+      out.basis = fp - d.underlying_value;
+      const a15 = _dhAgo(900);
+      if (a15?.fut && a15.spot) out.dBasis15 = out.basis - (a15.fut - a15.spot);
+      out.build = _oiBuild(d.futures_prev_close ? fp - d.futures_prev_close : null, d.futures_oi_chg);
+      if (d.futures_oi && d.futures_far_oi) out.roll = d.futures_far_oi / (d.futures_oi + d.futures_far_oi);
+    } else if (d.futures_price) {
+      out.spread = fp - d.futures_price;
+      const a15 = _dhAgo(900);
+      if (a15?.far && a15.fut) out.dSpread15 = out.spread - (a15.far - a15.fut);
+    }
+    let sc = 0; const why = [];
+    if (out.buy15 != null && out.vol15) {
+      const t = (out.buy15 - 0.5) * 2;
+      if (Math.abs(t) >= 0.1) { sc += t * (isNear ? 2 : 1); why.push(`${isNear ? 'FUT' : 'next FUT'} takers ${Math.round(out.buy15 * 100)}% buy`); }
+    }
+    const bmap = { 'long build': 1.5, 'short build': -1.5, 'short cover': 0.75, 'long unwind': -0.75 };
+    if (out.build) { sc += bmap[out.build]; why.push(`FUT ${out.build}`); }
+    if (out.dBasis15 != null && Math.abs(out.dBasis15) >= 1) { sc += out.dBasis15 > 0 ? 0.5 : -0.5; why.push(`basis ${out.dBasis15 > 0 ? 'widening' : 'narrowing'}`); }
+    out.score = sc; out.why = why;
+    return out;
+  }
+  function _deskSub(x) {
+    // the second line under a leg: what was traded and what changed
+    if (!x) return '';
+    const bits = [];
+    // coloured for the INDEX, like the verdict: put buyers taking the offer
+    // is bearish (red), puts being sold into the bid is bullish (green)
+    const inv = /PE$/.test(x.key || '') ? -1 : 1;
+    const tkc = v => (v - 0.5) * inv >= 0.05 ? '#26a69a' : (v - 0.5) * inv <= -0.05 ? '#ef5350' : '#9ab';
+    if (x.buy15 != null) bits.push(`<span style="color:${tkc(x.buy15)};" title="Share of the last 15 minutes' traded volume that lifted the offer (buyer-initiated), classified on every tick against the quote before the trade. Coloured for the index: on a put, buyers taking the offer is bearish.">takers ${Math.round(x.buy15 * 100)}% buy</span>`);
+    if (x.build) bits.push(`<span title="Today's premium change with today's OI change">${x.build}</span>`);
+    if (x.iv) bits.push(`IV ${x.iv.toFixed(1)}${x.div15 != null && Math.abs(x.div15) >= 0.1 ? `<span style="color:${x.div15 > 0 ? '#ffb300' : '#9ab'};"> ${x.div15 > 0 ? '↑' : '↓'}${Math.abs(x.div15).toFixed(1)}</span>` : ''}`);
+    if (x.excess5 != null && Math.abs(x.excess5) >= 0.5) bits.push(`<span title="Premium change in 5 minutes beyond what delta explains: positive = being paid up, negative = offered">prem ${x.excess5 > 0 ? '+' : ''}${x.excess5.toFixed(1)} vs δ</span>`);
+    const tag = x.bookCheck === 'confirmed' ? '<b style="color:#26a69a;">book confirmed by takers</b>'
+              : x.bookCheck === 'passive' ? '<b style="color:#ffb300;">passive book — takers on the other side</b>'
+              : x.bookCheck === 'flickering' ? '<b style="color:#ffb300;">flickering book — size stacked and pulled</b>'
+              : x.bookCheck === 'untraded' ? '<span style="color:#789;">book not being traded</span>' : '';
+    if (tag) bits.push(tag);
+    return bits.length ? `<div style="font-size:8.5px;color:#9ab;padding-left:2px;line-height:1.35;">${bits.join(' · ')}</div>` : '';
+  }
+
   function renderDelta90(d) {
     const box = document.getElementById('d90Body');
     if (!box) return;
+    try { _dhRecord(d); } catch (_) {}
     const x = _delta90(d);
     const f = _futBooks(d);
     if (!x) { box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Load the option chain.</div>'; return; }
+    // desk read per leg and for both futures
+    const dk = {};
+    try {
+      for (const r of x.rows) {
+        dk[`CE|${r.target}`] = _deskLeg(d, r.ce, 'CE');
+        dk[`PE|${r.target}`] = _deskLeg(d, r.pe, 'PE');
+      }
+      dk.near = _deskFut(d, 'near'); dk.far = _deskFut(d, 'far');
+    } catch (e) { console.warn('[desk book]', e.message); }
     const cell = (lab, leg, bullIfBid) => {
       if (!leg) return `<span style="min-width:150px;color:var(--muted);">${lab} —</span>`;
       const b = leg.book;
@@ -20287,32 +20462,41 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // The put side is the one people invert: a heavy PUT BID is buyers of
     // downside protection or outright shorts, which is bearish - the same
     // direction as a heavy call ASK, not the opposite of it.
-    let verdict = '', vcol = 'var(--muted)';
+    // ── desk verdict: trades and positioning first, the book last ──
+    let verdict = '', vcol = 'var(--muted)', vwhy = '';
     try {
-      let score = 0, counted = 0;
-      for (const r of x.rows) {
-        for (const [leg, bullIfBid] of [[r.ce, true], [r.pe, false]]) {
-          const rt = leg?.book?.ratio;
-          if (rt == null) continue;
-          counted++;
-          if (rt >= 2) score += bullIfBid ? 1 : -1;        // bid-heavy
-          else if (rt <= 0.5) score += bullIfBid ? -1 : 1; // ask-heavy
-        }
-      }
-      if (counted >= 2) {
-        vcol = score >= 2 ? 'var(--pos,#26a69a)' : score <= -2 ? 'var(--neg,#ef5350)' : 'var(--muted)';
-        verdict = score >= 2 ? `BULLISH book — ${score} of ${counted} legs lean that way`
-                : score <= -2 ? `BEARISH book — ${Math.abs(score)} of ${counted} legs lean that way`
-                : `No lean — ${counted} legs quoted, none decisive`;
+      const parts = Object.values(dk).filter(Boolean);
+      const total = parts.reduce((t, p) => t + (p.score || 0), 0);
+      const reasons = parts.flatMap(p => (p.why || []).map(w => ({ w, s: p.score }))).slice(0, 12);
+      const have = parts.some(p => p.vol15 || p.build);
+      if (have) {
+        vcol = total >= 2.5 ? 'var(--pos,#26a69a)' : total <= -2.5 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+        verdict = total >= 2.5 ? `BULLISH desk read (${total.toFixed(1)})`
+                : total <= -2.5 ? `BEARISH desk read (${total.toFixed(1)})`
+                : `No clear desk read (${total.toFixed(1)})`;
+        // the strongest contributors, in the direction of the verdict
+        const dir = Math.sign(total) || 1;
+        // the same reason on three legs is one reason seen three times -
+        // say it once with a count rather than repeating it
+        const seen = new Map();
+        parts.filter(p => Math.sign(p.score) === dir && Math.abs(p.score) >= 0.5)
+          .sort((p, q) => Math.abs(q.score) - Math.abs(p.score))
+          .forEach(p => (p.why || []).slice(0, 2).forEach(w => {
+            const k = w.replace(/\d+% buy/, 'buy');
+            const e = seen.get(k); if (e) e.n++; else seen.set(k, { w, n: 1 });
+          }));
+        vwhy = [...seen.values()].slice(0, 4).map(e => e.n > 1 ? `${e.w} (${e.n} legs)` : e.w).join(' · ');
+      } else {
+        verdict = 'Waiting for trades — the desk read needs a few minutes of classified flow';
       }
     } catch (_) {}
 
     box.innerHTML = `
-      ${verdict ? `<div style="padding:2px 4px 3px;font-size:11px;color:${vcol};font-weight:700;">${escapeHtml(verdict)}</div>` : ''}
-      ${x.rows.map(r => `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;align-items:baseline;">
+      ${verdict ? `<div style="padding:2px 4px 3px;font-size:11px;color:${vcol};font-weight:700;" title="Trades and positioning count most: who took liquidity (takers), today's OI build, premium paid beyond delta. A heavy book only counts when takers confirm it.">${escapeHtml(verdict)}${vwhy ? `<span style="font-weight:400;color:#9ab;font-size:9.5px;"> — ${escapeHtml(vwhy)}</span>` : ''}</div>` : ''}
+      ${x.rows.map(r => `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;align-items:flex-start;">
         <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">δ${r.target.toFixed(2).slice(1)}</span>
-        ${cell('CE', r.ce, true)}
-        ${cell('PE', r.pe, false)}
+        <span style="display:inline-flex;flex-direction:column;min-width:214px;">${cell('CE', r.ce, true)}${_deskSub(dk[`CE|${r.target}`])}</span>
+        <span style="display:inline-flex;flex-direction:column;min-width:214px;">${cell('PE', r.pe, false)}${_deskSub(dk[`PE|${r.target}`])}</span>
       </div>`).join('')}
       ${(() => {
         // Book-based risk reversal. The Capital Flow panel already asks this
@@ -20320,29 +20504,72 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         // disagreeing is informative on its own - IV skew is where the market
         // is PRICED, book skew is where it is currently being TRADED.
         const w = x.rows.find(r => r.target === 0.25);
-        if (!w?.ce?.book || !w?.pe?.book) return '';
+        // IV risk reversal and butterfly - the desk's own sentiment gauge.
+        // RR = 25δ call IV − 25δ put IV; rising means calls being bid
+        // relative to puts (upside wanted), falling means downside hedging.
+        let ivLine = '';
+        try {
+          const rowC = (d.strikes || []).find(q => Math.round(q.strike) === w?.ce?.k);
+          const rowP = (d.strikes || []).find(q => Math.round(q.strike) === w?.pe?.k);
+          const ivC = rowC?.ce_iv, ivP = rowP?.pe_iv, atm = d.atm_iv;
+          if (ivC && ivP) {
+            const rr = ivC - ivP, fly = atm ? (ivC + ivP) / 2 - atm : null;
+            const nowS = _DH.s[_DH.s.length - 1]; if (nowS) nowS.rr = rr;
+            const old = _dhAgo(900);
+            const d15 = old?.rr != null ? rr - old.rr : null;
+            const day = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+            let o = null; try { o = JSON.parse(localStorage.getItem('rr25V1') || 'null'); } catch (_) {}
+            const sym = d.symbol || state.symbol;
+            if (!o || o.day !== day || o.sym !== sym) { o = { day, sym, rr0: rr }; try { localStorage.setItem('rr25V1', JSON.stringify(o)); } catch (_) {} }
+            const dOpen = rr - o.rr0;
+            const mv = d15 != null ? d15 : dOpen;
+            const col = Math.abs(mv) < 0.15 ? 'var(--muted)' : mv > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
+            ivLine = `<div style="display:flex;gap:12px;flex-wrap:wrap;padding:3px 4px;font-size:10px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;align-items:baseline;">
+              <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">RR IV</span>
+              <span title="25-delta risk reversal in implied vol: call IV minus put IV. Negative is normal for an index (puts carry a premium); what matters is the CHANGE.">25δ ${rr >= 0 ? '+' : ''}${rr.toFixed(2)} vol</span>
+              <span style="color:${col};font-weight:700;">${d15 != null ? `${d15 >= 0 ? '+' : ''}${d15.toFixed(2)} in 15m` : ''} ${`${dOpen >= 0 ? '+' : ''}${dOpen.toFixed(2)} since first read`}</span>
+              ${fly != null ? `<span style="color:var(--muted);" title="Butterfly: wing IV over ATM IV - how much the market pays for a big move either way">fly ${fly >= 0 ? '+' : ''}${fly.toFixed(2)}</span>` : ''}
+              <span style="color:var(--muted);">${Math.abs(mv) < 0.15 ? 'skew steady' : mv > 0 ? 'calls being bid relative to puts — upside wanted' : 'puts being bid — downside hedging'}</span>
+            </div>`;
+          }
+        } catch (_) {}
+        if (!w?.ce?.book || !w?.pe?.book) return ivLine;
         const cb = w.ce.book, pb = w.pe.book;
         const callBid = cb.bid, putBid = pb.bid;
         const tot = callBid + putBid;
-        if (!tot) return '';
+        if (!tot) return ivLine;
         const skew = (callBid - putBid) / tot;        // -1 all puts, +1 all calls
         const col = Math.abs(skew) < 0.15 ? 'var(--muted)'
                   : skew > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
         const read = Math.abs(skew) < 0.15 ? 'both wings bid evenly — no directional preference in the book'
                    : skew > 0 ? 'the upside wing is being paid for'
                    : 'the downside wing is being paid for';
-        return `<div style="display:flex;gap:12px;flex-wrap:wrap;padding:3px 4px;font-size:10px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;align-items:baseline;">
-          <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">RR</span>
+        return ivLine + `<div style="display:flex;gap:12px;flex-wrap:wrap;padding:3px 4px;font-size:10px;align-items:baseline;">
+          <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">RR book</span>
           <span>25δ call bid <b>${fmtInt(callBid)}</b> vs put bid <b>${fmtInt(putBid)}</b></span>
           <span style="color:${col};font-weight:700;">${skew >= 0 ? '+' : ''}${(skew * 100).toFixed(0)}%</span>
           <span style="color:var(--muted);">${escapeHtml(read)}</span>
         </div>`;
       })()}
-      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;">
-        ${fcell('FUT current', f.near)}
-        ${fcell('FUT next', f.far)}
+      <div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;border-top:1px solid rgba(255,255,255,0.06);margin-top:3px;align-items:flex-start;">
+        <span style="display:inline-flex;flex-direction:column;">${fcell('FUT current', f.near)}${(() => {
+          const z = dk.near; if (!z) return '';
+          const b = [];
+          if (z.buy15 != null) b.push(`<span style="color:${z.buy15 >= 0.55 ? '#26a69a' : z.buy15 <= 0.45 ? '#ef5350' : '#9ab'};">takers ${Math.round(z.buy15 * 100)}% buy</span>`);
+          if (z.build) b.push(z.build);
+          if (z.basis != null) b.push(`basis ${z.basis >= 0 ? '+' : ''}${z.basis.toFixed(1)}${z.dBasis15 != null && Math.abs(z.dBasis15) >= 0.5 ? `<span style="color:${z.dBasis15 > 0 ? '#26a69a' : '#ef5350'};"> ${z.dBasis15 > 0 ? '↑' : '↓'}${Math.abs(z.dBasis15).toFixed(1)}</span>` : ''}`);
+          if (z.roll != null) b.push(`<span title="Share of total futures OI already in the next month">rollover ${(z.roll * 100).toFixed(0)}%</span>`);
+          return b.length ? `<div style="font-size:8.5px;color:#9ab;">${b.join(' · ')}</div>` : '';
+        })()}</span>
+        <span style="display:inline-flex;flex-direction:column;">${fcell('FUT next', f.far)}${(() => {
+          const z = dk.far; if (!z) return '';
+          const b = [];
+          if (z.buy15 != null) b.push(`<span style="color:${z.buy15 >= 0.55 ? '#26a69a' : z.buy15 <= 0.45 ? '#ef5350' : '#9ab'};">takers ${Math.round(z.buy15 * 100)}% buy</span>`);
+          if (z.spread != null) b.push(`<span title="Calendar spread: next month minus current - the cost of carrying a position into the next series">spread ${z.spread >= 0 ? '+' : ''}${z.spread.toFixed(1)}${z.dSpread15 != null && Math.abs(z.dSpread15) >= 0.5 ? ` ${z.dSpread15 > 0 ? '↑' : '↓'}${Math.abs(z.dSpread15).toFixed(1)}` : ''}</span>`);
+          return b.length ? `<div style="font-size:8.5px;color:#9ab;">${b.join(' · ')}</div>` : '';
+        })()}</span>
       </div>
-      <div class="oc-sub" style="margin-top:3px;">The strike is <b>recomputed every poll</b> — a 0.90-delta strike is only 0.90 delta at one price, and one fixed at the open stops answering the question within the hour. Round-hundred strikes only, as the fifties are thinner and their books are frequently empty this deep in the money, which would let one or two lots swing the ratio. <b>Deep ITM is where directional size gets worked quietly:</b> extrinsic value is small, the option tracks the underlying almost one-for-one, and a large order moves the premium far less than the same order at the money. <b>Read it with the caveat that matters:</b> resting size is passive liquidity, not demand. This deep it is mostly market-maker inventory, and real buyers often take the offer rather than joining the bid — which removes size from the ask and makes aggressive buying look bid-light, the opposite of the obvious reading. A 2× imbalance that <b>persists</b> is worth something; a single-poll ratio is noise. For commitment rather than intention, the aggressor flow panel classifies actual prints, and a trade is a position where a quote is not.</div>`;
+      <div class="oc-sub" style="margin-top:3px;">The strike is <b>recomputed every poll</b> — a 0.90-delta strike is only 0.90 delta at one price, and one fixed at the open stops answering the question within the hour. Round-hundred strikes only, as the fifties are thinner and their books are frequently empty this deep in the money, which would let one or two lots swing the ratio. <b>Deep ITM is where directional size gets worked quietly:</b> extrinsic value is small, the option tracks the underlying almost one-for-one, and a large order moves the premium far less than the same order at the money. <b>Read it with the caveat that matters:</b> resting size is passive liquidity, not demand. This deep it is mostly market-maker inventory, and real buyers often take the offer rather than joining the bid — which removes size from the ask and makes aggressive buying look bid-light, the opposite of the obvious reading. A 2× imbalance that <b>persists</b> is worth something; a single-poll ratio is noise. For commitment rather than intention, read the line under each leg: takers is the share of the last 15 minutes of prints that lifted the offer, classified tick by tick on the server, and a book only counts when takers confirm it.</div>`;
   }
 
   // ══ BULLISH / BEARISH ALERT TALLY ═════════════════════════════════
@@ -25012,7 +25239,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           for (let k = 0; k < show.length; k++) if (show[k].t >= t) return padL + k * bw + bw / 2;
           return padL + (show.length - 1) * bw + bw / 2;
         };
-        svg += _mqLegSvg(mq, brickAt(mq.leg.start_t), brickAt(mq.leg.now_t), y, lo, hi);
+        if (mq.leg) svg += _mqLegSvg(mq, brickAt(mq.leg.start_t), brickAt(mq.leg.now_t), y, lo, hi);
         renkoMqBox = _mqBoxSvg(mq, W, H, padR, padB);
       }
     } catch (e) { console.warn('[mq]', e.message); }
@@ -27197,7 +27424,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       const mq = _mqView();
       if (mq) {
         const xAt = t => { const k = cs.findIndex(c => c.t >= t); return k < 0 ? (cs.length ? x(cs.length - 1) : null) : x(k); };
-        svg += _mqLegSvg(mq, xAt(mq.leg.start_t), xAt(mq.leg.now_t), y, lo, hi);
+        if (mq.leg) svg += _mqLegSvg(mq, xAt(mq.leg.start_t), xAt(mq.leg.now_t), y, lo, hi);
         _chart._mqBox = _mqBoxSvg(mq, W, H, padR, padB);
       } else _chart._mqBox = '';
     } catch (e) { console.warn('[desk]', e.message); }
