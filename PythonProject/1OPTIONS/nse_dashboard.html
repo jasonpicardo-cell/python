@@ -11998,7 +11998,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Whatever is held back is written to the voice diagnostics with the
   // reason, so a silent alert is explainable rather than lost.
   const _VG = { lastDir: null, recentText: new Map() };
-  function _voicePriority(key) {
+  // Named _voiceGatePri, not _voicePriority: the speech queue already has a
+  // _voicePriority(text), and a second function declaration with the same
+  // name silently replaces the first throughout the script - so the gate was
+  // calling the queue's function and none of its priority rules applied.
+  function _voiceGatePri(key) {
     const k = String(key);
     if (/^(alert|custom|voicetest)\|/.test(k)) return 'user';
     if (/^(level|flow)\|/.test(k)) return 'governed';      // budgeted at source
@@ -12016,7 +12020,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return bull && !bear ? 1 : bear && !bull ? -1 : 0;
   }
   function _voiceGate(key, text) {
-    const pri = _voicePriority(key);
+    const pri = _voiceGatePri(key);
     if (pri === 'user') return true;
     const now = Date.now();
     // the same announcement reaching the local path after a failed relay
