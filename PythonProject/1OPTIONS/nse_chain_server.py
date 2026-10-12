@@ -2069,6 +2069,90 @@ def _start_janitor() -> None:
     print("[i] State janitor running (prunes stale caches every 5 min)")
 
 
+# ── broker-path analytics parity ─────────────────────────────────────────
+# The NSE path runs the full analysis pipeline - strategy library, idea
+# cards, the gain/pain payout curve, the IV skew note, IV rank, the straddle
+# premium. The broker adapters returned those keys EMPTY, so on Fyers the
+# Strategy tab read "0 of 0 strategies", Market View's gain/pain chart was
+# blank and IV rank never appeared. Same functions, run on the broker's chain:
+# CPU only, no request. The strategy library is the heavy part, so it is
+# rebuilt at most every 15 s per symbol and expiry and only for a full chain.
+_adapter_strat_cache: dict = {}
+_enrich_err_logged: set = set()
+
+
+def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
+    if not isinstance(data, dict) or not data.get("strikes"):
+        return data
+    try:
+        import dataclasses as _dc
+        from nse_options_strategy import StrikeData as _SD, ChainSnapshot as _CS
+        names = {f.name for f in _dc.fields(_SD)}
+
+        def _num(v):
+            try:
+                return float(v) if v is not None else 0.0
+            except Exception:
+                return 0.0
+        sds = [_SD(**{k: _num(r.get(k)) for k in names if k in r}) for r in data["strikes"]
+               if r.get("strike") is not None]
+        spot = float(data.get("underlying_value") or 0)
+        if not sds or not spot:
+            return data
+        snap = _CS(symbol=symbol, expiry=str(data.get("expiry") or ""), underlying_value=spot,
+                   timestamp="", strikes=sds, all_expiries=list(data.get("all_expiries") or []))
+        atm = float(data.get("atm") or min(sds, key=lambda x: abs(x.strike - spot)).strike)
+        gap = float(data.get("strike_gap") or 50)
+        nearby = [x for x in sds if abs(x.strike - atm) <= max(4, band) * gap] or sds
+        if not data.get("payout_distribution"):
+            data["payout_distribution"] = compute_payout_distribution(snap)
+        if not data.get("skew_note"):
+            data["skew_note"] = iv_skew_read(nearby, atm)
+        if data.get("straddle_premium") is None:
+            row = next((x for x in sds if abs(x.strike - atm) < 1e-6), None)
+            if row and row.ce_ltp and row.pe_ltp:
+                data["straddle_premium"] = round(row.ce_ltp + row.pe_ltp, 1)
+        atm_iv = float(data.get("atm_iv") or 0)
+        if data.get("iv_rank") is None and atm_iv > 0:
+            try:
+                ivr = _compute_iv_rank(symbol, round(atm_iv, 2))
+                data["atm_iv_rank"] = ivr
+                data["iv_rank"] = ivr["rank_pct"] if ivr else None
+            except Exception:
+                pass
+        key = (symbol.upper(), data.get("expiry"))
+        hit = _adapter_strat_cache.get(key)
+        now = time.time()
+        if hit and now - hit[0] < 15:
+            data["ideas"], data["strategies"] = hit[1], hit[2]
+        elif band >= 8:
+            support = max(nearby, key=lambda x: x.pe_oi)
+            resistance = max(nearby, key=lambda x: x.ce_oi)
+            pcr = float(data.get("pcr") or 1.0)
+            max_pain = float(data.get("max_pain") or atm)
+            flags = classify_buildups(nearby, atm)
+            dte_int = int(data.get("dte_days") or 0)
+            _sent, ideas = generate_strategies(snap, atm, support, resistance, pcr, max_pain,
+                                               flags, data.get("skew_note") or "", dte_int)
+            lot = int(data.get("lot_size") or LOT_SIZES.get(symbol.upper(), 50) or 50)
+            LOT_SIZES[symbol.upper()] = lot
+            strategies = build_strategy_list(
+                symbol=symbol.upper(), near_strikes=sds, atm=atm, strike_gap=gap, spot=spot,
+                dte_near=dte_int, atm_iv=atm_iv or 13.0, far_strikes=None, dte_far=None)
+            ideas_j = [asdict(i) for i in ideas]
+            strat_j = [asdict(x) for x in strategies]
+            data["ideas"], data["strategies"] = ideas_j, strat_j
+            _adapter_strat_cache[key] = (now, ideas_j, strat_j)
+            if len(_adapter_strat_cache) > 40:
+                _adapter_strat_cache.pop(next(iter(_adapter_strat_cache)), None)
+    except Exception as e:  # noqa: BLE001
+        tag = f"{type(e).__name__}:{e}"[:120]
+        if tag not in _enrich_err_logged:
+            _enrich_err_logged.add(tag)
+            print(f"[adapter] analytics parity skipped: {tag}")
+    return data
+
+
 def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
     """Route the chain fetch to the configured adapter.
 
@@ -2080,13 +2164,13 @@ def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
     if src == "fyers":
         try:
             import nse_adapter_fyers as _fy
-            return _attach_oi_rollups(symbol, _fy.fetch_chain(symbol, expiry, band))
+            return _enrich_adapter_payload(symbol, _attach_oi_rollups(symbol, _fy.fetch_chain(symbol, expiry, band)), band)
         except Exception as e:  # noqa: BLE001
             print(f"[adapter] fyers failed ({e}) - using NSE for this request")
     if src == "arrow":
         try:
             import nse_adapter_arrow as _arrow
-            return _attach_oi_rollups(symbol, _arrow.fetch_chain(symbol, expiry, band))
+            return _enrich_adapter_payload(symbol, _attach_oi_rollups(symbol, _arrow.fetch_chain(symbol, expiry, band)), band)
         except Exception as e:  # noqa: BLE001
             print(f"[adapter] arrow failed ({e}) - using NSE for this request")
     return _build_response(symbol, expiry, band)
@@ -3599,6 +3683,29 @@ def _compute_open_trade_pnl(trade: dict) -> float | None:
     leg's expiry is no longer in the live chain (most likely it's expired
     since the trade was opened) — the dashboard shows that as 'needs manual
     close' rather than guessing at a settlement value."""
+    # On a broker feed, price the legs from the chain the dashboards are
+    # already polling (shared cache, up to a minute old) rather than scraping
+    # NSE - which under Fyers was a second, slower, often-blocked source, and
+    # the P&L it produced disagreed with the prices on screen.
+    if RUN_DATA_SOURCE in ("fyers", "arrow"):
+        try:
+            total = 0.0
+            for leg in trade["legs"]:
+                d, _m = _cached_chain(trade["symbol"], leg.get("expiry"), 12, client="paper", max_age=60)
+                if not d or not d.get("strikes"):
+                    raise RuntimeError("no chain")
+                if leg.get("instrument_type") == "FUTURES":
+                    cur = d.get("futures_price") or d.get("underlying_value")
+                else:
+                    row = min(d["strikes"], key=lambda r: abs(r["strike"] - leg["strike"]))
+                    cur = row.get("ce_ltp" if leg["option_type"] == "CE" else "pe_ltp")
+                if cur is None:
+                    raise RuntimeError("no price")
+                sign = 1 if leg["action"] == "BUY" else -1
+                total += sign * (float(cur) - leg["premium"]) * leg["qty_lots"]
+            return round(total * trade["lot_size"], 2)
+        except Exception:
+            pass                       # fall through to the NSE path below
     try:
         now = time.time()
         cached = _cache.get(trade["symbol"])
@@ -7333,7 +7440,9 @@ class Handler(BaseHTTPRequestHandler):
                 # ── universe: the F&O list, from whichever source has it ──
                 syms, src = [], None
                 try:
-                    import nse_lot_sizes
+                    # module-level import - a local "import nse_lot_sizes" here
+                    # made the name local to all of do_GET and broke
+                    # /api/fno-symbols with UnboundLocalError
                     syms = [s.upper() for s in (nse_lot_sizes.get_fno_symbol_list() or [])]
                     if syms:
                         src = "nse_lot_sizes"
@@ -7342,7 +7451,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not syms:
                     # fall back to the lot-size table's own keys
                     try:
-                        import nse_lot_sizes
                         tbl = getattr(nse_lot_sizes, "LOT_SIZES", None) or getattr(nse_lot_sizes, "_LOTS", None)
                         if isinstance(tbl, dict):
                             syms = [k.upper() for k in tbl if k.upper() not in
@@ -7529,6 +7637,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/straddle-history":
             try:
+                symbol = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
                 records = nse_history_store.read_history(symbol, days=1)
                 straddle_pts = [{"t": r["t"], "v": r["straddle_premium"]}
                                  for r in records if r.get("straddle_premium")]

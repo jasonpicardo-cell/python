@@ -1773,6 +1773,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
     <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
+    <span id="riskPill" style="display:none;cursor:pointer;font-size:9.5px;font-weight:700;padding:2px 7px;margin-right:4px;border:1px solid #26a69a;border-radius:10px;white-space:nowrap;" title="Desk risk governor"></span>
     <button id="replayModeBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Session replay — scrub through recorded days">⏪</button>
     <button id="panelMgrBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Show / hide panels">🗂<i class="hi" data-h="panel-mgr">i</i></button>
     <button id="themeToggleBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Toggle dark/light mode">☀️<i class="hi" data-h="theme-toggle">i</i></button>
@@ -2560,6 +2561,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     <section id="tab-desk" class="tab-panel">
           <div class="level-grid" style="grid-template-columns:1fr;">
+          <div class="level-panel" id="deskCockpitPanel" style="grid-column:1 / -1;border:1px solid rgba(38,166,154,0.35);">
+            <div class="level-panel-head">
+              <span class="skew-chart-title">🎛 Desk Cockpit — risk, tape, execution, vol, clock<i class="hi" data-h="desk-cockpit">i</i></span>
+              <span id="deskCockpitStamp" style="font-size:9px;color:var(--muted);"></span>
+            </div>
+            <div id="deskCockpitBody" style="padding:6px 8px;"><div class="movers-loading" style="font-size:10px;">Load the option chain.</div></div>
+          </div>
           <div class="level-panel" id="postMktPanel" style="grid-column:1 / -1;border:1px solid rgba(120,136,153,0.35);">
             <div class="level-panel-head">
               <span class="skew-chart-title">🌙 Post-Market — FII / DII positioning<i class="hi" data-h="post-market">i</i></span>
@@ -3260,13 +3268,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
       <div class="level-panel" id="pcrHistPanel" style="margin-bottom:12px;">
         <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
-          <span class="skew-chart-title">⚖️ PCR Session Curve — positioning vs today\'s flow<i class="hi" data-h="pcr-history">i</i></span>
+          <span class="skew-chart-title">⚖️ PCR Session Curve — positioning vs today's flow<i class="hi" data-h="pcr-history">i</i></span>
           <select id="pcrHistStep" class="ohlc-inp" style="font-size:9px;padding:1px 4px;">
             <option value="1">1m</option><option value="5" selected>5m</option><option value="15">15m</option>
           </select>
           <button class="btn" id="pcrHistBtn" style="font-size:9px;padding:2px 10px;">↻ Load</button>
         </div>
-        <div id="pcrHistBody" style="padding:4px 6px;"><div class="movers-loading">Press Load to plot today\'s recorded PCR.</div></div>
+        <div id="pcrHistBody" style="padding:4px 6px;"><div class="movers-loading">Press Load to plot today's recorded PCR.</div></div>
       </div>
 
       <div class="level-panel" id="oiHistPanel" style="margin-bottom:12px;">
@@ -3717,7 +3725,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         </div>
 
         <div class="skew-chart-wrap">
-          <div class="skew-chart-head"><span class="skew-chart-title">📈 Benford\'s Law (real number-law)<i class="hi" data-h="numo-benford">i</i></span></div>
+          <div class="skew-chart-head"><span class="skew-chart-title">📈 Benford's Law (real number-law)<i class="hi" data-h="numo-benford">i</i></span></div>
           <div id="numoBenford"></div>
         </div>
       </div>
@@ -4142,7 +4150,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         question that matters — do zones where more real positioning stacks up actually reverse price more often? — and the
         Alert Journal tells you whether the alerts firing in your ear are edge or noise. Two honest caveats: the backtest
         can only validate the <em>data-backed</em> confluence sources (OI, max-pain, round numbers) since the geometric/astrological
-        levels aren\'t stored in replay; and small samples are noisy — treat everything here as firming up over weeks, not days.
+        levels aren't stored in replay; and small samples are noisy — treat everything here as firming up over weeks, not days.
         If a high-confluence bucket does NOT bounce more than a low one, believe the data, not the geometry.
       </div>
     </section>
@@ -4164,6 +4172,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 </div>
 
 <script>
+  // Resolve the API address BEFORE anything else runs. The full resolver sits
+  // far down this block, and calls made at load (health, FII/DII, GIFT Nifty,
+  // tab ping) went to the default 127.0.0.1:8765 first - on a second PC that
+  // opened http://<server-ip>:8765/ those first calls hit its own machine.
+  (function () {
+    try {
+      const el = document.getElementById('serverUrl');
+      if (el && /^https?:/.test(location.protocol)) el.value = location.origin;
+      else if (el) { const v = localStorage.getItem('serverUrl'); if (v) el.value = v; }
+    } catch (_) {}
+  })();
+
   // ── fast HH:MM ────────────────────────────────────────────────────
   // toLocaleTimeString builds a new Intl formatter on every call, and the
   // charts call it for every brick title, axis label and signal tooltip on
@@ -5126,9 +5146,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   function _getSessionPhase() {
     const now = new Date();
-    const ist = new Date(now.getTime() + (5.5 * 3600 - now.getTimezoneOffset() * 60) * 1000);
+    const ist = new Date(now.getTime() + (5.5 * 3600 + now.getTimezoneOffset() * 60) * 1000);
     const mins = ist.getHours() * 60 + ist.getMinutes();
-    const isExpiry = (state.lastData?.dte ?? 99) <= 0;
+    const isExpiry = (state.lastData?.dte ?? 99) < 1;   // fractional on the broker path: 0.04 at 14:30 on expiry day
     if (mins < 540)  return { label:'Pre-Market', cls:'phase-muted', icon:'🌙' };
     if (mins < 555)  return { label:'Pre-Open Auction', cls:'phase-gold', icon:'⏳' };
     if (mins < 570)  return { label:'Market Opening', cls:'phase-gold', icon:'🔔' };
@@ -7542,7 +7562,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const oc = computeOcLevels(d);
     const slope = _termSlope(d);
     const dte = d.dte ?? 99;
-    if ((dte ?? 99) <= 0)
+    if ((dte ?? 99) < 1)
       out.push({ tpl: null, noDeploy: true, name: '⚡ Expiry day (0-DTE)', why: ['theta burns by the minute — premium-selling structures decay in your favour but gamma risk is extreme near the pin', 'avoid calendars anchored to the dying expiry: deploy against the NEXT expiry instead', 'after 14:30, pinning/whip risk peaks — size down or stand aside'] });
     const gap = d.strike_gap || 50;
     const nearMaxPain = d.max_pain && Math.abs(d.underlying_value - d.max_pain) <= 1.5 * gap;
@@ -7571,7 +7591,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (ivLow && rangy && dte >= 2)
       out.push({ tpl: 'dblcal', name: 'Double Calendar (cheap far vega)', why: [ivSrc + ' — far-month vega is cheap to own', 'both walls STRONG: spot likely stays between the strikes while near legs decay', 'defined risk, no naked side — the conservative rangebound structure'] });
     if (dte <= 1 && nearMaxPain && gex === 'pos')
-      out.push({ tpl: 'mpfly', name: 'Max-Pain Butterfly', why: [`expiry ${dte === 0 ? 'today' : 'tomorrow'} · spot within 1.5 strikes of max pain ${fmtInt(d.max_pain)}`, '+GEX regime supports pinning'] });
+      out.push({ tpl: 'mpfly', name: 'Max-Pain Butterfly', why: [`expiry ${dte < 1 ? 'today' : 'tomorrow'} · spot within 1.5 strikes of max pain ${fmtInt(d.max_pain)}`, '+GEX regime supports pinning'] });
     if (ivHigh && rangy && gex === 'pos')
       out.push({ tpl: 'ic2510', name: 'Iron Condor 25/10Δ', why: [ivSrc + ' (elevated — premium rich)', 'both S/R walls STRONG (rangebound read)', '+GEX: dealers dampen moves'] });
     else if (ivHigh && rangy)
@@ -7851,7 +7871,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           null);
     }
     // Expiry-day roll-all
-    if (d && (d.dte ?? 99) <= 0 && opt.some(l => l.action === 'SELL' && l.expiry === d.expiry)) {
+    if (d && (d.dte ?? 99) < 1 && opt.some(l => l.action === 'SELL' && l.expiry === d.expiry)) {
       const nx = _adjNextExpiry(d.expiry);
       if (nx) {
         let net = 0, ok = true;
@@ -10942,6 +10962,311 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const last = +(localStorage.getItem('lastBackupTs') || 0);
     if (localStorage.length > 2 && Date.now() - last > 7 * 86400000) setTimeout(() => _backupExport(true), 4000);
   } catch (_) {}
+  // ══ DESK COCKPIT — risk governor, execution quality, premium tape ══════
+  // What a prop desk's screen carries that a signal panel does not:
+  //   governor   the day's rules enforced by the screen, not by willpower -
+  //              daily loss, trade count, losing streak, cooldown after
+  //              losses - with the state visible on EVERY tab (header pill)
+  //   execution  which strikes can actually be traded: spread in ticks and
+  //              as a share of premium, prints in the last 15 minutes
+  //   tape       net premium BOUGHT in calls vs puts, from prints classified
+  //              tick by tick on the server - money committed, not quotes
+  //   vol/range  how much of the day's implied move is used, what is left,
+  //              implied vs realised
+  //   clock      session phase and the next window, expiry and pin risk
+  // Paper trades come from the local server (no broker call); everything
+  // else is read from the chain already on screen.
+  const _DC = { trades: null, at: 0, busy: false, err: null, gov: null, lastState: '', alerted: {} };
+  const _DC_DEF = { dayLoss: 0, maxTrades: 6, maxStreak: 3, coolMin: 15, riskPerTrade: 0 };
+  function _dcCfg() {
+    let o = {};
+    try { o = JSON.parse(localStorage.getItem('deskGovV1') || '{}') || {}; } catch (_) {}
+    return Object.assign({}, _DC_DEF, o);
+  }
+  function _dcSave(o) { try { localStorage.setItem('deskGovV1', JSON.stringify(o)); } catch (_) {} }
+  function _dcDayStart() {                       // 00:00 IST today, epoch seconds
+    const ist = Date.now() + 19800000;
+    return Math.floor((ist - (ist % 86400000) - 19800000) / 1000);
+  }
+  function _dcIstMin() {
+    const g = new Date(), ist = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+    return { m: ist.getHours() * 60 + ist.getMinutes() + ist.getSeconds() / 60, wd: ist.getDay() };
+  }
+  async function _dcFetch(force) {
+    if (_DC.busy || (!force && Date.now() - _DC.at < 30000)) return;
+    _DC.busy = true;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/paper-trades?status=all`, { signal: AbortSignal.timeout(15000) });
+      const j = await r.json();
+      _DC.trades = Array.isArray(j?.trades) ? j.trades : Array.isArray(j) ? j : [];
+      _DC.err = j?.error || null;
+    } catch (e) { _DC.err = 'paper trades unavailable (' + (e.message || e) + ')'; }
+    _DC.at = Date.now(); _DC.busy = false;
+  }
+  function _dcLossLimit(cfg) {
+    if (cfg.dayLoss > 0) return cfg.dayLoss;
+    const v = parseFloat(document.getElementById('lossLimitInput')?.value);
+    return v > 0 ? v : 0;
+  }
+  function _deskGovernor() {
+    const cfg = _dcCfg();
+    const t0 = _dcDayStart();
+    const all = _DC.trades || [];
+    const closed = all.filter(t => t.status === 'closed' && (t.closed_at || 0) >= t0)
+                      .sort((a, b) => a.closed_at - b.closed_at);
+    const open = all.filter(t => t.status === 'open');
+    const realized = closed.reduce((s, t) => s + (+t.exit_pnl || 0), 0);
+    const openPnl = open.reduce((s, t) => s + (t.live_pnl == null ? 0 : +t.live_pnl), 0);
+    const total = realized + openPnl;
+    const nTrades = closed.length + open.filter(t => (t.opened_at || 0) >= t0).length;
+    let streak = 0; for (const t of closed) streak = (+t.exit_pnl < 0) ? streak + 1 : 0;
+    const lastLoss = [...closed].reverse().find(t => +t.exit_pnl < 0);
+    const wins = closed.filter(t => +t.exit_pnl > 0).length, losses = closed.filter(t => +t.exit_pnl < 0).length;
+    let peak = 0, run = 0; for (const t of closed) { run += +t.exit_pnl || 0; peak = Math.max(peak, run); }
+    const lim = _dcLossLimit(cfg);
+    const why = [];
+    let st = 'CLEAR', coolLeft = 0;
+    if (lim > 0 && total <= -lim) { st = 'LOCKED'; why.push(`day loss ${fmtRupee(total)} reached the ${fmtRupee(-lim)} limit`); }
+    if (cfg.maxTrades > 0 && nTrades >= cfg.maxTrades) { st = 'LOCKED'; why.push(`${nTrades} trades — the day's maximum is ${cfg.maxTrades}`); }
+    if (cfg.maxStreak > 0 && streak >= cfg.maxStreak) { st = 'LOCKED'; why.push(`${streak} losses in a row`); }
+    if (st !== 'LOCKED' && streak >= Math.max(1, cfg.maxStreak - 1) && lastLoss && cfg.coolMin > 0) {
+      coolLeft = lastLoss.closed_at + cfg.coolMin * 60 - Date.now() / 1000;
+      if (coolLeft > 0) { st = 'COOLDOWN'; why.push(`${streak} loss${streak > 1 ? 'es' : ''} in a row — step away ${Math.ceil(coolLeft / 60)} min`); }
+    }
+    if (st === 'CLEAR') {
+      if (lim > 0 && total <= -0.5 * lim) { st = 'CAUTION'; why.push(`half the day's loss limit used`); }
+      if (peak > 0 && run < peak * 0.5 && peak >= (lim || 0) * 0.3) { st = 'CAUTION'; why.push(`gave back ${fmtRupee(peak - run)} of a ${fmtRupee(peak)} peak`); }
+      if (cfg.maxTrades > 0 && nTrades === cfg.maxTrades - 1) { st = 'CAUTION'; why.push('one trade left today'); }
+    }
+    const left = lim > 0 ? Math.max(0, lim + Math.min(0, total)) : null;
+    const cap = cfg.riskPerTrade > 0 ? (left != null ? Math.min(cfg.riskPerTrade, left) : cfg.riskPerTrade) : left;
+    return { st, why, total, realized, openPnl, nTrades, streak, wins, losses, lim, left, cap, coolLeft, cfg, nOpen: open.length };
+  }
+  function _deskGovUpdate() {
+    try { _dcFetch(false); } catch (_) {}
+    if (!_DC.trades) return;
+    const g = _DC.gov = _deskGovernor();
+    const pill = document.getElementById('riskPill');
+    if (pill) {
+      const col = g.st === 'LOCKED' ? '#ef5350' : g.st === 'COOLDOWN' ? '#ffb300' : g.st === 'CAUTION' ? '#ffb300' : '#26a69a';
+      pill.style.display = '';
+      pill.style.borderColor = col; pill.style.color = col;
+      pill.textContent = `${g.st === 'LOCKED' ? '⛔' : g.st === 'COOLDOWN' ? '⏸' : g.st === 'CAUTION' ? '⚠' : '✓'} ${g.st} ${fmtRupee(g.total)} · ${g.nTrades}t`;
+      pill.title = `Desk risk governor — ${g.why.join('; ') || 'within the day\'s rules'}. Click for the Desk cockpit.`;
+    }
+    // announce a change of state once per state per day
+    const day = _dcDayStart();
+    const key = `${day}|${g.st}`;
+    if (g.st !== _DC.lastState && (g.st === 'LOCKED' || g.st === 'COOLDOWN') && !_DC.alerted[key]) {
+      _DC.alerted[key] = true;
+      const msg = g.st === 'LOCKED' ? `⛔ Desk locked for the day — ${g.why[0]}. Stop trading.`
+                                    : `⏸ Cooldown — ${g.why[0]}.`;
+      try { criticalAlert(msg); } catch (_) {}
+      try { if (typeof _speakOnce === 'function') _speakOnce(`custom|risk|${g.st}|${day}`, msg.replace(/^[^A-Za-z]+/, '')); } catch (_) {}
+    }
+    _DC.lastState = g.st;
+  }
+
+  // execution quality: strikes near the money, both sides
+  function _deskExec(d) {
+    const st = d?.strikes || [], spot = d?.underlying_value, gap = d?.strike_gap || 50, lot = d?.lot_size || 75;
+    if (!st.length || !spot) return [];
+    const atm = d.atm || st.reduce((b, r) => Math.abs(r.strike - spot) < Math.abs(b.strike - spot) ? r : b).strike;
+    const rows = [];
+    for (const r of st) {
+      const off = Math.round((r.strike - atm) / gap);
+      if (Math.abs(off) > 3) continue;
+      for (const p of ['ce', 'pe']) {
+        const bid = +r[p + '_bid'] || 0, ask = +r[p + '_ask'] || 0, ltp = +r[p + '_ltp'] || 0;
+        const key = `${Math.round(r.strike)}${p.toUpperCase()}`;
+        const f = d.flow?.strikes?.[key];
+        const lots15 = f ? (f.b15 + f.s15) / lot : null;
+        const ticks = bid > 0 && ask > bid ? Math.round((ask - bid) / 0.05) : null;
+        const pct = ticks != null && ltp > 0 ? (ask - bid) / ltp * 100 : null;
+        let grade = '—';
+        if (ticks != null) {
+          const active = lots15 == null ? (+r[p + '_volume'] || 0) / lot > 5000 : lots15 >= 150;
+          grade = ticks <= 2 && pct <= 0.5 && active ? 'A' : ticks <= 4 && pct <= 1.5 ? 'B' : 'C';
+        }
+        rows.push({ k: Math.round(r.strike), side: p.toUpperCase(), off, bid, ask, ltp, ticks, pct, lots15, grade,
+                    buy15: f && (f.b15 + f.s15) ? f.b15 / (f.b15 + f.s15) : null });
+      }
+    }
+    return rows;
+  }
+  // premium tape: money committed by takers, calls vs puts
+  function _deskTape(d) {
+    const fs = d?.flow?.strikes;
+    if (!fs || !Object.keys(fs).length) return null;
+    const ltpOf = {};
+    for (const r of d.strikes || []) {
+      const k = Math.round(r.strike);
+      ltpOf[`${k}CE`] = +r.ce_ltp || 0; ltpOf[`${k}PE`] = +r.pe_ltp || 0;
+    }
+    const acc = { ce5: 0, pe5: 0, ce15: 0, pe15: 0, ceG15: 0, peG15: 0 };
+    const per = [];
+    for (const [key, f] of Object.entries(fs)) {
+      if (!f) continue;
+      const px = ltpOf[key] || 0;
+      if (!px) continue;
+      const side = /CE$/.test(key) ? 'ce' : 'pe';
+      const n5 = (f.b5 - f.s5) * px, n15 = (f.b15 - f.s15) * px;
+      acc[side + '5'] += n5; acc[side + '15'] += n15; acc[(side === 'ce' ? 'ceG15' : 'peG15')] += (f.b15 + f.s15) * px;
+      per.push({ key, n15, gross: (f.b15 + f.s15) * px });
+    }
+    per.sort((a, b) => Math.abs(b.n15) - Math.abs(a.n15));
+    // bullish premium: calls bought plus puts sold
+    const bias15 = acc.ce15 - acc.pe15, bias5 = acc.ce5 - acc.pe5;
+    const gross = acc.ceG15 + acc.peG15;
+    return { ...acc, bias15, bias5, gross, top: per.slice(0, 4), fut: d.flow?.futures?.near || null };
+  }
+  function _fmtCr(v) {
+    const a = Math.abs(v), sg = v < 0 ? '−' : '+';
+    return a >= 1e7 ? `${sg}₹${(a / 1e7).toFixed(2)} Cr` : a >= 1e5 ? `${sg}₹${(a / 1e5).toFixed(1)} L` : `${sg}₹${fmtInt(a)}`;
+  }
+  function _deskVolRange(d) {
+    const spot = d?.underlying_value, iv = d?.atm_iv;
+    if (!spot || !iv) return null;
+    const { m, wd } = _dcIstMin();
+    const open = 555, close = 930;
+    const left = (wd === 0 || wd === 6) ? 0 : Math.max(0, Math.min(375, close - Math.max(open, m)));
+    const day1s = spot * iv / 100 * Math.sqrt(1 / 252);
+    const rem1s = spot * iv / 100 * Math.sqrt(left / 375 / 252);
+    const cs = (_chart.candles || []).filter(k => k.t >= _dcDayStart());
+    let hi = null, lo = null;
+    for (const k of cs) { hi = hi == null ? k.h : Math.max(hi, k.h); lo = lo == null ? k.l : Math.min(lo, k.l); }
+    const rng = hi != null ? hi - lo : null;
+    let rv = null; try { rv = _volRegime(d)?.rv ?? null; } catch (_) {}
+    const rvv = rv && typeof rv === 'object' ? rv.vol : rv;
+    const atm = (d.strikes || []).find(r => r.strike === d.atm);
+    const straddle = atm && atm.ce_ltp && atm.pe_ltp ? atm.ce_ltp + atm.pe_ltp : null;
+    return { iv, day1s, rem1s, left, rng, used: rng != null ? rng / day1s : null, rv: rvv, vrp: rvv != null ? iv - rvv : null,
+             straddle, ivr: d.iv_rank ?? null };
+  }
+  function _deskClock(d) {
+    const { m, wd } = _dcIstMin();
+    const marks = [[555, 'open'], [585, 'opening drive ends'], [660, 'trend window ends'], [810, 'midday lull ends'],
+                   [870, 'closing hour'], [910, 'last 20 min'], [930, 'close']];
+    const ph = (typeof _getSessionPhase === 'function') ? _getSessionPhase() : null;
+    const next = (wd === 0 || wd === 6) ? null : marks.find(([t]) => t > m);
+    const exp = (d?.dte ?? 99) < 1;
+    let pin = null;
+    if (exp && d?.strikes?.length) {
+      const spot = d.underlying_value;
+      const near = d.strikes.filter(r => Math.abs(r.strike - spot) <= (d.strike_gap || 50) * 3);
+      const top = near.map(r => ({ k: r.strike, oi: (+r.ce_oi || 0) + (+r.pe_oi || 0) })).sort((a, b) => b.oi - a.oi)[0];
+      if (top) pin = { k: top.k, dist: spot - top.k, mp: d.max_pain };
+    }
+    return { ph, next, mins: m, exp, pin, dte: d?.dte };
+  }
+
+  function renderDeskCockpit(data) {
+    const box = document.getElementById('deskCockpitBody');
+    if (!box) return;
+    // never repaint under the cursor: a limit being typed would be wiped
+    if (box.contains(document.activeElement) && document.activeElement.matches('input')) return;
+    const d = data || state.lastData;
+    if (!d?.underlying_value) { box.innerHTML = '<div class="movers-loading" style="font-size:10px;">Load the option chain.</div>'; return; }
+    const card = (title, body, accent) => `<div style="border:1px solid ${accent || 'rgba(255,255,255,0.08)'};border-radius:6px;padding:6px 8px;min-width:0;">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.04em;margin-bottom:4px;">${title}</div>${body}</div>`;
+    const kv = (k, v, c) => `<div style="display:flex;justify-content:space-between;gap:8px;font-size:10.5px;padding:1px 0;"><span style="color:var(--muted);">${k}</span><b style="${c ? `color:${c};` : ''}">${v}</b></div>`;
+    const pos = 'var(--pos,#26a69a)', neg = 'var(--neg,#ef5350)', amb = '#ffb300';
+
+    // 1. governor
+    const g = _DC.gov || (_DC.trades ? _deskGovernor() : null);
+    let govHtml;
+    if (!g) govHtml = `<div class="movers-loading" style="font-size:10px;">${escapeHtml(_DC.err || 'Reading today\'s paper trades…')}</div>`;
+    else {
+      const col = g.st === 'LOCKED' ? neg : g.st === 'CLEAR' ? pos : amb;
+      const c = g.cfg;
+      govHtml = `<div style="font-size:15px;font-weight:800;color:${col};margin-bottom:3px;">${g.st}${g.st === 'COOLDOWN' ? ` <span style="font-size:11px;">${Math.floor(g.coolLeft / 60)}:${String(Math.floor(g.coolLeft % 60)).padStart(2, '0')}</span>` : ''}</div>
+        <div style="font-size:9.5px;color:${col};min-height:12px;margin-bottom:3px;">${escapeHtml(g.why.join(' · ') || 'within the day\'s rules')}</div>
+        ${kv('Day P&L', fmtRupee(g.total), g.total >= 0 ? pos : neg)}
+        ${kv('realised · open', `${fmtRupee(g.realized)} · ${fmtRupee(g.openPnl)}${g.nOpen ? ` (${g.nOpen} open)` : ''}`)}
+        ${kv('Trades · W/L', `${g.nTrades}${c.maxTrades ? ' / ' + c.maxTrades : ''} · ${g.wins}/${g.losses}`)}
+        ${kv('Losing streak', `${g.streak}${c.maxStreak ? ' / ' + c.maxStreak : ''}`, g.streak >= Math.max(1, c.maxStreak - 1) ? amb : '')}
+        ${kv('Loss budget left', g.left != null ? fmtRupee(g.left) : 'set a limit', g.left != null && g.lim && g.left < g.lim * 0.5 ? amb : '')}
+        ${kv('Next trade max risk', g.cap != null ? fmtRupee(g.cap) : '—')}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px;font-size:9.5px;color:var(--muted);">
+          <label>loss ₹<input data-dc="dayLoss" type="number" class="ohlc-inp" style="width:62px;" step="500" min="0" value="${c.dayLoss || ''}" placeholder="${_dcLossLimit({ dayLoss: 0 }) || 'off'}"></label>
+          <label>trades<input data-dc="maxTrades" type="number" class="ohlc-inp" style="width:38px;" min="0" value="${c.maxTrades}"></label>
+          <label>streak<input data-dc="maxStreak" type="number" class="ohlc-inp" style="width:34px;" min="0" value="${c.maxStreak}"></label>
+          <label>cool min<input data-dc="coolMin" type="number" class="ohlc-inp" style="width:38px;" min="0" value="${c.coolMin}"></label>
+          <label>risk/trade ₹<input data-dc="riskPerTrade" type="number" class="ohlc-inp" style="width:56px;" step="250" min="0" value="${c.riskPerTrade || ''}" placeholder="—"></label>
+        </div>`;
+    }
+
+    // 2. execution quality
+    const ex = _deskExec(d);
+    const gcol = gr => gr === 'A' ? pos : gr === 'B' ? amb : gr === 'C' ? neg : 'var(--muted)';
+    const exRow = (k, off) => {
+      const ce = ex.find(r => r.k === k && r.side === 'CE'), pe = ex.find(r => r.k === k && r.side === 'PE');
+      const c1 = r => r ? `<span style="color:${gcol(r.grade)};font-weight:700;">${r.grade}</span> ${r.ticks != null ? r.ticks + 't' : '—'}<span style="color:var(--muted);"> ${r.pct != null ? r.pct.toFixed(1) + '%' : ''}${r.lots15 != null ? ' · ' + fmtInt(r.lots15) + 'L' : ''}</span>` : '—';
+      return `<div style="display:grid;grid-template-columns:1fr 54px 1fr;gap:4px;font-size:10px;padding:1px 0;${off === 0 ? 'background:rgba(212,175,55,0.08);' : ''}">
+        <span style="text-align:right;">${c1(ce)}</span><b style="text-align:center;">${fmtInt(k)}</b><span>${c1(pe)}</span></div>`;
+    };
+    const ks = [...new Set(ex.map(r => r.k))].sort((a, b) => b - a);
+    const exHtml = ks.length ? `<div style="display:grid;grid-template-columns:1fr 54px 1fr;gap:4px;font-size:9px;color:var(--muted);"><span style="text-align:right;">CALL</span><span style="text-align:center;">strike</span><span>PUT</span></div>
+      ${ks.map(k => exRow(k, ex.find(r => r.k === k)?.off)).join('')}
+      <div style="font-size:9px;color:var(--muted);margin-top:3px;">grade · spread in ticks · spread % of premium · lots printed in 15 min. <b>A</b> trade freely, <b>B</b> use limits, <b>C</b> the spread is your stop.</div>`
+      : '<div class="movers-loading" style="font-size:10px;">No bid/ask in the chain.</div>';
+
+    // 3. premium tape
+    const tp = _deskTape(d);
+    let tpHtml;
+    if (!tp) tpHtml = `<div class="movers-loading" style="font-size:10px;">${d._source === 'fyers' ? 'Waiting for prints — classified flow builds up over a few minutes after the server starts.' : 'Needs the broker feed (DATA_SOURCE=fyers): prints are classified tick by tick on the server.'}</div>`;
+    else {
+      const bcol = v => Math.abs(v) < tp.gross * 0.05 ? 'var(--muted)' : v > 0 ? pos : neg;
+      const fut = tp.fut && (tp.fut.b15 + tp.fut.s15) ? tp.fut.b15 / (tp.fut.b15 + tp.fut.s15) : null;
+      tpHtml = `${kv('Calls net bought 15m', _fmtCr(tp.ce15), tp.ce15 > 0 ? pos : neg)}
+        ${kv('Puts net bought 15m', _fmtCr(tp.pe15), tp.pe15 > 0 ? neg : pos)}
+        <div style="display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;border-top:1px solid rgba(255,255,255,0.06);margin-top:2px;">
+          <span>Bullish premium</span><b style="color:${bcol(tp.bias15)};">${_fmtCr(tp.bias15)} <span style="font-size:9.5px;font-weight:400;">15m</span> · ${_fmtCr(tp.bias5)} <span style="font-size:9.5px;font-weight:400;">5m</span></b></div>
+        ${fut != null ? kv('Futures takers 15m', `${Math.round(fut * 100)}% buy`, fut >= 0.55 ? pos : fut <= 0.45 ? neg : '') : ''}
+        <div style="font-size:9.5px;color:var(--muted);margin-top:3px;">largest: ${tp.top.map(x => `${x.key} <span style="color:${x.n15 > 0 ? pos : neg};">${_fmtCr(x.n15)}</span>`).join(' · ')}</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px;">(bought − sold at the offer/bid) × premium. Bullish premium = calls bought minus puts bought; turnover ${_fmtCr(tp.gross).replace('+', '')} in 15 min.</div>`;
+    }
+
+    // 4. vol & range
+    const vr = _deskVolRange(d);
+    const vrHtml = vr ? `${kv('ATM IV · IV rank', `${vr.iv.toFixed(1)}%${vr.ivr != null ? ' · ' + Math.round(vr.ivr) : ''}`)}
+        ${kv('Realised (chart) · IV−RV', vr.rv != null ? `${vr.rv.toFixed(1)}% · ${vr.vrp >= 0 ? '+' : ''}${vr.vrp.toFixed(1)}` : '—', vr.vrp != null ? (vr.vrp < 0 ? amb : '') : '')}
+        ${kv('Day 1σ (implied)', `±${fmtInt(vr.day1s)} pts`)}
+        ${kv('Range so far', vr.rng != null ? `${fmtInt(vr.rng)} pts · ${Math.round(vr.used * 100)}% of 1σ` : '—', vr.used != null ? (vr.used >= 1 ? amb : '') : '')}
+        ${kv('Move left (1σ, rest of day)', `±${fmtInt(vr.rem1s)} pts · ${Math.round(vr.left)} min`)}
+        ${vr.straddle ? kv('ATM straddle', `₹${vr.straddle.toFixed(1)} (±${fmtInt(vr.straddle * 0.8)} pts to expiry)`) : ''}
+        <div style="font-size:9px;color:var(--muted);margin-top:3px;">${vr.used == null ? '' : vr.used >= 1 ? 'The day has already covered its implied move — extensions are statistically rarer; favour fades over chases.' : vr.used < 0.4 && vr.left < 150 ? 'Little of the implied move used with under 2½ hours left — compression; breakouts from here tend to be late and fast.' : 'Range is within the implied move.'}${vr.vrp != null && vr.vrp < -1 ? ' Realised is running above implied: options are cheap relative to the tape — buying premium is paying fair or better.' : ''}</div>`
+      : '<div class="movers-loading" style="font-size:10px;">Needs ATM IV.</div>';
+
+    // 5. clock
+    const ck = _deskClock(d);
+    const fmtM = mm => `${Math.floor(mm / 60)}h ${String(Math.round(mm % 60)).padStart(2, '0')}m`;
+    const ckHtml = `${kv('Phase', ck.ph ? `${ck.ph.icon} ${escapeHtml(ck.ph.label)}` : '—')}
+        ${kv('Next', ck.next ? `${escapeHtml(ck.next[1])} in ${fmtM(ck.next[0] - ck.mins)}` : 'session over')}
+        ${kv('Expiry', ck.exp ? '<span style="color:#ffb300;">TODAY</span>' : ck.dte != null ? `${ck.dte.toFixed(1)} days` : '—')}
+        ${ck.pin ? kv('Pin magnet', `${fmtInt(ck.pin.k)} (${ck.pin.dist >= 0 ? '+' : ''}${fmtInt(ck.pin.dist)} away)${ck.pin.mp ? ' · max pain ' + fmtInt(ck.pin.mp) : ''}`, Math.abs(ck.pin.dist) < (d.strike_gap || 50) ? amb : '') : ''}`;
+
+    box.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px;">
+      ${card('RISK GOVERNOR', govHtml, g ? (g.st === 'LOCKED' ? 'rgba(239,83,80,0.6)' : g.st === 'CLEAR' ? 'rgba(38,166,154,0.35)' : 'rgba(255,179,0,0.5)') : null)}
+      ${card('PREMIUM TAPE — WHO IS PAYING', tpHtml)}
+      ${card('EXECUTION — WHAT CAN BE TRADED', exHtml)}
+      ${card('VOL & RANGE', vrHtml)}
+      ${card('CLOCK', ckHtml)}
+    </div>`;
+    box.querySelectorAll('[data-dc]').forEach(el => {
+      el.onchange = () => {
+        const o = _dcCfg(); o[el.dataset.dc] = Math.max(0, +el.value || 0); _dcSave(o);
+        _DC.gov = _DC.trades ? _deskGovernor() : null; _deskGovUpdate(); renderDeskCockpit();
+      };
+    });
+    const stamp = document.getElementById('deskCockpitStamp');
+    if (stamp) stamp.textContent = `paper trades ${_DC.at ? Math.round((Date.now() - _DC.at) / 1000) + 's ago' : '—'}`;
+  }
+  document.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('#riskPill')) document.querySelector('.tab[data-tab="desk"]')?.click();
+  });
+
   // ══ PRO F1: portfolio greeks + stress heatmap (paper positions) ══
   async function renderPortfolioGreeks() {
     const gBox = document.getElementById('pfGreeks'), hBox = document.getElementById('pfHeatmap');
@@ -10953,7 +11278,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const resp = await fetch(`${base}/api/paper-trades?status=open`, { signal: AbortSignal.timeout(15000) });
       const pj = await resp.json();
-      const trades = (pj.trades || pj || []).filter(t => (t.status || 'OPEN').toUpperCase() === 'OPEN');
+      if (pj && pj.error) { gBox.innerHTML = `<span class="oc-sub">${escapeHtml(pj.error)}</span>`; hBox.innerHTML = ''; return; }
+      const trades = (Array.isArray(pj?.trades) ? pj.trades : Array.isArray(pj) ? pj : []).filter(t => (t.status || 'OPEN').toUpperCase() === 'OPEN');
       if (!trades.length) { gBox.innerHTML = '<span class="oc-sub">No open paper positions. Deploy something from the Builder/Suggester and the risk desk lights up.</span>'; hBox.innerHTML = ''; return; }
       const spot = d.underlying_value, lot = d.lot_size || 50;
       const legIv = l => {
@@ -12404,7 +12730,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // 2. Max-pain magnet, weighted by how little time is left
     if (d.max_pain && spot && d.dte != null) {
       const gapPct = (d.max_pain - spot) / spot * 100;
-      const urgency = d.dte <= 0 ? 1 : d.dte <= 1 ? 0.8 : d.dte <= 3 ? 0.5 : 0.25;
+      const urgency = d.dte < 1 ? 1 : d.dte <= 1 ? 0.8 : d.dte <= 3 ? 0.5 : 0.25;
       add('Max-pain pull', 2, Math.max(-1, Math.min(1, gapPct / 1.2)) * urgency,
         `max pain ${fmtInt(d.max_pain)} is ${gapPct >= 0 ? 'above' : 'below'} spot (${gapPct.toFixed(2)}%), ${d.dte}d left`);
     }
@@ -12802,11 +13128,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // ── ⚡ Expiry-day mode: pin tracker + gamma-hour countdown ──
     try {
       const dEx = state.lastData;
-      if (dEx && (dEx.dte ?? 99) <= 0 && dEx.max_pain && dEx.underlying_value) {
+      if (dEx && (dEx.dte ?? 99) < 1 && dEx.max_pain && dEx.underlying_value) {
         const spotE = dEx.underlying_value, mp = dEx.max_pain;
         const dist = spotE - mp, distPct = dist / spotE * 100;
         const nowE = new Date();
-        const istM = (() => { const t = new Date(nowE.getTime() + (5.5 * 3600 - nowE.getTimezoneOffset() * 60) * 1000); return t.getHours() * 60 + t.getMinutes(); })();
+        const istM = (() => { const t = new Date(nowE.getTime() + (5.5 * 3600 + nowE.getTimezoneOffset() * 60) * 1000); return t.getHours() * 60 + t.getMinutes(); })();
         const gh = 870;   // 14:30 IST
         const cd = istM < gh ? `${Math.floor((gh - istM) / 60)}h ${(gh - istM) % 60}m to gamma hour (14:30)` : istM < 930 ? '🔥 GAMMA HOUR LIVE — pinning and whips strongest now' : 'session over';
         const pinRead = Math.abs(distPct) < 0.3 ? 'INSIDE the pin zone — max pain is magnetic from here; moves away tend to get pulled back' : distPct > 0 ? 'above max pain — writers profit if price grinds DOWN toward it into the close' : 'below max pain — writers profit if price grinds UP toward it into the close';
@@ -14596,7 +14922,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     try {
       const ec = document.getElementById('expiryChip');
-      if (ec) ec.style.display = ((data?.dte ?? 99) <= 0) ? 'inline-block' : 'none';
+      if (ec) ec.style.display = ((data?.dte ?? 99) < 1) ? 'inline-block' : 'none';
     } catch (_) {}
     try { _resetHistoriesIfSymbolChanged(state.symbol || data?.symbol); } catch (_) {}
     try { _alertsCheck(data); } catch (_) {}
@@ -14632,6 +14958,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _shockCheck(data); } catch (_) {}
     _paintVis('hzBody', () => renderHeroZero(data), 'renderHeroZero');
     _paintVis('aggrBody', () => renderAggressor(data), 'renderAggressor');
+    try { _deskGovUpdate(); } catch (_) {}
+    _paintVis('deskCockpitBody', () => renderDeskCockpit(data), 'renderDeskCockpit');
     try { _trendCheck(data); } catch (_) {}
     _paintVis('flowRangeBody', () => renderFlowRange(data), 'renderFlowRange');
     _paintVis('regimeBody', () => renderRegimeSignals(data), 'renderRegimeSignals');
@@ -16129,6 +16457,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // accumulate this session's history (in-memory only, resets on reload) —
     // capped so a long-running session doesn't grow unbounded
     const last = state.sessionHistory[state.sessionHistory.length - 1];
+    // a chain without PCR (no call OI yet, pre-open) drew NaN into the SVG
+    if (!(data.pcr > 0)) { els.pcrTrendCurrent.textContent = 'PCR —'; return; }
     if (!last || last.pcr !== data.pcr || last.spot !== data.underlying_value) {
       state.sessionHistory.push({ t: Date.now(), pcr: data.pcr, spot: data.underlying_value, atmIv: data.atm_iv });
       if (state.sessionHistory.length > 300) state.sessionHistory.shift();
@@ -23549,6 +23879,38 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _aggressorRead(d) {
     const st = d?.strikes || [], spot = d?.underlying_value;
     if (!st.length || !spot) return null;
+    // Best source first: prints classified tick by tick on the server - a
+    // trade at the offer is a buyer taking liquidity. That is aggression by
+    // definition. The book below is RESTING size, passive and cancellable,
+    // and calling a heavy bid "bought aggressively" reads it backwards.
+    const fl = d.flow?.strikes;
+    if (fl && Object.keys(fl).length) {
+      const gap0 = d.strike_gap || 50;
+      let ceB = 0, ceS = 0, peB = 0, peS = 0, n = 0;
+      const top = [];
+      for (const [k, f] of Object.entries(fl)) {
+        const m = /^(\d+)(CE|PE)$/.exec(k);
+        if (!m || !f) continue;
+        if (Math.abs(+m[1] - spot) > gap0 * 6) continue;
+        const b = +f.b15 || 0, s_ = +f.s15 || 0;
+        if (b + s_ <= 0) continue;
+        n++;
+        if (m[2] === 'CE') { ceB += b; ceS += s_; } else { peB += b; peS += s_; }
+        const p = m[2].toLowerCase(), row = st.find(r => Math.round(r.strike) === +m[1]) || {};
+        const bid = +row[p + '_bid'] || 0, ask = +row[p + '_ask'] || 0, ltp = +row[p + '_ltp'] || 0;
+        top.push({ strike: +m[1], side: m[2], pos: b / (b + s_), vol: b + s_,
+                   spreadPct: ltp > 0 && ask > bid ? (ask - bid) / ltp * 100 : 0 });
+      }
+      if (n >= 2) {
+        const ceRatio = ceB + ceS ? ceB / (ceB + ceS) : 0.5;
+        const peRatio = peB + peS ? peB / (peB + peS) : 0.5;
+        const score = (ceRatio - 0.5) + (0.5 - peRatio);
+        top.sort((x, y) => Math.abs(y.pos - 0.5) * y.vol - Math.abs(x.pos - 0.5) * x.vol);
+        return { ceRatio, peRatio, ceTot: ceB + ceS, peTot: peB + peS,
+                 score: Math.max(-1, Math.min(1, score * 2)), top: top.slice(0, 6),
+                 skipped: 0, counted: n, source: 'tick-classified prints, last 15 min' };
+      }
+    }
     // With a real order book, use it. The bid/ask approximation below infers
     // the aggressor from where the LAST TRADE sat in the spread, which is one
     // snapshot and blind to size; the book gives actual resting quantity on
@@ -25969,6 +26331,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
             const isCall = side === 'ce';
             const above = s.strike >= spot;
+            // A wall is OUT-of-the-money open interest: calls above spot
+            // (resistance), puts below (support). Put OI above spot is in the
+            // money - mostly old positions price has already run through - and
+            // it was being announced as "put wall ... resistance".
+            if (isCall !== above) continue;
             // is price heading at this wall, or away from it?
             const toward = MOVING && ((above && drift > 0) || (!above && drift < 0));
             const away = MOVING && !toward;
@@ -25987,9 +26354,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               tone = above ? 'pos' : 'neg';
               why = `${covering ? 'writers are buying back' : 'writers are stepping away'} as price presses into it`;
             } else if (away) {
-              bias = 'neutral';
-              tone = 'mid';
-              why = 'price is moving away, so this looks like writers taking profit on a level that no longer matters';
+              // writers banking profit on a level price has left behind is
+              // not a trade - recorded as the new base, never announced
+              _leadState.wallBase[k] = oi;
+              continue;
             } else {
               // flat tape: a wall thinning without a move is mildly directional
               // in the direction the wall was defending against
@@ -31625,8 +31993,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         <div class="wc-spot">${fmtPrice(d.underlying_value)}</div>
         <div class="wc-meta">
           <span class="${chg>=0?'pos-txt':'neg-txt'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>
-          <span class="wc-pcr">PCR ${d.pcr}</span>
-          <span class="${sentCls}">${d.sentiment.includes('bullish')?'▲':(d.sentiment.includes('bearish')?'▼':'—')}</span>
+          <span class="wc-pcr">PCR ${d.pcr != null && isFinite(+d.pcr) ? (+d.pcr).toFixed(2) : '—'}</span>
+          <span class="${sentCls}">${sentimentLower.includes('bullish')?'▲':(sentimentLower.includes('bearish')?'▼':'—')}</span>
           <button class="wc-alert-btn ${_watchlistAlerts[sym]?'armed':''}" data-wl-alert="${sym}" title="${_watchlistAlerts[sym]?'Alert @ '+fmtInt(_watchlistAlerts[sym])+' (click to remove)':'Set price alert'}">🔔<i class=\"hi\" data-h=\"wl-alerts\">i</i></button>
         </div>
       </div>`;
@@ -35243,6 +35611,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'scen-matrix':       '<strong>P&amp;L Scenario Matrix</strong>Position P&amp;L across spot levels (rows, ±5 strikes) and dates (columns, today → expiry) — the whole what-if surface in one grid. Read horizontally to see how time decay reshapes the same spot level; vertically for directional exposure on a given day. The ▶ row is the current spot.',
     'cmp-tray':          '<strong>Strategy Comparison</strong>Pin the current Builder position (up to 3) and compare POP, max profit/loss, EV and breakevens side-by-side before committing. "Load" restores a pinned strategy into the Builder. Pins live in memory only — they clear on page reload.',
     'ev-lot':            '<strong>Expected Value per Lot</strong>Probability-weighted P&amp;L at expiry: the payoff integrated over a lognormal terminal-price distribution (σ from ATM IV × √DTE). POP alone misleads — a 90% POP condor can still be negative-EV if the rare loss dwarfs the frequent win. Positive EV = statistical edge <em>if</em> the IV assumption holds; real edge also needs IV to be overpriced vs realized.',
+    'desk-cockpit':      '<strong>Desk Cockpit</strong>The screen a prop desk trades from. <b>Risk governor</b>: today\'s paper trades against your rules - daily loss (₹, or the Builder\'s loss limit), maximum trades, a losing streak that locks the day, and a cooldown after a loss one short of it. LOCKED and COOLDOWN are announced once and shown on every tab in the header pill. <b>Premium tape</b>: rupees of premium bought minus sold by takers in calls and puts over 5 and 15 minutes, from prints classified tick by tick on the server - bullish premium is calls bought minus puts bought. <b>Execution</b>: spread in ticks and as a share of premium, and lots printed in 15 minutes, for the seven strikes round the money - A trade freely, B use limit orders, C the spread costs more than the edge. <b>Vol &amp; range</b>: how much of today\'s implied 1σ move is used, what is left for the rest of the session, implied against realised. <b>Clock</b>: session phase, the next window, expiry and the pin strike on expiry day.',
     'loss-guard':        '<strong>Daily Loss Limit</strong>Set a ₹ amount; when the Builder\'s live P&amp;L breaches it, a persistent red banner locks to the top of the page. The single most valuable risk rule for a full-time trader: the limit decided calmly in the morning beats any decision made mid-drawdown. Leave blank to disable.',
     'trail-dd':          '<strong>Trailing Drawdown Alert</strong>Tracks the peak live P&amp;L of your position this session and alerts when you\'ve given back more than this ₹ amount from the peak. Catches the classic "it was green an hour ago" failure — locking a partial win is a decision, and this makes sure you actively make it.',
     'iv-alert':          '<strong>IV Spike / Crush Alert</strong>Fires when ATM IV moves ≥5% (relative) within 15 minutes. Spikes = event fear building (long premium gains, shorts bleed vega). Crush = premium deflating faster than theta — silently lethal for long options. 10-min cooldown between alerts.',

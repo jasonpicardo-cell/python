@@ -654,6 +654,95 @@ def _optionchain(req: Dict[str, Any]) -> Dict[str, Any]:
     return raw
 
 
+
+# ── implied volatility (desk convention) ─────────────────────────────────
+# Black-76 on the synthetic forward. The forward comes from put-call parity at
+# the strikes nearest spot (F = K + C - P), which is what an index desk quotes
+# against: it carries the dividend and carry the cash index does not, and it
+# exists for weekly expiries that have no listed future. Each strike's vol is
+# taken from its OUT-of-the-money option, which is the liquid one, and given
+# to both sides - an ITM premium is mostly intrinsic, and inverting it turns
+# one tick of spread into several vol points of noise.
+_IV_R = 0.065
+
+
+def _ncdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _b76(F: float, K: float, T: float, v: float, call: bool) -> float:
+    if v <= 0 or T <= 0:
+        return max(0.0, (F - K) if call else (K - F))
+    sd = v * math.sqrt(T)
+    d1 = (math.log(F / K) + 0.5 * sd * sd) / sd
+    d2 = d1 - sd
+    df = math.exp(-_IV_R * T)
+    return df * (F * _ncdf(d1) - K * _ncdf(d2)) if call else df * (K * _ncdf(-d2) - F * _ncdf(-d1))
+
+
+def _b76_iv(price: float, F: float, K: float, T: float, call: bool) -> Optional[float]:
+    intrinsic = max(0.0, (F - K) if call else (K - F)) * math.exp(-_IV_R * T)
+    # a few-tick option has no information in its price: at 0.05 the vol
+    # reads 30% or 3% depending on which side of a single tick it printed
+    if price is None or price < 1.0 or price - intrinsic < 0.5 or T <= 0:
+        return None
+    lo, hi = 0.005, 3.0
+    if _b76(F, K, T, hi, call) < price:
+        return None
+    for _ in range(60):                       # bisection: monotone in vol
+        mid = 0.5 * (lo + hi)
+        if _b76(F, K, T, mid, call) > price:
+            hi = mid
+        else:
+            lo = mid
+        if hi - lo < 1e-5:
+            break
+    return 0.5 * (lo + hi)
+
+
+def _opt_px(r: Dict[str, Any], p: str) -> Optional[float]:
+    """Mid when the quote is two-sided and tight, else last traded."""
+    b, a, l = r.get(f"{p}_bid") or 0, r.get(f"{p}_ask") or 0, r.get(f"{p}_ltp") or 0
+    if b > 0 and a > 0 and a >= b and (a - b) <= max(1.0, 0.05 * a):
+        return 0.5 * (a + b)
+    return l or None
+
+
+def _solve_chain_iv(strikes: List[Dict[str, Any]], spot: float, dte_days: float) -> str:
+    """Fill ce_iv / pe_iv (percent) in place when the source sent none.
+
+    Returns "broker" when the chain already carried IV, "solved" when it was
+    computed here, "none" when there was nothing to work with.
+    """
+    if not strikes or not spot:
+        return "none"
+    have = sum(1 for r in strikes if (r.get("ce_iv") or 0) > 0 or (r.get("pe_iv") or 0) > 0)
+    if have >= max(3, len(strikes) // 4):
+        return "broker"
+    T = max(dte_days, 1.0 / 1440) / 365.0
+    near = sorted(strikes, key=lambda r: abs(r["strike"] - spot))[:3]
+    fw = []
+    for r in near:
+        c, p_ = _opt_px(r, "ce"), _opt_px(r, "pe")
+        if c and p_:
+            fw.append(r["strike"] + (c - p_) * math.exp(_IV_R * T))
+    F = sorted(fw)[len(fw) // 2] if fw else spot
+    if not (0.9 * spot < F < 1.1 * spot):
+        F = spot
+    n = 0
+    for r in strikes:
+        K = r["strike"]
+        otm_call = K >= F
+        p = "ce" if otm_call else "pe"
+        v = _b76_iv(_opt_px(r, p), F, K, T, otm_call)
+        if v is None:                          # the OTM side is untradeable
+            q = "pe" if otm_call else "ce"
+            v = _b76_iv(_opt_px(r, q), F, K, T, not otm_call)
+        if v is not None and 0.01 < v < 2.5:
+            r["ce_iv"] = r["pe_iv"] = round(v * 100.0, 2)
+            n += 1
+    return "solved" if n else "none"
+
 # ── option chain ──────────────────────────────────────────────────────
 def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]:
     """Return a chain response in the server's native shape.
@@ -854,6 +943,18 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         near_epoch = exp_epochs[0]
     dte_frac = _dte_from(near_epoch)
 
+    # ── implied vol where the broker sends none ───────────────────────
+    # The Fyers option chain carries prices and OI, not IV. Every panel that
+    # prices an option - greeks, skew, the smile, GEX, portfolio risk, the
+    # 3-delta picker, the risk reversal - read ce_iv/pe_iv as 0 and fell back
+    # to a flat 12-13%, which flattens the smile and mis-states every delta.
+    # Solved here from prices already in hand: no extra request.
+    iv_src = _solve_chain_iv(strikes, spot, dte_frac)
+    if iv_src == "solved":
+        atm_row = next((s for s in strikes if s["strike"] == atm), {})
+        ivs = [v for v in (atm_row.get("ce_iv"), atm_row.get("pe_iv")) if v]
+        atm_iv = sum(ivs) / len(ivs) if ivs else atm_iv
+
     gaps = sorted({round(b - a) for a, b in zip(sorted(by_strike), sorted(by_strike)[1:]) if b > a})
     strike_gap = gaps[0] if gaps else 50
 
@@ -922,6 +1023,7 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "nearby": nearby,
         "atm": atm,
         "atm_iv": round(atm_iv, 2),
+        "iv_source": iv_src,
         "expiry": (expiry if expiry in expiries else None) or (expiries[0] if expiries else None),
         "all_expiries": expiries,
         "far_expiry": expiries[1] if len(expiries) > 1 else None,
@@ -945,7 +1047,10 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "futures_volume": fut.get("futures_volume"),
         "futures_far_price": fut.get("futures_far_price"),
         "futures_far_oi": fut.get("futures_far_oi"),
-        "futures_dte": round(dte_frac, 4),
+        # days to the FUTURES expiry (the monthly), not the weekly option
+        # expiry: annualising the basis over a 1-day weekly turned a 0.26%
+        # premium into "+91% a year"
+        "futures_dte": _monthly_dte(exp_epochs),
         "india_vix": india_vix(),
         # The index's previous close, from the stream, so a tile can show the
         # DAY's change rather than the change since its own last refresh.
@@ -1160,6 +1265,35 @@ def _futures_quote(symbol: str, exp_epochs: List[float]) -> Dict[str, Any]:
         out["futures_far_oi"] = _f(far, "open_interest", "oi") or None
         out["futures_far_symbol"] = syms[1]
     return out
+
+
+def _monthly_dte(exp_epochs: List[float]) -> Optional[float]:
+    """Fractional days to the current monthly expiry (15:30 IST).
+
+    The monthly is the last expiry of the month the nearest expiry falls in.
+    Fyers lists a handful of upcoming expiries, which may stop short of the
+    monthly, so the last Tuesday of that month (the index monthly expiry day)
+    is the fallback; a listed expiry within a week of it - a holiday moving it
+    a day earlier - is preferred.
+    """
+    if not exp_epochs:
+        return None
+    try:
+        import calendar
+        g = time.gmtime(exp_epochs[0] + 19800)
+        y, m = g.tm_year, g.tm_mon
+        last = calendar.monthrange(y, m)[1]
+        d = last
+        while calendar.weekday(y, m, d) != 1:          # Tuesday
+            d -= 1
+        lt = calendar.timegm((y, m, d, 15, 30, 0)) - 19800
+        same = [e for e in exp_epochs if time.gmtime(e + 19800).tm_mon == m and abs(e - lt) < 7 * 86400]
+        ep = max(same) if same else lt
+        gg = time.gmtime(ep + 19800)
+        settle = calendar.timegm((gg.tm_year, gg.tm_mon, gg.tm_mday, 15, 30, 0)) - 19800
+        return round(max((settle - time.time()) / 86400.0, 1.0 / 1440), 4)
+    except Exception:
+        return None
 
 
 def _max_pain(strikes: List[Dict[str, Any]]) -> Optional[float]:

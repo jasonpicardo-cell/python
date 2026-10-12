@@ -504,10 +504,82 @@ def test_aggressor_flow():
     A._flow.pop("T", None)
 
 
+def test_iv_solver():
+    # Black-76 on the synthetic forward must recover the vol that priced
+    # the chain, and leave few-tick wings unsolved rather than invent 30%.
+    sys.path.insert(0, HERE)
+    try:
+        import nse_adapter_fyers as A
+    except Exception as e:  # noqa: BLE001
+        warn("iv solver: adapter not importable here", str(e)[:120])
+        return
+    spot, T_days, vol = 25000.0, 3.0, 0.14
+    T = T_days / 365.0
+    F = spot * math.exp(0.065 * T)
+    rows = []
+    for k in range(23500, 26501, 100):
+        c = A._b76(F, k, T, vol, True)
+        p = A._b76(F, k, T, vol, False)
+        rows.append({"strike": float(k), "ce_ltp": round(c * 20) / 20, "pe_ltp": round(p * 20) / 20,
+                     "ce_iv": 0.0, "pe_iv": 0.0})
+    src = A._solve_chain_iv(rows, spot, T_days)
+    atm = min(rows, key=lambda r: abs(r["strike"] - spot))
+    check("iv: solved when the broker sends none", src == "solved", src)
+    check("iv: ATM vol recovered within 0.3 pts", abs(atm["ce_iv"] - 14.0) < 0.3, str(atm["ce_iv"]))
+    wing = rows[0]
+    check("iv: a few-tick wing is left unsolved", wing["ce_iv"] == 0 or wing["pe_ltp"] >= 1.0,
+          f'{wing["strike"]} pe {wing["pe_ltp"]} iv {wing["ce_iv"]}')
+    rows2 = [dict(r, ce_iv=15.0, pe_iv=15.0) for r in rows]
+    check("iv: broker IV is never overwritten", A._solve_chain_iv(rows2, spot, T_days) == "broker")
+    import calendar
+    ep = calendar.timegm((2026, 10, 13, 15, 30, 0)) - 19800
+    real_time = A.time.time
+    try:
+        A.time.time = lambda: calendar.timegm((2026, 10, 12, 9, 0, 0))     # 14:30 IST
+        mdte = A._monthly_dte([ep, ep + 7 * 86400])
+    finally:
+        A.time.time = real_time
+    check("futures dte: counts to the monthly expiry, not the weekly", mdte and 14.5 < mdte < 15.5, str(mdte))
+
+
+def test_no_shadowed_imports():
+    # A local "import x" anywhere in a function makes x local to the WHOLE
+    # function, so an earlier use raises UnboundLocalError. That broke
+    # /api/fno-symbols inside the 2,000-line do_GET.
+    import ast
+    src = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    tree = ast.parse(src)
+    bad = []
+    for f in ast.walk(tree):
+        if not isinstance(f, ast.FunctionDef):
+            continue
+        imports = {}
+        for n in ast.walk(f):
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                for a in n.names:
+                    nm = a.asname or a.name.split(".")[0]
+                    imports.setdefault(nm, n.lineno)
+        for n in ast.walk(f):
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id in imports \
+                    and n.lineno < imports[n.id]:
+                bad.append(f"{f.name}:{n.lineno} {n.id}")
+    check("no function-local import shadows an earlier use", not bad, str(sorted(set(bad))[:5]))
+
+
+def test_ist_offset():
+    # IST = UTC+5:30, and getTimezoneOffset() is -330 in India. The local
+    # clock that reads as IST is now + (330 + offset) minutes; the minus form
+    # put an Indian browser 11 hours ahead ("Pre-Market" at 14:30).
+    c = open(DASH, encoding="utf-8").read()
+    bad = re.findall(r"5\.5 \* 3600 - \w+\.getTimezoneOffset\(\)", c)
+    check("IST conversion uses + getTimezoneOffset()", not bad, str(bad[:3]))
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
-               test_pcr_bands_scale, test_aggressor_flow, test_index_weights, test_env):
+               test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
+               test_ist_offset, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
