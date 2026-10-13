@@ -2107,7 +2107,7 @@ def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
         # the day's open / high / low / close of the index, which the NSE path
         # accumulates on every fetch and the session pivots read; the broker
         # path never fed it, so those levels had nothing to build from
-        if not data.get("session_ohlc"):
+        if not data.get("session_ohlc"):          # the adapter sends the exchange's own when it has it
             try:
                 _update_session_ohlc(symbol, spot)
                 data["session_ohlc"] = _session_ohlc.get(symbol.upper(), {})
@@ -2165,8 +2165,16 @@ def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
 def _data_audit(symbol: str) -> dict:
     d, _m = _cached_chain(symbol, None, 12, client="audit", max_age=120)
     checks = []
+    # Outside 09:15-15:30 on a weekday nothing ticks, and a check that needs
+    # live data says so instead of failing.
+    _lt = time.gmtime(time.time() + 19800)          # IST wall clock
+    _m = _lt.tm_hour * 60 + _lt.tm_min
+    market_open = _lt.tm_wday < 5 and 555 <= _m <= 930
 
-    def add(name, ok, detail, warn=False):
+    def add(name, ok, detail, warn=False, live=False):
+        if live and not market_open and not ok:
+            checks.append({"check": name, "status": "ok", "detail": f"market closed - {detail}"})
+            return
         checks.append({"check": name, "status": "ok" if ok else ("warn" if warn else "FAIL"), "detail": detail})
 
     st = d.get("strikes") or []
@@ -2187,12 +2195,16 @@ def _data_audit(symbol: str) -> dict:
         add("quantities in contracts", d.get("oi_unit") == "contracts",
             f"oi_unit={d.get('oi_unit')} · {d.get('qty_per_contract')} shares per contract")
     lot = d.get("lot_size")
-    add("lot size", bool(lot), f"{lot}")
-    add("expiry / DTE", d.get("dte") is not None, f"{d.get('expiry')} · dte {d.get('dte')} · futures dte {d.get('futures_dte')}")
+    add("lot size", bool(lot) and lot >= 5, f"{lot} - a lot of 1 turns every per-lot figure into a per-share one")
+    dte = d.get("dte")
+    add("expiry not yet settled", dte is not None and dte > 0.002,
+        f"{d.get('expiry')} · dte {dte} days · futures dte {d.get('futures_dte')}")
     fp, sp = d.get("futures_price"), d.get("underlying_value")
     add("futures price", bool(fp), f"{fp} (basis {round(fp - sp, 1) if fp and sp else '—'})")
     add("next-month futures", bool(d.get("futures_far_price")), f"{d.get('futures_far_price')}", warn=True)
-    add("futures OI", bool(d.get("futures_oi")), f"{d.get('futures_oi')} - rollover % and futures build need it", warn=True)
+    add("futures OI", bool(d.get("futures_oi")),
+        f"{d.get('futures_oi')} - Fyers' quote carries no open interest, so rollover % and the futures OI build stay blank on this feed",
+        warn=True)
     add("futures best bid / offer", bool(d.get("futures_bid")) or src == "nse", f"{d.get('futures_bid')} / {d.get('futures_ask')}", warn=True)
     add("India VIX", bool(d.get("india_vix")), f"{d.get('india_vix')}")
     ne = len(d.get("expiries_data") or {})
@@ -2204,18 +2216,18 @@ def _data_audit(symbol: str) -> dict:
             import nse_adapter_fyers as _fya
             a = _fya.audit_state(symbol, d)
             sa = a.get("spot_tick_age_s")
-            add("index ticking", sa is not None and sa < 15, f"last tick {sa}s ago")
+            add("index ticking", sa is not None and sa < 15, f"last tick {sa}s ago", live=True)
             add("option price subscriptions", a["price_subscribed"] >= a["options"] * 0.9,
                 f"{a['price_subscribed']} of {a['options']} contracts")
             add("options ticking (last 60s)", a["ticking_60s"] >= a["options"] * 0.5,
-                f"{a['ticking_60s']} of {a['options']} - quiet far strikes are normal", warn=True)
+                f"{a['ticking_60s']} of {a['options']} - quiet far strikes are normal", warn=True, live=True)
             add("depth subscriptions", a["depth_subscribed"] > 0, f"{a['depth_subscribed']} contracts")
-            add("5-level depth arriving", a["ladders_fresh_120s"] > 0, f"{a['ladders_fresh_120s']} contracts updated in 2 min")
-            add("total bid / offer arriving", a["totals_fresh_120s"] > 0, f"{a['totals_fresh_120s']} contracts updated in 2 min")
+            add("5-level depth arriving", a["ladders_fresh_120s"] > 0, f"{a['ladders_fresh_120s']} contracts updated in 2 min", live=True)
+            add("total bid / offer arriving", a["totals_fresh_120s"] > 0, f"{a['totals_fresh_120s']} contracts updated in 2 min", live=True)
             add("trade classification (takers)", a["flow_contracts"] > 0,
-                f"{a['flow_contracts']} contracts with classified prints - builds from server start", warn=True)
+                f"{a['flow_contracts']} contracts with classified prints - builds from server start", warn=True, live=True)
             lf, lt = a.get("lot_from_data"), a.get("lot_table")
-            add("lot size: data vs table", not lf or lf == lt or (lt and lf % lt == 0),
+            add("lot size: data vs table", not lf or lf == lot or (lot and lot >= 5 and lf % lot == 0),
                 f"from the data {lf} · table {lt} · used {lot}", warn=True)
             rc = a["socket"]
             add("socket reconnects", True, f"{rc['reconnects']} connect(s)" +
@@ -2419,6 +2431,11 @@ _replay_last: dict = {}   # sym -> ts
 
 def _record_replay_snapshot(symbol: str) -> None:
     sym = symbol.upper()
+    # the session only: a dashboard left open used to keep recording the
+    # pre-open and the evening, which every consumer then had to filter
+    _g = time.gmtime(time.time() + 19800)
+    if _g.tm_wday >= 5 or not (555 <= _g.tm_hour * 60 + _g.tm_min <= 931):
+        return
     if time.time() - _replay_last.get(sym, 0) >= _REPLAY_INTERVAL:
         _replay_due[sym] = True
 

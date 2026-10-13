@@ -644,6 +644,24 @@ def test_units():
     rows2 = [{"ce_oi": 1001 + 7 * i, "pe_oi": 903 + 3 * i, "ce_volume": 51 + i, "pe_volume": 43 + i} for i in range(8)]
     check("units: contract quantities are not mistaken for shares", A._infer_lot(rows2) is None)
     check("units: lot table current (Nifty 65)", A._LOTS.get("NIFTY") == 65, str(A._LOTS.get("NIFTY")))
+    # nse_lot_sizes answers 1 without an NSE session; that must never be used
+    import types as _ty
+    _old = sys.modules.get("nse_lot_sizes")
+    sys.modules["nse_lot_sizes"] = _ty.SimpleNamespace(get_lot_size=lambda s: 1)
+    try:
+        check("lot size: an answer of 1 is rejected", A._lot_size("NIFTY") == 65, str(A._lot_size("NIFTY")))
+    finally:
+        if _old is not None:
+            sys.modules["nse_lot_sizes"] = _old
+        else:
+            sys.modules.pop("nse_lot_sizes", None)
+    import calendar as _cal
+    ep = _cal.timegm((2026, 10, 13, 0, 0, 0)) - 19800          # 13 Oct, IST midnight
+    check("expiry settles at 15:30 IST", A._settle_of(ep) == _cal.timegm((2026, 10, 13, 10, 0, 0)),
+          str(A._settle_of(ep)))
+    dsrc = open(DASH, encoding="utf-8").read()
+    check("dashboard sends only a user-picked expiry",
+          "if (state.expiry && state.expiryUser) params.set('expiry', state.expiry);" in dsrc)
     src = open(os.path.join(HERE, "nse_adapter_fyers.py"), encoding="utf-8").read()
     check("OI change never falls back to the PERCENT field", '"oich", "oichp"' not in src)
     # replay migration converts a broker snapshot once, and leaves NSE alone
@@ -672,11 +690,41 @@ def test_units():
     check("replay: NSE snapshot untouched", not S._snapshot_to_contracts(nse))
 
 
+def test_boxes():
+    # the bottom-right boxes: the day's 1 sigma from VIX, not a zero-day IV;
+    # move-quality legs read from the session only and timed start->extreme
+    c = open(DASH, encoding="utf-8").read()
+    check("desk box: day 1σ from India VIX first", "const iv = vix > 0 ? vix : ((d?.dte ?? 0) >= 1 ? aiv : 0);" in c)
+    check("desk box: IV change is ATM IV vs ATM IV", "const oldIv = _dhAgo(900)?.aiv;" in c)
+    sys.path.insert(0, HERE)
+    try:
+        import nse_move_quality as M
+    except Exception as e:  # noqa: BLE001
+        warn("move quality not importable", str(e)[:100])
+        return
+    import tempfile, calendar
+    d = tempfile.mkdtemp()
+    t0 = calendar.timegm((2026, 10, 9, 3, 30, 0))           # 09:00 IST
+    rows = []
+    for i in range(420):
+        m = 540 + i
+        spot = 25000 + (0 if m < 555 else (m - 555) * 0.8 if m < 700 else 116 - (m - 700) * 0.3)
+        rows.append(json.dumps({"underlying_value": spot, "_replay_ts": t0 + i * 60, "strike_gap": 50, "strikes": []}))
+    path = os.path.join(d, "NIFTY_2026-10-09.jsonl")
+    open(path, "w").write("\n".join(rows) + "\n")
+    ser = M.day_series(path)
+    check("move quality: pre-open and evening rows dropped",
+          M._ist_min(ser[0]["t"]) == 555 and M._ist_min(ser[-1]["t"]) == 930, f"{len(ser)} rows")
+    leg = M.current(d, "NIFTY", "2026-10-09").get("leg") or {}
+    check("move quality: leg minutes run start to extreme",
+          leg.get("mins") is not None and leg["mins"] == (leg["ext_t"] - leg["start_t"]) // 60, str(leg)[:120])
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

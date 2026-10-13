@@ -940,7 +940,25 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         _ck = f"{ysym}|{str(expiry or '').strip()}"
         if expiry and _exp_ts_cache.get(_ck):
             req["timestamp"] = _exp_ts_cache[_ck]
+        elif not expiry:
+            _rl = _rolled.get(ysym)
+            if _rl and _rl[2] == time.strftime("%Y-%m-%d"):
+                req["timestamp"] = str(int(_rl[1]))      # today's expiry has settled
         raw = _optionchain(req)
+        # ── after 15:30 on expiry day the default chain is a dead contract ──
+        # Fyers keeps serving the settled weekly until the day changes, so
+        # everything priced off it - IV (time to expiry is zero), deltas, the
+        # 3-delta book, the strategy library, the next-day plan - was computed
+        # on an expiry that no longer exists. Roll to the next one, and keep
+        # asking for it directly for the rest of the day (one call, not two).
+        if not expiry and "timestamp" not in req and isinstance(raw, dict) and raw.get("s") == "ok":
+            _eps = sorted(x for x in (_exp_epoch_any(e) for e in ((raw.get("data") or {}).get("expiryData") or [])) if x)
+            if len(_eps) > 1 and _settle_of(_eps[0]) <= time.time():
+                _rolled[ysym] = (_eps[0], _eps[1], time.strftime("%Y-%m-%d"))
+                print(f"[fyers] {sym}: today's expiry has settled - rolling the default chain to the next expiry")
+                raw2 = _optionchain({"symbol": ysym, "strikecount": count, "timestamp": str(int(_eps[1]))})
+                if isinstance(raw2, dict) and raw2.get("s") == "ok" and (raw2.get("data") or {}).get("optionsChain"):
+                    raw = raw2
     except Exception as e:  # noqa: BLE001
         raise RuntimeError(f"optionchain call failed: {e}") from e
     if not isinstance(raw, dict) or raw.get("s") != "ok":
@@ -1035,7 +1053,7 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     lot_seen = _infer_lot(strikes) or _lot_seen_cache.get(sym)
     if lot_seen:
         _lot_seen_cache[sym] = lot_seen
-        if lot_seen != lot and lot_seen % lot != 0:   # the table is stale; the data is not
+        if lot < 5 or (lot_seen != lot and lot_seen % lot != 0):   # the table is wrong; the data is not
             if _lot_warned.get(sym) != (lot_seen, lot):
                 _lot_warned[sym] = (lot_seen, lot)
                 print(f"[fyers] {sym}: lot size from the data is {lot_seen}, table says {lot} - using {lot_seen}")
@@ -1187,7 +1205,8 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
                 near_epoch = ep
                 break
     if near_epoch is None and exp_epochs:
-        near_epoch = exp_epochs[0]
+        # the first expiry that has not settled yet
+        near_epoch = next((ep for ep in exp_epochs if _settle_of(ep) > time.time()), exp_epochs[0])
     dte_frac = _dte_from(near_epoch)
 
     # ── implied vol where the broker sends none ───────────────────────
@@ -1273,7 +1292,7 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "atm": atm,
         "atm_iv": round(atm_iv, 2),
         "iv_source": iv_src,
-        "expiry": (expiry if expiry in expiries else None) or (expiries[0] if expiries else None),
+        "expiry": (expiry if expiry in expiries else None) or (_exp_str(near_epoch) if near_epoch else (expiries[0] if expiries else None)),
         "all_expiries": expiries,
         "far_expiry": expiries[1] if len(expiries) > 1 else None,
         "dte_far": round(_dte_from(exp_epochs[1]), 4) if len(exp_epochs) > 1 else None,
@@ -1315,6 +1334,9 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         # The index's previous close, from the stream, so a tile can show the
         # DAY's change rather than the change since its own last refresh.
         "spot_prev_close": (_ticks.get(ysym) or {}).get("prev_close"),
+        # the exchange's own day open / high / low for the index, from the
+        # socket - the server's version only starts counting when it starts
+        "session_ohlc": _session_from_ticks(ysym),
         "timestamp": time.strftime("%d-%b-%Y %H:%M:%S"),
         "_source": "fyers",
         "_live": bool(_status.get("streaming")),
@@ -1528,6 +1550,33 @@ def _futures_quote(symbol: str, exp_epochs: List[float]) -> Dict[str, Any]:
     return out
 
 
+_rolled: Dict[str, Any] = {}       # index symbol -> (settled epoch, next epoch, day)
+
+
+def _exp_epoch_any(e) -> Optional[float]:
+    v = e.get("expiry") if isinstance(e, dict) else e
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def _session_from_ticks(ysym: Optional[str]) -> Dict[str, Any]:
+    t = _ticks.get(ysym or "") or {}
+    o, h, l, c = t.get("open"), t.get("high"), t.get("low"), t.get("ltp")
+    if not (o and h and l and c):
+        return {}
+    return {"date": time.strftime("%Y-%m-%d"), "open": o, "high": h, "low": l, "close": c,
+            "prev_close": t.get("prev_close"), "src": "exchange"}
+
+
+def _settle_of(ep: float) -> float:
+    """15:30 IST on the expiry's own day, as an epoch."""
+    g = time.gmtime(ep + 19800)
+    day_start = ep - (g.tm_hour * 3600 + g.tm_min * 60 + g.tm_sec)
+    return day_start + 15 * 3600 + 30 * 60
+
+
 def _monthly_dte(exp_epochs: List[float]) -> Optional[float]:
     """Fractional days to the current monthly expiry (15:30 IST).
 
@@ -1607,14 +1656,17 @@ def _infer_lot(strikes) -> Optional[int]:
 
 
 def _lot_size(symbol: str) -> int:
+    # nse_lot_sizes answers 1 when it cannot reach NSE (no NSE session on the
+    # broker path) - and a lot of 1 made every per-lot figure in the system a
+    # per-SHARE figure. Only a plausible answer is taken.
     try:
         import nse_lot_sizes
         v = nse_lot_sizes.get_lot_size(symbol)
-        if v:
+        if v and int(v) >= 5:
             return int(v)
     except Exception:
         pass
-    return _LOTS.get(symbol.upper(), 75)
+    return _LOTS.get(symbol.upper(), 65)
 
 
 # ── historical candles: real OHLC with VOLUME ─────────────────────────

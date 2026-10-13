@@ -11129,7 +11129,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return a >= 1e7 ? `${sg}₹${(a / 1e7).toFixed(2)} Cr` : a >= 1e5 ? `${sg}₹${(a / 1e5).toFixed(1)} L` : `${sg}₹${fmtInt(a)}`;
   }
   function _deskVolRange(d) {
-    const spot = d?.underlying_value, iv = d?.atm_iv;
+    // The DAY's 1σ comes from India VIX - 30-day implied vol, the index's own
+    // fear gauge. The nearest weekly's ATM IV is the wrong input: on expiry
+    // day it is a zero-day option whose IV, on calendar time, runs 30-90%,
+    // which made "1σ" several hundred points and "range used" a few percent.
+    // ATM IV is used only when VIX is missing and the expiry is a day or more out.
+    const spot = d?.underlying_value;
+    const vix = +d?.india_vix || 0, aiv = +d?.atm_iv || 0;
+    const iv = vix > 0 ? vix : ((d?.dte ?? 0) >= 1 ? aiv : 0);
+    const ivSrc = vix > 0 ? 'VIX' : 'ATM IV';
     if (!spot || !iv) return null;
     const { m, wd } = _dcIstMin();
     const open = 555, close = 930;
@@ -11144,7 +11152,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const rvv = rv && typeof rv === 'object' ? rv.vol : rv;
     const atm = (d.strikes || []).find(r => r.strike === d.atm);
     const straddle = atm && atm.ce_ltp && atm.pe_ltp ? atm.ce_ltp + atm.pe_ltp : null;
-    return { iv, day1s, rem1s, left, rng, used: rng != null ? rng / day1s : null, rv: rvv, vrp: rvv != null ? iv - rvv : null,
+    return { iv: aiv || iv, sigIv: iv, ivSrc, day1s, rem1s, left, rng, used: rng != null ? rng / day1s : null, rv: rvv, vrp: rvv != null ? iv - rvv : null,
              straddle, ivr: d.iv_rank ?? null };
   }
   function _deskClock(d) {
@@ -11273,8 +11281,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // 4. vol & range
     const vr = _deskVolRange(d);
     const vrHtml = vr ? `${kv('ATM IV · IV rank', `${vr.iv.toFixed(1)}%${vr.ivr != null ? ' · ' + Math.round(vr.ivr) : ''}`)}
-        ${kv('Realised (chart) · IV−RV', vr.rv != null ? `${vr.rv.toFixed(1)}% · ${vr.vrp >= 0 ? '+' : ''}${vr.vrp.toFixed(1)}` : '—', vr.vrp != null ? (vr.vrp < 0 ? amb : '') : '')}
-        ${kv('Day 1σ (implied)', `±${fmtInt(vr.day1s)} pts`)}
+        ${kv(`Realised (chart) · ${vr.ivSrc}−RV`, vr.rv != null ? `${vr.rv.toFixed(1)}% · ${vr.vrp >= 0 ? '+' : ''}${vr.vrp.toFixed(1)}` : '—', vr.vrp != null ? (vr.vrp < 0 ? amb : '') : '')}
+        ${kv(`Day 1σ (${vr.ivSrc} ${vr.sigIv.toFixed(1)})`, `±${fmtInt(vr.day1s)} pts`)}
         ${kv('Range so far', vr.rng != null ? `${fmtInt(vr.rng)} pts · ${Math.round(vr.used * 100)}% of 1σ` : '—', vr.used != null ? (vr.used >= 1 ? amb : '') : '')}
         ${kv('Move left (1σ, rest of day)', `±${fmtInt(vr.rem1s)} pts · ${Math.round(vr.left)} min`)}
         ${vr.straddle ? kv('ATM straddle', `₹${vr.straddle.toFixed(1)} (±${fmtInt(vr.straddle * 0.8)} pts to expiry)`) : ''}
@@ -14659,6 +14667,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       fetchCandles();
     } catch (_) {}
     state.expiry = null;
+    state.expiryUser = false;
     state.shouldScrollToAtm = true;
     state.sessionHistory = [];
     _chainRowState.clear();
@@ -14681,6 +14690,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ---------- expiry select ----------
   els.expirySelect.addEventListener('change', () => {
     state.expiry = els.expirySelect.value;
+    state.expiryUser = true;          // a deliberate choice: keep asking for it
     state.shouldScrollToAtm = true;
     _chainRowState.clear(); // different expiry = different strikes
     fetchChain();
@@ -14765,7 +14775,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     const base = els.serverUrl.value.replace(/\/+$/, '');
     const params = new URLSearchParams({ symbol: state.symbol, band: String(state.band) });
-    if (state.expiry) params.set('expiry', state.expiry);
+    // Only an expiry YOU picked is sent. The server's default used to be
+    // echoed back on every poll, which pinned the dashboard to that expiry
+    // even after it settled at 15:30 - so on an expiry evening everything was
+    // priced off a dead contract instead of rolling to the next one.
+    if (state.expiry && state.expiryUser) params.set('expiry', state.expiry);
     const url = `${base}/api/chain?${params.toString()}`;
 
     try {
@@ -18091,10 +18105,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
     // ATR on the drawn interval
     try {
-      const n = Math.min(14, cs.length - 1);
+      // completed bars only: the forming bar is a partial range
+      const cb = _chart.liveBar && cs === _chart.candles && cs.length > 2 ? cs.slice(0, -1) : cs;
+      const n = Math.min(14, cb.length - 1);
       let tr = 0;
-      for (let i = cs.length - n; i < cs.length; i++) {
-        const c = cs[i], p = cs[i - 1];
+      for (let i = cb.length - n; i < cb.length; i++) {
+        const c = cb[i], p = cb[i - 1];
         tr += Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c));
       }
       cells.push([`ATR ${(tr / n).toFixed(1)} pts`, mut, `Average true range of the last ${n} ${_chart.interval || 1}-minute bars: the noise a stop must sit outside.`]);
@@ -18103,7 +18119,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       try {
         const vr = _deskVolRange(d);
         if (vr?.used != null) cells.push([`Range ${Math.round(vr.used * 100)}% of 1σ`, vr.used >= 1 ? amb : mut,
-          `Today's range ${fmtInt(vr.rng)} pts against an implied 1σ day of ±${fmtInt(vr.day1s)}; ${vr.left > 0 ? `about ±${fmtInt(vr.rem1s)} pts of 1σ left in ${Math.round(vr.left)} minutes` : 'session closed'}. Past 100% extensions get rarer - favour fades.`]);
+          `Today's range ${fmtInt(vr.rng)} pts against a 1σ day of ±${fmtInt(vr.day1s)} (from ${vr.ivSrc} ${vr.sigIv.toFixed(1)}); ${vr.left > 0 ? `about ±${fmtInt(vr.rem1s)} pts of 1σ left in ${Math.round(vr.left)} minutes` : 'session closed'}. Past 100% extensions get rarer - favour fades.`]);
       } catch (_) {}
       try {
         const tp = _deskTape(d);
@@ -18120,10 +18136,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         }
       } catch (_) {}
       try {
-        const atm = d.atm, ivNow = d.atm_iv;
-        const old = _dhAgo(900)?.legs?.[`${Math.round(atm)}CE`];
+        // ATM IV now against ATM IV 15 minutes ago - not against the IV of
+        // today's ATM strike back then, which on a moving market is a
+        // different point on the smile
+        const ivNow = d.atm_iv;
+        const oldIv = _dhAgo(900)?.aiv;
         if (ivNow) {
-          const dv = old && old[1] ? ivNow - old[1] : null;
+          const dv = oldIv ? ivNow - oldIv : null;
           cells.push([`IV ${ivNow.toFixed(1)}${dv != null && Math.abs(dv) >= 0.1 ? (dv > 0 ? ' ↑' : ' ↓') + Math.abs(dv).toFixed(1) : ''}`,
             dv == null ? mut : dv >= 0.5 ? amb : dv <= -0.5 ? pos : mut,
             `ATM implied vol${dv != null ? `, ${dv >= 0 ? '+' : ''}${dv.toFixed(2)} in 15 min` : ''}. Rising IV inflates premiums against option sellers and with a falling market; falling IV bleeds option buyers even when direction is right.`]);
@@ -18190,7 +18209,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       pCol = m.against - m.for >= 2 ? '#ffb300' : m.for - m.against >= 2 ? '#00e676' : '#cfd8dc';
       sub = m.calib.building ? 'building calibration from recorded days…' : `calibrating · ${m.calib.samples}/30 moves`;
     }
-    const retr = L.retraced > 0.02 ? ` · ${Math.round(L.retraced * 100)}% given back` : '';
+    const retr = (L.retraced > 0.02 ? ` · ${Math.round(L.retraced * 100)}% given back` : '') +
+      (L.since_ext_mins >= 2 ? ` · ${up ? 'high' : 'low'} ${L.since_ext_mins}m ago` : '');
     let out = `<g><rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="4"
         fill="rgba(14,17,23,0.93)" stroke="rgba(255,255,255,0.18)"/>
       <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 12).toFixed(1)}" style="font-size:9.5px;font-weight:800;fill:${up ? '#26a69a' : '#ef5350'};">${head}<tspan style="font-weight:400;fill:#9ab;">${retr}</tspan></text>
@@ -19957,7 +19977,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       const st = { chk: {}, sel: {}, num: {}, zoom: null, hist: window._histDate || '' };
       document.querySelectorAll('input[type=checkbox][id]').forEach(e => { st.chk[e.id] = e.checked; });
-      document.querySelectorAll('select[id]').forEach(e => { st.sel[e.id] = e.value; });
+      // the expiry is not a setting: restoring yesterday's pick would pin the
+      // chain to a contract that may have expired
+      document.querySelectorAll('select[id]').forEach(e => { if (e !== els.expirySelect) st.sel[e.id] = e.value; });
       document.querySelectorAll('input[type=number][id], input[type=date][id], input[type=range][id]')
         .forEach(e => { st.num[e.id] = e.value; });
       st.zoom = { y: _chart.yZoom, c: _chart.yCenter, iv: _chart.interval, maxed: !!_chart.maxed };
@@ -19984,6 +20006,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     // selects last: a select often drives what the others mean
     for (const [id, v] of Object.entries(st.sel || {})) {
+      if (id === 'expirySelect') continue;      // never restored (see _uiSave)
       const e = document.getElementById(id);
       if (e && v != null && e.value !== v) { e.value = v; fire(e); }
     }
@@ -20870,7 +20893,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _dhRecord(d) {
     const sym = d?.symbol || state.symbol;
     if (!d?.strikes?.length || !d.underlying_value) return;
-    if (_DH.sym !== sym) { _DH.sym = sym; _DH.s = []; }
+    // a different symbol OR a different expiry is a different set of
+    // contracts - comparing them across the switch (the 15:30 roll on expiry
+    // day, or picking another week) produced fake IV and premium changes
+    const ex = d?.expiry || '';
+    if (_DH.sym !== sym || _DH.ex !== ex) { _DH.sym = sym; _DH.ex = ex; _DH.s = []; }
     const now = Date.now();
     const last = _DH.s[_DH.s.length - 1];
     if (last && now - last.t < 4000) return;
@@ -20880,7 +20907,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (r.ce_ltp) legs[`${k}CE`] = [r.ce_ltp, r.ce_iv || 0];
       if (r.pe_ltp) legs[`${k}PE`] = [r.pe_ltp, r.pe_iv || 0];
     }
-    _DH.s.push({ t: now, spot: d.underlying_value, fut: d.futures_price, far: d.futures_far_price, legs, rr: null });
+    _DH.s.push({ t: now, spot: d.underlying_value, fut: d.futures_price, far: d.futures_far_price, aiv: d.atm_iv || null, legs, rr: null });
     while (_DH.s.length && now - _DH.s[0].t > 32 * 60000) _DH.s.shift();
   }
   function _dhAgo(sec) {

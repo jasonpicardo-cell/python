@@ -89,7 +89,11 @@ def _parse_lines(lines) -> List[dict]:
             c = _compact(json.loads(line))
         except Exception:
             continue
-        if c and c["t"]:
+        # The session only. A dashboard left open records before 09:15 (the
+        # pre-open, still at yesterday's close) and after 15:30 (a flat line
+        # into the evening, and on expiry day a different contract's OI):
+        # both bent the swing legs and the evidence read from them.
+        if c and c["t"] and 555 <= _ist_min(c["t"]) <= 930:
             out.append(c)
     return out
 
@@ -114,7 +118,8 @@ def day_series(path: str) -> List[dict]:
         hit = _series_cache.get(path)
         if hit and hit[0] == sig:
             return hit[1]
-    disk = os.path.join(os.path.dirname(path), "_mq", os.path.basename(path) + f".{sig[0]}.json")
+    # v2: session-only rows (09:15-15:30); older caches held pre/post-market rows
+    disk = os.path.join(os.path.dirname(path), "_mq", os.path.basename(path) + f".{sig[0]}.v2.json")
     if os.path.exists(disk):
         try:
             with open(disk) as fh:
@@ -459,7 +464,9 @@ def current(replay_dir: str, symbol: str, day: str, spot_now: Optional[float] = 
     if not series:
         return {"symbol": symbol, "date": day, "error": "no replay recording for this day yet"}
     # the live price between minute snapshots, carried on the last snapshot
-    if spot_now and spot_now > 0:
+    _nm = _ist_min(int(time.time()))
+    live_now = time.gmtime(time.time() + 19800).tm_wday < 5 and 555 <= _nm <= 930
+    if spot_now and spot_now > 0 and live_now:
         now_t = int(time.time()) // 60 * 60
         last = dict(series[-1])
         last["spot"] = float(spot_now)
@@ -500,7 +507,11 @@ def current(replay_dir: str, symbol: str, day: str, spot_now: Optional[float] = 
         "leg": {"dir": d, "start_t": a["t"], "start_px": a["spot"], "ext_px": series[e]["spot"],
                 "now_t": b["t"], "now_px": b["spot"], "size": round(size, 1),
                 "ext_size": round((series[e]["spot"] - a["spot"]) * d, 1),
-                "mins": (b["t"] - a["t"]) // 60, "qualified": ext_size >= qual, "qual": round(qual, 1),
+                # the LEG's duration, start to extreme; time since the extreme
+                # is reported separately (it was counting on into the evening)
+                "mins": (series[e]["t"] - a["t"]) // 60,
+                "since_ext_mins": (b["t"] - series[e]["t"]) // 60,
+                "qualified": ext_size >= qual, "qual": round(qual, 1),
                 "retraced": round(retr, 3), "ext_t": series[e]["t"]},
         "features": [{"k": k, "name": name, "v": f[k][0], "why": f[k][1]} for k, name in FEATURES if k in f],
         "for": sum(1 for v in fv.values() if v > 0), "against": sum(1 for v in fv.values() if v < 0),
