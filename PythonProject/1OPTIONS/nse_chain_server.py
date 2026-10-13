@@ -2104,6 +2104,15 @@ def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
         atm = float(data.get("atm") or min(sds, key=lambda x: abs(x.strike - spot)).strike)
         gap = float(data.get("strike_gap") or 50)
         nearby = [x for x in sds if abs(x.strike - atm) <= max(4, band) * gap] or sds
+        # the day's open / high / low / close of the index, which the NSE path
+        # accumulates on every fetch and the session pivots read; the broker
+        # path never fed it, so those levels had nothing to build from
+        if not data.get("session_ohlc"):
+            try:
+                _update_session_ohlc(symbol, spot)
+                data["session_ohlc"] = _session_ohlc.get(symbol.upper(), {})
+            except Exception:
+                pass
         if not data.get("payout_distribution"):
             data["payout_distribution"] = compute_payout_distribution(snap)
         if not data.get("skew_note"):
@@ -2151,6 +2160,80 @@ def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
             _enrich_err_logged.add(tag)
             print(f"[adapter] analytics parity skipped: {tag}")
     return data
+
+
+def _data_audit(symbol: str) -> dict:
+    d, _m = _cached_chain(symbol, None, 12, client="audit", max_age=120)
+    checks = []
+
+    def add(name, ok, detail, warn=False):
+        checks.append({"check": name, "status": "ok" if ok else ("warn" if warn else "FAIL"), "detail": detail})
+
+    st = d.get("strikes") or []
+    src = d.get("_source") or "nse"
+    add("data source", True, src)
+    add("strikes in chain", len(st) >= 20, f"{len(st)}")
+    n = max(1, len(st))
+    frac = lambda f: sum(1 for r in st if f(r)) / n
+    ivf = frac(lambda r: (r.get("ce_iv") or 0) > 0 or (r.get("pe_iv") or 0) > 0)
+    add("implied vol present", ivf >= 0.5, f"{ivf:.0%} of strikes · source {d.get('iv_source') or 'nse'} · ATM IV {d.get('atm_iv')}")
+    bidf = frac(lambda r: (r.get("ce_bid") or 0) > 0 and (r.get("ce_ask") or 0) > 0)
+    add("bid / ask prices in chain", bidf >= 0.5, f"{bidf:.0%} of strikes with a two-sided call quote", warn=True)
+    pcf = frac(lambda r: (r.get("ce_prev_close") or 0) > 0)
+    add("previous close per option", pcf >= 0.5, f"{pcf:.0%} - needed for OI build (premium change with OI change)", warn=True)
+    oicf = frac(lambda r: (r.get("ce_oi_chg") or 0) != 0 or (r.get("pe_oi_chg") or 0) != 0)
+    add("OI change per strike", oicf >= 0.3, f"{oicf:.0%} non-zero", warn=True)
+    if src in ("fyers", "arrow"):
+        add("quantities in contracts", d.get("oi_unit") == "contracts",
+            f"oi_unit={d.get('oi_unit')} · {d.get('qty_per_contract')} shares per contract")
+    lot = d.get("lot_size")
+    add("lot size", bool(lot), f"{lot}")
+    add("expiry / DTE", d.get("dte") is not None, f"{d.get('expiry')} · dte {d.get('dte')} · futures dte {d.get('futures_dte')}")
+    fp, sp = d.get("futures_price"), d.get("underlying_value")
+    add("futures price", bool(fp), f"{fp} (basis {round(fp - sp, 1) if fp and sp else '—'})")
+    add("next-month futures", bool(d.get("futures_far_price")), f"{d.get('futures_far_price')}", warn=True)
+    add("futures OI", bool(d.get("futures_oi")), f"{d.get('futures_oi')} - rollover % and futures build need it", warn=True)
+    add("futures best bid / offer", bool(d.get("futures_bid")) or src == "nse", f"{d.get('futures_bid')} / {d.get('futures_ask')}", warn=True)
+    add("India VIX", bool(d.get("india_vix")), f"{d.get('india_vix')}")
+    ne = len(d.get("expiries_data") or {})
+    add("other expiries loaded", ne > 0 or src == "nse",
+        f"{ne} - calendars, the Builder's other weeks and the term structure need them; on Fyers each expiry is one more option-chain call, so they are not fetched", warn=True)
+    add("session OHLC", bool(d.get("session_ohlc")), f"{d.get('session_ohlc')}", warn=True)
+    if src == "fyers":
+        try:
+            import nse_adapter_fyers as _fya
+            a = _fya.audit_state(symbol, d)
+            sa = a.get("spot_tick_age_s")
+            add("index ticking", sa is not None and sa < 15, f"last tick {sa}s ago")
+            add("option price subscriptions", a["price_subscribed"] >= a["options"] * 0.9,
+                f"{a['price_subscribed']} of {a['options']} contracts")
+            add("options ticking (last 60s)", a["ticking_60s"] >= a["options"] * 0.5,
+                f"{a['ticking_60s']} of {a['options']} - quiet far strikes are normal", warn=True)
+            add("depth subscriptions", a["depth_subscribed"] > 0, f"{a['depth_subscribed']} contracts")
+            add("5-level depth arriving", a["ladders_fresh_120s"] > 0, f"{a['ladders_fresh_120s']} contracts updated in 2 min")
+            add("total bid / offer arriving", a["totals_fresh_120s"] > 0, f"{a['totals_fresh_120s']} contracts updated in 2 min")
+            add("trade classification (takers)", a["flow_contracts"] > 0,
+                f"{a['flow_contracts']} contracts with classified prints - builds from server start", warn=True)
+            lf, lt = a.get("lot_from_data"), a.get("lot_table")
+            add("lot size: data vs table", not lf or lf == lt or (lt and lf % lt == 0),
+                f"from the data {lf} · table {lt} · used {lot}", warn=True)
+            rc = a["socket"]
+            add("socket reconnects", True, f"{rc['reconnects']} connect(s)" +
+                (f"; last {rc['last_reconnect_age_s']}s ago" if rc.get('last_reconnect_age_s') is not None else "") +
+                " - subscriptions are re-requested on each")
+            out_raw = a.get("raw_rest")
+        except Exception as e:  # noqa: BLE001
+            add("broker state", False, str(e))
+            out_raw = None
+    else:
+        out_raw = None
+    bad = [c for c in checks if c["status"] == "FAIL"]
+    warn = [c for c in checks if c["status"] == "warn"]
+    return {"symbol": symbol, "verdict": "FAIL" if bad else ("WARN" if warn else "OK"),
+            "failed": len(bad), "warnings": len(warn), "checks": checks,
+            # the raw broker rows the checks were made from, so a field name can
+            # be verified rather than assumed
+            "raw_samples": out_raw}
 
 
 def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
@@ -2354,6 +2437,124 @@ def _write_replay_snapshot(symbol: str, response: dict) -> None:
             f.write(json.dumps(slim, separators=(",", ":")) + "\n")
     except Exception as e:  # noqa: BLE001
         print(f"[!] Replay snapshot write failed (non-fatal): {e}")
+
+# ── one-time units migration of the replay archive ──────────────────────
+# Broker snapshots were recorded with OI / OI change / volume in SHARES while
+# everything that reads them assumes CONTRACTS (NSE's unit). The adapter now
+# converts at the source; this converts what was already recorded, so a day
+# does not change units half-way through and past days compare like with
+# like. Each file is copied to replay/_pre_units_backup/ before it is
+# rewritten, and a snapshot is converted only when it is provably in shares:
+# from a broker source, and every OI / volume figure a whole multiple of the
+# lot. Snapshots already marked oi_unit=contracts are left alone.
+_QTY_FIELDS_ROW = ("ce_oi", "pe_oi", "ce_oi_chg", "pe_oi_chg", "ce_volume", "pe_volume",
+                   "ce_oi_15m", "pe_oi_15m", "ce_d60", "pe_d60")
+_QTY_FIELDS_TOP = ("futures_oi", "futures_oi_chg", "futures_volume", "futures_far_oi",
+                   "total_ce_oi", "total_pe_oi")
+
+
+def _snapshot_to_contracts(snap: dict):
+    """Convert one snapshot in place; returns True if it changed."""
+    import math as _m
+    if not isinstance(snap, dict) or snap.get("oi_unit") == "contracts":
+        return False
+    if str(snap.get("_source") or "") not in ("fyers", "arrow"):
+        return False
+    vals = []
+    for r in snap.get("strikes") or []:
+        for k in ("ce_oi", "pe_oi", "ce_volume", "pe_volume"):
+            v = r.get(k)
+            if v and v > 0:
+                vals.append(int(round(v)))
+    if len(vals) < 12:
+        return False
+    g = 0
+    for v in vals:
+        g = _m.gcd(g, v)
+        if g == 1:
+            return False
+    if g < 5:
+        return False
+    lot = int(snap.get("lot_size") or 0)
+    if not lot or g % lot != 0:
+        lot = g
+    for r in snap.get("strikes") or []:
+        for k in _QTY_FIELDS_ROW:
+            if r.get(k):
+                r[k] = round(float(r[k]) / lot, 2)
+    for nb in ("nearby",):
+        for r in snap.get(nb) or []:
+            for k in _QTY_FIELDS_ROW:
+                if r.get(k):
+                    r[k] = round(float(r[k]) / lot, 2)
+    for k in _QTY_FIELDS_TOP:
+        if snap.get(k):
+            snap[k] = round(float(snap[k]) / lot, 2)
+    snap["lot_size"] = lot
+    snap["oi_unit"] = "contracts"
+    snap["qty_per_contract"] = lot
+    return True
+
+
+def _migrate_replay_units(only_today: bool = False) -> None:
+    import glob as _glob
+    import shutil as _sh
+    if not _os.path.isdir(_REPLAY_DIR):
+        return
+    marker = _os.path.join(_REPLAY_DIR, "_units_migrated.txt")
+    done = set()
+    try:
+        with open(marker) as fh:
+            done = {ln.strip() for ln in fh if ln.strip()}
+    except Exception:
+        pass
+    today = time.strftime("%Y-%m-%d")
+    files = sorted(_glob.glob(_os.path.join(_REPLAY_DIR, "*_????-??-??.jsonl")))
+    if only_today:
+        files = [f for f in files if f.endswith(f"_{today}.jsonl")]
+    bak_dir = _os.path.join(_REPLAY_DIR, "_pre_units_backup")
+    n_files = n_snaps = 0
+    for path in files:
+        name = _os.path.basename(path)
+        if name in done and not name.endswith(f"_{today}.jsonl"):
+            continue
+        try:
+            changed, out = 0, []
+            with open(path) as fh:
+                for line in fh:
+                    line = line.rstrip("\n")
+                    if not line:
+                        continue
+                    try:
+                        snap = json.loads(line)
+                    except Exception:
+                        out.append(line)
+                        continue
+                    if _snapshot_to_contracts(snap):
+                        changed += 1
+                        out.append(json.dumps(snap, separators=(",", ":")))
+                    else:
+                        out.append(line)
+            if changed:
+                _os.makedirs(bak_dir, exist_ok=True)
+                bak = _os.path.join(bak_dir, name)
+                if not _os.path.exists(bak):
+                    _sh.copy2(path, bak)
+                tmp = path + ".units.tmp"
+                with open(tmp, "w") as fh:
+                    fh.write("\n".join(out) + "\n")
+                _os.replace(tmp, path)
+                n_files += 1
+                n_snaps += changed
+            if not name.endswith(f"_{today}.jsonl"):
+                with open(marker, "a") as fh:
+                    fh.write(name + "\n")
+        except Exception as e:  # noqa: BLE001
+            print(f"[units] {name}: {e}")
+    if n_files:
+        print(f"[units] replay archive: {n_snaps} snapshot(s) in {n_files} file(s) converted from shares "
+              f"to contracts (originals in replay/_pre_units_backup/)")
+
 
 def _replay_index(symbol: str, day: str) -> dict:
     path = _os.path.join(_REPLAY_DIR, f"{symbol.upper()}_{day}.jsonl")
@@ -4772,6 +4973,31 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"status": "ok"})
             return
 
+        if parsed.path == "/api/data-audit":
+            # Every assumption the dashboard makes about the feed, checked
+            # against what is actually arriving. Built after a whole class of
+            # silent failures - depth in an unexpected format, quantities in
+            # shares read as contracts, IV that was never sent, subscriptions
+            # lost on reconnect - each of which looked like data, not like an
+            # error. Nothing here costs a broker call.
+            symbol = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+            try:
+                self._send_json(_data_audit(symbol))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)}, status=500)
+            return
+
+        if parsed.path == "/api/depth-debug":
+            # Raw Fyers messages for one contract, beside what the dashboard
+            # computes from them: ?symbol=FUT, ?symbol=22700CE, ?symbol=NIFTY26OCTFUT
+            try:
+                import nse_adapter_fyers as _fyd
+                q = (qs.get("symbol", ["FUT"])[0] or "FUT")
+                self._send_json({"match": q, "contracts": _fyd.raw_debug(q)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)}, status=500)
+            return
+
         if parsed.path == "/api/feed-status":
             # The live feed's REAL state. /api/health always answers "ok" while
             # the server process is up, even when the broker socket has gone
@@ -4802,6 +5028,11 @@ class Handler(BaseHTTPRequestHandler):
                     "last_error": st.get("last_error"),
                     "token": st.get("token"),
                     "rest_calls_today": rest,
+                    # the futures books, contract by contract: subscribed for
+                    # depth, how old the 5-level ladder is, and the totals
+                    "depth": (_fyx.depth_status(sorted(x for x in _fyx._depth_subs if x.endswith("FUT")) or
+                                                sorted(x for x in _fyx._ticks if x.endswith("FUT")))
+                              if hasattr(_fyx, "depth_status") else None),
                 })
             except Exception as e:  # noqa: BLE001
                 self._send_json({"verdict": "ADAPTER UNAVAILABLE", "error": str(e)})
@@ -8053,6 +8284,13 @@ def main():
                   f"- using whatever is on disk")
     else:
         _load_index_weights()
+    # today's file first, before anything can append to it; the rest of the
+    # archive in the background
+    try:
+        _migrate_replay_units(only_today=True)
+    except Exception as _ue:  # noqa: BLE001
+        print(f"[units] migration skipped: {_ue}")
+    threading.Thread(target=_migrate_replay_units, daemon=True).start()
     _start_janitor()
     _start_cleanup()
     if _envbool("NSE_RECONCILE", RUN_RECONCILE):

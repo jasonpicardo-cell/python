@@ -84,6 +84,18 @@ def market_open_now() -> bool:
 _client: Optional[Any] = None
 _socket: Optional[Any] = None
 _lock = threading.Lock()
+# The SDK's subscribe() stores data_type on the socket object and reads it
+# back while converting symbols - after an HTTP round trip to validate them.
+# Two subscribes at once (two PCs, two indices, price and depth from the
+# same chain build) could each run with the OTHER's type: price symbols
+# subscribed as depth (no ticks - prices fall back to slow REST) or depth
+# subscribed as price. Every subscribe goes through this lock.
+_sub_lock = threading.Lock()
+# last raw message per contract and type, exactly as the SDK delivered it,
+# for /api/depth-debug - the ground truth to compare against a terminal
+_raw_last: Dict[str, Dict[str, Any]] = {}
+_raw_rest: Dict[str, Any] = {}          # last raw REST rows, for /api/data-audit
+_reconnects = {"n": 0, "last": 0.0}
 # Expiry -> broker epoch, learned once per (symbol, expiry). Fyers validates
 # `timestamp` against its own list, so the first request for a non-nearest
 # expiry has to ask without one and look it up; caching the answer means every
@@ -397,6 +409,42 @@ def _on_message(msg) -> None:
         sym = msg.get("symbol") or msg.get("s") or msg.get("symbol_name")
         if not sym:
             return
+        try:
+            _raw_last.setdefault(sym, {})[str(msg.get("type") or "?")] = (time.time(), dict(msg))
+        except Exception:
+            pass
+        # ── DepthUpdate, as the v3 SDK actually delivers it ──────────
+        # FLAT numbered fields - bid_price1..5, bid_size1..5, bid_order1..5
+        # and the same for ask, type "dp" - with no ltp, no volume and no
+        # totals (checked against the SDK's own map.json). The handler below
+        # looked for "bids"/"asks" lists, which only the REST depth call
+        # returns, and returned early on "no ltp" before even that - so every
+        # five-level book the socket sent was thrown away, and the panels fell
+        # back to the WHOLE-book totals from the price tick: every resting
+        # order at every price, far-from-market ones included. That is not
+        # the bid and offer a depth window shows.
+        if msg.get("type") == "dp" or "bid_price1" in msg or "ask_price1" in msg:
+            def _flat(side):
+                out = []
+                for i in range(1, 6):
+                    p = msg.get(f"{side}_price{i}")
+                    try:
+                        p = float(p) if p is not None else 0.0
+                    except Exception:
+                        p = 0.0
+                    if p > 0:
+                        out.append({"p": p, "q": float(msg.get(f"{side}_size{i}") or 0),
+                                    "n": int(msg.get(f"{side}_order{i}") or 0)})
+                return out
+            b5, a5 = _flat("bid"), _flat("ask")
+            if b5 or a5:
+                now_ = time.time()
+                with _lock:
+                    prev = _depth.get(sym) or {}
+                    _depth[sym] = {"bids": b5, "asks": a5, "ts": now_, "lts": now_,
+                                   "tbq": prev.get("tbq", 0.0), "tsq": prev.get("tsq", 0.0),
+                                   "tts": prev.get("tts")}
+            return
         d = {}
         for src, dst in (("ltp", "ltp"), ("last_price", "ltp"), ("lp", "ltp"),
                          ("vol_traded_today", "volume"), ("volume", "volume"),
@@ -432,10 +480,11 @@ def _on_message(msg) -> None:
             b, a = _lvls(bids), _lvls(asks)
             if b or a:
                 with _lock:
+                    prev = _depth.get(sym) or {}
                     _depth[sym] = {
-                        "bids": b, "asks": a, "ts": time.time(),
-                        "tbq": float(msg.get("tot_buy_qty") or msg.get("totalbuyqty") or 0),
-                        "tsq": float(msg.get("tot_sell_qty") or msg.get("totalsellqty") or 0),
+                        "bids": b, "asks": a, "ts": time.time(), "lts": time.time(),
+                        "tbq": float(msg.get("tot_buy_qty") or msg.get("totalbuyqty") or prev.get("tbq") or 0),
+                        "tsq": float(msg.get("tot_sell_qty") or msg.get("totalsellqty") or prev.get("tsq") or 0),
                     }
 
         # TOTAL buy and sell quantity, which Fyers sends on the ORDINARY tick
@@ -453,6 +502,8 @@ def _on_message(msg) -> None:
                 _depth[sym] = {
                     "bids": prev.get("bids") or [],
                     "asks": prev.get("asks") or [],
+                    "lts": prev.get("lts"),           # when the LADDER last updated
+                    "tts": time.time(),               # when the TOTALS last updated
                     "ts": time.time(),
                     "tbq": float(_tbq or 0),
                     "tsq": float(_tsq or 0),
@@ -468,10 +519,43 @@ def _on_message(msg) -> None:
             _status["ticks"] += 1
             _status["streaming"] = True
             _dirty[sym] = {k: v for k, v in _ticks[sym].items()
-                           if k in ("ltp", "oi", "volume", "bid", "ask")}
+                           if k in ("ltp", "oi", "volume", "bid", "ask", "bid_qty", "ask_qty")}
         _push_ticks()
     except Exception:
         pass
+
+
+def _on_socket_connect() -> None:
+    """Every (re)connect, not just the first.
+
+    On a reconnect the SDK clears its own subscription table and does NOT
+    resubscribe, while our _subscribed / _depth_subs sets still listed every
+    symbol - so nothing was ever requested again. Prices fell back to REST
+    quotes (spending quota), and the depth ladders simply stopped: the books
+    froze on their last values, which is how a futures bid/offer can sit
+    unchanged for hours. Clear the sets and ask again for everything.
+    """
+    print("[fyers] market-data socket connected")
+    _reconnects["n"] += 1
+    _reconnects["last"] = time.time()
+    with _lock:
+        prev_px, prev_dp = sorted(_subscribed), list(_depth_subs)
+        _subscribed.clear()
+        _depth_subs.clear()
+    if not prev_px and not prev_dp:
+        return
+
+    def _again():
+        time.sleep(1.0)
+        try:
+            if prev_px:
+                _subscribe(prev_px)
+            if prev_dp:
+                _subscribe_depth(prev_dp)
+            print(f"[fyers] resubscribed {len(prev_px)} price + {len(prev_dp)} depth after reconnect")
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] resubscribe failed: {e}")
+    threading.Thread(target=_again, daemon=True).start()
 
 
 def _start_socket() -> None:
@@ -489,7 +573,7 @@ def _start_socket() -> None:
             on_message=_on_message,
             on_error=lambda m: print(f"[fyers] socket error: {str(m)[:120]}"),
             on_close=lambda m: print("[fyers] socket closed"),
-            on_connect=lambda: print("[fyers] market-data socket connected"),
+            on_connect=_on_socket_connect,
         )
         threading.Thread(target=s.connect, daemon=True).start()
         _socket = s
@@ -511,15 +595,102 @@ def _subscribe_depth(symbols: List[str]) -> None:
     """
     if not _socket or not symbols:
         return
-    new = [s for s in symbols if s not in _depth_subs]
-    if not new:
-        return
-    try:
-        _socket.subscribe(symbols=new[:40], data_type="DepthUpdate")
-        _depth_subs.update(new[:40])
-        print(f"[fyers] L2 depth subscribed for {len(new[:40])} contract(s)")
-    except Exception as e:  # noqa: BLE001
-        print(f"[fyers] depth subscribe failed: {e}")
+    # The SDK sends no depth for an index (it drops it silently), so do not
+    # spend a slot on one. The caller orders the list by priority - futures
+    # first, then strikes nearest the money - and the cap applies after that:
+    # the futures used to sit LAST, behind 42 strikes, past a 40 cap.
+    with _sub_lock:
+        new = []
+        for s_ in symbols:
+            if s_ and s_ not in _depth_subs and not s_.endswith("-INDEX") and s_ not in new:
+                new.append(s_)
+        if not new:
+            return
+        cap = int(os.environ.get("FYERS_DEPTH_MAX", "100"))
+        room = max(0, cap - len(_depth_subs))
+        new = new[:room]
+        if not new:
+            return
+        try:
+            _socket.subscribe(symbols=new, data_type="DepthUpdate")
+            _depth_subs.update(new)
+            print(f"[fyers] L2 depth subscribed for {len(new)} contract(s) ({len(_depth_subs)} total)")
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] depth subscribe failed: {e}")
+
+
+def depth_status(symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+    """What the depth feed is actually delivering, per contract."""
+    now = time.time()
+    with _lock:
+        out = {"subscribed": len(_depth_subs), "ladders": sum(1 for v in _depth.values() if v.get("lts")),
+               "contracts": {}}
+        for s_ in (symbols or []):
+            v = _depth.get(s_) or {}
+            out["contracts"][s_] = {
+                "depth_subscribed": s_ in _depth_subs,
+                "ladder_age_s": round(now - v["lts"], 1) if v.get("lts") else None,
+                "levels": [len(v.get("bids") or []), len(v.get("asks") or [])],
+                "bid5": sum(x["q"] for x in (v.get("bids") or [])),
+                "ask5": sum(x["q"] for x in (v.get("asks") or [])),
+                "total_buy": v.get("tbq"), "total_sell": v.get("tsq"),
+            }
+    return out
+
+
+def audit_state(sym: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Facts about the feed behind one chain payload, for /api/data-audit."""
+    now = time.time()
+    ysym = FYERS_INDEX.get((sym or "").upper())
+    toks = list((payload or {}).get("_tokens") or {})
+    with _lock:
+        tick_age = {t: now - (_ticks.get(t) or {}).get("ts", 0) for t in toks}
+        dp = {t: _depth.get(t) or {} for t in toks}
+        spot_age = now - (_ticks.get(ysym) or {}).get("ts", 0) if ysym else None
+    opt_toks = [t for t in toks if t.endswith("CE") or t.endswith("PE")]
+    return {
+        "socket": {"streaming": _status.get("streaming"), "reconnects": _reconnects["n"],
+                   "last_reconnect_age_s": round(now - _reconnects["last"], 1) if _reconnects["last"] else None},
+        "spot_tick_age_s": round(spot_age, 1) if spot_age is not None and spot_age < 1e8 else None,
+        "options": len(opt_toks),
+        "price_subscribed": sum(1 for t in opt_toks if t in _subscribed),
+        "ticking_60s": sum(1 for t in opt_toks if tick_age.get(t, 1e9) < 60),
+        "depth_subscribed": sum(1 for t in toks if t in _depth_subs),
+        "ladders_fresh_120s": sum(1 for t in toks if dp[t].get("lts") and now - dp[t]["lts"] < 120),
+        "totals_fresh_120s": sum(1 for t in toks if dp[t].get("tts") and now - dp[t]["tts"] < 120),
+        "flow_contracts": sum(1 for t in toks if _flow_read(t)),
+        "lot_from_data": _lot_seen_cache.get((sym or "").upper()),
+        "lot_table": _LOTS.get((sym or "").upper()),
+        "raw_rest": {k: v for k, v in _raw_rest.items()},
+    }
+
+
+def raw_debug(match: str) -> Dict[str, Any]:
+    """Last raw SDK message(s) for contracts whose symbol contains `match`,
+    with what the adapter stored from them."""
+    now = time.time()
+    m = (match or "").upper()
+    out = {}
+    for sym, by in list(_raw_last.items()):
+        if m and m not in sym.upper():
+            continue
+        dp = _depth.get(sym) or {}
+        out[sym] = {
+            "raw": {t: {"age_s": round(now - ts, 1), "msg": msg} for t, (ts, msg) in by.items()},
+            "stored": {
+                "ladder_age_s": round(now - dp["lts"], 1) if dp.get("lts") else None,
+                "bids": dp.get("bids"), "asks": dp.get("asks"),
+                "bid5_sum": sum(x["q"] for x in (dp.get("bids") or [])),
+                "ask5_sum": sum(x["q"] for x in (dp.get("asks") or [])),
+                "total_buy": dp.get("tbq"), "total_sell": dp.get("tsq"),
+                "tick": {k: v for k, v in (_ticks.get(sym) or {}).items()
+                         if k in ("ltp", "bid", "ask", "bid_qty", "ask_qty", "volume", "oi")},
+            },
+            "subscribed": {"price": sym in _subscribed, "depth": sym in _depth_subs},
+        }
+        if len(out) >= 12:
+            break
+    return out
 
 
 def depth_snapshot() -> Dict[str, Any]:
@@ -530,19 +701,20 @@ def depth_snapshot() -> Dict[str, Any]:
 def _subscribe(symbols: List[str]) -> None:
     if not _socket or not symbols:
         return
-    new = [s for s in symbols if s not in _subscribed]
-    if not new:
-        return
-    try:
-        # Fyers caps symbols per connection; subscribe in chunks so a large
-        # chain does not silently drop the tail.
-        for i in range(0, len(new), 200):
-            _socket.subscribe(symbols=new[i:i + 200], data_type="SymbolUpdate")
-        _subscribed.update(new)
-        with _lock:
-            _status["subscribed"] = len(_subscribed)
-    except Exception as e:  # noqa: BLE001
-        print(f"[fyers] subscribe failed: {e}")
+    with _sub_lock:
+        new = [s for s in symbols if s not in _subscribed]
+        if not new:
+            return
+        try:
+            # Fyers caps symbols per connection; subscribe in chunks so a large
+            # chain does not silently drop the tail.
+            for i in range(0, len(new), 200):
+                _socket.subscribe(symbols=new[i:i + 200], data_type="SymbolUpdate")
+            _subscribed.update(new)
+            with _lock:
+                _status["subscribed"] = len(_subscribed)
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] subscribe failed: {e}")
 
 
 # ── helpers ───────────────────────────────────────────────────────────
@@ -775,11 +947,31 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         raise RuntimeError(f"optionchain: {(raw or {}).get('message', 'bad response')}")
     data = raw.get("data") or {}
     rows = data.get("optionsChain") or []
-    spot = _f(data, "callOi", default=0.0) and 0.0  # placeholder, real spot below
-    spot = _spot(sym) or _f(data, "indiavixData", default=0.0)
+    # live index tick first; then the chain's own underlying row (the one
+    # without an option_type). It fell back to the India VIX block before.
+    spot = _spot(sym)
+    if not spot:
+        for r0 in rows:
+            if isinstance(r0, dict) and not (r0.get("option_type") or r0.get("optionType")):
+                spot = _f(r0, "ltp", "lp")
+                if spot:
+                    break
 
     by_strike: Dict[float, Dict[str, Any]] = {}
     tokens: List[str] = []
+    try:                                   # newest raw rows, one of each kind
+        _seen = set()
+        for _r in rows:
+            if not isinstance(_r, dict):
+                continue
+            _ot = str(_r.get("option_type") or "").upper() or "underlying"
+            if _ot not in _seen:
+                _seen.add(_ot)
+                _raw_rest["chain:" + _ot] = dict(_r)
+            if len(_seen) == 3:
+                break
+    except Exception:
+        pass
     for r in rows:
         if not isinstance(r, dict):
             continue
@@ -796,17 +988,67 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         # a live tick supersedes the REST snapshot when we have one
         rec[f"{p}_ltp"] = live.get("ltp", _f(r, "ltp", "lp"))
         rec[f"{p}_oi"] = live.get("oi", _f(r, "oi", "openInterest"))
-        rec[f"{p}_oi_chg"] = _f(r, "oich", "oichp", "changeinOpenInterest")
+        # "oichp" is the change in PERCENT - it was the fallback here, so a
+        # missing oich put a percentage where a quantity belongs
+        rec[f"{p}_oi_chg"] = _f(r, "oich", "changeinOpenInterest", default=None)
+        if rec[f"{p}_oi_chg"] is None:
+            _po = _f(r, "prev_oi", default=None)
+            rec[f"{p}_oi_chg"] = (rec[f"{p}_oi"] - _po) if (_po is not None and rec[f"{p}_oi"]) else 0.0
         rec[f"{p}_volume"] = live.get("volume", _f(r, "volume", "vol_traded_today"))
         rec[f"{p}_bid"] = live.get("bid", _f(r, "bid", "bid_price"))
         rec[f"{p}_ask"] = live.get("ask", _f(r, "ask", "ask_price"))
+        # best-level quantities: the "x 1,950" beside each price
+        rec[f"{p}_bid_qty"] = live.get("bid_qty", _f(r, "bid_qty", "bidQty", "bid_size", default=None))
+        rec[f"{p}_ask_qty"] = live.get("ask_qty", _f(r, "ask_qty", "askQty", "ask_size", default=None))
         rec[f"{p}_iv"] = _f(r, "iv", "impliedVolatility")
         rec[f"{p}_prev_close"] = _f(r, "prev_close_price", "prevClose")
+        # The v3 option chain gives the day's change (ltpch), not the previous
+        # close. Without it the OI-build read (premium change with OI change)
+        # never had a premium change to work with.
+        if not rec[f"{p}_prev_close"] and r.get("ltpch") is not None:
+            try:
+                _lp = _f(r, "ltp", "lp")
+                if _lp:
+                    rec[f"{p}_prev_close"] = round(_lp - float(r.get("ltpch")), 2)
+            except Exception:
+                pass
         rec[f"{p}_symbol"] = fsym
 
     strikes = [by_strike[k] for k in sorted(by_strike)]
     if not strikes:
         raise RuntimeError("option chain returned no strikes")
+
+    # ── units: Fyers counts SHARES, the rest of the system counts CONTRACTS ──
+    # NSE's chain reports open interest, OI change and volume in contracts,
+    # and every threshold, label and formula in the server and dashboard was
+    # written for that: the 4,000-contract alert floor, "OI change >= 1,000
+    # contracts", premium flow = LTP x volume x LOT, GEX = gamma x OI x LOT.
+    # Fyers reports the same fields in shares (every value a multiple of the
+    # lot), so on this feed each of those was off by the lot size - 65x on
+    # Nifty: GEX and premium flow inflated 65-fold, alert floors 65x looser.
+    # Converted here, at the boundary, once. Depth quantities (total bid /
+    # offer, best-level size) stay in shares, as a depth window shows them.
+    # Fyers always counts shares, so the conversion always applies; only the
+    # LOT is in question. Read it off the data when the data can say (and
+    # remember it for the session), else the lot-size table.
+    lot = _lot_size(sym)
+    lot_seen = _infer_lot(strikes) or _lot_seen_cache.get(sym)
+    if lot_seen:
+        _lot_seen_cache[sym] = lot_seen
+        if lot_seen != lot and lot_seen % lot != 0:   # the table is stale; the data is not
+            if _lot_warned.get(sym) != (lot_seen, lot):
+                _lot_warned[sym] = (lot_seen, lot)
+                print(f"[fyers] {sym}: lot size from the data is {lot_seen}, table says {lot} - using {lot_seen}")
+            lot = lot_seen
+    qty_unit = "shares"
+    if lot > 1:
+        for r in strikes:
+            for p in ("ce", "pe"):
+                for fld in ("oi", "oi_chg", "volume"):
+                    v = r.get(f"{p}_{fld}")
+                    if v:
+                        r[f"{p}_{fld}"] = round(float(v) / lot, 2)
+        qty_unit = "contracts"
     if not spot:
         best = min(strikes, key=lambda s: abs(s.get("ce_ltp", 0) - s.get("pe_ltp", 0)))
         spot = best["strike"]
@@ -906,6 +1148,11 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     # months without anyone seeing an error.
     try:
         fut = _futures_quote(sym, exp_epochs)
+        if qty_unit == "contracts" and fut:
+            fut = dict(fut)
+            for fk in ("futures_oi", "futures_oi_chg", "futures_volume", "futures_far_oi"):
+                if fut.get(fk):
+                    fut[fk] = round(float(fut[fk]) / lot, 2)
         # The futures legs need an ORDINARY tick subscription. Total buy/sell
         # quantity rides on the regular tick, and they were only ever added to
         # the depth subscription - which the broker may not serve - so no tick
@@ -967,6 +1214,7 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     if _status.get("streaming") and strikes:
         try:
             near_syms = []
+            _strike_of = {r.get(f"{p}_symbol"): r["strike"] for r in strikes for p in ("ce", "pe")}
             for r in strikes:
                 # +/- 10 strikes, not 5. A 0.90-delta option sits roughly
                 # seven strikes from the money on a weekly Nifty, so the old
@@ -990,7 +1238,8 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
             # undefined and the futures legs were silently never subscribed.
             fut_syms = [x for x in (fut.get("futures_symbol"),
                                     fut.get("futures_far_symbol")) if x]
-            _subscribe_depth(near_syms + [ysym] + fut_syms)
+            near_syms.sort(key=lambda fs_: abs(_strike_of.get(fs_, atm) - atm))
+            _subscribe_depth(fut_syms + near_syms)
         except Exception as _e:
             print(f"[fyers] depth subscribe skipped: {_e}")
 
@@ -1027,13 +1276,19 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "expiry": (expiry if expiry in expiries else None) or (expiries[0] if expiries else None),
         "all_expiries": expiries,
         "far_expiry": expiries[1] if len(expiries) > 1 else None,
+        "dte_far": round(_dte_from(exp_epochs[1]), 4) if len(exp_epochs) > 1 else None,
         "strikes": strikes,
         "pcr": round(tot_pe / tot_ce, 3) if tot_ce else None,
         "total_ce_oi": tot_ce,
         "total_pe_oi": tot_pe,
         "max_pain": _max_pain(strikes),
         "strike_gap": strike_gap,
-        "lot_size": _lot_size(sym),
+        "lot_size": lot,
+        # OI / OI change / volume are in CONTRACTS on both feeds now; depth
+        # quantities are shares. Ticks carry shares, so the dashboard divides
+        # tick volume by this.
+        "oi_unit": qty_unit,
+        "qty_per_contract": lot if qty_unit == "contracts" else 1,
         # every option-pricing panel reads these
         "dte": round(dte_frac, 4),
         "dte_days": int(dte_frac),
@@ -1046,6 +1301,11 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         "futures_prev_close": fut.get("futures_prev_close"),
         "futures_volume": fut.get("futures_volume"),
         "futures_far_price": fut.get("futures_far_price"),
+        # best bid / offer, price and size, for both series - live from the
+        # socket (the same ticks the price comes from)
+        **{f"futures{suf}_{k2}": (_ticks.get(fut.get(fsk)) or {}).get(k1)
+           for suf, fsk in (("", "futures_symbol"), ("_far", "futures_far_symbol"))
+           for k1, k2 in (("bid", "bid"), ("ask", "ask"), ("bid_qty", "bid_qty"), ("ask_qty", "ask_qty"))},
         "futures_far_oi": fut.get("futures_far_oi"),
         # days to the FUTURES expiry (the monthly), not the weekly option
         # expiry: annualising the basis over a 1-day weekly turned a 0.26%
@@ -1220,6 +1480,7 @@ def _futures_quote(symbol: str, exp_epochs: List[float]) -> Dict[str, Any]:
                 nm = row.get("n") or v.get("symbol") or v.get("short_name") or ""
                 if nm in syms and _f(v, "lp", "ltp"):
                     rows[nm] = v
+                    _raw_rest["quote:" + nm] = dict(v)
             # Some responses omit the symbol name; fall back to request order.
             if not rows:
                 for k2, row in zip(syms, (r.get("d") or [])):
@@ -1313,7 +1574,36 @@ def _max_pain(strikes: List[Dict[str, Any]]) -> Optional[float]:
     return best
 
 
-_LOTS = {"NIFTY": 75, "BANKNIFTY": 35, "FINNIFTY": 65, "MIDCPNIFTY": 140, "SENSEX": 20}
+# fallback only - the chain's own quantities decide (see _infer_lot)
+_LOTS = {"NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120, "SENSEX": 20}
+
+
+_lot_seen_cache: Dict[str, int] = {}
+_lot_warned: Dict[str, Any] = {}
+
+
+def _infer_lot(strikes) -> Optional[int]:
+    """The lot size, read off the quantities themselves.
+
+    On a feed that counts shares every OI and volume figure is a whole number
+    of lots, so their greatest common divisor IS the lot. Returns None when
+    the numbers are not lot multiples (a contracts feed) or too few to tell.
+    """
+    import math as _m
+    vals = []
+    for r in strikes:
+        for k in ("ce_oi", "pe_oi", "ce_volume", "pe_volume"):
+            v = r.get(k)
+            if v and v > 0:
+                vals.append(int(round(v)))
+    if len(vals) < 12:
+        return None
+    g = 0
+    for v in vals:
+        g = _m.gcd(g, v)
+        if g == 1:
+            return None
+    return g if 5 <= g <= 5000 else None
 
 
 def _lot_size(symbol: str) -> int:

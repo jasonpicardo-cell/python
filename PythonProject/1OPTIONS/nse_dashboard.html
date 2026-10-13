@@ -1773,6 +1773,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
     <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
+    <span id="feedPill" style="display:none;cursor:pointer;font-size:9.5px;font-weight:700;padding:2px 7px;margin-right:4px;border:1px solid #ef5350;color:#ef5350;border-radius:10px;white-space:nowrap;" title="Feed check"></span>
     <span id="riskPill" style="display:none;cursor:pointer;font-size:9.5px;font-weight:700;padding:2px 7px;margin-right:4px;border:1px solid #26a69a;border-radius:10px;white-space:nowrap;" title="Desk risk governor"></span>
     <button id="replayModeBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Session replay — scrub through recorded days">⏪</button>
     <button id="panelMgrBtn" class="btn" style="font-size:12px;padding:2px 7px;margin-right:4px;" title="Show / hide panels">🗂<i class="hi" data-h="panel-mgr">i</i></button>
@@ -1895,6 +1896,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label title="Previous day's high, low and close — the first targets and anchors of the session."><input type="checkbox" id="chk_pdhl"> PDH/L</label>
                 <label title="Today's point of control and 70% value area. Real volume at price when the feed has it, otherwise time at price (TPO)."><input type="checkbox" id="chk_vprof"> POC/VA</label>
                 <label title="Heikin Ashi only: a dot where a streak of three strong bars (no wick against the trend) begins, amber ring when a run is ageing, and colour flips marked confirmed (▲▼) only when the real close agrees with VWAP — a × otherwise."><input type="checkbox" id="chk_haMarks"> HA marks</label>
+                <label title="Desk box, bottom right above Move quality: stretch from VWAP in σ, share of the day's implied move used, premium tape, futures takers, ATM IV change, ATR, basis change and the risk governor."><input type="checkbox" id="chk_deskBox"> Desk box</label>
                 <button id="addAlertBtn" class="mini-btn" style="font-size:9px;padding:1px 6px;" title="Add a price alert. Shift-click the chart (or right-click) to place one at the price under the cursor.">🔔 Alert</button>
                 <span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.05);">
                   <select id="chartDataMode" class="ohlc-inp" style="font-size:9px;padding:1px 3px;" title="Live uses today's session. Historical replays a past date's 1-minute candles through the same chart and indicators.">
@@ -11086,7 +11088,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const pct = ticks != null && ltp > 0 ? (ask - bid) / ltp * 100 : null;
         let grade = '—';
         if (ticks != null) {
-          const active = lots15 == null ? (+r[p + '_volume'] || 0) / lot > 5000 : lots15 >= 150;
+          // chain volume is in contracts on both feeds
+          const active = lots15 == null ? (+r[p + '_volume'] || 0) > 5000 : lots15 >= 150;
           grade = ticks <= 2 && pct <= 0.5 && active ? 'A' : ticks <= 4 && pct <= 1.5 ? 'B' : 'C';
         }
         rows.push({ k: Math.round(r.strike), side: p.toUpperCase(), off, bid, ask, ltp, ticks, pct, lots15, grade,
@@ -11160,6 +11163,45 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     return { ph, next, mins: m, exp, pin, dte: d?.dte };
   }
+
+  // ── feed check: the server's data audit, every minute ──────────────
+  // Every assumption about the feed - units, depth, IV, subscriptions,
+  // freshness - checked against what is actually arriving, so a silent
+  // failure shows up as a red pill instead of as plausible-looking numbers.
+  const _FA = { r: null, at: 0, busy: false };
+  async function _feedAuditFetch() {
+    if (_FA.busy || Date.now() - _FA.at < 60000) return;
+    _FA.busy = true;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const r = await fetch(`${base}/api/data-audit?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`, { signal: AbortSignal.timeout(15000) });
+      if (r.ok) _FA.r = await r.json();
+    } catch (_) {}
+    _FA.at = Date.now(); _FA.busy = false;
+    const pill = document.getElementById('feedPill');
+    const a = _FA.r;
+    if (pill) {
+      if (a && a.verdict === 'FAIL') {
+        pill.style.display = '';
+        pill.textContent = `⚠ FEED ${a.failed} fail`;
+        pill.title = 'Data audit failed: ' + a.checks.filter(c => c.status === 'FAIL').map(c => `${c.check} (${c.detail})`).join('; ') + '. Click for details.';
+      } else pill.style.display = 'none';
+    }
+  }
+  function _feedAuditHtml() {
+    const a = _FA.r;
+    if (!a) return '<div class="movers-loading" style="font-size:10px;">Checking the feed…</div>';
+    if (a.error) return `<div style="font-size:10px;color:#ef5350;">${escapeHtml(a.error)}</div>`;
+    const col = a.verdict === 'FAIL' ? '#ef5350' : a.verdict === 'WARN' ? '#ffb300' : '#26a69a';
+    const rows = a.checks.filter(c => c.status !== 'ok').map(c =>
+      `<div style="font-size:9.5px;padding:1px 0;"><b style="color:${c.status === 'FAIL' ? '#ef5350' : '#ffb300'};">${c.status === 'FAIL' ? '✗' : '!'} ${escapeHtml(c.check)}</b> <span style="color:var(--muted);">${escapeHtml(String(c.detail))}</span></div>`).join('');
+    return `<div style="font-size:13px;font-weight:800;color:${col};margin-bottom:3px;">${a.verdict === 'OK' ? '✓ ALL CHECKS PASS' : a.verdict}</div>
+      ${rows || `<div style="font-size:9.5px;color:var(--muted);">${a.checks.length} checks: units, IV, depth, totals, subscriptions, freshness.</div>`}
+      <div style="font-size:9px;color:var(--muted);margin-top:3px;">${a.checks.length} checks · ${Math.round((Date.now() - _FA.at) / 1000)}s ago · full report: /api/data-audit</div>`;
+  }
+  document.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('#feedPill')) document.querySelector('.tab[data-tab="desk"]')?.click();
+  });
 
   function renderDeskCockpit(data) {
     const box = document.getElementById('deskCockpitBody');
@@ -11253,6 +11295,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       ${card('EXECUTION — WHAT CAN BE TRADED', exHtml)}
       ${card('VOL & RANGE', vrHtml)}
       ${card('CLOCK', ckHtml)}
+      ${card('FEED CHECK', _feedAuditHtml(), _FA.r && _FA.r.verdict === 'FAIL' ? 'rgba(239,83,80,0.6)' : null)}
     </div>`;
     box.querySelectorAll('[data-dc]').forEach(el => {
       el.onchange = () => {
@@ -12120,8 +12163,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (meta.vix) { if (data && v.ltp != null) data.india_vix = v.ltp; continue; }
       // futures ticks: the price moves live instead of once per poll
       if (meta.fut) {
-        if (data && v.ltp != null) {
-          if (meta.fut === 'near') data.futures_price = v.ltp; else data.futures_far_price = v.ltp;
+        if (data) {
+          const pre = meta.fut === 'near' ? 'futures' : 'futures_far';
+          if (v.ltp != null) data[pre + '_price'] = v.ltp;
+          for (const k of ['bid', 'ask', 'bid_qty', 'ask_qty']) if (v[k] != null) data[`${pre}_${k}`] = v[k];
         }
         continue;
       }
@@ -12131,8 +12176,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (!row) continue;
       const p = meta.side === 'CE' ? 'ce' : 'pe';
       if (v.ltp !== undefined) { row[p + '_ltp'] = v.ltp; touchedChain = true; }
-      if (v.oi !== undefined) { row[p + '_oi'] = v.oi; touchedChain = true; }
-      if (v.volume !== undefined) row[p + '_volume'] = v.volume;
+      // Ticks count SHARES; the chain (both feeds) counts CONTRACTS. Writing a
+      // tick's volume straight into the row multiplied it by the lot size
+      // until the next poll overwrote it.
+      const qpc = data.oi_unit === 'contracts' ? (+data.qty_per_contract || 1) : 1;
+      if (v.oi !== undefined) { row[p + '_oi'] = v.oi / qpc; touchedChain = true; }
+      if (v.volume !== undefined) row[p + '_volume'] = v.volume / qpc;
+      // best bid / offer live, not once per poll
+      for (const k of ['bid', 'ask', 'bid_qty', 'ask_qty']) if (v[k] !== undefined) row[`${p}_${k}`] = v[k];
     }
     if (spot != null && data) {
       data.underlying_value = spot;
@@ -14959,6 +15010,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _paintVis('hzBody', () => renderHeroZero(data), 'renderHeroZero');
     _paintVis('aggrBody', () => renderAggressor(data), 'renderAggressor');
     try { _deskGovUpdate(); } catch (_) {}
+    try { _feedAuditFetch(); } catch (_) {}
     _paintVis('deskCockpitBody', () => renderDeskCockpit(data), 'renderDeskCockpit');
     try { _trendCheck(data); } catch (_) {}
     _paintVis('flowRangeBody', () => renderFlowRange(data), 'renderFlowRange');
@@ -16976,8 +17028,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: true, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
 
@@ -18009,9 +18061,107 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <circle cx="${xStart.toFixed(1)}" cy="${y(a).toFixed(1)}" r="2.6" fill="${col}"/>`;
   }
   // the small box, bottom-right of the plot
+  // ── desk box: the numbers a desk scalper glances at, on the chart ──
+  // Sits above Move quality, bottom right. Each cell answers one question:
+  //   VWAP        how stretched is price - in σ of the session's own VWAP
+  //   range       how much of today's implied 1σ move is already used
+  //   premium     who is paying: calls bought minus puts bought, 15 min
+  //   FUT takers  share of futures prints lifting the offer, 15 min
+  //   ATM IV      implied vol and its 15-minute change
+  //   ATR         average true range of the drawn bars, in points
+  //   basis       futures premium and its 15-minute change
+  //   risk        the desk governor's state and day P&L
+  // Live-only cells are dropped on a historical date or an option chart.
+  function _deskBoxSvg(W, H, padR, padB, cs, above) {
+    if (!_chart.show?.deskBox || !cs || cs.length < 5) return '';
+    const live = !window._histDate && !_chart.optionMeta;
+    const d = state.lastData;
+    const cells = [];
+    const pos = '#26a69a', neg = '#ef5350', amb = '#ffb300', mut = '#9ab';
+    const last = cs[cs.length - 1];
+    // VWAP stretch
+    try {
+      const vb = _vwapBands(cs);
+      const vw = vb.vw[vb.vw.length - 1], sd = vb.sd[vb.sd.length - 1];
+      if (sd > 0) {
+        const z = (last.c - vw) / sd;
+        cells.push([`VWAP ${z >= 0 ? '+' : ''}${z.toFixed(1)}σ`, Math.abs(z) >= 2 ? amb : z > 0 ? pos : neg,
+          `Price is ${Math.abs(z).toFixed(1)} standard deviations ${z >= 0 ? 'above' : 'below'} VWAP (${fmtInt(vw)}). Beyond ±2σ is stretched: on a range day a fade back to VWAP, on a trend day only a pullback entry.`]);
+      }
+    } catch (_) {}
+    // ATR on the drawn interval
+    try {
+      const n = Math.min(14, cs.length - 1);
+      let tr = 0;
+      for (let i = cs.length - n; i < cs.length; i++) {
+        const c = cs[i], p = cs[i - 1];
+        tr += Math.max(c.h - c.l, Math.abs(c.h - p.c), Math.abs(c.l - p.c));
+      }
+      cells.push([`ATR ${(tr / n).toFixed(1)} pts`, mut, `Average true range of the last ${n} ${_chart.interval || 1}-minute bars: the noise a stop must sit outside.`]);
+    } catch (_) {}
+    if (live && d?.underlying_value) {
+      try {
+        const vr = _deskVolRange(d);
+        if (vr?.used != null) cells.push([`Range ${Math.round(vr.used * 100)}% of 1σ`, vr.used >= 1 ? amb : mut,
+          `Today's range ${fmtInt(vr.rng)} pts against an implied 1σ day of ±${fmtInt(vr.day1s)}; ${vr.left > 0 ? `about ±${fmtInt(vr.rem1s)} pts of 1σ left in ${Math.round(vr.left)} minutes` : 'session closed'}. Past 100% extensions get rarer - favour fades.`]);
+      } catch (_) {}
+      try {
+        const tp = _deskTape(d);
+        if (tp) {
+          const b = tp.bias15, flat = Math.abs(b) < tp.gross * 0.05;
+          cells.push([`Prem ${_fmtCr(b)}`, flat ? mut : b > 0 ? pos : neg,
+            `Bullish premium, 15 min: calls net bought minus puts net bought by takers (${_fmtCr(tp.ce15)} calls, ${_fmtCr(tp.pe15)} puts). 5 min: ${_fmtCr(tp.bias5)}.`]);
+          const f = tp.fut;
+          if (f && f.b15 + f.s15 > 0) {
+            const r = f.b15 / (f.b15 + f.s15);
+            cells.push([`FUT takers ${Math.round(r * 100)}%`, r >= 0.55 ? pos : r <= 0.45 ? neg : mut,
+              'Share of near-month futures volume in the last 15 minutes that lifted the offer - the cleanest single read of directional money.']);
+          }
+        }
+      } catch (_) {}
+      try {
+        const atm = d.atm, ivNow = d.atm_iv;
+        const old = _dhAgo(900)?.legs?.[`${Math.round(atm)}CE`];
+        if (ivNow) {
+          const dv = old && old[1] ? ivNow - old[1] : null;
+          cells.push([`IV ${ivNow.toFixed(1)}${dv != null && Math.abs(dv) >= 0.1 ? (dv > 0 ? ' ↑' : ' ↓') + Math.abs(dv).toFixed(1) : ''}`,
+            dv == null ? mut : dv >= 0.5 ? amb : dv <= -0.5 ? pos : mut,
+            `ATM implied vol${dv != null ? `, ${dv >= 0 ? '+' : ''}${dv.toFixed(2)} in 15 min` : ''}. Rising IV inflates premiums against option sellers and with a falling market; falling IV bleeds option buyers even when direction is right.`]);
+        }
+      } catch (_) {}
+      try {
+        const fu = _deskFut(d, 'near');
+        if (fu?.basis != null) cells.push([`Basis ${fu.basis >= 0 ? '+' : ''}${fu.basis.toFixed(0)}${fu.dBasis15 != null && Math.abs(fu.dBasis15) >= 0.5 ? (fu.dBasis15 > 0 ? ' ↑' : ' ↓') + Math.abs(fu.dBasis15).toFixed(1) : ''}`,
+          fu.dBasis15 == null || Math.abs(fu.dBasis15) < 1 ? mut : fu.dBasis15 > 0 ? pos : neg,
+          'Futures minus spot. A widening premium is longs paying up for the future (bullish); a narrowing one, futures being sold ahead of spot.']);
+      } catch (_) {}
+      try {
+        const g = _DC.gov;
+        if (g) cells.push([`${g.st} ${fmtRupee(g.total)}`, g.st === 'LOCKED' ? neg : g.st === 'CLEAR' ? pos : amb,
+          `Risk governor: ${g.why.join('; ') || 'within the day\'s rules'}. ${g.nTrades} trades, losing streak ${g.streak}.`]);
+      } catch (_) {}
+    }
+    if (!cells.length) return '';
+    const rd = window._deskReadLast;
+    const read = live && rd && rd.have && Date.now() - rd.t < 120000
+      ? (rd.total >= 2.5 ? ['BULLISH', pos] : rd.total <= -2.5 ? ['BEARISH', neg] : ['NO EDGE', mut]) : null;
+    const bw = 236, rowH = 11, rows = Math.ceil(cells.length / 2);
+    const bh = 17 + rows * rowH + 4;
+    const x0 = W - padR - bw - 4, y0 = H - padB - (above || 0) - bh - (above ? 8 : 4);
+    let out = `<g><rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${bw}" height="${bh}" rx="4" fill="rgba(14,17,23,0.93)" stroke="rgba(255,255,255,0.18)"/>
+      <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 12).toFixed(1)}" style="font-size:9px;font-weight:800;fill:#9ab;">DESK${read ? `<tspan dx="6" style="fill:${read[1]};">${read[0]} ${rd.total >= 0 ? '+' : ''}${rd.total.toFixed(1)}</tspan>` : ''}</text>`;
+    cells.forEach((c, k) => {
+      const cx = x0 + 7 + (k % 2) * (bw / 2 - 2), cy = y0 + 25 + Math.floor(k / 2) * rowH;
+      out += `<text x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" style="font-size:8.5px;font-weight:700;fill:${c[1]};">${escapeHtml(c[0])}<title>${escapeHtml(c[2])}</title></text>`;
+    });
+    out += `<title>Desk box: the read is the 3-delta widget's desk verdict (trades and positioning first, the book last). Hover a cell for what it means. Untick "Desk box" in the chart options to hide it.</title></g>`;
+    return out;
+  }
+
   function _mqBoxSvg(m, W, H, padR, padB) {
     if (m.error || !m.leg) {
       const bw2 = 236, bh2 = 34, x2 = W - padR - bw2 - 4, y2 = H - padB - bh2 - 4;
+      _mqBoxSvg.h = bh2;
       const msg = m.error
         ? (/no replay/.test(m.error) ? 'no recording for this day yet — the server records one snapshot a minute; scoring starts ~20 min after recording does' : m.error)
         : 'no move yet today — waiting for the first swing';
@@ -18024,6 +18174,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const feats = m.features || [];
     const rows = Math.ceil(feats.length / 2);
     const bh = 44 + rows * rowH + 4;
+    _mqBoxSvg.h = bh;
     const x0 = W - padR - bw - 4, y0 = H - padB - bh - 4;
     const word = up ? 'RALLY' : 'FALL';
     const head = `${word} ${up ? '+' : '−'}${Math.round(L.ext_size)} pts · ${L.mins} min`;
@@ -18952,6 +19103,97 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return { regime, note, lo, hi, last, above, breaking };
   }
 
+  // ── one time axis for all three panes ────────────────────────────
+  // The context pane above the chart, the candles and the RSI pane below
+  // share a viewBox width and side margins, so the same x is the same
+  // minute in each. These draw the half-hour grid and time labels the same
+  // way everywhere, and mirror the crosshair across the panes.
+  function _isRenkoView() { return (document.getElementById('chartType')?.value || 'candle') === 'renko'; }
+  function _timeGridSvg(W, padL, padR, top, bottom, labelY, cs, xOf) {
+    const SESSION_MIN = 385, iv = _chart.interval || 1;
+    const slots = Math.max(1, Math.ceil(SESSION_MIN / iv));
+    const hm = m => { const t = 9 * 60 + 15 + m; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+    let s = '';
+    // Renko spaces bricks, not minutes: the label sits on the first bar at
+    // or after each half hour, wherever its brick landed
+    const brickMode = _isRenkoView() && cs && xOf;
+    let lastX = -1e9;
+    for (let m = 0; m <= SESSION_MIN; m += 30) {
+      let sx;
+      if (brickMode) {
+        const k = cs.findIndex(c => {
+          const g = new Date((c.t + 19800) * 1000);
+          return g.getUTCHours() * 60 + g.getUTCMinutes() - 555 >= m;
+        });
+        if (k < 0) break;
+        sx = xOf(k);
+        if (sx - lastX < 26) continue;          // compressed quiet stretch
+      } else sx = padL + (m / iv + 0.5) / slots * (W - padL - padR);
+      if (sx > W - padR) break;
+      lastX = sx;
+      s += `<line x1="${sx.toFixed(1)}" y1="${top}" x2="${sx.toFixed(1)}" y2="${bottom}" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>`;
+      if (labelY != null) s += `<text x="${sx.toFixed(1)}" y="${labelY}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${hm(m)}</text>`;
+    }
+    // the right-hand axis edge, as on the candle pane
+    s += `<line x1="${(W - padR).toFixed(1)}" y1="${top}" x2="${(W - padR).toFixed(1)}" y2="${bottom}" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>`;
+    return s;
+  }
+  function _xmSvg(id, top, bottom, tagY) {
+    return `<line id="${id}" x1="0" x2="0" y1="${top}" y2="${bottom}" stroke="rgba(230,235,245,0.55)" stroke-width="1" stroke-dasharray="3,3" style="display:none;pointer-events:none;"/>` +
+      (tagY != null ? `<g id="${id}T" style="display:none;pointer-events:none;"><rect x="0" y="${tagY - 9}" width="34" height="12" rx="2" fill="rgba(30,36,48,0.95)" stroke="rgba(255,255,255,0.25)"/><text x="17" y="${tagY}" text-anchor="middle" style="font-size:8.5px;fill:#e6ebf5;"></text></g>` : '');
+  }
+  function _xmTime(px, W, padL, padR) {
+    const iv = _chart.interval || 1, slots = Math.max(1, Math.ceil(385 / iv));
+    const sl = Math.max(0, Math.min(slots - 1, Math.round((px - padL) / (W - padL - padR) * slots - 0.5)));
+    const t = 555 + sl * iv;
+    return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  }
+  // Called by the candle pane's own crosshair (src 'main') and by hovering
+  // the context or RSI pane. Draws the vertical line in the OTHER panes, and
+  // a time tag in the context and RSI panes, which have no crosshair of
+  // their own. Renko spaces bricks, not minutes, so the time-scaled context
+  // pane is left out there.
+  function _mirrorCrosshair(px, on, W, src) {
+    src = src || 'main';
+    _chart._xm = on ? { px, W, src } : null;
+    const ren = _isRenkoView();
+    const G = _chart._geo || { padL: 8, padR: 72 };
+    for (const [id, pane] of [['ctxXM', 'ctx'], ['rsiXM', 'rsi'], ['mainXM', 'main']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      // every pane but the one already drawing its own crosshair
+      const show = on && !(pane === 'main' && src === 'main') && !(ren && (pane === 'ctx' || src === 'ctx'));
+      el.style.display = show ? '' : 'none';
+      if (show) { el.setAttribute('x1', px.toFixed(1)); el.setAttribute('x2', px.toFixed(1)); }
+      const tag = document.getElementById(id + 'T');
+      if (tag) {
+        const showT = on && pane !== 'main' && !ren;
+        tag.style.display = showT ? '' : 'none';
+        if (showT) {
+          const tx = Math.max(G.padL + 17, Math.min((W || 900) - G.padR - 17, px));
+          tag.setAttribute('transform', `translate(${(tx - 17).toFixed(1)},0)`);
+          const tt = tag.querySelector('text'); if (tt) tt.textContent = _xmTime(px, W || 900, G.padL, G.padR);
+        }
+      }
+    }
+  }
+  // hovering the context or RSI pane drives the same crosshair
+  document.addEventListener('mousemove', ev => {
+    const sv = ev.target && ev.target.closest ? ev.target.closest('#ctxChartBody svg, #rsiPaneBody svg') : null;
+    if (!sv) {
+      if (_chart._xm && _chart._xm.src !== 'main') _mirrorCrosshair(0, false);
+      return;
+    }
+    const vb = sv.viewBox && sv.viewBox.baseVal;
+    if (!vb || !vb.width) return;
+    const r = sv.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * vb.width;
+    const G = _chart._geo || { padL: 8, padR: 72 };
+    const src = sv.closest('#ctxChartBody') ? 'ctx' : 'rsi';
+    if (px < G.padL || px > vb.width - G.padR) { _mirrorCrosshair(0, false); return; }
+    _mirrorCrosshair(px, true, vb.width, src);
+  }, { passive: true });
+
   function _rsiPaneSvg(cs, xOf, W, padL, padR, H) {
     const cfg = (() => {
       try { return Object.assign({ on: true, period: 14, maLen: 14 },
@@ -18978,13 +19220,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const closes = cs.map(c => c.c);
     const rsi = _rsiSeries(closes, cfg.period);
     const ma = _smaOf(rsi, cfg.maLen);
-    const padT = 6, padB = 12;
+    const padT = 6, padB = 16;          // room for the time labels
     const y = v => padT + (1 - v / 100) * (H - padT - padB);
     const right = W - padR;
     let s = '';
 
     // background, so the pane reads as its own plane rather than floating
-    s += `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${H}" fill="rgba(255,255,255,0.022)"/>`;
+    s += `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${(H - padB + 2).toFixed(1)}" fill="rgba(255,255,255,0.022)"/>`;
+    s += _timeGridSvg(W, padL, padR, 0, H - padB + 2, H - 3, cs, xOf);
 
     // Gradient fills for the extremes. Green above 80, red below 20 - the
     // zones, not the line, because the line spends most of its life in the
@@ -19115,6 +19358,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     s += `<text x="${(padL + 3)}" y="11" style="font-size:8.5px;fill:var(--muted,#789);">RSI ${cfg.period}` +
          `<tspan fill="${rangeCol}" font-weight="700">${escapeHtml(rangeTxt)}</tspan>` +
          `${divs.length ? ` · ${divs.length} divergence${divs.length > 1 ? 's' : ''}` : ''}</text>`;
+    s += _xmSvg('rsiXM', 0, H - padB + 2, H - padB - 1);
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
   }
 
@@ -19707,6 +19951,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // warning without also losing the selection on every reload.
   const _UI_KEY = 'uiStateV1';
   function _uiSave() {
+    // a reset in progress: the reload's beforeunload save would write the
+    // old ticks straight back over the cleared state
+    if (window._settingsResetting) return;
     try {
       const st = { chk: {}, sel: {}, num: {}, zoom: null, hist: window._histDate || '' };
       document.querySelectorAll('input[type=checkbox][id]').forEach(e => { st.chk[e.id] = e.checked; });
@@ -20505,16 +20752,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // TOTAL buy and sell quantity rides on the ordinary tick - so the
       // aggregate you actually want is usually available even when the ladder
       // is not. Falling back means "no book" now genuinely means no data.
-      if (bk.bids?.length && bk.asks?.length) {
-        const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
-        const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
-        return { bid, ask, ratio: ask > 0 ? bid / ask : null,
-                 bestB: bk.bids[0]?.p, bestA: bk.asks[0]?.p, src: 'L2' };
-      }
-      if (bk.tbq || bk.tsq)
-        return { bid: bk.tbq || 0, ask: bk.tsq || 0,
-                 ratio: bk.tsq > 0 ? bk.tbq / bk.tsq : null, src: 'total' };
-      return null;
+      // TOTAL bid and offer quantity - the whole order book, as the depth
+      // window's "Total" line shows it. The five-level sum only when no
+      // totals have arrived for this contract.
+      return _bookOf(bk);
     };
     return {
       rows: TARGETS.map(t => {
@@ -20529,6 +20770,70 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     };
   }
 
+  // A ladder stamped by the socket (lts) is current for two minutes; one
+  // from the REST depth call carries no stamp and is taken as it is.
+  function _ladderFresh(bk) {
+    if (!bk?.bids?.length || !bk?.asks?.length) return false;
+    return bk.lts == null || (Date.now() / 1000 - bk.lts) < 120;
+  }
+  // Best bid and best offer - price and size - for a contract. The top of
+  // the five-level ladder while it is current; otherwise the best bid/ask
+  // the price tick carries. This is the quote a depth window shows first.
+  function _optQuote(d, k, side) {
+    const p = side === 'CE' ? 'ce' : 'pe';
+    let bk = null;
+    for (const [kk, vv] of Object.entries(d?.depth?.strikes || {})) {
+      const m = /^(\d+(?:\.\d+)?)(CE|PE)$/i.exec(kk);
+      if (m && Math.round(+m[1]) === Math.round(k) && m[2].toUpperCase() === side) { bk = vv; break; }
+    }
+    if (_ladderFresh(bk)) return { bp: bk.bids[0].p, bq: bk.bids[0].q, ap: bk.asks[0].p, aq: bk.asks[0].q, src: 'L1' };
+    const row = (d?.strikes || []).find(r => Math.round(r.strike) === Math.round(k)) || {};
+    if (!(row[p + '_bid'] > 0) && !(row[p + '_ask'] > 0)) return null;
+    return { bp: +row[p + '_bid'] || null, bq: row[p + '_bid_qty'] != null ? +row[p + '_bid_qty'] : null,
+             ap: +row[p + '_ask'] || null, aq: row[p + '_ask_qty'] != null ? +row[p + '_ask_qty'] : null, src: 'tick' };
+  }
+  function _futQuote(d, which) {
+    const bk = d?.depth?.futures?.[which];
+    if (_ladderFresh(bk)) return { bp: bk.bids[0].p, bq: bk.bids[0].q, ap: bk.asks[0].p, aq: bk.asks[0].q, src: 'L1' };
+    const pre = which === 'near' ? 'futures' : 'futures_far';
+    if (!(d?.[pre + '_bid'] > 0) && !(d?.[pre + '_ask'] > 0)) return null;
+    return { bp: +d[pre + '_bid'] || null, bq: d[pre + '_bid_qty'] != null ? +d[pre + '_bid_qty'] : null,
+             ap: +d[pre + '_ask'] || null, aq: d[pre + '_ask_qty'] != null ? +d[pre + '_ask_qty'] : null, src: 'tick' };
+  }
+  function _quoteHtml(q) {
+    if (!q) return '<span style="color:var(--muted);font-size:9.5px;">no bid / offer yet</span>';
+    const px = v => v == null ? '—' : (+v).toFixed(2);
+    const qt = v => v == null ? '' : ` <span style="color:var(--muted);font-weight:400;">× ${fmtInt(v)}</span>`;
+    const spr = q.bp && q.ap ? q.ap - q.bp : null;
+    return `<span style="font-size:10.5px;white-space:nowrap;" title="Best bid and best offer: price × quantity${q.src === 'L1' ? ' (top of the five-level book)' : ' (from the price tick)'}">
+      <span style="color:var(--pos,#26a69a);font-weight:700;">${px(q.bp)}</span>${qt(q.bq)}
+      <span style="color:var(--muted);"> | </span>
+      <span style="color:var(--neg,#ef5350);font-weight:700;">${px(q.ap)}</span>${qt(q.aq)}
+      ${spr != null ? `<span style="color:var(--muted);font-size:9px;"> spr ${spr.toFixed(2)}</span>` : ''}</span>`;
+  }
+  // Total bid / total offer for a contract, with how old they are.
+  function _bookOf(bk) {
+    if (!bk) return null;
+    if (bk.tbq || bk.tsq) {
+      const age = bk.tts ? Date.now() / 1000 - bk.tts : (bk.ts ? Date.now() / 1000 - bk.ts : null);
+      return { bid: bk.tbq || 0, ask: bk.tsq || 0, ratio: bk.tsq > 0 ? bk.tbq / bk.tsq : null,
+               src: 'total', age, stale: age != null && age > 120 };
+    }
+    if (_ladderFresh(bk)) {
+      const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
+      const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
+      return { bid, ask, ratio: ask > 0 ? bid / ask : null, src: 'L2' };
+    }
+    return null;
+  }
+  function _bookSrcTag(b) {
+    if (!b) return '';
+    if (b.src === 'total')
+      return b.stale
+        ? `<span style="font-size:8px;color:#ffb300;border:1px solid rgba(255,179,0,0.5);border-radius:3px;padding:0 3px;margin-left:3px;" title="No update for this contract in ${Math.round(b.age / 60)} min - the figures are the last ones received.">STALE ${Math.round(b.age / 60)}m</span>`
+        : '';
+    return '<span style="font-size:8px;color:#789;border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:0 3px;margin-left:3px;" title="Total quantity not received yet for this contract: showing the sum of the five best levels instead.">5L</span>';
+  }
   function _futBooks(d) {
     // Current and next series. The far month is the rollover leg, and a
     // lopsided book there near expiry says which way positions are being
@@ -20536,13 +20841,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const fb = (d?.depth && d.depth.futures) || {};
     const rd = bk => {
       if (!bk) return null;
-      if (bk.bids?.length && bk.asks?.length) {
-        const bid = bk.bids.reduce((s, x) => s + (x.q || 0), 0);
-        const ask = bk.asks.reduce((s, x) => s + (x.q || 0), 0);
-        return { bid, ask, ratio: ask > 0 ? bid / ask : null };
-      }
-      if (bk.tbq || bk.tsq)
-        return { bid: bk.tbq || 0, ask: bk.tsq || 0, ratio: bk.tsq > 0 ? bk.tbq / bk.tsq : null };
+      const r0 = _bookOf(bk);
+      if (r0) return r0;
       return null;
     };
     return {
@@ -20733,7 +21033,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               ? 'NSE publishes no bid/offer quantities — needs DATA_SOURCE=fyers'
               : 'depth block present but empty — broker sent none')
           : `not among the ${anyDepth} strikes with depth`;
-        return `<span style="min-width:214px;"><b>${lab} ${fmtInt(leg.k)}</b> <span style="color:var(--muted);">δ${Math.abs(leg.delta).toFixed(2)} · ${escapeHtml(why)}</span></span>`;
+        return `<span style="min-width:214px;"><b>${lab} ${fmtInt(leg.k)}</b> <span style="color:var(--muted);font-size:9px;">δ${Math.abs(leg.delta).toFixed(2)}</span> &nbsp;${_quoteHtml(_optQuote(d, leg.k, lab))}</span>
+          <span style="min-width:214px;font-size:9px;color:var(--muted);">depth: ${escapeHtml(why)}</span>`;
       }
       const r = b.ratio;
       // 2x either way is the threshold asked for; below it, say so plainly
@@ -20756,16 +21057,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const askStyle = askHot ? `${hot}background:${bullIfBid ? 'rgba(239,83,80,0.30)' : 'rgba(38,166,154,0.30)'};color:${bullIfBid ? '#ef5350' : '#26a69a'};` : '';
       return `<span style="min-width:214px;"><b>${lab} ${fmtInt(leg.k)}</b>
         <span style="color:var(--muted);font-size:9px;">δ${Math.abs(leg.delta).toFixed(2)}</span>
-        &nbsp;bid <span style="${bidStyle}">${fmtInt(b.bid)}</span>
-        / ask <span style="${askStyle}">${fmtInt(b.ask)}</span>
-        <span style="color:${held ? col : 'var(--muted)'};font-weight:700;">${r != null ? r.toFixed(2) + '× ' + read : ''}</span>
-        <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(track.heldMs)}</span></span>`;
+        &nbsp;total bid <span style="${bidStyle}">${fmtInt(b.bid)}</span>
+        / offer <span style="${askStyle}">${fmtInt(b.ask)}</span>
+        <span style="color:${held ? col : 'var(--muted)'};font-weight:700;">${r != null ? r.toFixed(2) + '× ' + read : ''}</span>${_bookSrcTag(b)}
+        <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(track.heldMs)}</span></span>
+        <span style="font-size:9px;color:var(--muted);">best ${_quoteHtml(_optQuote(d, leg.k, lab)).replace('font-size:10.5px', 'font-size:9px')}</span>`;
     };
     const fcell = (lab, o) => {
       // Show the futures PRICE even without a book: on NSE the price is real
       // and useful, and a bare dash made it look as if the futures were
       // missing entirely rather than only their bid/offer quantities.
-      if (!o?.book) return `<span style="min-width:150px;"><b>${lab}</b>${o?.price ? ` <span style="color:var(--muted);font-size:9px;">${fmtInt(Math.round(o.price))}</span>` : ''} <span style="color:var(--muted);font-size:9px;">${o?.price ? 'no book' : '—'}</span></span>`;
+      const fq = _futQuote(d, lab === 'FUT current' ? 'near' : 'far');
+      if (!o?.book) return `<span style="min-width:150px;"><b>${lab}</b>${o?.price ? ` <span style="color:var(--muted);font-size:9px;">${(+o.price).toFixed(2)}</span>` : ''} &nbsp;${_quoteHtml(fq)}</span>`;
       const r = o.book.ratio;
       const col = r == null ? 'var(--muted)' : r >= 2 ? 'var(--pos,#26a69a)' : r <= 0.5 ? 'var(--neg,#ef5350)' : 'var(--muted)';
       // Futures have no call/put inversion: a heavy bid is simply buyers.
@@ -20774,11 +21077,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const heldF = tk.heldMs >= 45000;
       const bS = (r != null && r >= 2 && heldF) ? `${hotF}background:rgba(38,166,154,0.30);color:#26a69a;` : '';
       const aS = (r != null && r <= 0.5 && heldF) ? `${hotF}background:rgba(239,83,80,0.30);color:#ef5350;` : '';
-      return `<span style="min-width:204px;"><b>${lab}</b>${o.price ? ` <span style="color:var(--muted);font-size:9px;">${fmtInt(Math.round(o.price))}</span>` : ''}
-        &nbsp;bid <span style="${bS}">${fmtInt(o.book.bid)}</span>
-        / ask <span style="${aS}">${fmtInt(o.book.ask)}</span>
-        <span style="color:${heldF ? col : 'var(--muted)'};font-weight:700;">${r != null ? r.toFixed(2) + '×' : ''}</span>
-        <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(tk.heldMs)}</span></span>`;
+      return `<span style="min-width:204px;"><b>${lab}</b>${o.price ? ` <span style="color:var(--muted);font-size:9px;">${(+o.price).toFixed(2)}</span>` : ''}
+        &nbsp;total bid <span style="${bS}">${fmtInt(o.book.bid)}</span>
+        / offer <span style="${aS}">${fmtInt(o.book.ask)}</span>
+        <span style="color:${heldF ? col : 'var(--muted)'};font-weight:700;">${r != null ? r.toFixed(2) + '×' : ''}</span>${_bookSrcTag(o.book)}
+        <span style="color:var(--gold,#d4af37);font-size:9px;font-weight:700;">${_imbLabel(tk.heldMs)}</span></span>
+        <span style="font-size:9px;color:var(--muted);">best ${_quoteHtml(fq).replace('font-size:10.5px', 'font-size:9px')}</span>`;
     };
     // ── one-line verdict ───────────────────────────────────────────
     // Nine cells is a lot to read under pressure. This states the conclusion
@@ -20797,6 +21101,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       const parts = Object.values(dk).filter(Boolean);
       const total = parts.reduce((t, p) => t + (p.score || 0), 0);
+      window._deskReadLast = { total, t: Date.now(), have: parts.some(p => p.vol15 || p.build) };
       const reasons = parts.flatMap(p => (p.why || []).map(w => ({ w, s: p.score }))).slice(0, 12);
       const have = parts.some(p => p.vol15 || p.build);
       if (have) {
@@ -20817,7 +21122,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           }));
         vwhy = [...seen.values()].slice(0, 4).map(e => e.n > 1 ? `${e.w} (${e.n} legs)` : e.w).join(' · ');
       } else {
-        verdict = 'Waiting for trades — the desk read needs a few minutes of classified flow';
+        verdict = !d.flow
+          ? 'No trade classification from the server — restart nse_chain_server.py so it loads the current nse_adapter_fyers.py'
+          : 'Waiting for trades — the desk read needs a few minutes of classified flow';
       }
     } catch (_) {}
 
@@ -22861,8 +23168,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // Coalesce inside 400ms rather than 3s: with tick-driven updates a 3s
     // window would throw away most of the new resolution, which is the whole
     // point of computing from ticks.
-    if (last && row.ts - last.ts < 400) {
-      Object.assign(last, row);
+    // Measured from the START of the point's window, not its last update:
+    // Object.assign moves last.ts forward, so with ticks arriving every
+    // 250 ms the window slid forever, every tick overwrote the same point,
+    // and the pane sat on "Collecting" for the whole session.
+    if (last && row.ts - (last.t0 || last.ts) < 400) {
+      Object.assign(last, row, { t0: last.t0 || last.ts });
     } else {
       _ctxHist.push(row);
       // prune on a cadence rather than every push: the downsample walks the
@@ -22884,7 +23195,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // over hours, so as a line it mostly redraws a number already shown in
     // the chart strip. CVD updates tick by tick and turns before price does,
     // which is what a pane sharing the price axis is for.
-    const CTX_DEFAULT = { cvd: true, pcr: false, pcr1d: false, vix: false, iv: false,
+    // VIX on as well: the fear gauge beside the order flow
+    const CTX_DEFAULT = { cvd: true, pcr: false, pcr1d: false, vix: true, iv: false,
                           straddle: false, skew: false };
     const cfg = (() => {
       try {
@@ -22914,7 +23226,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // Share the candle chart's x-axis so the two panes line up. Without this
     // the whole point is lost: you cannot compare timing across two charts
     // that scale their time axis differently.
-    const W = 900, H = 150, padL = 8, padR = 74, padT = 8, padB = 18;
+    // the candle pane's own width and margins (they change when maximised),
+    // so a minute here sits exactly over the same minute below
+    const G0 = _chart._geo || { W: 900, padL: 8, padR: 72 };
+    const W = G0.W, H = Math.round(150 * W / 900), padL = G0.padL, padR = G0.padR, padT = 8, padB = 18;
     const SESSION_MIN = 385;
     const slots = Math.max(1, Math.ceil(SESSION_MIN / _chart.interval));
     // Same slot arithmetic the candle pane uses, so the two line up exactly.
@@ -23058,18 +23373,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       legend.push(`<span style="color:${s.col};font-size:9.5px;">● ${s.lab} ${last.v.toFixed(1)} <span style="opacity:.55;">${lo.toFixed(1)}–${hi.toFixed(1)}</span></span>`);
     }
 
-    // half-hour gridlines, matching the candle pane
-    for (let m = 0; m <= SESSION_MIN; m += 30) {
-      const cx = padL + (m / _chart.interval) / slots * (W - padL - padR);
-      if (cx > W - padR) break;
-      svg = `<line x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${H - padB}" stroke="rgba(255,255,255,0.05)"/>` + svg;
-    }
+    // half-hour gridlines and time labels, at the candle pane's positions
+    svg = _timeGridSvg(W, padL, padR, padT, H - padB, H - 5) + svg + _xmSvg('ctxXM', padT, H - padB, H - padB - 1);
     box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${svg}</svg>
       <div style="display:flex;gap:14px;flex-wrap:wrap;padding:2px 8px 4px;align-items:center;">
         ${legend.join('')}
         <span style="margin-left:auto;">${ctrls}</span>
       </div>
       <div class="oc-sub" style="padding:0 8px 4px;font-size:9px;">Each line is scaled to its own range — they share no units, and one absolute axis would flatten two of the three. The range beside each legend entry is that series' span so far. <b>What to look for is ORDER, not level:</b> IV lifting while price is flat, or PCR turning before the candles do, is what a set of readouts cannot show you.</div>`;
+    try { const xm = _chart._xm; if (xm) _mirrorCrosshair(xm.px, true, xm.W, xm.src); } catch (_) {}
   }
 
   // Delegated so it survives the panel being re-rendered.
@@ -23898,7 +24210,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         if (m[2] === 'CE') { ceB += b; ceS += s_; } else { peB += b; peS += s_; }
         const p = m[2].toLowerCase(), row = st.find(r => Math.round(r.strike) === +m[1]) || {};
         const bid = +row[p + '_bid'] || 0, ask = +row[p + '_ask'] || 0, ltp = +row[p + '_ltp'] || 0;
-        top.push({ strike: +m[1], side: m[2], pos: b / (b + s_), vol: b + s_,
+        // prints are counted in shares; shown in contracts like the rest of the chain
+        top.push({ strike: +m[1], side: m[2], pos: b / (b + s_), vol: (b + s_) / (d.lot_size || 1),
                    spreadPct: ltp > 0 && ask > bid ? (ask - bid) / ltp * 100 : 0 });
       }
       if (n >= 2) {
@@ -25605,6 +25918,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         renkoMqBox = _mqBoxSvg(mq, W, H, padR, padB);
       }
     } catch (e) { console.warn('[mq]', e.message); }
+    try { renkoMqBox += _deskBoxSvg(W, H, padR, padB, _chart.candles, renkoMqBox ? (_mqBoxSvg.h || 0) : 0); } catch (e) { console.warn('[deskbox]', e.message); }
 
     // ── Bollinger bands over brick closes ──────────────────────────
     // Computed on the brick sequence, like the EMAs: bricks are not evenly
@@ -25837,7 +26151,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       svg += `<text x="${(padL + i * bw + bw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle" style="font-size:8px;fill:var(--muted,#789);">${_hm(b.t)}</text>`; });
     const dirTxt = st.dir > 0 ? ['UP', 'var(--pos,#26a69a)'] : ['DOWN', 'var(--neg,#ef5350)'];
     box.innerHTML = (renkoDay ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:2px 6px 5px;">${_dayTypeBadge(renkoDay)}</div>` : '') +
-      `<svg id="renkoSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}${renkoMqBox}
+      `<svg id="renkoSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">${svg}${renkoMqBox}${_xmSvg('mainXM', padT, H - padB)}
         <g id="renkoCross" style="display:none;pointer-events:none;">
           <line id="renkoCrossV" y1="${padT}" y2="${H - padB}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
           <line id="renkoCrossH" x1="${padL}" x2="${W - padR}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
@@ -25915,6 +26229,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
       const xAligned = i2 => brickX[Math.max(0, Math.min(brickX.length - 1, i2))];
       _chart._rsiCtx = { cs, x: xAligned, W, padL, padR, H };
+      _chart._geo = { W, padL, padR };
     } catch (_) {}
     try {
       const sv = document.getElementById('renkoSvg');
@@ -25925,8 +26240,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           const r = sv.getBoundingClientRect();
           const vx = (ev.clientX - r.left) / r.width * W;
           const vy = (ev.clientY - r.top) / r.height * H;
-          if (vx < padL || vx > W - padR || vy < padT || vy > H - padB) { g.style.display = 'none'; return; }
+          if (vx < padL || vx > W - padR || vy < padT || vy > H - padB) { g.style.display = 'none'; try { _mirrorCrosshair(0, false); } catch (_) {} return; }
           const i2 = Math.max(0, Math.min(show.length - 1, Math.floor((vx - padL) / bw)));
+          try { _mirrorCrosshair(padL + i2 * bw + bw / 2, true, W, 'main'); } catch (_) {}
           const b2 = show[i2];
           const price = hi - (vy - padT) / (H - padT - padB) * (hi - lo);
           const cx = padL + i2 * bw + bw / 2;
@@ -27180,8 +27496,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const box2 = document.getElementById('rsiPaneBody');
       const k = _chart._rsiCtx;
       if (box2 && k)
-        box2.innerHTML = _rsiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25));
+        box2.innerHTML = _rsiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10);
     } catch (_) {}
+    // the panes were just rebuilt: put a hovering crosshair back
+    try { const xm = _chart._xm; if (xm) _mirrorCrosshair(xm.px, true, xm.W, xm.src); } catch (_) {}
     // The series array holds exactly one VWAP, so if more than one is on
     // SCREEN the extras are stale DOM rather than anything this render
     // produced. Counting the live elements is the only way to tell those
@@ -27796,11 +28114,15 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         _chart._mqBox = _mqBoxSvg(mq, W, H, padR, padB);
       } else _chart._mqBox = '';
     } catch (e) { console.warn('[desk]', e.message); }
+    try {
+      _chart._mqBox = (_chart._mqBox || '') + _deskBoxSvg(W, H, padR, padB, _chart.candles || cs, _chart._mqBox ? (_mqBoxSvg.h || 0) : 0);
+    } catch (e) { console.warn('[deskbox]', e.message); }
     // user alerts last, so they sit above the levels they were set against
     try { svg += _chartAlertLines(y, lo, hi, W, padL, padR); } catch (_) {}
     // hand the pane the same x-mapping and geometry the candles used, so the
     // two align exactly rather than approximately
     _chart._rsiCtx = { cs, x, W, padL, padR, H };
+    _chart._geo = { W, padL, padR };
     // Geometry for the alert interaction layer. It lives on the CONTAINER,
     // not on the SVG, because the SVG is replaced on every render while
     // #chartBody itself persists - handlers bound to the SVG die with it, and
@@ -27904,7 +28226,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
           (dsl ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:0 4px 5px;">${dsl}</div>` : '');
     } catch (_) {}
     box.innerHTML = regBar + dayBar +
-      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}${_chart._mqBox || ''}
+      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}${_chart._mqBox || ''}${_xmSvg('mainXM', padT, H - padB)}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
         <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
@@ -28686,12 +29008,24 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const msg = `Reset ${found.length} setting${found.length === 1 ? '' : 's'} on THIS browser to the recommended Nifty defaults?\n\n` +
       (found.length ? `Will be reset:\n  ${found.join(', ')}\n\n` : '') +
       (kept.length ? `Will be KEPT (your data):\n  ${kept.join(', ')}\n\n` : '') +
+      `Every checkbox, selector and number box returns to its default (chart zoom and a historical date are kept).\n` +
       `Other computers are unaffected. The page will reload.`;
     if (!confirm(msg)) return;
+    window._settingsResetting = true;
     let n = 0;
     for (const k of _SETTINGS_KEYS) {
+      // a key on both lists (m920Levels, customAlerts) is data: keep it
+      if (_KEEP_KEYS.includes(k)) continue;
       try { if (localStorage.getItem(k) !== null) { localStorage.removeItem(k); n++; } } catch (_) {}
     }
+    // uiStateV1 replays every checkbox, selector and number box on load, so
+    // keeping it whole meant the reset restored the old ticks straight back
+    // (Pivots stayed on). Clear the control states; keep the chart zoom and
+    // a historical date, which are where you are, not how it is set up.
+    try {
+      const ui = JSON.parse(localStorage.getItem('uiStateV1') || 'null');
+      if (ui) { localStorage.setItem('uiStateV1', JSON.stringify({ chk: {}, sel: {}, num: {}, zoom: ui.zoom || null, hist: ui.hist || '' })); n++; }
+    } catch (_) {}
     try { showToast(`↺ ${n} setting(s) reset — reloading`); } catch (_) {}
     setTimeout(() => location.reload(), 400);
   }
@@ -28752,12 +29086,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       // new overlays default ON: a saved config predates them, and its
       // missing key must not read as a deliberate "off"
-      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks'].includes(k)) _chart.show[k] = true;
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
     }

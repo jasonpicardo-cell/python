@@ -502,6 +502,46 @@ def test_aggressor_flow():
     u("T", {"ltp": 100, "volume": 5})
     check("flow: volume counter reset starts a new session", A._flow_read("T") is None)
     A._flow.pop("T", None)
+    # v3 DepthUpdate is FLAT (bid_price1..5 etc., type "dp", no ltp) - the
+    # format in the SDK's map.json. It must land as a five-level ladder and
+    # keep the whole-book totals from the price tick.
+    A._push_ticks = lambda: None
+    A._on_message({"symbol": "D", "ltp": 40.5, "vol_traded_today": 1000, "tot_buy_qty": 600000, "tot_sell_qty": 1800000})
+    m = {"type": "dp", "symbol": "D"}
+    for i in range(1, 6):
+        m[f"bid_price{i}"] = 40.4 - 0.05 * (i - 1); m[f"ask_price{i}"] = 40.6 + 0.05 * (i - 1)
+        m[f"bid_size{i}"] = 750; m[f"ask_size{i}"] = 300
+    A._on_message(m)
+    dd = A._depth.get("D") or {}
+    check("depth: flat v3 DepthUpdate becomes a 5-level ladder",
+          len(dd.get("bids", [])) == 5 and sum(x["q"] for x in dd["asks"]) == 1500, str(dd)[:160])
+    check("depth: whole-book totals kept beside the ladder", dd.get("tbq") == 600000, str(dd.get("tbq")))
+    A._depth.pop("D", None); A._flow.pop("D", None); A._ticks.pop("D", None)
+    # futures get depth first, the index never (the SDK drops it), and a
+    # reconnect asks for everything again - the SDK forgets, our sets did not
+    calls = []
+    class _S:
+        def subscribe(self, symbols, data_type="SymbolUpdate"):
+            calls.append((data_type, list(symbols)))
+    old_sock, old_px, old_dp = A._socket, set(A._subscribed), set(A._depth_subs)
+    try:
+        A._socket = _S(); A._subscribed.clear(); A._depth_subs.clear()
+        A._subscribe_depth(["NSE:NIFTY26OCTFUT", "NSE:NIFTY26NOVFUT"] +
+                           [f"NSE:NIFTY26OCT{k}CE" for k in range(22000, 24000, 50)] + ["NSE:NIFTY50-INDEX"])
+        dp = calls[-1][1] if calls else []
+        check("depth: futures subscribed first, index skipped",
+              dp[:2] == ["NSE:NIFTY26OCTFUT", "NSE:NIFTY26NOVFUT"] and not any(x.endswith("-INDEX") for x in dp))
+        A._subscribed.add("NSE:NIFTY50-INDEX")
+        calls.clear()
+        A._on_socket_connect()
+        import time as _t
+        _t.sleep(1.4)
+        check("reconnect: price and depth subscriptions re-requested",
+              any(c[0] == "DepthUpdate" and "NSE:NIFTY26OCTFUT" in c[1] for c in calls)
+              and any(c[0] == "SymbolUpdate" for c in calls), str([(c[0], len(c[1])) for c in calls]))
+    finally:
+        A._socket = old_sock; A._subscribed.clear(); A._subscribed.update(old_px)
+        A._depth_subs.clear(); A._depth_subs.update(old_dp)
 
 
 def test_iv_solver():
@@ -575,11 +615,68 @@ def test_ist_offset():
     check("IST conversion uses + getTimezoneOffset()", not bad, str(bad[:3]))
 
 
+def test_reset_defaults():
+    # Reset must actually restore the shipped defaults: uiStateV1 replays
+    # every checkbox on load, and a beforeunload save rewrote it after the
+    # reset cleared it - so Pivots (and every other tick) came straight back.
+    c = open(DASH, encoding="utf-8").read()
+    check("chart: pivots off by default", c.count("pivots: false, pivotType") == 2 and "pivots: true, pivotType" not in c)
+    check("reset: clears saved control states", "chk: {}, sel: {}, num: {}, zoom: ui.zoom" in c)
+    check("context pane: VIX on by default", "vix: true, iv: false," in c)
+    check("crosshair mirror is defined (it was called but never written)", "function _mirrorCrosshair(" in c)
+    check("context history coalesces from the window start, not a sliding last.ts",
+          "row.ts - (last.t0 || last.ts) < 400" in c)
+    check("reset: unload save suspended during reset",
+          "if (window._settingsResetting) return;" in c and "window._settingsResetting = true;" in c)
+
+
+def test_units():
+    # Fyers counts shares; NSE (and every threshold here) counts contracts.
+    sys.path.insert(0, HERE)
+    try:
+        import nse_adapter_fyers as A
+    except Exception as e:  # noqa: BLE001
+        warn("units: adapter not importable here", str(e)[:120])
+        return
+    rows = [{"ce_oi": 65 * (1000 + 7 * i), "pe_oi": 65 * (900 + 3 * i),
+             "ce_volume": 65 * (50 + i), "pe_volume": 65 * (40 + 2 * i)} for i in range(8)]
+    check("units: lot read off share quantities", A._infer_lot(rows) == 65, str(A._infer_lot(rows)))
+    rows2 = [{"ce_oi": 1001 + 7 * i, "pe_oi": 903 + 3 * i, "ce_volume": 51 + i, "pe_volume": 43 + i} for i in range(8)]
+    check("units: contract quantities are not mistaken for shares", A._infer_lot(rows2) is None)
+    check("units: lot table current (Nifty 65)", A._LOTS.get("NIFTY") == 65, str(A._LOTS.get("NIFTY")))
+    src = open(os.path.join(HERE, "nse_adapter_fyers.py"), encoding="utf-8").read()
+    check("OI change never falls back to the PERCENT field", '"oich", "oichp"' not in src)
+    # replay migration converts a broker snapshot once, and leaves NSE alone
+    # the server is not imported (that would start it); the function is
+    # lifted out of its source and run on its own
+    import ast as _ast, types as _types
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    fn = next((n for n in _ast.parse(ssrc).body
+               if isinstance(n, _ast.FunctionDef) and n.name == "_snapshot_to_contracts"), None)
+    if fn is None:
+        check("replay migration present", False, "_snapshot_to_contracts not found")
+        return
+    ns = {"_QTY_FIELDS_ROW": ("ce_oi", "pe_oi", "ce_oi_chg", "pe_oi_chg", "ce_volume", "pe_volume",
+                              "ce_oi_15m", "pe_oi_15m", "ce_d60", "pe_d60"),
+          "_QTY_FIELDS_TOP": ("futures_oi", "futures_oi_chg", "futures_volume", "futures_far_oi",
+                              "total_ce_oi", "total_pe_oi")}
+    exec(compile(_ast.Module(body=[fn], type_ignores=[]), "srv", "exec"), ns)
+    S = _types.SimpleNamespace(_snapshot_to_contracts=ns["_snapshot_to_contracts"])
+    snap = {"_source": "fyers", "lot_size": 65, "futures_oi": 65 * 1000,
+            "strikes": [dict(strike=22000 + 50 * i, **r) for i, r in enumerate(rows)]}
+    ok1 = S._snapshot_to_contracts(snap)
+    check("replay: broker snapshot converted to contracts",
+          ok1 and snap["strikes"][0]["ce_oi"] == 1000 and snap["futures_oi"] == 1000 and snap["oi_unit"] == "contracts")
+    check("replay: an already-converted snapshot is left alone", not S._snapshot_to_contracts(snap))
+    nse = {"_source": "nse", "strikes": [dict(strike=22000 + 50 * i, **r) for i, r in enumerate(rows)]}
+    check("replay: NSE snapshot untouched", not S._snapshot_to_contracts(nse))
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
