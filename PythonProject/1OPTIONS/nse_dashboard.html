@@ -15076,7 +15076,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (data.atm_iv_rank) {
       const r = data.atm_iv_rank;
       const cls = r.rank_pct >= 70 ? 'high' : (r.rank_pct >= 30 ? 'mid' : 'low');
-      els.metaIvRank.innerHTML = `<span class="iv-rank-badge ${cls}">${r.rank_pct.toFixed(0)}% <span style="font-weight:400;font-size:9px;">${r.period_days}d</span></span>`;
+      const vb = r.basis === 'india_vix';
+      els.metaIvRank.innerHTML = `<span class="iv-rank-badge ${cls}" title="${vb ? 'India VIX rank' : 'ATM IV rank'} over ${r.period_days} recorded sessions: low ${r.low}, high ${r.high}, now ${r.current}${r.percentile != null ? ` · higher than ${r.percentile}% of those days` : ''}">${r.rank_pct.toFixed(0)}%${vb ? ' <span style="font-weight:400;font-size:9px;">VIX</span>' : ''} <span style="font-weight:400;font-size:9px;">${r.period_days}d</span></span>`;
     } else {
       els.metaIvRank.textContent = '—';
     }
@@ -20825,6 +20826,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _quoteHtml(q) {
     if (!q) return '<span style="color:var(--muted);font-size:9.5px;">no bid / offer yet</span>';
+    // a bid at or above the offer is not a market: the 09:00-09:08 auction
+    // collects orders that cross, and they print until the open
+    if (q.bp && q.ap && q.bp >= q.ap)
+      return `<span style="color:#ffb300;font-size:9.5px;" title="Bid ${(+q.bp).toFixed(2)} at or above offer ${(+q.ap).toFixed(2)} - pre-open auction orders, not a tradeable market">pre-open · crossed quote</span>`;
     const px = v => v == null ? '—' : (+v).toFixed(2);
     const qt = v => v == null ? '' : ` <span style="color:var(--muted);font-weight:400;">× ${fmtInt(v)}</span>`;
     const spr = q.bp && q.ap ? q.ap - q.bp : null;

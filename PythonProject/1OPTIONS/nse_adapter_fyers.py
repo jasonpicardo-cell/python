@@ -140,11 +140,11 @@ def _flow_update(sym: str, d: Dict[str, Any]) -> None:
         return
     f = _flow.get(sym)
     if f is None:
-        _flow[sym] = {"v": vol, "ltp": ltp, "bid": d.get("bid"), "ask": d.get("ask"), "sgn": 0, "m": {}}
+        _flow[sym] = {"v": vol, "v0": vol, "ltp": ltp, "bid": d.get("bid"), "ask": d.get("ask"), "sgn": 0, "m": {}}
         return
     dv = vol - f["v"]
     if dv < 0:                        # a new session's counter
-        f.update({"v": vol, "m": {}})
+        f.update({"v": vol, "v0": vol, "m": {}})
         return
     if dv > 0:
         bid, ask = f.get("bid"), f.get("ask")
@@ -189,8 +189,10 @@ def _flow_read(sym: Optional[str]) -> Optional[Dict[str, Any]]:
             b15 += b; s15 += s_
         if now - mnt < 5:
             b5 += b; s5 += s_
+    # share of the volume traded since the server started that was classified
+    traded = (f.get("v") or 0) - (f.get("v0") or 0)
     return {"b5": b5, "s5": s5, "b15": b15, "s15": s15, "bd": bd, "sd": sd,
-            "since": first * 60}
+            "since": first * 60, "coverage": round((bd + sd) / traded, 3) if traded > 0 else None}
 _status: Dict[str, Any] = {
     "connected": False, "streaming": False, "last_error": "",
     "ticks": 0, "subscribed": 0, "last_chain": 0.0, "token_age_h": None,
@@ -606,9 +608,13 @@ def _subscribe_depth(symbols: List[str]) -> None:
                 new.append(s_)
         if not new:
             return
+        # futures are few and always wanted; the cap applies to option books -
+        # otherwise the indices fetched later (Midcap here) found it full
         cap = int(os.environ.get("FYERS_DEPTH_MAX", "100"))
-        room = max(0, cap - len(_depth_subs))
-        new = new[:room]
+        futs = [x for x in new if x.endswith("FUT")]
+        opts = [x for x in new if not x.endswith("FUT")]
+        room = max(0, cap - sum(1 for x in _depth_subs if not x.endswith("FUT")))
+        new = futs + opts[:room]
         if not new:
             return
         try:
@@ -659,7 +665,10 @@ def audit_state(sym: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         "ladders_fresh_120s": sum(1 for t in toks if dp[t].get("lts") and now - dp[t]["lts"] < 120),
         "totals_fresh_120s": sum(1 for t in toks if dp[t].get("tts") and now - dp[t]["tts"] < 120),
         "flow_contracts": sum(1 for t in toks if _flow_read(t)),
+        "flow_coverage": {t: (_flow_read(t) or {}).get("coverage") for t in toks if t.endswith("FUT")},
         "lot_from_data": _lot_seen_cache.get((sym or "").upper()),
+        "lot_from_book": _infer_lot_book(opt_toks),
+        "lot_from_master": _master_lot(sym), "master_error": _master.get("err") or None,
         "lot_table": _LOTS.get((sym or "").upper()),
         "raw_rest": {k: v for k, v in _raw_rest.items()},
     }
@@ -671,9 +680,12 @@ def raw_debug(match: str) -> Dict[str, Any]:
     now = time.time()
     m = (match or "").upper()
     out = {}
-    for sym, by in list(_raw_last.items()):
-        if m and m not in sym.upper():
-            continue
+    hits = [(s, b) for s, b in list(_raw_last.items()) if not m or m in s.upper()]
+    # Futures first, then depth-subscribed contracts, then most recently
+    # updated — so a symbol query never hides the future behind 12 options.
+    hits.sort(key=lambda sb: (not sb[0].endswith("FUT"), sb[0] not in _depth_subs,
+                              -max((ts for ts, _ in sb[1].values()), default=0)))
+    for sym, by in hits:
         dp = _depth.get(sym) or {}
         out[sym] = {
             "raw": {t: {"age_s": round(now - ts, 1), "msg": msg} for t, (ts, msg) in by.items()},
@@ -687,9 +699,13 @@ def raw_debug(match: str) -> Dict[str, Any]:
                          if k in ("ltp", "bid", "ask", "bid_qty", "ask_qty", "volume", "oi")},
             },
             "subscribed": {"price": sym in _subscribed, "depth": sym in _depth_subs},
+            "flow": _flow_read(sym),
         }
         if len(out) >= 12:
             break
+    if len(hits) > len(out):
+        out["_note"] = (f"showing {len(out)} of {len(hits)} matching contracts "
+                        "(futures first, then depth-subscribed, newest); narrow the symbol to see others")
     return out
 
 
@@ -1023,6 +1039,12 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         # The v3 option chain gives the day's change (ltpch), not the previous
         # close. Without it the OI-build read (premium change with OI change)
         # never had a premium change to work with.
+        # A contract with NO TRADE TODAY (every contract before 09:15) still
+        # carries yesterday's last price and yesterday's change, so ltp-ltpch
+        # is the close of the day BEFORE - 55 for a strike that closed at 207.
+        # Its last price is its previous close.
+        if not rec[f"{p}_prev_close"] and not (rec[f"{p}_volume"] or 0) and rec[f"{p}_ltp"]:
+            rec[f"{p}_prev_close"] = rec[f"{p}_ltp"]
         if not rec[f"{p}_prev_close"] and r.get("ltpch") is not None:
             try:
                 _lp = _f(r, "ltp", "lp")
@@ -1049,14 +1071,25 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
     # Fyers always counts shares, so the conversion always applies; only the
     # LOT is in question. Read it off the data when the data can say (and
     # remember it for the session), else the lot-size table.
+    #
+    # Which evidence, in order. OPEN INTEREST IS NOT EVIDENCE: positions
+    # opened before a lot-size revision stay in the old lot, so a contract's
+    # OI mixes lots (65 and 75 share a divisor of 5) and the divisor of OI
+    # read 5 - which turned every figure 13x too large. What reflects the
+    # CURRENT lot is what trades now: the order book (every resting order is
+    # whole lots) and today's volume.
     lot = _lot_size(sym)
-    lot_seen = _infer_lot(strikes) or _lot_seen_cache.get(sym)
-    if lot_seen:
+    _bk = _infer_lot_book([r.get(f"{p}_symbol") for r in strikes for p in ("ce", "pe")])
+    _ms = _master_lot(sym)
+    if _ms and _bk and _bk % _ms != 0:     # the master must agree with the live book
+        _ms = None
+    lot_seen = _ms or _bk or _infer_lot(strikes) or _lot_seen_cache.get(sym)
+    if lot_seen and lot_seen >= 15:
         _lot_seen_cache[sym] = lot_seen
         if lot < 5 or (lot_seen != lot and lot_seen % lot != 0):   # the table is wrong; the data is not
             if _lot_warned.get(sym) != (lot_seen, lot):
                 _lot_warned[sym] = (lot_seen, lot)
-                print(f"[fyers] {sym}: lot size from the data is {lot_seen}, table says {lot} - using {lot_seen}")
+                print(f"[fyers] {sym}: lot size from the feed is {lot_seen}, table says {lot} - using {lot_seen}")
             lot = lot_seen
     qty_unit = "shares"
     if lot > 1:
@@ -1371,6 +1404,18 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
         },
     }
     out["_tokens"][ysym] = {"sym": sym, "spot": True}
+    # Session state, and no crossed quotes. In the 09:00-09:08 pre-open the
+    # futures carry auction orders - a 23,371 bid against a 22,650 offer - and
+    # options carry yesterday's last prices; neither is a market to read.
+    _g = time.gmtime(time.time() + 19800)
+    _mm = _g.tm_hour * 60 + _g.tm_min
+    out["session_state"] = ("closed" if _g.tm_wday >= 5 or _mm >= 930 or _mm < 540
+                            else "pre-open" if _mm < 555 else "open")
+    for _pre in ("futures", "futures_far"):
+        _b, _a = out.get(f"{_pre}_bid"), out.get(f"{_pre}_ask")
+        if _b and _a and float(_b) >= float(_a):
+            for _k in ("bid", "ask", "bid_qty", "ask_qty"):
+                out[f"{_pre}_{_k}"] = None
     # futures ticks were streamed but had no token entry, so the browser
     # dropped them and the futures price only moved once per poll
     for _which, _fs in (("near", fut.get("futures_symbol")), ("far", fut.get("futures_far_symbol"))):
@@ -1641,7 +1686,7 @@ def _infer_lot(strikes) -> Optional[int]:
     import math as _m
     vals = []
     for r in strikes:
-        for k in ("ce_oi", "pe_oi", "ce_volume", "pe_volume"):
+        for k in ("ce_volume", "pe_volume"):      # volume only - OI mixes old lots
             v = r.get(k)
             if v and v > 0:
                 vals.append(int(round(v)))
@@ -1652,7 +1697,82 @@ def _infer_lot(strikes) -> Optional[int]:
         g = _m.gcd(g, v)
         if g == 1:
             return None
-    return g if 5 <= g <= 5000 else None
+    return g if 15 <= g <= 5000 else None
+
+
+def _infer_lot_book(symbols) -> Optional[int]:
+    """The lot from the five-level books: every resting order is whole lots."""
+    import math as _m
+    vals = []
+    with _lock:
+        for s_ in symbols:
+            bk = _depth.get(s_ or "") or {}
+            for lv in (bk.get("bids") or []) + (bk.get("asks") or []):
+                q = int(round(lv.get("q") or 0))
+                if q > 0:
+                    vals.append(q)
+    if len(vals) < 20:
+        return None
+    g = 0
+    for v in vals:
+        g = _m.gcd(g, v)
+        if g < 15:
+            return None
+    return g if g <= 5000 else None
+
+
+# ── Fyers' own symbol master: the exchange lot per contract ──────────────
+# A public CSV (no API quota), downloaded once a day in the background.
+_MASTER_URL = os.environ.get("FYERS_SYMBOL_MASTER", "https://public.fyers.in/sym_details/NSE_FO.csv")
+_master = {"day": "", "lots": {}, "busy": False, "err": ""}
+
+
+def _master_load() -> None:
+    if _master["busy"]:
+        return
+    _master["busy"] = True
+    try:
+        import csv
+        import io
+        import urllib.request
+        with urllib.request.urlopen(_MASTER_URL, timeout=30) as r:
+            text = r.read().decode("utf-8", "ignore")
+        lots = {}
+        for row in csv.reader(io.StringIO(text)):
+            # Fytoken, details, instrument type, MIN LOT SIZE, tick, ISIN,
+            # session, updated, expiry, SYMBOL TICKER, ... underlying symbol
+            if len(row) < 10:
+                continue
+            tick = row[9].strip()
+            if not tick.endswith("FUT"):
+                continue
+            try:
+                lt = int(float(row[3]))
+            except Exception:
+                continue
+            if 1 <= lt <= 100000:
+                lots[tick] = lt
+        if lots:
+            _master.update({"day": time.strftime("%Y-%m-%d"), "lots": lots, "err": ""})
+            print(f"[fyers] symbol master: lot sizes for {len(lots)} futures")
+    except Exception as e:  # noqa: BLE001
+        _master["err"] = str(e)[:120]
+        _master["day"] = time.strftime("%Y-%m-%d")      # do not retry all day
+    finally:
+        _master["busy"] = False
+
+
+def _master_lot(sym: str) -> Optional[int]:
+    if _master["day"] != time.strftime("%Y-%m-%d") and not _master["busy"]:
+        threading.Thread(target=_master_load, daemon=True).start()
+        return None
+    base = FUT_SUFFIX.get((sym or "").upper())
+    if not base:
+        return None
+    for tick, lt in _master["lots"].items():
+        if tick.startswith(f"NSE:{base}") and tick[len(f"NSE:{base}"):][:2].isdigit():
+            return lt if lt >= 5 else None
+    return None
 
 
 def _lot_size(symbol: str) -> int:

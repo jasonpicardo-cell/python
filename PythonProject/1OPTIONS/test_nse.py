@@ -644,6 +644,18 @@ def test_units():
     rows2 = [{"ce_oi": 1001 + 7 * i, "pe_oi": 903 + 3 * i, "ce_volume": 51 + i, "pe_volume": 43 + i} for i in range(8)]
     check("units: contract quantities are not mistaken for shares", A._infer_lot(rows2) is None)
     check("units: lot table current (Nifty 65)", A._LOTS.get("NIFTY") == 65, str(A._LOTS.get("NIFTY")))
+    # OI mixes lots across a lot-size revision (65 and 75 -> divisor 5); the
+    # lot must come from what trades now, never from OI
+    mixed = [{"ce_oi": 65 * 1000 + 75 * i, "pe_oi": 65 * 700 + 75 * (i + 1), "ce_volume": 0, "pe_volume": 0}
+             for i in range(10)]
+    check("units: lot is never read from OI", A._infer_lot(mixed) is None, str(A._infer_lot(mixed)))
+    A._depth["T1"] = {"bids": [{"p": 1, "q": 65 * k, "n": 1} for k in (1, 2, 3, 4, 7)],
+                      "asks": [{"p": 2, "q": 65 * k, "n": 1} for k in (1, 5, 2, 9, 3)]}
+    A._depth["T2"] = {"bids": [{"p": 1, "q": 65 * k, "n": 1} for k in (6, 1, 2, 11, 4)],
+                      "asks": [{"p": 2, "q": 65 * k, "n": 1} for k in (2, 3, 1, 8, 13)]}
+    check("units: lot read off the live order book", A._infer_lot_book(["T1", "T2"]) == 65,
+          str(A._infer_lot_book(["T1", "T2"])))
+    A._depth.pop("T1", None); A._depth.pop("T2", None)
     # nse_lot_sizes answers 1 without an NSE session; that must never be used
     import types as _ty
     _old = sys.modules.get("nse_lot_sizes")
@@ -688,6 +700,11 @@ def test_units():
     check("replay: an already-converted snapshot is left alone", not S._snapshot_to_contracts(snap))
     nse = {"_source": "nse", "strikes": [dict(strike=22000 + 50 * i, **r) for i, r in enumerate(rows)]}
     check("replay: NSE snapshot untouched", not S._snapshot_to_contracts(nse))
+    bad = {"_source": "fyers", "symbol": "NIFTY", "oi_unit": "contracts", "qty_per_contract": 5,
+           "strikes": [{"strike": 22000.0, "ce_oi": 1000.0, "pe_oi": 13.0}]}
+    S._snapshot_to_contracts(bad)
+    check("replay: a snapshot divided by a lot of 5 is rescaled to 65",
+          bad["qty_per_contract"] == 65 and abs(bad["strikes"][0]["ce_oi"] - 1000 * 5 / 65) < 0.01, str(bad)[:120])
 
 
 def test_boxes():

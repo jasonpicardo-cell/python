@@ -2081,6 +2081,67 @@ _adapter_strat_cache: dict = {}
 _enrich_err_logged: set = set()
 
 
+_ivr_day_cache: dict = {}        # replay file -> (size, atm_iv, vix) of its last session snapshot
+
+
+def _last_session_snapshot(path: str):
+    """The last snapshot in a replay file, read from the end of the file."""
+    try:
+        size = _os.path.getsize(path)
+        hit = _ivr_day_cache.get(path)
+        if hit and hit[0] == size:
+            return hit[1], hit[2]
+        with open(path, "rb") as fh:
+            back = min(size, 400000)
+            fh.seek(size - back)
+            tail = fh.read().decode("utf-8", "ignore").strip().split("\n")
+        for line in reversed(tail):
+            try:
+                snap = json.loads(line)
+            except Exception:
+                continue
+            iv = float(snap.get("atm_iv") or 0)
+            vx = float(snap.get("india_vix") or 0)
+            _ivr_day_cache[path] = (size, iv, vx)
+            return iv, vx
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+
+def _iv_rank_from_replay(symbol: str, current_iv: float, current_vix: float = 0.0):
+    """IV rank over the last 30 recorded sessions, from each day's closing
+    snapshot. ATM IV when at least 5 days carry it; otherwise India VIX's own
+    rank (the index's 30-day implied vol), labelled as such."""
+    import glob as _glob
+    today = time.strftime("%Y-%m-%d")
+    files = sorted(f for f in _glob.glob(_os.path.join(_REPLAY_DIR, f"{symbol.upper()}_????-??-??.jsonl"))
+                   if not f.endswith(f"_{today}.jsonl"))[-30:]
+    ivs, vixs = [], []
+    for f in files:
+        iv, vx = _last_session_snapshot(f)
+        if iv > 0:
+            ivs.append(iv)
+        if vx > 0:
+            vixs.append(vx)
+    basis, series, cur = None, None, None
+    if len(ivs) >= 5 and current_iv:
+        basis, series, cur = "atm_iv", ivs, current_iv
+    elif len(vixs) >= 5:
+        cv = current_vix or float(_last_chain_vix.get(symbol.upper()) or 0) or vixs[-1]
+        basis, series, cur = "india_vix", vixs, cv
+    if not basis:
+        return None
+    lo, hi = min(series + [cur]), max(series + [cur])
+    rank = round((cur - lo) / (hi - lo) * 100, 1) if hi > lo else 50.0
+    pct = round(sum(1 for v in series if v < cur) / len(series) * 100, 1)
+    return {"rank_pct": rank, "percentile": pct, "period_days": len(series), "low": round(lo, 2),
+            "high": round(hi, 2), "current": round(cur, 2), "basis": basis}
+
+
+_last_chain_vix: dict = {}
+
+
 def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
     if not isinstance(data, dict) or not data.get("strikes"):
         return data
@@ -2113,6 +2174,12 @@ def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
                 data["session_ohlc"] = _session_ohlc.get(symbol.upper(), {})
             except Exception:
                 pass
+        try:
+            so = data.get("session_ohlc")
+            if isinstance(so, dict) and so and not so.get("prev_close") and data.get("spot_prev_close"):
+                so["prev_close"] = data["spot_prev_close"]
+        except Exception:
+            pass
         if not data.get("payout_distribution"):
             data["payout_distribution"] = compute_payout_distribution(snap)
         if not data.get("skew_note"):
@@ -2122,6 +2189,11 @@ def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
             if row and row.ce_ltp and row.pe_ltp:
                 data["straddle_premium"] = round(row.ce_ltp + row.pe_ltp, 1)
         atm_iv = float(data.get("atm_iv") or 0)
+        try:
+            if data.get("india_vix"):
+                _last_chain_vix[symbol.upper()] = float(data["india_vix"])
+        except Exception:
+            pass
         if data.get("iv_rank") is None and atm_iv > 0:
             try:
                 ivr = _compute_iv_rank(symbol, round(atm_iv, 2))
@@ -2179,7 +2251,7 @@ def _data_audit(symbol: str) -> dict:
 
     st = d.get("strikes") or []
     src = d.get("_source") or "nse"
-    add("data source", True, src)
+    add("data source", True, f"{src} · session {d.get('session_state') or '—'}")
     add("strikes in chain", len(st) >= 20, f"{len(st)}")
     n = max(1, len(st))
     frac = lambda f: sum(1 for r in st if f(r)) / n
@@ -2226,6 +2298,16 @@ def _data_audit(symbol: str) -> dict:
             add("total bid / offer arriving", a["totals_fresh_120s"] > 0, f"{a['totals_fresh_120s']} contracts updated in 2 min", live=True)
             add("trade classification (takers)", a["flow_contracts"] > 0,
                 f"{a['flow_contracts']} contracts with classified prints - builds from server start", warn=True, live=True)
+            cov = {k: v for k, v in (a.get("flow_coverage") or {}).items() if v is not None}
+            if cov:
+                worst = min(cov.values())
+                add("trade classification coverage (futures)", worst >= 0.8,
+                    " · ".join(f"{k.split(':')[-1]} {v:.0%}" for k, v in cov.items()) +
+                    " of the volume traded since the server started", warn=True, live=True)
+            lb = a.get("lot_from_book")
+            add("lot size matches the live order book", not lb or (lot and lb % lot == 0),
+                f"book says {lb} · master {a.get('lot_from_master')} · used {lot}"
+                + (f" · symbol master: {a['master_error']}" if a.get("master_error") else ""))
             lf, lt = a.get("lot_from_data"), a.get("lot_table")
             add("lot size: data vs table", not lf or lf == lot or (lot and lot >= 5 and lf % lot == 0),
                 f"from the data {lf} · table {lt} · used {lot}", warn=True)
@@ -2473,40 +2555,59 @@ _QTY_FIELDS_TOP = ("futures_oi", "futures_oi_chg", "futures_volume", "futures_fa
 def _snapshot_to_contracts(snap: dict):
     """Convert one snapshot in place; returns True if it changed."""
     import math as _m
-    if not isinstance(snap, dict) or snap.get("oi_unit") == "contracts":
+    if not isinstance(snap, dict):
         return False
     if str(snap.get("_source") or "") not in ("fyers", "arrow"):
-        return False
-    vals = []
+        return False                       # the broker feed always counts shares
+    # already in contracts: leave it - unless it was divided by an impossible
+    # lot (the adapter briefly read the lot from OI and got 5); then undo that
+    q_old = 1.0
+    if snap.get("oi_unit") == "contracts":
+        q = snap.get("qty_per_contract")
+        if q is None or float(q) >= 15:
+            return False
+        q_old = float(q)
+    # The lot: today's VOLUME (trades happen in the current lot) - never OI,
+    # which mixes lots across a lot-size revision (65 and 75 -> divisor 5).
+    vols = []
     for r in snap.get("strikes") or []:
-        for k in ("ce_oi", "pe_oi", "ce_volume", "pe_volume"):
+        for k in ("ce_volume", "pe_volume"):
             v = r.get(k)
             if v and v > 0:
-                vals.append(int(round(v)))
-    if len(vals) < 12:
-        return False
-    g = 0
-    for v in vals:
-        g = _m.gcd(g, v)
-        if g == 1:
-            return False
-    if g < 5:
-        return False
+                vols.append(int(round(v * q_old)))
+    gv = 0
+    if len(vols) >= 12:
+        for v in vols:
+            gv = _m.gcd(gv, v)
     lot = int(snap.get("lot_size") or 0)
-    if not lot or g % lot != 0:
-        lot = g
+    if lot < 15:
+        lot = 0                            # a recorded lot of 1 or 5 was itself a bug
+    if gv >= 15 and (not lot or gv % lot != 0):
+        lot = gv
+    if not lot:
+        lot = {"NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60, "MIDCPNIFTY": 120}.get(
+            str(snap.get("symbol") or "").upper(), 0)
+    if not lot:
+        return False
+    f = q_old / lot
     for r in snap.get("strikes") or []:
         for k in _QTY_FIELDS_ROW:
             if r.get(k):
-                r[k] = round(float(r[k]) / lot, 2)
+                r[k] = round(float(r[k]) * f, 2)
     for nb in ("nearby",):
         for r in snap.get(nb) or []:
             for k in _QTY_FIELDS_ROW:
                 if r.get(k):
-                    r[k] = round(float(r[k]) / lot, 2)
+                    r[k] = round(float(r[k]) * f, 2)
+    for one in ("support", "resistance"):
+        r = snap.get(one)
+        if isinstance(r, dict):
+            for k in _QTY_FIELDS_ROW:
+                if r.get(k):
+                    r[k] = round(float(r[k]) * f, 2)
     for k in _QTY_FIELDS_TOP:
         if snap.get(k):
-            snap[k] = round(float(snap[k]) / lot, 2)
+            snap[k] = round(float(snap[k]) * f, 2)
     snap["lot_size"] = lot
     snap["oi_unit"] = "contracts"
     snap["qty_per_contract"] = lot
@@ -2533,6 +2634,22 @@ def _migrate_replay_units(only_today: bool = False) -> None:
     n_files = n_snaps = 0
     for path in files:
         name = _os.path.basename(path)
+        # A first pass took the lot from OI, which read 5 on contracts whose
+        # OI mixes two lot sizes. Files converted with a lot under 15 are put
+        # back from their backup and converted again.
+        try:
+            bak0 = _os.path.join(bak_dir, name)
+            if _os.path.exists(bak0):
+                with open(path) as fh:
+                    bad = any('"qty_per_contract":' in ln and
+                              (lambda q: q is not None and q < 15)(json.loads(ln).get("qty_per_contract"))
+                              for ln in fh if ln.strip())
+                if bad:
+                    _sh.copy2(bak0, path)
+                    done.discard(name)
+                    print(f"[units] {name}: earlier conversion used a wrong lot - restored and redone")
+        except Exception as _re:  # noqa: BLE001
+            print(f"[units] {name}: recheck failed: {_re}")
         if name in done and not name.endswith(f"_{today}.jsonl"):
             continue
         try:
@@ -3645,7 +3762,10 @@ def _compute_iv_rank(symbol: str, current_iv: float) -> dict | None:
         records = nse_history_store.read_history(symbol, days=30)
         ivs = [r["atm_iv"] for r in records if r.get("atm_iv") and r["atm_iv"] > 0]
         if len(ivs) < 5:
-            return None
+            # The history store's writes are a no-op, so this never filled and
+            # IV rank was blank on every feed. The replay archive holds a
+            # snapshot a minute for every session recorded - read from that.
+            return _iv_rank_from_replay(symbol, current_iv)
         lo, hi = min(ivs), max(ivs)
         rank = round((current_iv - lo) / (hi - lo) * 100, 1) if hi > lo else 50.0
         return {
