@@ -512,17 +512,24 @@ def _on_message(msg) -> None:
                 }
 
         d["ts"] = time.time()
+        _eq = sym.endswith("-EQ")
         with _lock:
-            try:
-                _flow_update(sym, d)
-            except Exception:
-                pass
             _ticks[sym] = {**_ticks.get(sym, {}), **d}
             _status["ticks"] += 1
             _status["streaming"] = True
-            _dirty[sym] = {k: v for k, v in _ticks[sym].items()
-                           if k in ("ltp", "oi", "volume", "bid", "ask", "bid_qty", "ask_qty")}
-        _push_ticks()
+            if not _eq:
+                # Index-constituent equities are subscribed only so the
+                # constituent widget and Trend Engine can be served from the
+                # socket instead of REST quotes; the browsers never use their
+                # ticks, so they are not pushed or flow-classified.
+                try:
+                    _flow_update(sym, d)
+                except Exception:
+                    pass
+                _dirty[sym] = {k: v for k, v in _ticks[sym].items()
+                               if k in ("ltp", "oi", "volume", "bid", "ask", "bid_qty", "ask_qty")}
+        if not _eq:
+            _push_ticks()
     except Exception:
         pass
 
@@ -1948,6 +1955,10 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1,
             _ev2.set()
 
 
+_eq_stats: Dict[str, Any] = {"socket": 0, "rest": 0, "rest_calls": 0, "ts": 0.0}
+_eq_rest_cache: Dict[str, Any] = {}
+
+
 def constituent_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     """Live quotes for a list of NSE equity symbols.
 
@@ -1963,6 +1974,52 @@ def constituent_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         return {}
     out: Dict[str, Dict[str, Any]] = {}
     syms = [f"NSE:{s.strip().upper()}-EQ" for s in symbols if s and s.strip()]
+    # Socket first. The names are subscribed once (price ticks only, no
+    # depth) and every later call is answered from the ticks they stream -
+    # zero REST calls - so the constituent widget and the Trend Engine can
+    # refresh every few seconds while using LESS of the Fyers quota than the
+    # old once-a-minute REST poll. Only names with no tick yet (the very
+    # first call, or a socket that is down) fall through to a REST quote.
+    try:
+        if _socket:
+            _subscribe([s for s in syms if s not in _subscribed])
+    except Exception:
+        pass
+    missing = []
+    with _lock:
+        for s in syms:
+            t = _ticks.get(s) or {}
+            ltp, prev = _f(t, "ltp"), _f(t, "prev_close")
+            if ltp and prev and s in _subscribed:
+                name = s.replace("NSE:", "").replace("-EQ", "")
+                vol = _f(t, "volume")
+                out[name] = {
+                    "symbol": name, "lastPrice": ltp, "previousClose": prev,
+                    "change": round(ltp - prev, 2),
+                    "pChange": round((ltp - prev) / prev * 100, 2),
+                    "totalTradedVolume": vol, "totalTradedValue": vol * ltp,
+                    "dayHigh": _f(t, "high"), "dayLow": _f(t, "low"), "open": _f(t, "open"),
+                    "_age": round(time.time() - (t.get("ts") or 0), 1),
+                }
+            else:
+                missing.append(s)
+    _eq_stats["socket"] = len(out)
+    _eq_stats["rest"] = len(missing)
+    _eq_stats["ts"] = time.time()
+    # A name the socket has not delivered is REST-quoted at most once per
+    # 30 s (the old widget poll rate) and served from that answer meanwhile,
+    # so a socket outage can never turn a frequent caller into a quota drain.
+    now_ = time.time()
+    syms = []
+    for s_ in missing:
+        nm = s_.replace("NSE:", "").replace("-EQ", "")
+        hit = _eq_rest_cache.get(nm)
+        if hit and now_ - hit[0] < 30:
+            out[nm] = hit[1]
+        else:
+            syms.append(s_)
+    if syms:
+        _eq_stats["rest_calls"] += (len(syms) + 39) // 40
     CHUNK = 40                      # keep each request comfortably small
     for i in range(0, len(syms), CHUNK):
         batch = syms[i:i + CHUNK]
@@ -1997,6 +2054,7 @@ def constituent_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
                 "dayLow": _f(v, "low_price", "l"),
                 "open": _f(v, "open_price", "o"),
             }
+            _eq_rest_cache[name] = (time.time(), out[name])
     return out
 
 

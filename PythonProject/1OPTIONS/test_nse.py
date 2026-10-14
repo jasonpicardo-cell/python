@@ -737,11 +737,79 @@ def test_boxes():
           leg.get("mins") is not None and leg["mins"] == (leg["ext_t"] - leg["start_t"]) // 60, str(leg)[:120])
 
 
+def test_constituents():
+    """Constituent score: weighted breadth, momentum window, socket-served
+    quotes (no REST once streaming), REST throttled, Trend Engine wiring."""
+    import ast as _ast, time as _t
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    fn = next((n for n in _ast.parse(ssrc).body
+               if isinstance(n, _ast.FunctionDef) and n.name == "_constituent_score"), None)
+    check("constituent score present", fn is not None)
+    if fn is None:
+        return
+    ns = {"time": _t, "_const_hist": {}}
+    exec(compile(_ast.Module(body=[fn], type_ignores=[]), "srv", "exec"), ns)
+    sc = ns["_constituent_score"]
+    rows = [{"symbol": f"S{i}", "ltp": 101.0, "open": 100.0, "pct_change": 1.0,
+             "weight_est": w, "pts_contributed": 1} for i, w in enumerate((40, 30, 20, 10))]
+    rows[3].update(ltp=99.0, pct_change=-1.0)            # 10% weight falling
+    now = _t.time()
+    r = sc("NIFTY", rows, {"index_value": 25000}, now - 400)
+    check("constituents: weighted breadth since open", abs(r["open"]["w"] - 0.8) < 1e-6 and r["open"]["adv"] == 3)
+    check("constituents: no 5-min reading without history", r["mom"] is None)
+    rows2 = [dict(x, ltp=x["ltp"] * (0.99 if i < 2 else 1.01)) for i, x in enumerate(rows)]
+    r2 = sc("NIFTY", rows2, {"index_value": 25000}, now)
+    check("constituents: 5-min breadth follows the heavyweights", r2["mom"] and r2["mom"]["w"] < -0.3
+          and r2["mom"]["pts"] < 0, str(r2.get("mom")))
+    check("constituents: score bounded", -100 <= r2["score"] <= 100 and r["score"] > 50, f'{r["score"]} {r2["score"]}')
+    # adapter: socket-served quotes cost no REST call
+    import nse_adapter_fyers as A
+    calls = []
+    class _C:
+        def quotes(self, req):
+            calls.append(req); return {"s": "ok", "d": []}
+    class _S:
+        def subscribe(self, symbols, data_type=None): pass
+    old = (A._client, A._socket, A.connect)
+    try:
+        A._client, A._socket, A.connect = _C(), _S(), (lambda *a, **k: True)
+        A._ticks["NSE:ZZTEST-EQ"] = {"ltp": 110.0, "prev_close": 100.0, "open": 105.0, "volume": 10, "ts": _t.time()}
+        A._subscribed.add("NSE:ZZTEST-EQ")
+        q = A.constituent_quotes(["ZZTEST"])
+        check("constituents: streamed name served from the socket", q.get("ZZTEST", {}).get("pChange") == 10.0 and not calls)
+        A.constituent_quotes(["ZZNEW"]); n1 = len(calls)
+        A._eq_rest_cache["ZZNEW"] = (_t.time(), {"symbol": "ZZNEW", "lastPrice": 1})
+        A.constituent_quotes(["ZZNEW"])
+        check("constituents: REST fallback at most once per 30 s", n1 == 1 and len(calls) == 1, f"{n1} {len(calls)}")
+        A._dirty.clear()
+        A._on_message({"symbol": "NSE:ZZTEST-EQ", "ltp": 111.0})
+        check("constituents: equity ticks are not pushed to browsers", "NSE:ZZTEST-EQ" not in A._dirty)
+    finally:
+        A._client, A._socket, A.connect = old
+        A._ticks.pop("NSE:ZZTEST-EQ", None); A._subscribed.discard("NSE:ZZTEST-EQ")
+    check("constituents: background refresh never scrapes NSE", "_fetch_nifty_constituents(sym, broker_only=True)" in ssrc
+          and "if broker_only:" in ssrc)
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("constituents: Trend Engine input and score strip", "add(P, 'Constituents', 3" in dsrc and "${_consBlock(t)}" in dsrc)
+
+
+def test_theme():
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    import re as _re
+    root = _re.search(r":root \{(.*?)\}", dsrc, _re.S).group(1)
+    check("dark theme: page and widget backgrounds are true black",
+          all(f"--{k}: #000000;" in root for k in ("bg", "panel", "panel-2")))
+    check("light theme: variables also on <html>", "html.light-mode, body.light-mode {" in dsrc
+          and "document.documentElement.classList.toggle('light-mode', light)" in dsrc)
+    check("light theme: dark-tuned inline colours remapped", 'body.light-mode [style*="color:#9ab;"]' in dsrc)
+    check("tab bar wraps instead of overflowing", ".tabs { display: flex; flex-wrap: wrap;" in dsrc)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

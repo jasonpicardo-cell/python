@@ -4691,6 +4691,7 @@ def _build_constituents_result(sym: str, raw_stocks: list, source: str = "nse",
             "prev_close": round(float(s.get("previousClose") or 0), 2),
             "change":     round(float(s.get("change") or 0), 2),
             "pct_change": round(pct, 2),
+            "open":       round(float(s.get("open") or 0), 2),
             "volume":     int(float(s.get("totalTradedVolume") or 0)),
             "weight_est": round(wt, 2),
             "pts_contributed": pts,
@@ -4715,14 +4716,147 @@ def _build_constituents_result(sym: str, raw_stocks: list, source: str = "nse",
                if data_quality == "pre_open" else "")
         ),
     }
+    if source == "fyers":
+        try:
+            import nse_adapter_fyers as _fy
+            data["feed"] = {"socket": _fy._eq_stats.get("socket", 0),
+                            "rest": _fy._eq_stats.get("rest", 0)}
+        except Exception:
+            pass
     _nifty_cache[sym] = {"ts": time.time(), "data": data}
     return data
+
+
+# ── CONSTITUENT SCORE for the Trend Engine ───────────────────────────
+# The index is a weighted sum of its stocks, so what the stocks are doing
+# is the most direct confirmation (or contradiction) of what the index is
+# doing. Attached to every /api/chain response for the four indices so the
+# Trend Engine has it on every PC, whichever tab is open.
+#
+# Fyers source: the constituent quotes stream on the socket (see
+# constituent_quotes), so refreshing every few seconds costs no REST calls.
+# Other sources: NSE is scraped only by the constituents widget itself; this
+# reads that cache and never adds a fetch of its own.
+_CONST_IDX = ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY")
+_const_hist: dict = {}          # sym -> [(ts, {stock: ltp})]
+_const_busy: dict = {}          # sym -> refresh thread running
+_const_last_try: dict = {}
+
+
+def _const_refresh_bg(sym: str) -> None:
+    now = time.time()
+    if _const_busy.get(sym) or now - _const_last_try.get(sym, 0) < 3:
+        return
+    _const_last_try[sym] = now
+    _const_busy[sym] = True
+
+    def _run():
+        try:
+            _fetch_nifty_constituents(sym, broker_only=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"[constituents] background refresh {sym}: {e}")
+        finally:
+            _const_busy[sym] = False
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _constituent_summary(symbol: str) -> dict | None:
+    sym = (symbol or "").upper()
+    if sym not in _CONST_IDX:
+        return None
+    c = _nifty_cache.get(sym) or {}
+    age = time.time() - c.get("ts", 0) if c else None
+    if RUN_DATA_SOURCE == "fyers" and (age is None or age > 4):
+        _const_refresh_bg(sym)
+    data = c.get("data") or {}
+    rows = [r for r in (data.get("stocks") or []) if r.get("ltp")]
+    if not rows:
+        return {"index": sym, "available": False,
+                "reason": ("loading constituent quotes" if RUN_DATA_SOURCE == "fyers"
+                           else "open the Home tab once - constituents load from NSE there")}
+    return _constituent_score(sym, rows, data, c.get("ts", 0))
+
+
+def _constituent_score(sym: str, rows: list, data: dict, ts: float) -> dict:
+    """Weighted breadth three ways - vs previous close, vs today's open, and
+    over the last ~5 minutes - folded into one -100..+100 score."""
+    FLAT = 0.02                                    # % treated as unchanged
+    tw = sum(float(r.get("weight_est") or 0) for r in rows) or 1.0
+
+    def wb(fn):
+        up = dn = 0.0
+        nu = nd = 0
+        for r in rows:
+            ch = fn(r)
+            if ch is None:
+                continue
+            w = float(r.get("weight_est") or 0) / tw
+            if ch > FLAT:
+                up += w; nu += 1
+            elif ch < -FLAT:
+                dn += w; nd += 1
+        return up - dn, nu, nd, up, dn
+
+    day_w, adv, dec, adv_w, dec_w = wb(lambda r: r.get("pct_change"))
+    opn = lambda r: ((r["ltp"] - r["open"]) / r["open"] * 100) if r.get("open") else None
+    open_w, o_adv, o_dec, _, _ = wb(opn)
+
+    # 5-minute momentum from the server's own snapshot history
+    hist = _const_hist.setdefault(sym, [])
+    if not hist or ts - hist[-1][0] >= 2:
+        hist.append((ts, {r["symbol"]: r["ltp"] for r in rows}))
+    while hist and ts - hist[0][0] > 1200:
+        hist.pop(0)
+    mom_w = mom_pts = mom_win = None
+    m_adv = m_dec = 0
+    ref = None
+    for t0, snap in hist:
+        if ts - t0 >= 300:
+            ref = (t0, snap)                     # newest snapshot >= 5 min old
+    if ref is None and hist and ts - hist[0][0] >= 120:
+        ref = hist[0]                            # warming up: use what exists
+    if ref:
+        old = ref[1]
+        mret = lambda r: ((r["ltp"] - old[r["symbol"]]) / old[r["symbol"]] * 100) if old.get(r["symbol"]) else None
+        mom_w, m_adv, m_dec, _, _ = wb(mret)
+        iv = float(data.get("index_value") or 0)
+        mom_pts = round(sum((float(r.get("weight_est") or 0) / tw) * (mret(r) or 0) / 100 * iv
+                            for r in rows), 1)
+        mom_win = int(ts - ref[0])
+
+    # heavyweights: the top five by weight, change since the open
+    heavy = sorted(rows, key=lambda r: -(r.get("weight_est") or 0))[:5]
+    hw = sum(float(r.get("weight_est") or 0) for r in heavy) or 1.0
+    heavy_open = sum(float(r.get("weight_est") or 0) * (opn(r) or 0) for r in heavy) / hw
+    heavy_dir = max(-1.0, min(1.0, heavy_open / 0.5))
+
+    parts = [(0.40, open_w), (0.20, heavy_dir), (0.15, day_w)]
+    if mom_w is not None:
+        parts.append((0.25, mom_w))
+    wsum = sum(w for w, _ in parts)
+    score = round(100 * sum(w * v for w, v in parts) / wsum)
+    return {
+        "index": sym, "available": True, "n": len(rows),
+        "age_s": round(time.time() - ts, 1) if ts else None,
+        "source": data.get("source"), "feed": data.get("feed"),
+        "weight_source": data.get("weight_source"),
+        "score": max(-100, min(100, score)),
+        "day": {"adv": adv, "dec": dec, "adv_w": round(adv_w * 100, 1),
+                "dec_w": round(dec_w * 100, 1), "w": round(day_w, 3)},
+        "open": {"adv": o_adv, "dec": o_dec, "w": round(open_w, 3)},
+        "mom": ({"adv": m_adv, "dec": m_dec, "w": round(mom_w, 3), "pts": mom_pts,
+                 "win_s": mom_win} if mom_w is not None else None),
+        "heavy": [{"s": r["symbol"], "w": r.get("weight_est"), "pct": r.get("pct_change"),
+                   "open_pct": round(opn(r), 2) if opn(r) is not None else None} for r in heavy],
+        "heavy_open_pct": round(heavy_open, 2),
+        "net_pts": round(sum(float(r.get("pts_contributed") or 0) for r in rows), 1),
+    }
 
 
 _stock_symbols_cache: dict = {"ts": 0, "symbols": []}
 
 
-def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
+def _fetch_nifty_constituents(symbol: str = "NIFTY", broker_only: bool = False) -> dict:
     """
     Fetch constituents for NIFTY, BANKNIFTY, FINNIFTY, or MIDCPNIFTY.
 
@@ -4761,7 +4895,9 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
                 if _names:
                     _q = _fy.constituent_quotes(_names)
                     if len(_q) >= max(3, len(_names) // 3):
-                        print(f"[constituents] {symbol}: {len(_q)} names from the Fyers feed")
+                        if _fy._eq_stats.get("rest"):
+                            print(f"[constituents] {symbol}: {len(_q)} names from the Fyers feed "
+                                  f"({_fy._eq_stats.get('socket', 0)} socket, {_fy._eq_stats.get('rest', 0)} REST)")
                         return _build_constituents_result(symbol, list(_q.values()),
                                                           source="fyers",
                                                           data_quality="live")
@@ -4770,6 +4906,9 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY") -> dict:
                               f"- falling through to NSE")
         except Exception as e:  # noqa: BLE001
             print(f"[constituents] fyers path failed ({e}) - falling through to NSE")
+    if broker_only:
+        # background refresh for the Trend Engine: never scrape NSE from here
+        return {}
 
     from nse_options_strategy import API_HEADERS, NSE_OC_PAGE, NSE_ALL_INDICES_API
 
@@ -5220,6 +5359,12 @@ class Handler(BaseHTTPRequestHandler):
                     data["_cache"] = meta
                 except Exception:
                     pass
+                try:
+                    cs_ = _constituent_summary(symbol)
+                    if cs_:
+                        data["constituents"] = cs_
+                except Exception as e:  # noqa: BLE001
+                    print(f"[constituents] summary failed: {e}")
                 if meta["cache"] != "miss":
                     print(f"[cache {meta['cache']}] /api/chain {symbol} age={meta['age']}s -> {client}")
                 else:

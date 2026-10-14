@@ -8,12 +8,15 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0d13;
-    --panel: #11151f;
-    --panel-2: #161b27;
-    --panel-3: #1c2230;
-    --border: #232838;
-    --border-soft: #1a1f2c;
+    /* Dark theme is true black: page and every widget background #000, with
+       structure carried by the borders. panel-3 stays a hair above black for
+       hover and selected states, which need something to show against. */
+    --bg: #000000;
+    --panel: #000000;
+    --panel-2: #000000;
+    --panel-3: #101114;
+    --border: #262a33;
+    --border-soft: #17191e;
     --text: #e8ebf2;
     --muted: #8b93a7;
     --muted-2: #5c6478;
@@ -156,7 +159,12 @@
   .ticker-meta b { color: var(--text); font-weight: 500; }
 
   /* ---------- Tabs ---------- */
-  .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+  /* wraps rather than overflowing: sixteen tabs plus the status pills and
+     buttons are wider than a 1600px window, and the overflow pushed the
+     HUD/theme buttons off-screen and made the whole page scroll sideways */
+  .tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+  @media (max-width: 1900px) { .tab { margin-right: 12px; } }
+  @media (max-width: 1500px) { .tab { margin-right: 8px; font-size: 13px; } }
   .tab {
     background: none; border: none; color: var(--muted); padding: 10px 4px; margin-right: 22px;
     font-size: 13.5px; font-weight: 500; cursor: pointer; font-family: inherit;
@@ -548,12 +556,290 @@
   .home-right { display: flex; flex-direction: column; gap: 12px; }
 
   /* ── Dark → Light mode ── */
-  body.light-mode { --bg:#f3f4f6;--panel:#ffffff;--panel-2:#f9fafb;--text:#111827;
-    --muted:#6b7280;--muted-2:#9ca3af;--border:#e5e7eb;--accent:#2563eb;
+  /* On <html> as well as <body>: html's background was still the dark --bg,
+     so any area past the body (overscroll, a page wider than the window)
+     showed a black band in light mode. */
+  html.light-mode, body.light-mode { --bg:#f3f4f6;--panel:#ffffff;--panel-2:#f9fafb;--text:#111827;
+    --muted:#4b5563;--muted-2:#6b7280;--border:#d9dce1;--accent:#2563eb;
     --pos:#059669;--neg:#dc2626;--gold:#d97706;--warm:#ea580c;
     --panel-3:#f3f4f6;--border-soft:#f0f1f3;--accent-dim:rgba(37,99,235,.12);
     --pos-dim:rgba(5,150,105,.12);--neg-dim:rgba(220,38,38,.12); }
   body.light-mode .hi { background:#e5e7eb; color:#6b7280; }
+  /* ── Light theme: colours written for a dark background ──────────────
+     Many panels are built from template strings with literal colours tuned
+     for the dark theme - pale greys and neon greens that vanish on white.
+     Map them onto the theme variables here instead of editing hundreds of
+     call sites, and turn the white-alpha tracks and dividers dark. */
+  body.light-mode [style*="color:#9ab;"],
+  body.light-mode [style*="color:#9ab\""],
+  body.light-mode [style*="color: #9ab;"],
+  body.light-mode [style*="color: #9ab\""],
+  body.light-mode [style$="color:#9ab"],
+  body.light-mode [style*="color:#9aa;"],
+  body.light-mode [style*="color:#9aa\""],
+  body.light-mode [style*="color: #9aa;"],
+  body.light-mode [style*="color: #9aa\""],
+  body.light-mode [style$="color:#9aa"],
+  body.light-mode [style*="color:#cdd;"],
+  body.light-mode [style*="color:#cdd\""],
+  body.light-mode [style*="color: #cdd;"],
+  body.light-mode [style*="color: #cdd\""],
+  body.light-mode [style$="color:#cdd"],
+  body.light-mode [style*="color:#dde;"],
+  body.light-mode [style*="color:#dde\""],
+  body.light-mode [style*="color: #dde;"],
+  body.light-mode [style*="color: #dde\""],
+  body.light-mode [style$="color:#dde"],
+  body.light-mode [style*="color:#cbd;"],
+  body.light-mode [style*="color:#cbd\""],
+  body.light-mode [style*="color: #cbd;"],
+  body.light-mode [style*="color: #cbd\""],
+  body.light-mode [style$="color:#cbd"],
+  body.light-mode [style*="color:#789;"],
+  body.light-mode [style*="color:#789\""],
+  body.light-mode [style*="color: #789;"],
+  body.light-mode [style*="color: #789\""],
+  body.light-mode [style$="color:#789"],
+  body.light-mode [style*="color:#b8c4cc;"],
+  body.light-mode [style*="color:#b8c4cc\""],
+  body.light-mode [style*="color: #b8c4cc;"],
+  body.light-mode [style*="color: #b8c4cc\""],
+  body.light-mode [style$="color:#b8c4cc"],
+  body.light-mode [style*="color:#868e96;"],
+  body.light-mode [style*="color:#868e96\""],
+  body.light-mode [style*="color: #868e96;"],
+  body.light-mode [style*="color: #868e96\""],
+  body.light-mode [style$="color:#868e96"],
+  body.light-mode [style*="color:#a9c4f7;"],
+  body.light-mode [style*="color:#a9c4f7\""],
+  body.light-mode [style*="color: #a9c4f7;"],
+  body.light-mode [style*="color: #a9c4f7\""],
+  body.light-mode [style$="color:#a9c4f7"],
+  body.light-mode [style*="color:#cfe0ff;"],
+  body.light-mode [style*="color:#cfe0ff\""],
+  body.light-mode [style*="color: #cfe0ff;"],
+  body.light-mode [style*="color: #cfe0ff\""],
+  body.light-mode [style$="color:#cfe0ff"],
+  body.light-mode [style*="color:#ccc;"],
+  body.light-mode [style*="color:#ccc\""],
+  body.light-mode [style*="color: #ccc;"],
+  body.light-mode [style*="color: #ccc\""],
+  body.light-mode [style$="color:#ccc"],
+  body.light-mode [style*="color:#bbb;"],
+  body.light-mode [style*="color:#bbb\""],
+  body.light-mode [style*="color: #bbb;"],
+  body.light-mode [style*="color: #bbb\""],
+  body.light-mode [style$="color:#bbb"],
+  body.light-mode [style*="color:#aaa;"],
+  body.light-mode [style*="color:#aaa\""],
+  body.light-mode [style*="color: #aaa;"],
+  body.light-mode [style*="color: #aaa\""],
+  body.light-mode [style$="color:#aaa"],
+  body.light-mode [style*="color:#ddd;"],
+  body.light-mode [style*="color:#ddd\""],
+  body.light-mode [style*="color: #ddd;"],
+  body.light-mode [style*="color: #ddd\""],
+  body.light-mode [style$="color:#ddd"] { color:var(--muted) !important; }
+  body.light-mode [style*="color:#51cf66;"],
+  body.light-mode [style*="color:#51cf66\""],
+  body.light-mode [style*="color: #51cf66;"],
+  body.light-mode [style*="color: #51cf66\""],
+  body.light-mode [style$="color:#51cf66"],
+  body.light-mode [style*="color:#1fc93b;"],
+  body.light-mode [style*="color:#1fc93b\""],
+  body.light-mode [style*="color: #1fc93b;"],
+  body.light-mode [style*="color: #1fc93b\""],
+  body.light-mode [style$="color:#1fc93b"],
+  body.light-mode [style*="color:#00e676;"],
+  body.light-mode [style*="color:#00e676\""],
+  body.light-mode [style*="color: #00e676;"],
+  body.light-mode [style*="color: #00e676\""],
+  body.light-mode [style$="color:#00e676"],
+  body.light-mode [style*="color:#00E676;"],
+  body.light-mode [style*="color:#00E676\""],
+  body.light-mode [style*="color: #00E676;"],
+  body.light-mode [style*="color: #00E676\""],
+  body.light-mode [style$="color:#00E676"],
+  body.light-mode [style*="color:#26de81;"],
+  body.light-mode [style*="color:#26de81\""],
+  body.light-mode [style*="color: #26de81;"],
+  body.light-mode [style*="color: #26de81\""],
+  body.light-mode [style$="color:#26de81"],
+  body.light-mode [style*="color:#6fda82;"],
+  body.light-mode [style*="color:#6fda82\""],
+  body.light-mode [style*="color: #6fda82;"],
+  body.light-mode [style*="color: #6fda82\""],
+  body.light-mode [style$="color:#6fda82"],
+  body.light-mode [style*="color:#6dc970;"],
+  body.light-mode [style*="color:#6dc970\""],
+  body.light-mode [style*="color: #6dc970;"],
+  body.light-mode [style*="color: #6dc970\""],
+  body.light-mode [style$="color:#6dc970"],
+  body.light-mode [style*="color:#a3d9a5;"],
+  body.light-mode [style*="color:#a3d9a5\""],
+  body.light-mode [style*="color: #a3d9a5;"],
+  body.light-mode [style*="color: #a3d9a5\""],
+  body.light-mode [style$="color:#a3d9a5"],
+  body.light-mode [style*="color:#A5D6A7;"],
+  body.light-mode [style*="color:#A5D6A7\""],
+  body.light-mode [style*="color: #A5D6A7;"],
+  body.light-mode [style*="color: #A5D6A7\""],
+  body.light-mode [style$="color:#A5D6A7"],
+  body.light-mode [style*="color:#26a69a;"],
+  body.light-mode [style*="color:#26a69a\""],
+  body.light-mode [style*="color: #26a69a;"],
+  body.light-mode [style*="color: #26a69a\""],
+  body.light-mode [style$="color:#26a69a"],
+  body.light-mode [style*="color:#22c55e;"],
+  body.light-mode [style*="color:#22c55e\""],
+  body.light-mode [style*="color: #22c55e;"],
+  body.light-mode [style*="color: #22c55e\""],
+  body.light-mode [style$="color:#22c55e"],
+  body.light-mode [style*="color:#7fbf9f;"],
+  body.light-mode [style*="color:#7fbf9f\""],
+  body.light-mode [style*="color: #7fbf9f;"],
+  body.light-mode [style*="color: #7fbf9f\""],
+  body.light-mode [style$="color:#7fbf9f"] { color:var(--pos) !important; }
+  body.light-mode [style*="color:#ff6b6b;"],
+  body.light-mode [style*="color:#ff6b6b\""],
+  body.light-mode [style*="color: #ff6b6b;"],
+  body.light-mode [style*="color: #ff6b6b\""],
+  body.light-mode [style$="color:#ff6b6b"],
+  body.light-mode [style*="color:#ff3c3c;"],
+  body.light-mode [style*="color:#ff3c3c\""],
+  body.light-mode [style*="color: #ff3c3c;"],
+  body.light-mode [style*="color: #ff3c3c\""],
+  body.light-mode [style$="color:#ff3c3c"],
+  body.light-mode [style*="color:#ff8080;"],
+  body.light-mode [style*="color:#ff8080\""],
+  body.light-mode [style*="color: #ff8080;"],
+  body.light-mode [style*="color: #ff8080\""],
+  body.light-mode [style$="color:#ff8080"],
+  body.light-mode [style*="color:#ef5350;"],
+  body.light-mode [style*="color:#ef5350\""],
+  body.light-mode [style*="color: #ef5350;"],
+  body.light-mode [style*="color: #ef5350\""],
+  body.light-mode [style$="color:#ef5350"],
+  body.light-mode [style*="color:#ff1744;"],
+  body.light-mode [style*="color:#ff1744\""],
+  body.light-mode [style*="color: #ff1744;"],
+  body.light-mode [style*="color: #ff1744\""],
+  body.light-mode [style$="color:#ff1744"],
+  body.light-mode [style*="color:#FF1744;"],
+  body.light-mode [style*="color:#FF1744\""],
+  body.light-mode [style*="color: #FF1744;"],
+  body.light-mode [style*="color: #FF1744\""],
+  body.light-mode [style$="color:#FF1744"],
+  body.light-mode [style*="color:#ff9090;"],
+  body.light-mode [style*="color:#ff9090\""],
+  body.light-mode [style*="color: #ff9090;"],
+  body.light-mode [style*="color: #ff9090\""],
+  body.light-mode [style$="color:#ff9090"],
+  body.light-mode [style*="color:#ffb3ba;"],
+  body.light-mode [style*="color:#ffb3ba\""],
+  body.light-mode [style*="color: #ffb3ba;"],
+  body.light-mode [style*="color: #ffb3ba\""],
+  body.light-mode [style$="color:#ffb3ba"],
+  body.light-mode [style*="color:#e08f8f;"],
+  body.light-mode [style*="color:#e08f8f\""],
+  body.light-mode [style*="color: #e08f8f;"],
+  body.light-mode [style*="color: #e08f8f\""],
+  body.light-mode [style$="color:#e08f8f"],
+  body.light-mode [style*="color:#F48FB1;"],
+  body.light-mode [style*="color:#F48FB1\""],
+  body.light-mode [style*="color: #F48FB1;"],
+  body.light-mode [style*="color: #F48FB1\""],
+  body.light-mode [style$="color:#F48FB1"] { color:var(--neg) !important; }
+  body.light-mode [style*="color:#ffb300;"],
+  body.light-mode [style*="color:#ffb300\""],
+  body.light-mode [style*="color: #ffb300;"],
+  body.light-mode [style*="color: #ffb300\""],
+  body.light-mode [style$="color:#ffb300"],
+  body.light-mode [style*="color:#ffd43b;"],
+  body.light-mode [style*="color:#ffd43b\""],
+  body.light-mode [style*="color: #ffd43b;"],
+  body.light-mode [style*="color: #ffd43b\""],
+  body.light-mode [style$="color:#ffd43b"],
+  body.light-mode [style*="color:#ffd54f;"],
+  body.light-mode [style*="color:#ffd54f\""],
+  body.light-mode [style*="color: #ffd54f;"],
+  body.light-mode [style*="color: #ffd54f\""],
+  body.light-mode [style$="color:#ffd54f"],
+  body.light-mode [style*="color:#ffa94d;"],
+  body.light-mode [style*="color:#ffa94d\""],
+  body.light-mode [style*="color: #ffa94d;"],
+  body.light-mode [style*="color: #ffa94d\""],
+  body.light-mode [style$="color:#ffa94d"],
+  body.light-mode [style*="color:#ff9f43;"],
+  body.light-mode [style*="color:#ff9f43\""],
+  body.light-mode [style*="color: #ff9f43;"],
+  body.light-mode [style*="color: #ff9f43\""],
+  body.light-mode [style$="color:#ff9f43"],
+  body.light-mode [style*="color:#d4af37;"],
+  body.light-mode [style*="color:#d4af37\""],
+  body.light-mode [style*="color: #d4af37;"],
+  body.light-mode [style*="color: #d4af37\""],
+  body.light-mode [style$="color:#d4af37"],
+  body.light-mode [style*="color:#c9b458;"],
+  body.light-mode [style*="color:#c9b458\""],
+  body.light-mode [style*="color: #c9b458;"],
+  body.light-mode [style*="color: #c9b458\""],
+  body.light-mode [style$="color:#c9b458"],
+  body.light-mode [style*="color:#eab308;"],
+  body.light-mode [style*="color:#eab308\""],
+  body.light-mode [style*="color: #eab308;"],
+  body.light-mode [style*="color: #eab308\""],
+  body.light-mode [style$="color:#eab308"],
+  body.light-mode [style*="color:#f59e0b;"],
+  body.light-mode [style*="color:#f59e0b\""],
+  body.light-mode [style*="color: #f59e0b;"],
+  body.light-mode [style*="color: #f59e0b\""],
+  body.light-mode [style$="color:#f59e0b"] { color:var(--gold) !important; }
+  body.light-mode [style*="color:#74c0fc;"],
+  body.light-mode [style*="color:#74c0fc\""],
+  body.light-mode [style*="color: #74c0fc;"],
+  body.light-mode [style*="color: #74c0fc\""],
+  body.light-mode [style$="color:#74c0fc"],
+  body.light-mode [style*="color:#7bcfff;"],
+  body.light-mode [style*="color:#7bcfff\""],
+  body.light-mode [style*="color: #7bcfff;"],
+  body.light-mode [style*="color: #7bcfff\""],
+  body.light-mode [style$="color:#7bcfff"],
+  body.light-mode [style*="color:#7aa2f7;"],
+  body.light-mode [style*="color:#7aa2f7\""],
+  body.light-mode [style*="color: #7aa2f7;"],
+  body.light-mode [style*="color: #7aa2f7\""],
+  body.light-mode [style$="color:#7aa2f7"],
+  body.light-mode [style*="color:#7099e8;"],
+  body.light-mode [style*="color:#7099e8\""],
+  body.light-mode [style*="color: #7099e8;"],
+  body.light-mode [style*="color: #7099e8\""],
+  body.light-mode [style$="color:#7099e8"],
+  body.light-mode [style*="color:#339af0;"],
+  body.light-mode [style*="color:#339af0\""],
+  body.light-mode [style*="color: #339af0;"],
+  body.light-mode [style*="color: #339af0\""],
+  body.light-mode [style$="color:#339af0"] { color:var(--accent) !important; }
+  body.light-mode [style*="background:rgba(255,255,255,0.0"],
+  body.light-mode [style*="background: rgba(255,255,255,0.0"],
+  body.light-mode [style*="background:rgba(255, 255, 255, 0.0"] { background:rgba(15,23,42,0.03) !important; }
+  body.light-mode [style*="background:rgba(255,255,255,0.06"], body.light-mode [style*="background:rgba(255,255,255,0.07"],
+  body.light-mode [style*="background:rgba(255,255,255,0.08"], body.light-mode [style*="background:rgba(255,255,255,0.09"] { background:rgba(15,23,42,0.09) !important; }
+  body.light-mode [style*="background:rgba(255,255,255,0.1"],
+  body.light-mode [style*="background:rgba(255,255,255,0.2"] { background:rgba(15,23,42,0.14) !important; }
+  body.light-mode [style*="solid rgba(255,255,255"],
+  body.light-mode [style*="solid rgba(255, 255, 255"] { border-color:rgba(15,23,42,0.12) !important; }
+  body.light-mode [stroke^="rgba(255,255,255"] { stroke:rgba(15,23,42,0.22); }
+  body.light-mode [fill^="rgba(255,255,255"] { fill:rgba(15,23,42,0.04); }
+  body.light-mode #riskPill { color:var(--gold) !important; border-color:var(--gold) !important; }
+  body.light-mode .layman-body { color:var(--muted) !important; }
+  body.light-mode .lvl-tag, body.light-mode .lvl-val { filter:brightness(0.72) saturate(1.2); }
+  body.light-mode #flowCeLabel { color:#c2410c !important; }
+  body.light-mode #flowPeLabel { color:#047857 !important; }
+  body.light-mode .strike-cell { color:var(--text) !important; }
+  body.light-mode .voloi-badge { color:#92400e; }
+  body.light-mode .lvl-tag[style*="148, 163, 184"], body.light-mode .lvl-tag { text-shadow:none; }
+
   /* ── GEX profile ── */
   .gex-flip-line { stroke:var(--gold); stroke-width:1.5; stroke-dasharray:4 3; }
   .gex-summary { display:flex; gap:14px; font-size:10px; color:var(--muted); padding:4px 0; flex-wrap:wrap; }
@@ -6523,13 +6809,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ======================================================================
   (function() {
     const saved = localStorage.getItem('nse_theme');
-    if (saved === 'light') { document.body.classList.add('light-mode'); }
+    if (saved === 'light') { document.body.classList.add('light-mode'); document.documentElement.classList.add('light-mode'); }
     const btn = document.getElementById('themeToggleBtn');
     if (btn) btn.innerHTML = (document.body.classList.contains('light-mode') ? '🌙' : '☀️') + '<i class="hi" data-h="theme-toggle">i</i>';
   })();
   document.getElementById('themeToggleBtn')?.addEventListener('click', (e) => {
     if (e.target.closest('.hi')) return;   // clicking the (i) icon shouldn't toggle theme
     const light = document.body.classList.toggle('light-mode');
+    document.documentElement.classList.toggle('light-mode', light);
     localStorage.setItem('nse_theme', light ? 'light' : 'dark');
     document.getElementById('themeToggleBtn').innerHTML = (light ? '🌙' : '☀️') + '<i class="hi" data-h="theme-toggle">i</i>';
   });
@@ -24602,6 +24889,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       } catch (_) {}
     }
 
+    // 5e. CONSTITUENTS of the index selected at the top. The index is a
+    //     weighted sum of these stocks, so their breadth is the most direct
+    //     confirmation - or contradiction - of the index move. The server
+    //     blends weighted breadth since the open, the top-5 heavyweights,
+    //     5-minute breadth and breadth vs previous close into -100..+100.
+    //     Live data, so it stands down with the rest of price action when the
+    //     chart is in replay or on an option contract.
+    const cons = d.constituents && d.constituents.available ? d.constituents : null;
+    let consStale = false;
+    if (cons && !paOff) {
+      const mkt = (() => { const g = new Date(); const i = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+                           const m = i.getHours() * 60 + i.getMinutes(); return i.getDay() > 0 && i.getDay() < 6 && m >= 555 && m <= 930; })();
+      consStale = mkt && cons.age_s != null && cons.age_s > 120;
+      if (!consStale) {
+        const mo = cons.mom;
+        const hv = (cons.heavy || []).slice(0, 3).map(h => `${h.s} ${h.open_pct >= 0 ? '+' : ''}${(h.open_pct ?? 0).toFixed(2)}%`).join(', ');
+        add(P, 'Constituents', 3, cons.score / 100,
+            `${cons.open.adv}↑/${cons.open.dec}↓ since open of ${cons.n}` +
+            (mo ? ` · ${Math.round(mo.win_s / 60)}-min ${mo.adv}↑/${mo.dec}↓ (${mo.pts >= 0 ? '+' : ''}${mo.pts} pts implied)` : '') +
+            (hv ? ` · heavy: ${hv}` : ''));
+      }
+    }
+
     // ── OPTIONS POSITIONING ────────────────────────────────────────
     // 6. fresh flow bias from the recent classified events
     try {
@@ -24762,6 +25072,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const score = Math.round(raw);
     return { score, pScore: Math.round(pScore * 100), oScore: Math.round(oScore * 100),
              agree, price: P, options: O, paOff, dayT,
+             cons: d.constituents || null, consStale,
              label: score >= 45 ? 'BULLISH' : score <= -45 ? 'BEARISH'
                   : score >= 20 ? 'MILD BULL' : score <= -20 ? 'MILD BEAR' : 'NEUTRAL' };
   }
@@ -24808,6 +25119,38 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _pushAlertHistory(`Trend ${dir} ${Math.abs(t.score)}`, d.underlying_value, t.score > 0 ? 'pos' : 'neg', sym); } catch (_) {}
   }
 
+  // Constituent score strip for the Trend Engine: the stocks of the index
+  // selected at the top, as one -100..+100 number with its three parts.
+  const _CONS_TITLE = { NIFTY: 'Nifty 50', BANKNIFTY: 'Bank Nifty', FINNIFTY: 'Fin Nifty', MIDCPNIFTY: 'Midcap Select' };
+  function _consBlock(t) {
+    const c = t?.cons;
+    if (!c) return '';
+    const name = _CONS_TITLE[c.index] || c.index;
+    if (!c.available)
+      return `<div class="oc-sub" style="padding:2px 4px;">${escapeHtml(name)} constituents: ${escapeHtml(c.reason || 'not available')}</div>`;
+    const sc = c.score;
+    const col = sc >= 30 ? 'var(--pos,#26a69a)' : sc <= -30 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+    const lab = sc >= 60 ? 'broad buying' : sc >= 30 ? 'leaning up' : sc <= -60 ? 'broad selling' : sc <= -30 ? 'leaning down' : 'mixed';
+    const sg = v => (v >= 0 ? '+' : '') + v;
+    const pctW = w => sg(Math.round(w * 100));
+    const mo = c.mom;
+    const idxUp = (t.pScore ?? 0) >= 0;
+    const clash = Math.abs(sc) >= 30 && Math.abs(t.pScore ?? 0) >= 20 && (sc > 0) !== idxUp;
+    return `<div style="border:1px solid ${col};border-radius:6px;padding:4px 6px;margin:4px;font-size:10.5px;">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline;">
+        <b style="font-size:12.5px;color:${col};">${escapeHtml(name)} constituents ${sg(sc)}</b>
+        <span style="color:${col};font-weight:700;">${lab}</span>
+        <span>since open <b>${c.open.adv}↑ ${c.open.dec}↓</b> (wt ${pctW(c.open.w)})</span>
+        ${mo ? `<span>last ${Math.round(mo.win_s / 60)} min <b>${mo.adv}↑ ${mo.dec}↓</b> (wt ${pctW(mo.w)}, ${sg(mo.pts)} pts)</span>` : '<span style="color:var(--muted);">5-min breadth after ~2 min of history</span>'}
+        <span>vs prev close ${c.day.adv}↑ ${c.day.dec}↓ · net ${sg(c.net_pts)} pts</span>
+        <span style="color:var(--muted);font-size:9.5px;">${c.n} names · ${escapeHtml(c.source || '')}${c.feed ? ` · ${c.feed.socket} streamed` : ''}${c.age_s != null ? ` · ${c.age_s}s old` : ''}</span>
+      </div>
+      <div style="color:var(--muted);font-size:9.5px;margin-top:2px;">heavyweights since open: ${(c.heavy || []).map(h => `${escapeHtml(h.s)} <span style="color:${(h.open_pct || 0) >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${(h.open_pct ?? 0) >= 0 ? '+' : ''}${(h.open_pct ?? 0).toFixed(2)}%</span> (${(+h.w || 0).toFixed(1)}%)`).join(' · ')}</div>
+      ${t.consStale ? `<div style="color:var(--gold,#d4af37);font-weight:700;">constituent quotes are ${c.age_s}s old — left out of the score</div>` : ''}
+      ${clash ? `<div style="color:var(--gold,#d4af37);font-weight:700;">Constituents disagree with the index price action — the move is narrow or about to turn; trust it less.</div>` : ''}
+    </div>`;
+  }
+
   function renderTrendPanel(t) {
     const box = document.getElementById('trendBody');
     if (!box) return;
@@ -24837,6 +25180,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         ${t.need ? `<span style="font-size:10px;color:var(--muted);">announces at ±${t.need}${t.need > 45 ? ' (raised on a range day)' : ''}, held 30 s</span>` : ''}
       </div>
       ${t.dayT ? `<div style="padding:2px 4px;">${_dayTypeBadge(t.dayT)}</div>` : ''}
+      ${_consBlock(t)}
       ${t.paOff ? `<div style="padding:3px 4px;font-size:10.5px;color:var(--gold,#d4af37);font-weight:700;">Price action off: ${escapeHtml(t.paOff)}. Options alone cannot clear the agreement rule, so nothing is announced.</div>` : ''}
       <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">Price action</div>${rows(t.price) || '<span class="oc-sub">waiting for candles</span>'}
       <div style="font-size:10px;font-weight:700;margin:5px 4px 2px;">Options positioning</div>${rows(t.options) || '<span class="oc-sub">waiting for chain data</span>'}
@@ -29749,7 +30093,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const above = lastC.spot >= lastC.flip;
     box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
         ${line('spot', '#fff')}${line('flip', 'var(--gold,#d4af37)', '4,3')}
-        <text x="${W - padR + 3}" y="${(y(lastC.spot) + 3).toFixed(1)}" style="font-size:9px;fill:#fff;">spot</text>
+        <text x="${W - padR + 3}" y="${(y(lastC.spot) + 3).toFixed(1)}" style="font-size:9px;fill:var(--text);">spot</text>
         <text x="${W - padR + 3}" y="${(y(lastC.flip) + 3).toFixed(1)}" style="font-size:9px;fill:var(--gold,#d4af37);">flip</text>
       </svg>
       <div style="font-size:9.5px;color:#9ab;padding:2px 4px;">Spot (white) against the gamma flip level (gold) through the session. Spot is currently <b style="color:${above ? 'var(--pos)' : 'var(--neg)'};">${above ? 'ABOVE' : 'BELOW'}</b> the flip at ${fmtInt(Math.round(lastC.flip))} — ${above ? 'positive-gamma regime: dealer hedging leans against moves, so dips get bought and ranges hold' : 'negative-gamma regime: hedging chases price, so moves extend and volatility feeds itself'}. Watch whether price is chasing the flip or the flip is chasing price: the latter means positioning is being rebuilt around the new level.</div>`;
@@ -35879,7 +36223,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'pcr-bands':         '<strong>PCR by horizon</strong>One put-call ratio hides which strikes produced it. Computed over the whole chain it includes strikes price cannot reach this week - that open interest is positional and barely moves intraday, so it dilutes a genuine shift near the money into something that looks like nothing happened. The bands here are defined in <b>sigma</b> - the expected move - rather than in strike counts, and that distinction matters more than it sounds. Nifty uses 50-point steps near the money and 100-point steps further out, so a fixed count like \'±12 strikes\' covers ±600 points in one part of the chain and ±1200 in another: the band silently changes meaning depending on where the money is. A fixed count also means different risk on different instruments, because BankNifty\'s higher volatility needs a wider net for the same reachability. Measuring in sigma removes both problems - each band self-adjusts to strike spacing, to the instrument and to today\'s volatility, and the strike COUNT becomes an output worth reading rather than a number to guess at. On a quiet Nifty day the rest-of-day band might be ±111 points and five strikes; on a high-volatility day the same band widens to ±195 points and seven. <b>The divergence between the near and wide bands is the actionable part:</b> when they disagree, positioning is shifting where price actually is, and the wide ratio will not reflect it for some time. The three columns are the same ratio computed on open interest, traded volume, and CHANGE in open interest - and ΔOI is the most immediate of the three, because it counts only what was added or removed today rather than the standing book. <b>Only the ±3 band is announced.</b> The wider ones move slowly by design, so alerting on them would mostly report the passage of time; the near band is the one that can change what you do in the next few minutes. Rising PCR means puts building relative to calls, which is support being written and conventionally bullish - but above 1.6 or below 0.6 the reading inverts and is called out as contrarian, because when everyone is positioned one way there is nobody left to push it further.',
     'premium-shock':     '<strong>Premium Shock — gamma × vega</strong>The condition that makes option premium move violently, and the one a premium SELLER most needs warning of. Two forces <b>multiply</b> rather than add. <b>Gamma concentration</b> measures how much gamma-weighted open interest sits within two strikes of spot: gamma goes to infinity at the money as time runs out, so on expiry day a single ATM strike can carry more gamma than the rest of the chain combined, and when spot sits on that pile delta reprices with every tick. <b>IV velocity</b> is the rate implied volatility is rising, not its level - rising IV reprices the whole surface at once, so premium moves even when spot does not. Either alone is manageable; together, delta runs away while vega lifts the base, and an at-the-money straddle that cost 150 can be worth 260 inside a few minutes. The panel makes this concrete rather than abstract by repricing the ATM straddle for a 1%% move plus 2 IV points and showing the rupee result. <b>The framing is deliberately asymmetric:</b> for a buyer this is the payoff condition, but for a seller it is the blowup condition, and short gamma near expiry is where accounts actually die. If you are short premium and this reads high, the honest response is to reduce size rather than widen a stop - gamma risk does not respect stops, because the loss accelerates faster than price moves.',
     'aggressor':         '<strong>Aggressor Flow</strong>The closest honest approximation of order-flow analysis on NSE data. Full-depth order books are a broker-feed product, but the chain already carries bid and ask per strike, and <b>where the last trade sat between them</b> tells you who was the aggressor: a print at the ask is a buyer lifting the offer, a print at the bid is a seller hitting it. Someone paying the spread is expressing urgency, and urgency is what precedes movement - which is why this <b>leads the open-interest figure</b>, since OI only updates after the exchange processes the position change. Aggressive call buying and aggressive put selling are both bullish reads; the reverse is bearish. It feeds the Trend Engine at weight 3. <b>Honest limits, and they matter:</b> this is one snapshot per refresh rather than a tape, so it cannot see order size, cancellations or iceberg orders. Strikes whose bid-ask spread exceeds 15%% of the premium are excluded rather than guessed at, because "traded at the ask" means nothing on an illiquid contract - the panel reports how many were skipped for that reason. A genuine tick-by-tick order-flow read, of the kind commercial platforms sell as full-depth analytics, needs Level 2 data from a broker feed; this gets you most of the directional signal without it.',
-    'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP bands read by day type — stretched on a range day leans back to VWAP, riding the band on a trend day leans with it — the day type itself, momentum, position in the day range, acceptance outside the previous-day range, the opening range, the Heikin Ashi trend state, and move quality — whether the current leg looks real or likely to reverse) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
+    'trend-engine':      '<strong>Trend Engine</strong>Fuses the two families of evidence you actually trade on into one directional call: <b>price action</b> (market structure, EMA 9/21 alignment, VWAP bands read by day type — stretched on a range day leans back to VWAP, riding the band on a trend day leans with it — the day type itself, momentum, position in the day range, acceptance outside the previous-day range, the opening range, the Heikin Ashi trend state, move quality — whether the current leg looks real or likely to reverse — and the <b>constituents</b> of the index selected at the top: weighted breadth since the open, over the last five minutes and against the previous close, plus the five heaviest stocks, scored −100 to +100 and shown in its own strip; on the Fyers feed the constituent quotes stream on the socket, so this costs no extra API calls) and <b>option positioning</b> (classified fresh flow, PCR level and its volume counterpart, gamma regime, wall proximity, VIX direction, and the OI regime signal). <b>The design decision that matters is the agreement rule.</b> A signal is only announced when both families point the same way and the score clears your threshold, because price-action-only signals whipsaw in chop while options-only signals are early but frequently wrong about timing. Demanding agreement costs a few points of entry and removes most false starts, which is the right trade for a scalper: a whipsawed scalp costs more than a late one. Turn the rule off and you will hear more signals, most of them worse. Every input is listed with its weight and current reading, so the score is auditable rather than a black box. <b>Weights are judgement, not fitted.</b> They have not been optimised on history, and treating the number as precise would be a mistake - use it to confirm what you already see on the chart, not as a reason to trade something you do not. When price and options disagree the panel says so explicitly and stays silent, which is itself information: it usually means positioning has shifted before price has, or price is moving on something the option chain does not know about yet.',
     'leading-signals':   '<strong>Leading signals</strong>Five conditions that change before price does, because each is <b>mechanical rather than predictive</b>. None of them forecasts direction; what they mark is a moment when a move becomes more likely or more violent, which is a claim that can actually be defended. <b>Gamma flip cross</b> is the strongest of them: dealer hedging literally reverses sign at that level, from damping moves to amplifying them, so crossing it changes the character of the tape as arithmetic rather than opinion. <b>Wall abandonment</b> fires when writers pull open interest out of a level while price approaches it - the defence stops before the break, not after, which is why it leads. <b>Straddle expansion on a flat tape</b> means the market is paying up for a move that has not happened yet. <b>Volume-PCR divergence</b> catches today\'s conviction pulling away from the standing book, visible well before open interest reflects it. <b>Regime flips</b> - WTT, WTB, bull run, bloodbath - were already being computed on the OI Flow tab but never announced, so they only helped if you happened to be looking at that panel. <b>Honest limits:</b> each of these can fire and be followed by nothing. They identify conditions, not outcomes, and the wall and straddle detectors in particular will fire on ordinary repositioning in a quiet market - raise their thresholds if that happens. Everything here routes through the same voice, index filter and Enable-All controls as the rest.',
     'price-ma-cross':    '<strong>Price crossing an EMA or VWAP</strong>Distinct from the EMA crossover alerts above, which watch one average crossing ANOTHER. This watches <b>price</b> crossing a moving average - the more common scalping trigger, and the one you actually see happening on the chart. It covers EMA 5, 10, 15, 20, 50, 100 and 200 plus VWAP, announcing only the ones you have switched on for the chart, so the alert set follows what you are looking at rather than a separate list you have to remember to keep in sync. <b>Two rules make it usable rather than maddening.</b> <b>Close only:</b> price wanders across a nearby average constantly inside a bar, so alerting on the forming candle produces a stream of reversals that all undo themselves - waiting for the close costs one interval and removes nearly all of it. <b>Minimum clearance:</b> a close half a point past an EMA is not a crossing, it is noise, so the bar must close clear of the line by a set share of price. The spoken alert names whether the average is short-term, intermediate or trend-defining, because a close through EMA 5 and a close through EMA 200 mean very different things and the number alone does not make that obvious by ear. <b>Honest note:</b> on a 1-minute chart with EMA 5 switched on, this will fire often - that is the nature of a fast average, not a fault. Raise the clearance or switch the fast EMAs off the chart if it chatters.',
     'ema-cross':         '<strong>EMA crossover alerts</strong>Announces when a faster EMA crosses a slower one on the live chart - 5/20 and 9/21 for intraday triggers, 20/50 for a trend shift, 50/200 for the golden and death cross. Crossovers are computed on <b>whatever interval and instrument the chart is showing</b>, so switching the chart to 5-minute or to a CE contract moves the alerts with it. <b>Confirm on candle close</b> (recommended, on by default) waits for the bar to finish before announcing: the forming candle wiggles across the EMA repeatedly during its interval, so alerting on it produces a burst of contradictory signals that mostly reverse. Waiting costs you one interval of lateness and removes nearly all the false positives. <b>Min separation</b> ignores a cross where the two lines are closer together than that percentage of price - a hairline touch is not a trend change, and this is what stops a flat market generating a stream of meaningless crosses. Each pair fires once per direction per candle, and crossings are logged below and pushed into the alert history with the rest. Like the other alert TYPE filters, these boxes are bypassed while <b>Enable ALL alert types</b> is ticked - every pair then announces and the controls dim, with your selection preserved for when you untick it. The per-index filter still applies on top, as always.',
