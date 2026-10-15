@@ -552,15 +552,27 @@ def _m920_detect(symbol: str, data: dict):
         })
 
 # ── candle helpers shared by every client ─────────────────────────────
+def _sess_bucket(ts, mins: int) -> int:
+    """Start of the N-minute bucket holding ts, counted from 09:15 IST.
+
+    Epoch alignment only happens to put 09:15 on a boundary for 1, 3, 5 and
+    15 minutes (09:15 IST is 13,500 s into the UTC day); 2- and 10-minute bars
+    would start at 09:14 and 09:10. Anchoring on the session open is right for
+    every interval and identical to the old result for the four that worked."""
+    step = int(mins) * 60
+    ts = int(ts)
+    anchor = (ts + 19800) // 86400 * 86400 - 19800 + 555 * 60
+    return anchor + (ts - anchor) // step * step
+
+
 def _aggregate_candles(rows, interval: int):
-    """Build N-minute candles from 1-minute ones (buckets aligned to the epoch,
-    which puts 09:15 IST on a boundary for 3, 5 and 15 minutes)."""
+    """Build N-minute candles from 1-minute ones, buckets aligned to 09:15 IST."""
     if not rows or interval <= 1:
         return rows or []
     step = interval * 60
     out, cur = [], None
     for cd in rows:
-        b = int(cd["t"]) // step * step
+        b = _sess_bucket(cd["t"], interval)
         if cur is None or cur["t"] != b:
             if cur:
                 out.append(cur)
@@ -2552,6 +2564,178 @@ def _write_replay_snapshot(symbol: str, response: dict) -> None:
             f.write(json.dumps(slim, separators=(",", ":")) + "\n")
     except Exception as e:  # noqa: BLE001
         print(f"[!] Replay snapshot write failed (non-fatal): {e}")
+
+# ── CONTEXT-PANE HISTORY (PCR now / 1-day, VIX, ATM IV, straddle, skew) ──
+# The chart's context pane used to be built only from what each browser had
+# seen since it opened: a server restart, a refresh on another PC, or a
+# switch of index started every line from nothing. The server now records the
+# same series itself - every 10 s per index, from the chain it is already
+# serving, so no extra broker calls - to ctx/<SYM>_<date>.jsonl, and backfills
+# a day from the 1-minute replay archive when the file is missing. Browsers
+# merge it into their own history on load, so the lines survive restarts.
+# The arithmetic mirrors the dashboard's _recordCtx / _pcrByBand exactly.
+_CTX_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "ctx")
+_ctx_mem: dict = {}            # (sym, day) -> list of points
+_ctx_last: dict = {}           # sym -> last record time
+_ctx_lock = threading.Lock()
+_ctx_backfilling: set = set()
+
+
+def _ctx_point(d: dict, ts: float):
+    try:
+        st = d.get("strikes") or []
+        spot = float(d.get("underlying_value") or 0)
+        if not st or not spot:
+            return None
+        gap = float(d.get("strike_gap") or 50)
+        atm_row = min(st, key=lambda r: abs(float(r.get("strike") or 0) - spot))
+        atm = float(atm_row.get("strike") or 0)
+        g = time.gmtime(ts + 19800)
+        mins_left = max(5, (15 * 60 + 40) - (g.tm_hour * 60 + g.tm_min))
+        dte = max(1 / 1440, float(d.get("dte") if d.get("dte") is not None else 1))
+        ivf = float(d.get("atm_iv") or 12) / 100
+        sig = lambda days: spot * ivf * (max(1 / 1440, days) / 365) ** 0.5
+
+        def band(days):
+            w = max(gap, sig(days))
+            sel = [r for r in st if abs(float(r.get("strike") or 0) - atm) <= w]
+            if len(sel) < 3:
+                return None
+            ce = sum(float(r.get("ce_oi") or 0) for r in sel)
+            pe = sum(float(r.get("pe_oi") or 0) for r in sel)
+            return round(pe / ce, 4) if ce else None
+        pcr = band(mins_left / 375)
+        if pcr is None:
+            pcr = d.get("pcr")
+        pcr1d = band(1)
+        sv = (atm_row.get("ce_ltp") or 0) + (atm_row.get("pe_ltp") or 0)
+        straddle = round(float(sv), 2) if sv > 0 else None
+
+        def near(k):
+            for r in st:
+                if abs(float(r.get("strike") or 0) - k) < gap / 2:
+                    return r
+            return None
+        p, c = near(spot - gap * 4), near(spot + gap * 4)
+        skew = (round(float(p["pe_iv"]) - float(c["ce_iv"]), 3)
+                if p and c and p.get("pe_iv") and c.get("ce_iv") else None)
+        vix = d.get("india_vix")
+        iv = d.get("atm_iv")
+        if pcr is None and vix is None and iv is None and straddle is None:
+            return None
+        return {"ts": int(ts), "spot": round(spot, 2), "pcr": pcr, "pcr1d": pcr1d,
+                "vix": vix, "iv": iv, "straddle": straddle, "skew": skew}
+    except Exception:
+        return None
+
+
+def _ctx_day() -> str:
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() + 19800))
+
+
+def _ctx_load(sym: str, day: str) -> list:
+    key = (sym, day)
+    with _ctx_lock:
+        if key in _ctx_mem:
+            return _ctx_mem[key]
+    pts = []
+    path = _os.path.join(_CTX_DIR, f"{sym}_{day}.jsonl")
+    try:
+        if _os.path.exists(path):
+            with open(path) as f:
+                for line in f:
+                    try:
+                        pts.append(json.loads(line))
+                    except Exception:
+                        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[ctx] read {path}: {e}")
+    pts.sort(key=lambda x: x.get("ts", 0))
+    with _ctx_lock:
+        _ctx_mem.setdefault(key, pts)
+        out = _ctx_mem[key]
+    # nothing recorded yet today (first run of this version, or a fresh
+    # folder): rebuild what the replay archive holds, in the background
+    if not out:
+        _ctx_backfill_bg(sym, day)
+    return out
+
+
+def _ctx_backfill_bg(sym: str, day: str) -> None:
+    if (sym, day) in _ctx_backfilling:
+        return
+    rp = _os.path.join(_REPLAY_DIR, f"{sym}_{day}.jsonl")
+    if not _os.path.exists(rp):
+        return
+    _ctx_backfilling.add((sym, day))
+
+    def _run():
+        got = []
+        try:
+            with open(rp) as f:
+                for line in f:
+                    try:
+                        snap = json.loads(line)
+                    except Exception:
+                        continue
+                    if snap.get("_source") in ("fyers", "arrow") and snap.get("oi_unit") != "contracts":
+                        pass                  # PCR is a ratio: units cancel
+                    pt = _ctx_point(snap, float(snap.get("_replay_ts") or 0))
+                    if pt and pt["ts"]:
+                        pt["src"] = "replay"
+                        got.append(pt)
+        except Exception as e:  # noqa: BLE001
+            print(f"[ctx] backfill {sym} {day}: {e}")
+        if got:
+            with _ctx_lock:
+                cur = _ctx_mem.setdefault((sym, day), [])
+                have = {p["ts"] // 60 for p in cur}
+                add = [p for p in got if p["ts"] // 60 not in have]
+                cur.extend(add)
+                cur.sort(key=lambda x: x.get("ts", 0))
+            try:
+                _os.makedirs(_CTX_DIR, exist_ok=True)
+                with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.jsonl"), "a") as f:
+                    for p in add:
+                        f.write(json.dumps(p, separators=(",", ":")) + "\n")
+            except Exception as e:  # noqa: BLE001
+                print(f"[ctx] backfill write: {e}")
+            print(f"[ctx] {sym} {day}: rebuilt {len(add)} point(s) from the replay archive")
+        _ctx_backfilling.discard((sym, day))
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _ctx_record(sym: str, d: dict) -> None:
+    """One point every 10 s per index, session hours only, default expiry."""
+    now = time.time()
+    if now - _ctx_last.get(sym, 0) < 10:
+        return
+    g = time.gmtime(now + 19800)
+    if g.tm_wday >= 5 or not (555 <= g.tm_hour * 60 + g.tm_min <= 931):
+        return
+    _ctx_last[sym] = now
+    pt = _ctx_point(d, now)
+    if not pt:
+        return
+    day = _ctx_day()
+    pts = _ctx_load(sym, day)
+    with _ctx_lock:
+        pts.append(pt)
+        if len(pts) > 6000:
+            del pts[:len(pts) - 6000]
+    try:
+        _os.makedirs(_CTX_DIR, exist_ok=True)
+        with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.jsonl"), "a") as f:
+            f.write(json.dumps(pt, separators=(",", ":")) + "\n")
+    except Exception as e:  # noqa: BLE001
+        print(f"[ctx] write: {e}")
+
+
+def _ctx_history(sym: str, since: float = 0) -> list:
+    pts = _ctx_load(sym, _ctx_day())
+    with _ctx_lock:
+        return [p for p in pts if p.get("ts", 0) > since]
+
 
 # ── one-time units migration of the replay archive ──────────────────────
 # Broker snapshots were recorded with OI / OI change / volume in SHARES while
@@ -5375,6 +5559,11 @@ class Handler(BaseHTTPRequestHandler):
                     data["_cache"] = meta
                 except Exception:
                     pass
+                if not expiry:
+                    try:
+                        _ctx_record(symbol.upper(), data)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[ctx] record failed: {e}")
                 try:
                     cs_ = _constituent_summary(symbol)
                     if cs_:
@@ -5980,6 +6169,17 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(rep)
             return
 
+        if parsed.path == "/api/ctx-history":
+            sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+            try:
+                since = float(qs.get("since", ["0"])[0] or 0)
+            except ValueError:
+                since = 0.0
+            pts = _ctx_history(sym_, since)
+            self._send_json({"symbol": sym_, "day": _ctx_day(), "points": pts,
+                             "backfilling": (sym_, _ctx_day()) in _ctx_backfilling})
+            return
+
         if parsed.path == "/api/intraday-candles":
             # Intraday OHLC candles for the chart widget.
             # Source 1: NSE chart-databyindex (live intraday data for indices);
@@ -6006,7 +6206,9 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     import nse_adapter_fyers as _fyh
                     print(f"[history] {symbol} {on_date} interval={interval}m requested")
-                    rows = _fyh.fetch_candles(symbol, interval, 1, on_date=on_date)
+                    # one 1-minute series per date, aggregated here: any
+                    # interval (2m, 10m) and one cached call for all of them
+                    rows = _aggregate_candles(_fyh.fetch_candles(symbol, 1, 1, on_date=on_date), interval)
                     print(f"[history] {symbol} {on_date}: returned {len(rows)} candle(s)")
                 except Exception as e:  # noqa: BLE001
                     self._send_json({"candles": [], "error": f"history fetch failed: {e}"})
@@ -6039,7 +6241,7 @@ class Handler(BaseHTTPRequestHandler):
             def _bucket(ticks, mins):
                 out, cur = [], None
                 for ts, px in sorted(ticks):
-                    b = int(ts // (mins * 60)) * (mins * 60)
+                    b = _sess_bucket(ts, mins)
                     if cur is None or cur["t"] != b:
                         if cur:
                             out.append(cur)
@@ -6931,7 +7133,7 @@ class Handler(BaseHTTPRequestHandler):
                 ois = [(t, v) for t, v in ois if _in_session(_ist_min(t))]
                 out, cur = [], None
                 for ts, px in sorted(ticks):
-                    b = int(ts // (interval * 60)) * (interval * 60)
+                    b = _sess_bucket(ts, interval)
                     if cur is None or cur["t"] != b:
                         if cur:
                             out.append(cur)
@@ -6959,7 +7161,7 @@ class Handler(BaseHTTPRequestHandler):
                 oi_series = []
                 seen = set()
                 for ts, v in sorted(ois):
-                    b = int(ts // (interval * 60)) * (interval * 60)
+                    b = _sess_bucket(ts, interval)
                     if b in seen:
                         oi_series[-1] = {"t": b, "oi": v}
                     else:

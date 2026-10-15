@@ -841,6 +841,10 @@
   body.light-mode .lvl-tag[style*="148, 163, 184"], body.light-mode .lvl-tag { text-shadow:none; }
 
 
+
+  /* ── chart interval: the selected one must be obvious ── */
+  .chart-iv.active { background:var(--accent) !important; border-color:var(--accent) !important; color:#fff !important; font-weight:700; box-shadow:0 0 0 1px var(--accent); }
+  .chart-iv:not(.active):hover { border-color:var(--accent); }
   /* ── scalp entry flash ── */
   .scalp-flash { position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:9999; min-width:380px; max-width:92vw;
     padding:10px 14px; border-radius:10px; color:#fff; background:var(--sf); border:2px solid #fff;
@@ -2174,8 +2178,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               </span>
               <span style="display:flex;gap:3px;">
                 <button class="btn chart-iv active" data-iv="1" style="font-size:9px;padding:2px 8px;">1m</button>
+                <button class="btn chart-iv" data-iv="2" style="font-size:9px;padding:2px 8px;">2m</button>
                 <button class="btn chart-iv" data-iv="3" style="font-size:9px;padding:2px 8px;">3m</button>
                 <button class="btn chart-iv" data-iv="5" style="font-size:9px;padding:2px 8px;">5m</button>
+                <button class="btn chart-iv" data-iv="10" style="font-size:9px;padding:2px 8px;">10m</button>
                 <button class="btn chart-iv" data-iv="15" style="font-size:9px;padding:2px 8px;">15m</button>
               </span>
               <span style="display:flex;gap:7px;flex-wrap:wrap;font-size:9px;color:var(--muted,#789);">
@@ -21478,47 +21484,104 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const sigExp = spot * ivFb * Math.sqrt(T);
     const sigDay = spot * (vix > 0 ? vix / 100 : ivFb) / Math.sqrt(252);
 
-    // BUY side: target delta, then within +-0.1 of it the strike with the
-    // best 15-minute edge = what a 1-sigma move earns minus decay minus cost
-    let bT = 0.55;
-    if (expiryDay) bT = 0.65;
-    else if (vix >= 18) bT = 0.65;
-    else if (vix > 0 && vix < 11 && dte >= 2) bT = 0.50;
-    const buyInfo = g => {
-      if (!g) return null;
-      const dec15 = Math.abs(g.theta) * 15 / 375;
-      const gain = Math.abs(g.delta) * sig15 + 0.5 * g.gamma * sig15 * sig15;
-      // edge per unit of delta = edge in index points: risk is sized in
-      // index points (the stop), so a higher-delta strike is not better just
-      // because it moves more rupees - it is traded in fewer lots
-      const ad = Math.max(0.05, Math.abs(g.delta));
-      return { ...g, dec15, gain15: gain, edge15: (gain - dec15 - (g.costU || 0)) / ad,
-               be15: Math.abs(g.delta) > 0 ? dec15 / Math.abs(g.delta) : null };
-    };
-    const pickBuy = typ => {
-      const c = near(typ, bT).filter(g => liquid(g) && Math.abs(Math.abs(g.delta) - bT) <= 0.10).map(buyInfo);
-      c.sort((a, b) => b.edge15 - a.edge15);
-      const fresh = c[0] || buyInfo(near(typ, bT).find(liquid) || null);
-      const old = _pickMem[`${memKey}|B${typ}`] ? buyInfo(all[typ].find(g => g.K === _pickMem[`${memKey}|B${typ}`])) : null;
-      const out = _pickHold('B' + typ, fresh, old, bT, liquid);
-      if (out) _pickMem[`${memKey}|B${typ}`] = out.K;
-      return out;
-    };
-    const buyCE = pickBuy('CE'), buyPE = pickBuy('PE');
+    // ── DAILY MOVE, REGIME and the capture each setup is built for ──────
+    // Daily move (1 sigma) = spot x vol / sqrt(252): India VIX for Nifty (it
+    // IS Nifty's 30-day implied vol), this expiry's ATM IV for the others,
+    // which have no VIX of their own.
+    //   trend day  -> capture at least 30% of it (T1), stretch to 70% (T2),
+    //                 held ~60 min, half booked at T1 and the rest trailed
+    //   range day  -> capture at least 34% (T1), stretch to 40% (T2), ~30 min
+    // e.g. Nifty +-350 on a trend day -> T1 105 / T2 245; +-150 on a range
+    // day -> T1 51 / T2 60. T2 is capped by what the session has left of its
+    // expected RANGE (1.6 D; 2.5 D once trending).
+    const symU = String(sym || '').toUpperCase();
+    const useVix = symU === 'NIFTY' && vix > 0;
+    const volD = useVix ? vix / 100 : ivFb;
+    const D = spot * volD / Math.sqrt(252);
+    const Dsrc = useVix ? `India VIX ${vix.toFixed(1)}` : `ATM IV ${(ivFb * 100).toFixed(1)}`;
+    // D is CLOSE-TO-CLOSE. The high-to-low range of a session is larger by
+    // nature - about 1.6 x for a random walk - so a 1-sigma day spans ~1.6 D
+    // from low to high. Comparing a day's range with D itself made a normal
+    // day look exhausted and capped the targets just as moves got going.
+    const ER = 1.6 * D;
+    let dayT = null, rng = null;
+    try {
+      const hist = typeof _isHistorical === 'function' && _isHistorical();
+      const csR = (!_chart.optionMeta && !hist) ? (_chart.candles || []) : [];
+      dayT = csR.length ? _dayType(csR) : null;
+      if (csR.length >= 5) {
+        const hi = Math.max(...csR.map(c => c.h)), lo = Math.min(...csR.map(c => c.l));
+        const net = csR[csR.length - 1].c - csR[0].o;
+        let path = 0; for (let i = 1; i < csR.length; i++) path += Math.abs(csR[i].c - csR[i - 1].c);
+        // efficiency: how much of the range is one-way travel (1 = straight
+        // line, ~0.3 or less = chop)
+        rng = { hi, lo, range: hi - lo, net, eff: hi > lo ? Math.abs(net) / (hi - lo) : 0,
+                pathEff: path > 0 ? Math.abs(net) / path : 0 };
+      }
+    } catch (_) {}
+    const tl = window._trendLast && Date.now() - window._trendLast.at < 120000 ? window._trendLast : null;
+    // RANGE EXPANSION upgrades the day to a trend, whatever the opening read
+    // said: a session that has already travelled a full sigma, mostly one
+    // way, is trending - including the day that chopped across VWAP early and
+    // rallied in the afternoon, which the 09:45 day-type read calls a range.
+    const expanded = !!rng && rng.range >= 1.0 * D && rng.eff >= 0.6;
+    const trending = dayT?.kind === 'trend' || (tl && Math.abs(tl.score) >= 45) || expanded;
+    const regime = trending ? 'trend' : 'range';
+    const trendWhy = dayT?.kind === 'trend' ? 'trend day (held one side of VWAP)'
+                   : expanded ? `range expansion: ${Math.round(rng.range)} pts, ${Math.round(rng.eff * 100)}% one-way`
+                   : tl && Math.abs(tl.score) >= 45 ? `Trend Engine ${tl.score > 0 ? '+' : ''}${tl.score}` : '';
+    const trendDir = !trending ? 0
+      : (dayT?.kind === 'trend' ? dayT.dir : expanded ? Math.sign(rng.net) : Math.sign(tl?.score || 0)) || bias;
+    const FR = { trend: [cfg.trendMin ?? 0.30, cfg.trendMax ?? 0.70], range: [cfg.rangeMin ?? 0.34, cfg.rangeMax ?? 0.40] }[regime];
+    // room left: against the expected RANGE (1.6 D), or 2.5 D on a trend day,
+    // since trend days are the ones that run past their pricing
+    const used = rng ? rng.range : null;
+    const roomCap = (trending ? 2.5 : 1.6) * D;
+    const roomLeft = used != null ? Math.max(0, roomCap - used) : null;
+    const T1 = Math.round(FR[0] * D);
+    const T2raw = Math.round(FR[1] * D);
+    const T2 = Math.round(Math.max(T1, roomLeft != null ? Math.min(T2raw, roomLeft) : T2raw));
+    const H = trending ? 60 : 30;                          // minutes the move is given
 
-    // SELL-scalp side: fading a push into a wall wants a strike that RESPONDS -
-    // near the money (delta ~0.40), so the premium collapses when price
-    // reverts. A delta-0.15 strike barely moves in a scalp.
-    const fT = expiryDay ? 0.45 : 0.40;
-    const pickFade = typ => {
-      const fresh = near(typ, fT).find(g => liquid(g) && (typ === 'CE' ? g.K > spot : g.K < spot)) || null;
-      const k0 = _pickMem[`${memKey}|S${typ}`];
-      const old = k0 ? all[typ].find(g => g.K === k0) : null;
-      const out = _pickHold('S' + typ, fresh, old && (typ === 'CE' ? old.K > spot : old.K < spot) ? old : null, fT, liquid);
-      if (out) _pickMem[`${memKey}|S${typ}`] = out.K;
+    // Reprice each strike for a move with Black-Scholes on its own IV,
+    // applied as a CHANGE to the market premium (smile and quote kept), with
+    // the clock advanced by the hold. dir = the index direction the trade
+    // wants: a CE buy and a PE sell both want +1.
+    const TH = _volT(Math.max(1 / 1440, dte - H / 375));
+    const TS = _volT(Math.max(1 / 1440, dte - H / 3 / 375));
+    const model = (g, S2, Tx) => bsPriceCalc(S2, g.K, Tx, g.iv / 100, RISK_FREE, g.typ);
+    const planFor = (g, side, dir, mv, stp, mv2) => {
+      if (!g || !(g.ltp > 0)) return null;
+      const base = model(g, Sx, T);
+      if (!isFinite(base)) return null;
+      const at = (dS, Tx) => Math.max(0.05, g.ltp + (model(g, Sx + dS, Tx) - base));
+      const entry = side === 'BUY' ? (g.ask || g.ltp) : (g.bid || g.ltp);
+      const c = g.costU || 0;
+      const full = at(dir * mv, TH), half = at(dir * mv / 2, TH), stop = at(-dir * stp, TS);
+      const full2 = mv2 ? at(dir * mv2, TH) : null;
+      const rew = v => side === 'BUY' ? v - entry - c : entry - v - c;
+      const risk = side === 'BUY' ? entry - stop + c : stop - entry + c;
+      if (!(risk > 0)) return null;
+      const rFull = rew(full) / risk, rHalf = rew(half) / risk;
+      return { entry, full, half, stop, full2, risk, rFull, rHalf, r2: full2 != null ? rew(full2) / risk : null,
+               score: 0.5 * rFull + 0.5 * rHalf, gainU: rew(full), gain2U: full2 != null ? rew(full2) : null };
+    };
+    // strike choice for a given move: eligible deltas, best score, and the
+    // previous pick held unless the new one is better by 0.25R
+    const choose = (slot, side, typ, dir, mv, stp, mv2) => {
+      const lo = side === 'BUY' ? (expiryDay ? 0.45 : 0.35) : 0.20;
+      const hi = side === 'BUY' ? (expiryDay ? 0.85 : 0.80) : 0.55;
+      const ok = g => liquid(g) && Math.abs(g.delta) >= lo && Math.abs(g.delta) <= hi;
+      const c = all[typ].filter(ok).map(g => ({ ...g, plan: planFor(g, side, dir, mv, stp, mv2) }))
+        .filter(x => x.plan).sort((a, b) => b.plan.score - a.plan.score);
+      const best = c[0] || null;
+      const k0 = _pickMem[`${memKey}|${slot}`];
+      const old = k0 != null ? c.find(x => x.K === k0) : null;
+      const out = old && best && best.plan.score <= old.plan.score + 0.25 ? old : best;
+      if (out) _pickMem[`${memKey}|${slot}`] = out.K;
       return out;
     };
-    const fadeCE = pickFade('CE'), fadePE = pickFade('PE');
+    const bT = expiryDay || vix >= 18 ? 0.65 : 0.55, fT = 0.40;
 
     // positional theta sell (kept as one line): ~1 sigma, delta 0.10-0.20,
     // at or beyond the OI wall when that still pays
@@ -21547,33 +21610,35 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const posPE = posSell('PE', Math.max(0.07, sT + (bias > 0 ? tilt : bias < 0 ? -tilt : 0)), wallBelow);
 
     return { spot, F, dte, expiryDay, vix, aiv: aiv * 100, ivVsVix, rv, bias, biasWhy, stance, buyPts, sellPts, why,
-             sig15, sigExp, sigDay, bT, fT, sT, minPrem, lot, buyCE, buyPE, fadeCE, fadePE, posCE, posPE,
-             wallAbove, wallBelow, flip: gex?.flip || null, aboveFlip, istMin, sym };
+             sig15, sigExp, sigDay, bT, fT, sT, minPrem, lot, posCE, posPE,
+             wallAbove, wallBelow, flip: gex?.flip || null, aboveFlip, istMin, sym,
+             D, Dsrc, ER, rng, regime, trendDir, trendWhy, dayT, T1, T2, T2raw, H, FR, roomLeft, roomCap, choose, planFor };
   }
 
-  // ══ SCALP ENTRY CONDITIONS ═══════════════════════════════════════
-  // Two setups, the two a scalper actually trades:
-  //   BUY  = pullback WITH the read: the flow is one way, price has come back
-  //          to value (VWAP / fast EMA) instead of running away, the premium
-  //          is not already being paid up, and there is room to the next wall
-  //          for at least 1.5R after costs.
-  //   SELL = fade INTO a wall AGAINST a stretched push: price tags the OI
-  //          wall or the +-1.5 sigma VWAP band on a day that is not trending
-  //          that way, the premium has been paid up into it, and VWAP is far
-  //          enough back for 1.5R. Stop just through the wall.
-  // MUSTs gate the alert; the soft checks must score at least 3 of 6. The
-  // alert fires only after the setup has held for two consecutive reads.
+  // ══ SCALP / SWING ENTRY CONDITIONS ═══════════════════════════════
+  // Two directions x two expressions. For each direction the index might
+  // go, there is a BUY (the option that gains: CE up, PE down) and a SELL
+  // (the option that loses: PE up, CE down). Which one is PREFERRED comes
+  // from the Greeks and vol: cheap options / dealers amplifying / tape
+  // outrunning IV favour buying; rich premium / dealers damping / decay
+  // favour selling - plus whichever strike scores more R for the move.
+  //
+  //   TREND day : trade only WITH the trend, enter on the pullback that
+  //               holds above value, target T1 (>=30% of the daily move),
+  //               book half there and trail the rest toward T2 (70%).
+  //   RANGE day : trade from the EDGE back toward value - at the OI wall or
+  //               a +-1.5 sigma stretch - target T1 (>=34%), T2 (40%).
+  // MUSTs gate the alert; 3 of 6 supporting checks must also pass; the
+  // setup must hold for two reads; one alert per direction (the preferred).
   function _scalpSetups(d, p) {
     if (!p) return [];
     const spot = p.spot, s15 = p.sig15;
     const hist = typeof _isHistorical === 'function' && _isHistorical();
     const cs = (!_chart.optionMeta && !hist) ? (_chart.candles || []) : [];
     const done = _chart.liveBar ? cs.slice(0, -1) : cs;
-    let vw = null, vsd = null, ema9 = null, dayT = null, budget = null;
+    let vw = null, vsd = null, ema9 = null;
     try { if (cs.length >= 10) { const vb = _vwapBands(cs); vw = vb.vw[vb.vw.length - 1]; vsd = vb.sd[vb.sd.length - 1]; } } catch (_) {}
     try { if (cs.length >= 12) { const e = _emaSeries(cs.map(c => c.c), 9); ema9 = e[e.length - 1]; } } catch (_) {}
-    try { dayT = _dayType(cs); } catch (_) {}
-    try { budget = _sessionBudget(d); } catch (_) {}
     const z = vw != null && vsd > 0 ? (spot - vw) / vsd : null;
     const swing = done.slice(-6);
     const swLo = swing.length ? Math.min(...swing.map(c => c.l)) : null;
@@ -21585,105 +21650,112 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const cons = d.constituents?.available ? d.constituents.score : null;
     const futTk = d.flow?.futures?.near; const futBuy = futTk && futTk.b15 + futTk.s15 > 0 ? futTk.b15 / (futTk.b15 + futTk.s15) : null;
     const buf = 0.1 * s15;
-    const out = [];
+    const trend = p.regime === 'trend';
     const legOf = g => { try { const bk = _depthFor(d, g.K, g.typ); return _deskLeg(d, { k: g.K, delta: g.delta, target: 'pk', book: _bookOf(bk) }, g.typ) || {}; } catch (_) { return {}; } };
-    const prem = (g, spotMove) => Math.max(0.05, g.ltp + g.delta * spotMove + 0.5 * g.gamma * spotMove * spotMove);
-    const lotsFor = (riskPerUnit) => p.lot && riskPerUnit > 0 ? Math.max(1, Math.floor((_scalpCfg().riskRs || 3000) / (riskPerUnit * p.lot))) : 1;
+    const lotsFor = r => p.lot && r > 0 ? Math.max(1, Math.floor((_scalpCfg().riskRs || 3000) / (r * p.lot))) : 1;
+    const out = [];
 
-    const mk = (side, g) => {
-      if (!g) return null;
-      const L = legOf(g);
-      const up = g.typ === 'CE';               // CE gains when spot rises
-      const dir = side === 'BUY' ? (up ? 1 : -1) : (up ? -1 : 1);   // index direction the trade wants
-      const checks = [];
-      const must = (name, ok, txt) => checks.push({ name, ok: !!ok, must: true, txt });
-      const soft = (name, ok, txt) => checks.push({ name, ok: !!ok, must: false, txt });
-      let stopSpot, targetSpot;
-      if (side === 'BUY') {
-        must('read', p.bias === dir, p.bias === dir ? p.biasWhy : `needs a ${dir > 0 ? 'bullish' : 'bearish'} read (${p.biasWhy})`);
+    for (const dir of [1, -1]) {
+      // ── where to enter, where it is wrong, how far it should go ──
+      const base = [];
+      const must = (arr, name, ok, txt) => arr.push({ name, ok: !!ok, must: true, txt });
+      const soft = (arr, name, ok, txt) => arr.push({ name, ok: !!ok, must: false, txt });
+      let stopD, tgtD = p.T1, tgt2 = p.T2;
+      if (trend) {
+        must(base, 'with the trend', p.trendDir === dir, p.trendDir === dir ? `trend day ${dir > 0 ? 'up' : 'down'}` : `trend is ${p.trendDir > 0 ? 'up' : p.trendDir < 0 ? 'down' : 'unclear'} — no counter-trend trades`);
+        must(base, 'read', p.bias !== -dir, p.bias === -dir ? `read is against it (${p.biasWhy})` : p.biasWhy);
         const zz = z == null ? null : z * dir;
         const ext = ema9 != null ? (spot - ema9) * dir : null;
-        must('at value', zz != null && zz >= -0.5 && zz <= 1.2 && (ext == null || ext <= 0.6 * s15),
-             zz == null ? 'needs index candles on the chart' : `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ from VWAP${ext != null ? `, ${Math.round(Math.abs(spot - ema9))} pts from EMA9` : ''}${zz > 1.2 || (ext != null && ext > 0.6 * s15) ? ' — stretched, wait for a pullback' : ''}`);
-        must('not chasing', L.excess5 == null || L.excess5 <= Math.max(0.5, g.ltp * 0.01),
-             L.excess5 == null ? 'premium vs delta: no 5-min history yet' : `premium ${L.excess5 >= 0 ? '+' : ''}${L.excess5.toFixed(1)} vs delta in 5 min${L.excess5 > Math.max(0.5, g.ltp * 0.01) ? ' — already paid up' : ''}`);
-        const wall = dir > 0 ? p.wallAbove : p.wallBelow;
+        const okV = zz != null && zz >= -0.5 && zz <= 1.8 && (ext == null || ext <= 0.6 * s15);
+        must(base, 'pullback entry', okV, zz == null ? 'needs index candles on the chart'
+          : `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ from VWAP${ext != null ? `, ${Math.round(Math.abs(spot - ema9))} pts from EMA9` : ''}${okV ? '' : zz > 1.8 || (ext != null && ext > 0.6 * s15) ? ' — extended, wait for the pullback' : ' — back through value, trend failing'}`);
         const lvl = dir > 0 ? Math.min(...[swLo, vw].filter(v => v != null)) : Math.max(...[swHi, vw].filter(v => v != null));
-        let stopD = isFinite(lvl) ? Math.abs(spot - lvl) + buf : 0.8 * s15;
-        stopD = Math.max(0.5 * s15, Math.min(1.5 * s15, stopD));
-        stopSpot = spot - dir * stopD;
-        // a scalp target must be reachable inside the hold: at most 1.5 sigma
-        // of 15 minutes, and short of the wall that will absorb the move
-        const tgtD = wall ? Math.min(Math.abs(wall - spot) - buf, 1.5 * s15) : 1.5 * s15;
-        targetSpot = spot + dir * Math.max(0, tgtD);
+        stopD = isFinite(lvl) ? Math.abs(spot - lvl) + buf : 0.35 * p.T1;
+        stopD = Math.max(0.5 * s15, Math.min(Math.max(1.5 * s15, 0.45 * p.T1), stopD));
       } else {
-        must('read', p.bias !== -dir, p.bias === -dir ? `read is ${p.biasWhy} — do not fade it` : `no read against the fade (${p.biasWhy})`);
-        const wall = dir < 0 ? p.wallAbove : p.wallBelow;           // fading up-moves at the call wall
-        const atWall = wall != null && (dir < 0 ? (wall - spot) <= 0.35 * s15 && spot - wall <= 0.2 * s15
-                                                : (spot - wall) <= 0.35 * s15 && wall - spot <= 0.2 * s15);
-        const zs = z == null ? null : -z * dir;                      // stretch toward the wall
-        const trendWith = dayT?.kind === 'trend' && dayT.dir === -dir;
-        must('at the wall', atWall || (zs != null && zs >= 1.5 && !trendWith),
-             atWall ? `spot ${Math.round(Math.abs(spot - wall))} pts from the ${dir < 0 ? 'call' : 'put'} wall ${fmtInt(wall)}`
-                    : zs != null && zs >= 1.5 ? (trendWith ? 'stretched, but it is a trend day that way — no fade' : `${z.toFixed(1)}σ from VWAP — stretched`)
-                    : `waiting for spot to reach ${wall ? (dir < 0 ? 'call' : 'put') + ' wall ' + fmtInt(wall) : 'the ±1.5σ band'}`);
-        const rich = (L.excess5 != null && L.excess5 > 0) || (L.div15 != null && L.div15 > 0.2) || (L.buy15 != null && L.buy15 >= 0.6);
-        must('premium paid up', rich, rich ? [L.excess5 > 0 ? `premium +${L.excess5.toFixed(1)} vs delta` : '', L.div15 > 0.2 ? `IV +${L.div15.toFixed(1)}` : '', L.buy15 >= 0.6 ? `takers ${Math.round(L.buy15 * 100)}% buy` : ''].filter(Boolean).join(', ') : 'premium not stretched — nothing to sell into');
-        const ref = dir < 0 ? Math.max(...[swHi, wall].filter(v => v != null)) : Math.min(...[swLo, wall].filter(v => v != null));
-        let stopD = isFinite(ref) ? Math.abs(ref - spot) + 0.3 * s15 : 0.8 * s15;
-        stopD = Math.max(0.5 * s15, Math.min(1.2 * s15, stopD));
-        stopSpot = spot - dir * stopD;
-        const tgtD = vw != null ? Math.min(Math.abs(spot - vw), 1.5 * s15) : 1.2 * s15;
-        targetSpot = spot + dir * Math.max(0, tgtD);
+        must(base, 'read', p.bias !== -dir, p.bias === -dir ? `read is against it (${p.biasWhy})` : p.biasWhy);
+        const wall = dir > 0 ? p.wallBelow : p.wallAbove;            // buy up from the put wall, down from the call wall
+        const atWall = wall != null && (dir > 0 ? (spot - wall) <= 0.35 * s15 && wall - spot <= 0.2 * s15
+                                                : (wall - spot) <= 0.35 * s15 && spot - wall <= 0.2 * s15);
+        const zs = z == null ? null : -z * dir;                     // stretch AWAY from where the trade goes
+        must(base, 'at the range edge', atWall || (zs != null && zs >= 1.5),
+             atWall ? `spot ${Math.round(Math.abs(spot - wall))} pts from the ${dir > 0 ? 'put' : 'call'} wall ${fmtInt(wall)}`
+                    : zs != null && zs >= 1.5 ? `${z.toFixed(1)}σ from VWAP — stretched`
+                    : `waiting for the ${dir > 0 ? 'lower' : 'upper'} edge (${wall ? (dir > 0 ? 'put' : 'call') + ' wall ' + fmtInt(wall) : '±1.5σ band'})`);
+        const ref = dir > 0 ? Math.min(...[swLo, wall].filter(v => v != null)) : Math.max(...[swHi, wall].filter(v => v != null));
+        stopD = isFinite(ref) ? Math.abs(spot - ref) + 0.3 * s15 : 0.6 * p.T1;
+        stopD = Math.max(0.5 * s15, Math.min(Math.max(1.2 * s15, 0.6 * p.T1), stopD));
+        soft(base, 'value beyond T1', vw == null || (vw - spot) * dir >= 0.8 * p.T1,
+             vw == null ? '—' : `VWAP ${Math.round(Math.abs(spot - vw))} pts ${(vw - spot) * dir >= 0 ? 'ahead' : 'behind'}`);
       }
-      // plan in premium, both legs priced off delta and gamma
-      const mvT = targetSpot - spot, mvS = stopSpot - spot;
-      const entry = side === 'BUY' ? (g.ask || g.ltp) : (g.bid || g.ltp);
-      const tP = prem(g, mvT), sP = prem(g, mvS);
-      const costU = g.costU || 0;
-      const reward = side === 'BUY' ? tP - entry - costU : entry - tP - costU;
-      const risk = side === 'BUY' ? entry - sP + costU : sP - entry + costU;
-      const rr = risk > 0 ? reward / risk : null;
-      must('room ≥1.5R', rr != null && rr >= 1.5, rr == null ? '—' : `${rr.toFixed(1)}R after costs (target ${fmtInt(Math.round(targetSpot))}, stop ${fmtInt(Math.round(stopSpot))})`);
-      must('cheap to trade', g.costPts != null && g.costPts <= 0.35 * s15, g.costPts == null ? '—' : `round trip ${g.costPts.toFixed(1)} pts vs 15-min move ${s15.toFixed(0)}`);
-      must('time', timeOk, timeOk ? (lull ? 'midday lull' : 'ok') : (m < 565 ? 'opening 10 minutes — spreads and fakes' : 'after 15:15'));
-      if (side === 'BUY') {
-        const tk = L.buy15 != null ? L.buy15 : null;
-        soft('takers with you', (tk != null && tk >= 0.55) || (futBuy != null && (futBuy - 0.5) * dir >= 0.05),
-             tk != null ? `strike takers ${Math.round(tk * 100)}% buy` : futBuy != null ? `FUT takers ${Math.round(futBuy * 100)}% buy` : 'no flow yet');
-        soft('tape moving', p.rv != null && p.aiv > 0 && p.rv >= 0.8 * p.aiv, p.rv != null ? `realised ${p.rv.toFixed(1)} vs IV ${p.aiv.toFixed(1)}` : 'needs 15 candles');
-        soft('day not spent', budget ? budget.spent < 1.0 : true, budget ? `${Math.round(budget.spent * 100)}% of the day's move used` : '—');
-        soft('dealers amplify', p.aboveFlip === false, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — moves get damped' : 'below flip');
-        soft('not the lull', !lull, lull ? '11:45–13:15 lull — moves stall' : 'active hours');
-        soft('breadth / day type', (cons != null && cons * dir >= 30) || (dayT?.kind === 'trend' && dayT.dir === dir),
-             cons != null ? `constituents ${cons >= 0 ? '+' : ''}${cons}` : dayT?.kind ? `${dayT.kind} day` : '—');
-      } else {
-        soft('dealers damp', p.aboveFlip === true, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — ranges hold' : 'below flip — moves extend');
-        soft('premium rich', p.stance === 'sell' || (p.ivVsVix != null && p.ivVsVix >= 1), `stance ${p.stance}${p.ivVsVix != null ? `, IV/VIX ${p.ivVsVix.toFixed(2)}` : ''}`);
-        soft('day spent', budget ? budget.spent >= 0.8 : false, budget ? `${Math.round(budget.spent * 100)}% of the day's move used` : '—');
-        const bk = L.bookCheck, br = _bookOf(_depthFor(d, g.K, g.typ))?.ratio;
-        soft('offers stacked', br != null && br <= 0.8, br != null ? `book ${br.toFixed(2)}× bid/offer` : 'no book');
-        soft('push fading', lastUp != null && (dir < 0 ? !lastUp : lastUp), lastUp == null ? '—' : 'last candle ' + (lastUp ? 'up' : 'down'));
-        soft('breadth not with the push', cons == null || cons * -dir < 30, cons != null ? `constituents ${cons >= 0 ? '+' : ''}${cons}` : '—');
+      must(base, 'time', timeOk, timeOk ? (lull ? 'midday lull' : 'ok') : (m < 565 ? 'opening 10 minutes — spreads and fakes' : 'after 15:15'));
+      soft(base, 'room left today', p.roomLeft == null || p.roomLeft >= p.T1,
+           p.roomLeft == null ? '—' : `≈${Math.round(p.roomLeft)} pts of the day's move left`);
+      soft(base, 'not the lull', !lull, lull ? '11:45–13:15 lull — moves stall' : 'active hours');
+
+      // ── the two expressions for this direction ──
+      for (const side of ['BUY', 'SELL']) {
+        const typ = side === 'BUY' ? (dir > 0 ? 'CE' : 'PE') : (dir > 0 ? 'PE' : 'CE');
+        const g = p.choose(`${side}${typ}`, side, typ, dir, tgtD, stopD, tgt2);
+        if (!g) continue;
+        const pl = g.plan, L = legOf(g);
+        const checks = base.map(c => ({ ...c }));
+        const mustS = (n, ok, t) => checks.push({ name: n, ok: !!ok, must: true, txt: t });
+        const softS = (n, ok, t) => checks.push({ name: n, ok: !!ok, must: false, txt: t });
+        if (side === 'BUY') {
+          mustS('not chasing', L.excess5 == null || L.excess5 <= Math.max(0.5, g.ltp * 0.01),
+                L.excess5 == null ? 'premium vs delta: no 5-min history yet' : `premium ${L.excess5 >= 0 ? '+' : ''}${L.excess5.toFixed(1)} vs delta in 5 min${L.excess5 > Math.max(0.5, g.ltp * 0.01) ? ' — already paid up' : ''}`);
+          softS('takers with you', (L.buy15 != null && L.buy15 >= 0.55) || (futBuy != null && (futBuy - 0.5) * dir >= 0.05),
+                L.buy15 != null ? `strike takers ${Math.round(L.buy15 * 100)}% buy` : futBuy != null ? `FUT takers ${Math.round(futBuy * 100)}% buy` : 'no flow yet');
+          softS('options cheap / tape moving', p.stance === 'buy' || (p.rv != null && p.aiv > 0 && p.rv >= 0.8 * p.aiv),
+                `stance ${p.stance}${p.rv != null ? `, realised ${p.rv.toFixed(1)} vs IV ${p.aiv.toFixed(1)}` : ''}`);
+        } else {
+          const rich = (L.excess5 != null && L.excess5 > 0) || (L.div15 != null && L.div15 > 0.2) || (L.buy15 != null && L.buy15 >= 0.6);
+          mustS('premium paid up', rich, rich ? [L.excess5 > 0 ? `premium +${L.excess5.toFixed(1)} vs delta` : '', L.div15 > 0.2 ? `IV +${L.div15.toFixed(1)}` : '', L.buy15 >= 0.6 ? `takers ${Math.round(L.buy15 * 100)}% buy` : ''].filter(Boolean).join(', ') : 'premium not stretched — nothing to sell into');
+          softS('premium rich', p.stance === 'sell' || (p.ivVsVix != null && p.ivVsVix >= 1), `stance ${p.stance}${p.ivVsVix != null ? `, IV/VIX ${p.ivVsVix.toFixed(2)}` : ''}`);
+          const br = _bookOf(_depthFor(d, g.K, g.typ))?.ratio;
+          softS('offers stacked', br != null && br <= 0.8, br != null ? `book ${br.toFixed(2)}× bid/offer` : 'no book');
+        }
+        if (trend) {
+          softS('dealers amplify', p.aboveFlip === false, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — moves get damped' : 'below flip — moves extend');
+          softS('breadth with it', cons != null && cons * dir >= 30, cons != null ? `constituents ${cons >= 0 ? '+' : ''}${cons}` : '—');
+        } else {
+          softS('dealers damp', p.aboveFlip === true, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — ranges hold' : 'below flip — moves extend');
+          softS('push fading', lastUp != null && (dir > 0 ? lastUp : !lastUp), lastUp == null ? '—' : 'last candle ' + (lastUp ? 'up' : 'down'));
+        }
+        mustS('≥1.5R at T1', pl.rFull >= 1.5,
+              `${pl.rFull.toFixed(1)}R at T1 ${p.T1} pts${pl.r2 != null ? ` · ${pl.r2.toFixed(1)}R at T2 ${p.T2}` : ''} · stop ${Math.round(stopD)} pts`);
+        mustS('cheap to trade', g.costPts != null && g.costPts <= 0.12 * p.T1,
+              g.costPts == null ? '—' : `round trip ${g.costPts.toFixed(1)} pts vs T1 ${p.T1}`);
+        const musts = checks.filter(c => c.must), softs = checks.filter(c => !c.must);
+        const mOk = musts.filter(c => c.ok).length, sOk = softs.filter(c => c.ok).length;
+        const pref = pl.score + (p.stance === (side === 'BUY' ? 'buy' : 'sell') ? 0.3 : 0);
+        out.push({
+          id: `${p.sym}|${side}|${g.typ}|${g.K}`, side, typ: g.typ, K: g.K, g, dir, regime: p.regime, checks,
+          mOk, mN: musts.length, sOk, sN: softs.length, ready: mOk === musts.length && sOk >= 3,
+          entry: pl.entry, stopPrem: pl.stop, targetPrem: pl.full, target2Prem: pl.full2,
+          stopSpot: spot - dir * stopD, targetSpot: spot + dir * tgtD, target2Spot: spot + dir * tgt2,
+          T1: tgtD, T2: tgt2, rr: pl.rFull, r2: pl.r2, gainU: pl.gainU, gain2U: pl.gain2U,
+          lots: lotsFor(Math.max(0.05, pl.risk)), prefScore: pref, hold: p.H,
+          missing: musts.filter(c => !c.ok).map(c => c.txt),
+        });
       }
-      const musts = checks.filter(c => c.must), softs = checks.filter(c => !c.must);
-      const mOk = musts.filter(c => c.ok).length, sOk = softs.filter(c => c.ok).length;
-      const ready = mOk === musts.length && sOk >= 3;
-      const riskPerUnit = Math.max(0.05, risk);
-      return { id: `${p.sym}|${side}|${g.typ}|${g.K}`, side, typ: g.typ, K: g.K, g, checks, mOk, mN: musts.length, sOk, sN: softs.length, ready,
-               entry, stopPrem: sP, targetPrem: tP, stopSpot, targetSpot, rr, lots: lotsFor(riskPerUnit), missing: musts.filter(c => !c.ok).map(c => c.txt) };
-    };
-    for (const [side, g] of [['BUY', p.buyCE], ['BUY', p.buyPE], ['SELL', p.fadeCE], ['SELL', p.fadePE]]) {
-      const s = mk(side, g); if (s) out.push(s);
+    }
+    // preferred expression per direction
+    for (const dir of [1, -1]) {
+      const two = out.filter(s => s.dir === dir);
+      if (!two.length) continue;
+      const best = two.reduce((a, b) => (b.ready && !a.ready) || (b.ready === a.ready && b.prefScore > a.prefScore) ? b : a);
+      for (const s of two) s.preferred = s === best;
     }
     return out;
   }
 
   // ══ ENTRY ALERTS + OUTCOME LOG ═══════════════════════════════════
   // The alert does not promise a profit; the log measures one. Every alert
-  // is recorded with its entry, stop and target premium and followed on the
-  // live chain until it hits the target, the stop, or 20 minutes pass, net of
-  // costs. After a couple of weeks that is the honest answer to "does this
+  // is recorded with its entry, stop and targets and followed on the live
+  // chain until T2, the stop (the trail once T1 is in), or the hold runs out,
+  // net of costs. After a couple of weeks that is the honest answer to "does this
   // make money", per setup - and the setups that do not can be switched off.
   const _SE_KEY = 'scalpEntryLogV1', _SE_CFG = 'scalpAlertCfgV1';
   const _seState = { hold: {}, fired: {}, banner: null };
@@ -21696,20 +21768,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const now = Date.now();
     for (const e of log) {
       if (e.res) continue;
-      if (now - e.t > 40 * 60000) { e.res = 'untracked'; ch = true; continue; }   // never seen again (other expiry / index)
+      const holdMs = ((e.hold || 20) + 10) * 60000;
+      if (now - e.t > holdMs + 20 * 60000) { e.res = 'untracked'; ch = true; continue; }   // never seen again
       if (e.sym !== (d.symbol || state.symbol) || e.exp !== (d.expiry || '')) continue;
       const r = (d.strikes || []).find(x => Math.round(x.strike) === e.K);
       const px = r ? +r[(e.typ === 'CE' ? 'ce' : 'pe') + '_ltp'] : 0;
       if (!(px > 0)) continue;
-      e.hi = Math.max(e.hi ?? px, px); e.lo = Math.min(e.lo ?? px, px);
       const buy = e.side === 'BUY';
+      // best and worst premium seen, from the trader's side
+      e.best = buy ? Math.max(e.best ?? px, px) : Math.min(e.best ?? px, px);
       let res = null;
-      if (buy ? px >= e.tgt : px <= e.tgt) res = 'target';
-      else if (buy ? px <= e.stop : px >= e.stop) res = 'stop';
-      else if (now - e.t > 20 * 60000) res = 'time';
+      if (e.tgt2 != null && (buy ? px >= e.tgt2 : px <= e.tgt2)) res = 'T2';
+      else if (buy ? px >= e.tgt : px <= e.tgt) { if (!e.t1At) { e.t1At = now; ch = true; } }
+      if (!res && (buy ? px <= e.stop : px >= e.stop)) res = e.t1At ? 'T1' : 'stop';  // after T1 the stop is the trail
+      if (!res && now - e.t > holdMs) res = e.t1At ? 'T1' : 'time';
       if (res) {
+        // T1 then trailed: half booked at T1, half at the exit (or T2)
+        const c = e.costU || 0;
+        const at = v => (buy ? v - e.entry : e.entry - v) - c;
+        let per;
+        if (res === 'T2') per = 0.5 * at(e.tgt) + 0.5 * at(e.tgt2);
+        else if (res === 'T1') per = 0.5 * at(e.tgt) + 0.5 * Math.max(at(px), at(e.entry));
+        else per = at(px);
         e.res = res; e.exit = px; e.tEnd = now;
-        const per = (buy ? px - e.entry : e.entry - px) - (e.costU || 0);
         e.pnlLot = per * (e.lot || 1);
         e.R = e.riskU > 0 ? per / e.riskU : null;
         ch = true;
@@ -21720,15 +21801,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _seStats(log, sym) {
     const done = log.filter(e => e.res && e.res !== 'untracked' && (!sym || e.sym === sym));
-    const by = k => done.filter(e => e.side === k);
     const st = a => {
       if (!a.length) return null;
-      const w = a.filter(e => e.res === 'target').length, l = a.filter(e => e.res === 'stop').length;
+      const w = a.filter(e => e.res === 'T1' || e.res === 'T2' || e.res === 'target').length;
+      const l = a.filter(e => e.res === 'stop').length;
       const exp = a.reduce((s, e) => s + (e.pnlLot || 0), 0) / a.length;
       const r = a.filter(e => e.R != null); const avgR = r.length ? r.reduce((s, e) => s + e.R, 0) / r.length : null;
       return { n: a.length, w, l, t: a.length - w - l, exp, avgR };
     };
-    return { all: st(done), buy: st(by('BUY')), sell: st(by('SELL')), open: log.filter(e => !e.res && (!sym || e.sym === sym)).length };
+    const f = fn => st(done.filter(fn));
+    return { all: st(done), buy: f(e => e.side === 'BUY'), sell: f(e => e.side === 'SELL'),
+             trend: f(e => e.regime === 'trend'), range: f(e => e.regime === 'range'),
+             open: log.filter(e => !e.res && (!sym || e.sym === sym)).length };
   }
 
   function _seEvaluate(d, setups) {
@@ -21736,18 +21820,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const { m, wd } = _istNowMin();
     const live = wd > 0 && wd < 6 && m >= 555 && m <= 930 && !(typeof _isHistorical === 'function' && _isHistorical());
     const now = Date.now();
-    for (const s of setups) {
-      const allowed = cfg.on && live && (s.side === 'BUY' ? cfg.buy : cfg.sell);
-      if (!s.ready || !allowed) { delete _seState.hold[s.id]; continue; }
-      const h = _seState.hold[s.id] || (_seState.hold[s.id] = { since: now, n: 0, last: 0 });
+    for (const dir of [1, -1]) {
+      // one alert per direction: the preferred expression if it is ready,
+      // else the other one if that is
+      const cands = setups.filter(s => s.dir === dir && s.ready && cfg.on && live && (s.side === 'BUY' ? cfg.buy : cfg.sell))
+        .sort((a, b) => (b.preferred ? 1 : 0) - (a.preferred ? 1 : 0));
+      const ids = new Set(cands.map(s => s.id));
+      for (const k of Object.keys(_seState.hold)) if (_seState.hold[k].dir === dir && !ids.has(k)) delete _seState.hold[k];
+      const s = cands[0];
+      if (!s) continue;
+      const h = _seState.hold[s.id] || (_seState.hold[s.id] = { since: now, n: 0, last: 0, dir });
       if (now - h.last >= 4000) { h.n++; h.last = now; }
-      if (h.n < 2) continue;                                   // must hold for two reads
-      const f = _seState.fired[s.id];
-      if (f && now - f < 180000) continue;                     // 3-minute cooldown per strike
-      _seState.fired[s.id] = now;
+      if (h.n < 2) continue;                                    // must hold for two reads
+      const fk = `${s.id.split('|')[0]}|${dir}`;
+      const f = _seState.fired[fk];
+      if (f && now - f < 300000) continue;                      // 5-minute cooldown per direction
+      _seState.fired[fk] = now;
       _seFire(d, s, cfg);
     }
-    // a showing banner whose setup has lapsed is marked, not silently left up
     const b = _seState.banner;
     if (b && !setups.find(s => s.id === b.id && s.ready)) _seBannerLapsed(b.id);
   }
@@ -21755,21 +21845,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _seFire(d, s, cfg) {
     const lot = +d.lot_size || 1;
     const e = { t: Date.now(), sym: d.symbol || state.symbol, exp: d.expiry || '', side: s.side, typ: s.typ, K: s.K,
+                regime: s.regime, dir: s.dir, hold: s.hold, T1: s.T1, T2: s.T2,
                 entry: +s.entry.toFixed(2), stop: +s.stopPrem.toFixed(2), tgt: +s.targetPrem.toFixed(2),
+                tgt2: s.target2Prem != null && s.T2 > s.T1 ? +s.target2Prem.toFixed(2) : null,
                 costU: s.g.costU || 0, lot, lots: s.lots, rr: s.rr,
                 riskU: Math.abs(s.entry - s.stopPrem) + (s.g.costU || 0), spot: d.underlying_value };
     const log = _seLog(); log.push(e); _seSave(log);
-    const verb = s.side === 'BUY' ? 'BUY' : 'SELL';
-    const txt = `${verb} ${fmtInt(s.K)} ${s.typ} at ${s.entry.toFixed(1)}. Stop ${s.stopPrem.toFixed(1)}, target ${s.targetPrem.toFixed(1)}, ${s.rr.toFixed(1)} R`;
+    const txt = `${s.side} ${fmtInt(s.K)} ${s.typ} at ${s.entry.toFixed(1)}. Stop ${s.stopPrem.toFixed(1)}, first target ${s.targetPrem.toFixed(1)}, ${s.rr.toFixed(1)} R`;
     _seBanner(s);
     try { if (typeof showToast === 'function') showToast(`${s.side === 'BUY' ? '🟢' : '🟠'} ${txt}`); } catch (_) {}
-    try { _pushAlertHistory(`Scalp ${verb} ${fmtInt(s.K)} ${s.typ}`, d.underlying_value, s.side === 'BUY' ? (s.typ === 'CE' ? 'pos' : 'neg') : (s.typ === 'CE' ? 'neg' : 'pos'), e.sym); } catch (_) {}
+    try { _pushAlertHistory(`${s.regime === 'trend' ? 'Trend' : 'Range'} ${s.side} ${fmtInt(s.K)} ${s.typ}`, d.underlying_value, s.dir > 0 ? 'pos' : 'neg', e.sym); } catch (_) {}
     if (cfg.voice) {
-      const key = `scalp|${s.id}|${Math.round(Date.now() / 180000)}`;
-      const say = `${e.sym} scalp. ${txt}`;
+      const key = `scalp|${s.id}|${Math.round(Date.now() / 300000)}`;
+      const say = `${e.sym} ${s.regime === 'trend' ? 'trend' : 'range'} trade. ${txt}`;
       try {
-        if (typeof _streamLive !== 'undefined' && _streamLive) _relayAlert(key, say, 'level', 180);
-        else _speakOnce(key, say, 180);
+        if (typeof _streamLive !== 'undefined' && _streamLive) _relayAlert(key, say, 'level', 300);
+        else _speakOnce(key, say, 300);
       } catch (_) {}
     }
   }
@@ -21782,18 +21873,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       document.body.appendChild(el);
       el.addEventListener('click', ev => { if (ev.target.closest('[data-x]')) { el.style.display = 'none'; _seState.banner = null; } });
     }
-    const buy = s.side === 'BUY';
-    const col = buy ? (s.typ === 'CE' ? '#1fae6a' : '#e0475a') : '#e39b1c';
+    const buy = s.side === 'BUY', up = s.dir > 0;
+    const col = up ? '#1fae6a' : '#e0475a';
+    const lot = state.lastData?.lot_size || 1;
+    const rs = v => '₹' + fmtInt(Math.round(v * lot));
     el.className = 'scalp-flash';
     el.style.cssText = `display:block;--sf:${col};`;
     el.innerHTML = `
       <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
-        <b style="font-size:17px;letter-spacing:.3px;">${buy ? '▲ BUY' : '▼ SELL'} ${fmtInt(s.K)} ${s.typ}</b>
-        <span style="font-size:13px;">at ≤ ₹${s.entry.toFixed(1)}</span>
+        <b style="font-size:17px;letter-spacing:.3px;">${up ? '▲' : '▼'} ${s.side} ${fmtInt(s.K)} ${s.typ}</b>
+        <span style="font-size:13px;">at ${buy ? '≤' : '≥'} ₹${s.entry.toFixed(1)}</span>
+        <span style="font-size:11px;font-weight:700;border:1px solid #fff;border-radius:3px;padding:0 5px;">${s.regime === 'trend' ? 'TREND' : 'RANGE'}</span>
         <span data-x style="margin-left:auto;cursor:pointer;opacity:.8;font-size:14px;" title="Dismiss">✕</span>
       </div>
-      <div style="font-size:11.5px;margin-top:3px;">stop ₹${s.stopPrem.toFixed(1)} <span style="opacity:.75;">(spot ${fmtInt(Math.round(s.stopSpot))})</span> · target ₹${s.targetPrem.toFixed(1)} <span style="opacity:.75;">(spot ${fmtInt(Math.round(s.targetSpot))})</span> · <b>${s.rr.toFixed(1)}R</b> · ${s.lots} lot${s.lots > 1 ? 's' : ''}</div>
-      <div style="font-size:10px;opacity:.85;margin-top:2px;">${buy ? 'pullback with the read' : 'fade into the wall'} · ${s.mOk}/${s.mN} must + ${s.sOk}/${s.sN} supporting · ${new Date().toLocaleTimeString('en-IN', { hour12: false })}</div>
+      <div style="font-size:11.5px;margin-top:3px;">stop ₹${s.stopPrem.toFixed(1)} <span style="opacity:.75;">(spot ${fmtInt(Math.round(s.stopSpot))})</span>
+        · T1 ₹${s.targetPrem.toFixed(1)} <span style="opacity:.75;">(+${s.T1} pts, ${rs(s.gainU)}/lot)</span>
+        ${s.target2Prem != null && s.T2 > s.T1 ? `· T2 ₹${s.target2Prem.toFixed(1)} <span style="opacity:.75;">(+${s.T2} pts, ${rs(s.gain2U)}/lot)</span>` : ''}</div>
+      <div style="font-size:11px;margin-top:2px;"><b>${s.rr.toFixed(1)}R</b> · ${s.lots} lot${s.lots > 1 ? 's' : ''} · ${s.regime === 'trend' ? 'book half at T1, move the stop to entry, trail the rest under the 9 EMA toward T2' : 'exit at T1 — range trades do not get trailed'}</div>
+      <div style="font-size:10px;opacity:.85;margin-top:2px;">${s.regime === 'trend' ? 'pullback with the trend' : 'from the range edge back to value'} · ${s.mOk}/${s.mN} must + ${s.sOk}/${s.sN} supporting · ${new Date().toLocaleTimeString('en-IN', { hour12: false })}</div>
       <div class="sf-status" style="font-size:10px;margin-top:2px;font-weight:700;">● setup live</div>`;
     _seState.banner = { id: s.id, t: Date.now() };
     clearTimeout(_seState.bannerTimer);
@@ -21814,32 +21911,42 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const r2 = v => (v == null || !isFinite(v)) ? '—' : (+v).toFixed(Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2);
     const stCol = p.stance === 'buy' ? 'var(--accent,#5b8cff)' : p.stance === 'sell' ? 'var(--gold,#d4af37)' : 'var(--muted)';
     const stTxt = p.stance === 'buy' ? 'favours BUYING options' : p.stance === 'sell' ? 'favours SELLING options' : 'no strong edge either way';
-    const cfg = _seCfg();
+    const cfg = _seCfg(), lot = p.lot || 1;
+    const rs = v => v == null ? '—' : `${v >= 0 ? '+' : '−'}₹${n(Math.abs(v * lot))}`;
     const cell = (s, label) => {
-      if (!s) return `<span style="min-width:310px;color:var(--muted);">${label} — no liquid strike</span>`;
+      if (!s) return `<span style="min-width:330px;color:var(--muted);">${label} — no liquid strike in range</span>`;
       const g = s.g, buy = s.side === 'BUY';
-      const col = buy ? (s.typ === 'CE' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)') : 'var(--gold,#d4af37)';
+      const col = s.dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)';
       const chip = s.ready
-        ? `<span class="sf-chip" style="--sf:${col};">ENTER</span>`
+        ? `<span class="sf-chip" style="--sf:${s.dir > 0 ? '#1fae6a' : '#e0475a'};">ENTER</span>`
         : `<span style="font-size:9px;color:var(--muted);border:1px solid var(--border);border-radius:3px;padding:0 4px;">${s.mOk}/${s.mN} · ${s.sOk}/${s.sN}</span>`;
+      const star = s.preferred ? '<span style="color:var(--gold,#d4af37);" title="Preferred expression for this direction, from vol, Greeks and the R it makes">★</span>' : '';
       const tip = s.checks.map(c => `${c.ok ? '✓' : '✗'} ${c.must ? '' : '(supporting) '}${c.name}: ${c.txt}`).join('\n');
-      return `<span style="min-width:310px;" title="${escapeHtml(tip)}">
-        ${chip} <b style="color:${col};">${s.side} ${s.typ} ${n(s.K)}</b> ₹${r2(g.ltp)}
+      return `<span style="min-width:330px;${s.preferred ? '' : 'opacity:.78;'}" title="${escapeHtml(tip)}">
+        ${chip} ${star}<b style="color:${col};">${s.side} ${s.typ} ${n(s.K)}</b> ₹${r2(g.ltp)}
         <span style="color:var(--muted);font-size:9px;">δ${Math.abs(g.delta).toFixed(2)} · IV ${g.iv.toFixed(1)}${g.ivOwn ? '' : '*'}${g.spr != null ? ` · spr ${r2(g.spr)}` : ''} · cost ${r2(g.costPts)} pts</span>
-        <div style="font-size:9px;color:var(--muted);padding-left:10px;">${s.ready
-          ? `<b style="color:var(--text);">entry ≤ ₹${r2(s.entry)} · stop ₹${r2(s.stopPrem)} · target ₹${r2(s.targetPrem)} · ${r2(s.rr)}R · ${s.lots} lot${s.lots > 1 ? 's' : ''}</b>`
-          : `waiting: ${escapeHtml((s.missing[0] || (s.sOk < 3 ? `only ${s.sOk}/${s.sN} supporting checks` : '')).slice(0, 90))}`}
-          ${buy && g.gain15 != null ? ` · 15-min 1σ +₹${r2(g.gain15)} vs θ ₹${r2(g.dec15)}` : ''}</div>
-      </span>`;
+        <div style="font-size:9px;color:var(--muted);padding-left:10px;">
+          T1 +${s.T1} pts → <b style="color:var(--text);">${rs(s.gainU)}/lot (${r2(s.rr)}R)</b>${s.T2 > s.T1 ? ` · T2 +${s.T2} → ${rs(s.gain2U)} (${r2(s.r2)}R)` : ''}
+          ${s.ready ? `<br><b style="color:var(--text);">entry ${buy ? '≤' : '≥'} ₹${r2(s.entry)} · stop ₹${r2(s.stopPrem)} · T1 ₹${r2(s.targetPrem)}${s.target2Prem != null && s.T2 > s.T1 ? ` · T2 ₹${r2(s.target2Prem)}` : ''} · ${s.lots} lot${s.lots > 1 ? 's' : ''}</b>`
+                    : `<br>waiting: ${escapeHtml((s.missing[0] || (s.sOk < 3 ? `only ${s.sOk}/${s.sN} supporting checks` : '')).slice(0, 96))}`}
+        </div></span>`;
     };
-    const S = k => setups.find(s => s.side === k[0] && s.typ === k[1]);
+    const S = (side, typ) => setups.find(s => s.side === side && s.typ === typ);
     const stat = x => !x ? '—' : `${x.n} · ${x.w} target / ${x.l} stop / ${x.t} time-out · <b style="color:${x.exp >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${x.exp >= 0 ? '+' : '−'}₹${n(Math.abs(x.exp))}/lot</b>${x.avgR != null ? ` (${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R)` : ''}`;
+    const trend = p.regime === 'trend';
+    const regTxt = trend ? `TREND ${p.trendDir > 0 ? '▲' : p.trendDir < 0 ? '▼' : ''}` : 'RANGE';
+    const regCol = trend ? (p.trendDir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)') : 'var(--gold,#d4af37)';
+    const row = (dir) => `<div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:3px;font-size:10px;align-items:flex-start;">
+        <span style="min-width:38px;font-weight:700;color:${dir > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${dir > 0 ? '▲ UP' : '▼ DOWN'}</span>
+        ${cell(S('BUY', dir > 0 ? 'CE' : 'PE'), dir > 0 ? 'BUY CE' : 'BUY PE')}${cell(S('SELL', dir > 0 ? 'PE' : 'CE'), dir > 0 ? 'SELL PE' : 'SELL CE')}</div>`;
     return `<div style="border:1px solid var(--border);border-radius:6px;padding:4px 6px;margin:3px 4px 5px;">
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline;font-size:10px;">
-        <b style="font-size:10.5px;">SCALP ENTRIES</b>
+        <b style="font-size:10.5px;">TRADE ENTRIES</b>
+        <b style="color:${regCol};border:1px solid ${regCol};border-radius:3px;padding:0 5px;" title="${escapeHtml(p.trendWhy || 'no trend evidence: the day-type read, the Trend Engine and the range so far all say balance')}">${regTxt} day</b>${p.trendWhy ? `<span style="color:var(--muted);font-size:9px;">${escapeHtml(p.trendWhy)}</span>` : ''}
+        <span title="Close-to-close 1σ = spot × vol ÷ √252 (vol = ${escapeHtml(p.Dsrc)}): about 2 days in 3 close inside it. The high-to-low range of a day is naturally larger, ≈1.6 × that.">close-to-close <b>±${n(p.D)}</b> <span style="color:var(--muted);">(${escapeHtml(p.Dsrc)})</span> · expected range <b>≈${n(p.ER)}</b>${p.rng ? ` · today so far <b style="color:${p.rng.range > p.ER ? 'var(--gold,#d4af37)' : 'inherit'};">${n(p.rng.range)}</b> (${(p.rng.range / p.ER).toFixed(2)}× expected)` : ''}</span>
+        <span>target <b>T1 ${p.T1}</b> (${Math.round(p.T1 / p.D * 100)}%) · stretch <b>T2 ${p.T2}</b> (${Math.round(p.T2 / p.D * 100)}%${p.T2 < p.T2raw ? `, capped from ${p.T2raw}: ≈${n(p.roomLeft ?? 0)} pts of the day's ${p.regime === 'trend' ? '2.5σ trend' : '1.6σ'} range left` : ''})</span>
         <b style="color:${stCol};">${stTxt}</b>
         <span style="color:var(--muted);">bias: ${escapeHtml(p.biasWhy)}</span>
-        <span style="color:var(--muted);">1σ: 15 min ±${r2(p.sig15)} · day ±${n(p.sigDay)} · expiry ±${n(p.sigExp)} pts${p.F ? ` · fwd ${n(p.F)}` : ''}</span>
         <span style="margin-left:auto;display:flex;gap:8px;color:var(--muted);">
           <label><input type="checkbox" class="se-cfg" data-k="on" ${cfg.on ? 'checked' : ''}> alerts</label>
           <label><input type="checkbox" class="se-cfg" data-k="voice" ${cfg.voice ? 'checked' : ''}> voice</label>
@@ -21847,14 +21954,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <label><input type="checkbox" class="se-cfg" data-k="sell" ${cfg.sell ? 'checked' : ''}> sells</label>
         </span>
       </div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:3px;font-size:10px;">${cell(S(['BUY', 'CE']), 'BUY CE')}${cell(S(['BUY', 'PE']), 'BUY PE')}</div>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:2px;font-size:10px;">${cell(S(['SELL', 'CE']), 'SELL CE')}${cell(S(['SELL', 'PE']), 'SELL PE')}</div>
-      <div style="font-size:9px;color:var(--muted);padding-top:3px;">positional theta sell (≈1σ, not a scalp): ${p.posCE ? `CE ${n(p.posCE.K)} ₹${r2(p.posCE.ltp)} δ${Math.abs(p.posCE.delta).toFixed(2)}` : '—'} · ${p.posPE ? `PE ${n(p.posPE.K)} ₹${r2(p.posPE.ltp)} δ${Math.abs(p.posPE.delta).toFixed(2)}` : '—'}${p.wallAbove ? ` · walls ${n(p.wallAbove)} / ${p.wallBelow ? n(p.wallBelow) : '—'}` : ''}</div>
+      ${row(1)}${row(-1)}
+      <div style="font-size:9px;color:var(--muted);padding-top:3px;">positional theta sell (≈1σ, not intraday): ${p.posCE ? `CE ${n(p.posCE.K)} ₹${r2(p.posCE.ltp)} δ${Math.abs(p.posCE.delta).toFixed(2)}` : '—'} · ${p.posPE ? `PE ${n(p.posPE.K)} ₹${r2(p.posPE.ltp)} δ${Math.abs(p.posPE.delta).toFixed(2)}` : '—'}${p.wallAbove ? ` · walls ${n(p.wallAbove)} / ${p.wallBelow ? n(p.wallBelow) : '—'}` : ''}</div>
       <div style="font-size:9.5px;padding-top:3px;border-top:1px solid var(--border-soft);margin-top:3px;">
-        <b>Alert record</b> ${escapeHtml(p.sym || '')}: all ${stat(stats.all)} · buys ${stat(stats.buy)} · sells ${stat(stats.sell)}${stats.open ? ` · ${stats.open} open` : ''}
-        <span style="color:var(--muted);"> — the only honest answer to "is it profitable": each alert followed to target, stop or 20 min, net of costs.</span>
+        <b>Alert record</b> ${escapeHtml(p.sym || '')}: all ${stat(stats.all)} · trend ${stat(stats.trend)} · range ${stat(stats.range)} · buys ${stat(stats.buy)} · sells ${stat(stats.sell)}${stats.open ? ` · ${stats.open} open` : ''}
+        <span style="color:var(--muted);"> — each alert followed on the live chain: trend trades half at T1 and the rest trailed, range trades out at T1; net of costs.</span>
       </div>
-      <div style="font-size:9px;color:var(--muted);padding-top:2px;">${escapeHtml(p.why.join(' · '))}${p.why.length ? ' · ' : ''}BUY = pullback to value with the read, not chased, ≥1.5R to the next wall · SELL = fade a paid-up push into the OI wall, stop through the wall, target VWAP · every MUST plus 3 of 6 supporting, held two reads, then the banner flashes. Hover a strike for its checklist. * = ATM IV used.</div>
+      <div style="font-size:9px;color:var(--muted);padding-top:2px;">${escapeHtml(p.why.join(' · '))}${p.why.length ? ' · ' : ''}Strikes are chosen for the target move itself: each liquid strike is repriced on its own IV for T1, for half of T1 and for the stop, with the hold's decay and the round-trip cost, and the best R wins (held unless a new strike beats it by 0.25R). ★ = preferred expression for the direction. TREND: with the trend only, on the pullback. RANGE: from the edge back to value. Every MUST plus 3 supporting, held two reads, one alert per direction. Hover a strike for its checklist.</div>
     </div>`;
   }
 
@@ -21864,9 +21970,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const o = _seCfg(); o[el.dataset.k] = el.checked;
     try { localStorage.setItem(_SE_CFG, JSON.stringify(o)); } catch (_) {}
   });
+
+  // ── do not rebuild a panel under the pointer ──────────────────────
+  // Panels that rebuild their own checkboxes on every poll swallow clicks:
+  // mousedown lands on one element, the redraw replaces it, and the click
+  // never fires. While a pointer is held inside a panel (or within 400 ms of
+  // a click there), its redraw waits for the next poll.
+  const _ptr = { el: null, at: 0 };
+  document.addEventListener('pointerdown', e => { _ptr.el = e.target; _ptr.at = Date.now(); _ptr.up = false; }, true);
+  document.addEventListener('pointerup', () => { _ptr.at = Date.now(); _ptr.up = true; }, true);
+  function _holdRender(box) {
+    if (!box || !_ptr.el || !box.contains(_ptr.el)) return false;
+    return !_ptr.up || Date.now() - _ptr.at < 400;
+  }
   function renderDelta90(d) {
     const box = document.getElementById('d90Body');
     if (!box) return;
+    if (_holdRender(box)) return;            // a click is in progress inside it
     try { _dhRecord(d); } catch (_) {}
     const x = _delta90(d);
     const f = _futBooks(d);
@@ -24010,7 +24130,54 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
     } catch (_) {}
   }
+  // ── the server's copy ─────────────────────────────────────────────
+  // The server records the same series every 10 s from the chain it serves
+  // (and rebuilds a day from its replay archive), so a restart, a refresh, a
+  // second PC or an index switch no longer starts every line from nothing.
+  // Its points fill whatever this browser did not see; local points (finer,
+  // tick-driven) win where both exist.
+  const _ctxSrv = { sym: null, since: 0, busy: false };
+  async function _ctxServerSync() {
+    const sym = state.symbol;
+    if (!sym || _ctxSrv.busy) return;
+    if (typeof _isHistorical === 'function' && _isHistorical()) return;
+    if (state.expiryUser) return;             // the server records the default expiry only
+    if (_ctxSrv.sym !== sym) { _ctxSrv.sym = sym; _ctxSrv.since = 0; }
+    _ctxSrv.busy = true;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/ctx-history?symbol=${encodeURIComponent(sym)}&since=${_ctxSrv.since}`,
+                                   { signal: AbortSignal.timeout(8000) })).json();
+      if (state.symbol !== sym || !Array.isArray(j.points)) return;
+      const open = _ctxSessionStart();
+      if (_ctxHist.length && _ctxHist[_ctxHist.length - 1].sym !== sym) _ctxHist.length = 0;
+      const have = _ctxHist.map(p => p.ts);
+      let add = 0, hi = _ctxSrv.since;
+      for (const q of j.points) {
+        hi = Math.max(hi, q.ts || 0);
+        const ts = (q.ts || 0) * 1000;
+        if (ts < open) continue;
+        // skip where this browser already has a point within 4 s
+        let lo2 = 0, hi2 = have.length;
+        while (lo2 < hi2) { const mid = (lo2 + hi2) >> 1; if (have[mid] < ts) lo2 = mid + 1; else hi2 = mid; }
+        const near = (lo2 < have.length && have[lo2] - ts < 4000) || (lo2 > 0 && ts - have[lo2 - 1] < 4000);
+        if (near) continue;
+        _ctxHist.push({ ts, sym, spot: q.spot, pcr: q.pcr, pcr1d: q.pcr1d, vix: q.vix, iv: q.iv,
+                        straddle: q.straddle, skew: q.skew, srv: 1 });
+        add++;
+      }
+      _ctxSrv.since = j.backfilling ? 0 : hi;     // re-read once the backfill lands
+      if (add) {
+        _ctxHist.sort((a, b) => a.ts - b.ts);
+        _ctxPrune();
+        try { renderCtxChart(); } catch (_) {}
+      }
+    } catch (_) {
+    } finally { _ctxSrv.busy = false; }
+  }
   setTimeout(_ctxLoad, 1200);            // after state.symbol is settled
+  setTimeout(_ctxServerSync, 2500);
+  setInterval(_ctxServerSync, 60000);
   setInterval(_ctxSave, 30000);          // cheap, and bounded by the coarse grid
   window.addEventListener('beforeunload', _ctxSave);
 
@@ -24019,7 +24186,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const sym = state.symbol;
     // Drop foreign-symbol points at write time rather than filtering later:
     // a series that silently blends two instruments is worse than an empty one.
-    if (_ctxHist.length && _ctxHist[_ctxHist.length - 1].sym !== sym) _ctxHist.length = 0;
+    if (_ctxHist.length && _ctxHist[_ctxHist.length - 1].sym !== sym) {
+      _ctxHist.length = 0;
+      setTimeout(_ctxServerSync, 300);       // the new index's session, from the server
+    }
     let pcr = null, pcr1d = null;
     try {
       const b = _pcrByBand(d);
@@ -24092,16 +24262,32 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // blanked the pane along with its own controls - leaving no way to turn
     // anything back on short of clearing storage. A control that can remove
     // itself is a trap, not a feature.
-    const ctrls = `<span style="display:flex;gap:8px;font-size:9px;color:var(--muted,#789);">
-        ${_CTX_SERIES.map(s => `<label title="${escapeHtml(s.tip || '')}"><input type="checkbox" data-ctxs="${s.k}" ${cfg[s.k] !== false ? 'checked' : ''}> ${s.lab}</label>`).join('')}
+    // The pane is re-drawn on every poll and tick. The tick boxes used to be
+    // part of that redraw, so a click that landed between mousedown and
+    // mouseup hit an element that had just been replaced and was lost - the
+    // "takes several clicks" problem. They now live in their own container,
+    // built once, and are only rebuilt when the settings actually change.
+    if (!box.querySelector('.ctx-plot')) {
+      box.innerHTML = `<div class="ctx-plot"></div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;padding:2px 8px 4px;align-items:center;">
+          <span class="ctx-legend" style="display:contents;"></span>
+          <span class="ctx-ctrls" style="margin-left:auto;"></span>
+        </div>
+        <div class="oc-sub ctx-note" style="padding:0 8px 4px;font-size:9px;">Each line is scaled to its own range — they share no units, and one absolute axis would flatten two of the three. The range beside each legend entry is that series' span so far. <b>What to look for is ORDER, not level:</b> IV lifting while price is flat, or PCR turning before the candles do, is what a set of readouts cannot show you. History is kept by the server too, so a restart or a refresh does not lose the session.</div>`;
+    }
+    const plotEl = box.querySelector('.ctx-plot'), legEl = box.querySelector('.ctx-legend'), ctlEl = box.querySelector('.ctx-ctrls');
+    const sig = _CTX_SERIES.map(s => cfg[s.k] !== false ? 1 : 0).join('');
+    if (ctlEl.dataset.sig !== sig) {
+      ctlEl.dataset.sig = sig;
+      ctlEl.innerHTML = `<span style="display:flex;gap:8px;font-size:9px;color:var(--muted,#789);">
+        ${_CTX_SERIES.map(s => `<label title="${escapeHtml(s.tip || '')}" style="cursor:pointer;user-select:none;"><input type="checkbox" data-ctxs="${s.k}" ${cfg[s.k] !== false ? 'checked' : ''}> ${s.lab}</label>`).join('')}
       </span>`;
+    }
     // Price is always drawn, so an empty series selection is no longer a reason
     // to blank the pane - only a lack of history is.
     if (pts.length < 3) {
-      box.innerHTML = `<div style="display:flex;gap:12px;align-items:center;padding:6px 8px;font-size:9.5px;color:var(--muted,#789);">
-          <span>${'Collecting — a few more polls.'}</span>
-          <span style="margin-left:auto;">${ctrls}</span>
-        </div>`;
+      plotEl.innerHTML = `<div style="padding:6px 8px;font-size:9.5px;color:var(--muted,#789);">Collecting — a few more polls (the server's history for this session loads automatically).</div>`;
+      legEl.innerHTML = '';
       return;
     }
     // Share the candle chart's x-axis so the two panes line up. Without this
@@ -24256,12 +24442,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // half-hour gridlines and time labels, at the candle pane's positions
     svg = _timeGridSvg(W, padL, padR, padT, H - padB, H - 5) + svg + _xmSvg('ctxXM', padT, H - padB, H - padB - 1);
-    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${svg}</svg>
-      <div style="display:flex;gap:14px;flex-wrap:wrap;padding:2px 8px 4px;align-items:center;">
-        ${legend.join('')}
-        <span style="margin-left:auto;">${ctrls}</span>
-      </div>
-      <div class="oc-sub" style="padding:0 8px 4px;font-size:9px;">Each line is scaled to its own range — they share no units, and one absolute axis would flatten two of the three. The range beside each legend entry is that series' span so far. <b>What to look for is ORDER, not level:</b> IV lifting while price is flat, or PCR turning before the candles do, is what a set of readouts cannot show you.</div>`;
+    plotEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${svg}</svg>`;
+    legEl.innerHTML = legend.join('');
     try { const xm = _chart._xm; if (xm) _mirrorCrosshair(xm.px, true, xm.W, xm.src); } catch (_) {}
   }
 
@@ -24617,6 +24799,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function renderPcrBands(res, d) {
     const box = document.getElementById('pcrBandBody');
     if (!box) return;
+    if (typeof _holdRender === 'function' && _holdRender(box)) return;
     if (!res) { box.innerHTML = '<div class="movers-loading">Load the option chain.</div>'; return; }
     const cfg = _pcrAlertCfg();
     const near = res.bands.find(b => b.k === 'rod');
@@ -24826,10 +25009,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (sv.exchPct === 0.05) sv.exchPct = 0.03503;
       return Object.assign({ move: 30, mins: 20, riskRs: 3000, brokerage: 20,
                              sttPct: 0.1, exchPct: 0.03503, gstPct: 18,
-                             stampPct: 0.003, slipTicks: 1 }, sv);
+                             stampPct: 0.003, slipTicks: 1, trendPts: 100, rangePts: 40 }, sv);
     } catch (_) {
       return { move: 30, mins: 20, riskRs: 3000, brokerage: 20, sttPct: 0.1,
-               exchPct: 0.03503, gstPct: 18, stampPct: 0.003, slipTicks: 1 };
+               exchPct: 0.03503, gstPct: 18, stampPct: 0.003, slipTicks: 1, trendPts: 100, rangePts: 40 };
     }
   }
   function _scalpSave(o) { try { localStorage.setItem(_SCALP_KEY, JSON.stringify(o)); } catch (_) {} }
@@ -28105,7 +28288,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (typeof _isHistorical === 'function' && _isHistorical()) return false;
     const bucket = _chart.interval * 60;
     const nowSec = Date.now() / 1000;
-    const curT = Math.floor(nowSec / bucket) * bucket;
+    // buckets counted from 09:15 IST, as the server builds them: epoch
+    // alignment only lands on 09:15 for 1/3/5/15 minutes, not for 2 or 10
+    const anchor = Math.floor((nowSec + 19800) / 86400) * 86400 - 19800 + 555 * 60;
+    const curT = anchor + Math.floor((nowSec - anchor) / bucket) * bucket;
     const last = cs[cs.length - 1];
     if (curT > last.t) {
       // a new bar has started since the last server fetch — open it at the

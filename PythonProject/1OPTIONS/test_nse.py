@@ -872,11 +872,12 @@ def test_watchdog():
 
 
 def test_strike_picker():
-    """Strike picker runs on a synthetic chain: buy near delta 0.55, sell
-    OTM near 0.15, liquid only, and it is rendered in the desk read."""
-    import subprocess, re as _re, json as _json
+    """Trade-entry engine on a synthetic Nifty chain: the daily move from VIX,
+    T1/T2 as fractions of it per regime (the two worked scenarios), strikes
+    chosen for that move, picks held, and the outcome log."""
+    import subprocess, json as _json
     dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
-    check("strike picker rendered in the desk read widget", "${pickHtml}" in dsrc and "function _strikePicker(d)" in dsrc)
+    check("trade entries rendered in the desk read widget", "${pickHtml}" in dsrc and "function _strikePicker(d)" in dsrc)
     def grab(name):
         i = dsrc.index(f"function {name}(")
         depth, j = 0, dsrc.index("{", i)
@@ -884,35 +885,65 @@ def test_strike_picker():
             depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
             if depth == 0:
                 return dsrc[i:k + 1]
-    code = "\n".join(grab(n) for n in ("bsErf", "bsNormCdf", "bsNormPdf", "bsD1D2", "bsGreeks", "_volT", "_strikePicker",
-                                         "_pickHold", "_istNowMin", "_tradeCost", "_scalpCfg", "_seTrack", "_seStats", "_seLog", "_seSave"))
+    code = "\n".join(grab(n) for n in ("bsErf", "bsNormCdf", "bsNormPdf", "bsD1D2", "bsGreeks", "bsPriceCalc", "_volT",
+                                        "_strikePicker", "_istNowMin", "_tradeCost", "_scalpCfg", "_seTrack", "_seStats",
+                                        "_seLog", "_seSave"))
     harness = code + r"""
 const RISK_FREE = 0.07; const window = {}; const fmtInt = x => String(x);
 const _store = {}; const localStorage = { getItem: k => _store[k] ?? null, setItem: (k, v) => { _store[k] = String(v); } };
 const _SCALP_KEY = 'sc', _SE_KEY = 'se'; const _pickMem = {}; const state = { symbol: 'NIFTY' };
-const _chart = { candles: [] }; const _isHistorical = () => false;
+const _chart = { candles: [] }; const _isHistorical = () => false; const _dayType = () => null; const _sessionBudget = () => null;
 const _computeGex = () => ({ flip: 24800 });
-const spot = 25000, st = [];
-function px(K, typ, iv, T) { const g = bsD1D2(spot, K, T, iv, 0.07); const [d1, d2] = g;
-  return typ === 'CE' ? spot * bsNormCdf(d1) - K * Math.exp(-0.07 * T) * bsNormCdf(d2)
-                      : K * Math.exp(-0.07 * T) * bsNormCdf(-d2) - spot * bsNormCdf(-d1); }
-const T = _volT(4);
-for (let K = 24000; K <= 26000; K += 50) {
-  const c = Math.max(0.05, px(K, 'CE', 0.13, T)), p = Math.max(0.05, px(K, 'PE', 0.13, T));
-  st.push({ strike: K, ce_ltp: c, pe_ltp: p, ce_bid: c - 0.1, ce_ask: c + 0.1, pe_bid: p - 0.1, pe_ask: p + 0.1,
-            ce_iv: 13, pe_iv: 13, ce_volume: 100, pe_volume: 100, ce_oi: K === 25300 ? 9e5 : 1e5, pe_oi: K === 24700 ? 9e5 : 1e5 });
+const spot = 25000;
+function chain(vix) {
+  const st = [], T = _volT(4), iv = vix / 100;
+  const px = (K, typ) => { const [d1, d2] = bsD1D2(spot, K, T, iv, 0.07);
+    return typ === 'CE' ? spot * bsNormCdf(d1) - K * Math.exp(-0.07 * T) * bsNormCdf(d2)
+                        : K * Math.exp(-0.07 * T) * bsNormCdf(-d2) - spot * bsNormCdf(-d1); };
+  for (let K = 23500; K <= 26500; K += 50) {
+    const c = Math.max(0.05, px(K, 'CE')), p = Math.max(0.05, px(K, 'PE'));
+    st.push({ strike: K, ce_ltp: c, pe_ltp: p, ce_bid: c - 0.1, ce_ask: c + 0.1, pe_bid: p - 0.1, pe_ask: p + 0.1,
+              ce_iv: vix, pe_iv: vix, ce_volume: 100, pe_volume: 100, ce_oi: 1e5, pe_oi: 1e5 });
+  }
+  return { symbol: 'NIFTY', underlying_value: spot, strikes: st, dte: 4, atm_iv: vix, india_vix: vix, lot_size: 65 };
 }
-const r = _strikePicker({ underlying_value: spot, strikes: st, dte: 4, atm_iv: 13, india_vix: 13, lot_size: 65 });
-// hysteresis: a tiny change in spot must not move the pick
-const r2 = _strikePicker({ underlying_value: spot + 3, strikes: st, dte: 4, atm_iv: 13, india_vix: 13, lot_size: 65 });
-// outcome log: a buy that reaches its target is scored as a win, net of costs
+const vixFor = D => D * Math.sqrt(252) / spot * 100;
+// scenario 1: trending, daily move +-350
+window._trendLast = { score: 70, at: Date.now() };
+const t = _strikePicker(chain(vixFor(350)));
+const tb = t.choose('BUYCE', 'BUY', 'CE', 1, t.T1, 0.35 * t.T1, t.T2);
+const ts = t.choose('SELLPE', 'SELL', 'PE', 1, t.T1, 0.35 * t.T1, t.T2);
+// scenario 2: range, daily move +-150
+window._trendLast = { score: 5, at: Date.now() };
+const r = _strikePicker(chain(vixFor(150)));
+const rb = r.choose('BUYPE', 'BUY', 'PE', -1, r.T1, 0.6 * r.T1, r.T2);
+const rb2 = r.choose('BUYPE', 'BUY', 'PE', -1, r.T1, 0.6 * r.T1, r.T2);
+// the 15-Oct case: +-203 priced, 374-point rally. Candles from 09:15 rising
+// steadily (one-way) vs the same range chopped back and forth.
+window._trendLast = { score: 5, at: Date.now() };
+const D203 = vixFor(203), t0 = 1792036500;
+const rally = [], chop = [];
+for (let i = 0; i < 300; i++) {
+  const a = 24700 + i * 374 / 300, b2 = 24700 + 374 * Math.abs(Math.sin(i / 20)) * (i % 40 < 20 ? 1 : 0.4);
+  rally.push({ t: t0 + i * 60, o: a - 0.6, h: a + 0.6, l: a - 1.2, c: a });
+  chop.push({ t: t0 + i * 60, o: b2, h: b2 + 1, l: b2 - 1, c: b2 });
+}
+chop[chop.length - 1].c = 24750;
+_chart.candles = rally; const up = _strikePicker(chain(D203));
+_chart.candles = chop;  const ch = _strikePicker(chain(D203));
+_chart.candles = [];
+// outcome log: T1 reached, then T2 -> half at each, net of costs
 localStorage.setItem('se', JSON.stringify([{ t: Date.now(), sym: 'NIFTY', exp: '', side: 'BUY', typ: 'CE', K: 25000,
-  entry: 100, stop: 90, tgt: 115, costU: 1, lot: 65, riskU: 11 }]));
-const chain2 = { symbol: 'NIFTY', expiry: '', strikes: [{ strike: 25000, ce_ltp: 116 }] };
-const lg = _seTrack(chain2); const stt = _seStats(lg, 'NIFTY');
-console.log(JSON.stringify({ b: [r.buyCE.K, r.buyCE.delta, r.buyPE.K, r.buyPE.delta],
-  s: [r.posCE.K, r.posCE.delta, r.posPE.K, r.posPE.delta], f: [r.fadeCE.K, r.fadeCE.delta, r.fadePE.K, r.fadePE.delta],
-  hold: [r2.buyCE.K === r.buyCE.K, r2.buyPE.K === r.buyPE.K], log: [lg[0].res, Math.round(lg[0].pnlLot), stt.all.n, stt.all.w] }));
+  entry: 100, stop: 90, tgt: 115, tgt2: 130, costU: 1, lot: 65, riskU: 11, hold: 60, regime: 'trend' }]));
+_seTrack({ symbol: 'NIFTY', expiry: '', strikes: [{ strike: 25000, ce_ltp: 116 }] });
+const lg = _seTrack({ symbol: 'NIFTY', expiry: '', strikes: [{ strike: 25000, ce_ltp: 131 }] });
+const stt = _seStats(lg, 'NIFTY');
+console.log(JSON.stringify({
+  trend: { D: Math.round(t.D), reg: t.regime, T1: t.T1, T2: t.T2, buy: [tb.K, tb.delta, tb.plan.rFull], sell: [ts.K, ts.delta] },
+  range: { D: Math.round(r.D), reg: r.regime, T1: r.T1, T2: r.T2, buy: [rb.K, rb.delta], hold: rb2.K === rb.K },
+  log: [lg[0].res, Math.round(lg[0].pnlLot), stt.all.n, stt.all.w, stt.trend.n],
+  oct15: { D: Math.round(up.D), ER: Math.round(up.ER), upReg: up.regime, upDir: up.trendDir, upT2: up.T2, upRoom: Math.round(up.roomLeft),
+           chopReg: ch.regime, chopT2: ch.T2, chopT1: ch.T1 } }));
 """
     fn = os.path.join(HERE, "__pick_test.js")
     open(fn, "w").write(harness)
@@ -921,29 +952,66 @@ console.log(JSON.stringify({ b: [r.buyCE.K, r.buyCE.delta, r.buyPE.K, r.buyPE.de
     finally:
         os.remove(fn)
     if out.returncode:
-        check("strike picker runs", False, out.stderr[-300:]); return
+        check("trade entries engine runs", False, out.stderr[-400:]); return
     r = _json.loads(out.stdout.strip().splitlines()[-1])
-    b, s_ = r["b"], r["s"]
-    check("strike picker: buy strikes within 0.10 of delta 0.55", abs(abs(b[1]) - 0.55) <= 0.11 and abs(abs(b[3]) - 0.55) <= 0.11, str(b))
-    check("strike picker: positional sells OTM near delta 0.15 (or the OI wall)",
-          s_[0] > 25000 and s_[2] < 25000 and 0.06 <= abs(s_[1]) <= 0.25 and 0.06 <= abs(s_[3]) <= 0.25, str(s_))
-    f = r["f"]
-    check("strike picker: fade-sell strikes OTM near delta 0.40", f[0] > 25000 and f[2] < 25000
-          and 0.30 <= abs(f[1]) <= 0.50 and 0.30 <= abs(f[3]) <= 0.50, str(f))
-    check("strike picker: picks hold on a small spot change", all(r["hold"]), str(r["hold"]))
+    t, g = r["trend"], r["range"]
+    check("daily move = spot x VIX / sqrt(252)", abs(t["D"] - 350) <= 1 and abs(g["D"] - 150) <= 1, f'{t["D"]} {g["D"]}')
+    check("scenario trend +-350: T1 above 100 pts, T2 up to 70%", t["reg"] == "trend" and t["T1"] > 100 and t["T2"] == 245, str(t))
+    check("scenario range +-150: T1 above 50 pts, T2 up to 40%", g["reg"] == "range" and g["T1"] > 50 and g["T2"] == 60, str(g))
+    check("trend buy: liquid strike between delta 0.35 and 0.80", 0.35 <= abs(t["buy"][1]) <= 0.80, str(t["buy"]))
+    check("trend sell: the against-trend option, delta 0.20-0.55", t["sell"][0] and 0.20 <= abs(t["sell"][1]) <= 0.55, str(t["sell"]))
+    check("range buy put chosen and held", 0.35 <= abs(g["buy"][1]) <= 0.80 and g["hold"], str(g))
+    o = r["oct15"]
+    check("expected range = 1.6 x the close-to-close move", abs(o["ER"] - 1.6 * o["D"]) <= 1, str(o))
+    check("a one-way 374-pt day on a +-203 forecast is upgraded to TREND (up)", o["upReg"] == "trend" and o["upDir"] == 1, str(o))
+    check("trend day room uses 2.5 sigma: T2 not collapsed to T1", o["upT2"] > round(0.30 * o["D"]) + 20, str(o))
+    check("the same range chopped back and forth stays RANGE, T2 capped", o["chopReg"] == "range" and o["chopT2"] == o["chopT1"], str(o))
     lg = r["log"]
-    check("entry log: target hit scored as a win net of costs", lg[0] == "target" and lg[1] == (116 - 100 - 1) * 65
-          and lg[2] == 1 and lg[3] == 1, str(lg))
-    check("entry alerts: flash banner, two-read hold, cooldown", "_seBanner(s)" in dsrc and "if (h.n < 2) continue;" in dsrc
-          and "now - f < 180000" in dsrc)
+    check("entry log: T1 then T2 scored half at each, net of costs",
+          lg[0] == "T2" and lg[1] == round((0.5 * (115 - 100 - 1) + 0.5 * (130 - 100 - 1)) * 65) and lg[2] == 1 and lg[3] == 1 and lg[4] == 1, str(lg))
+    check("entry alerts: banner, two-read hold, one per direction, cooldown",
+          "_seBanner(s)" in dsrc and "if (h.n < 2) continue;" in dsrc and "now - f < 300000" in dsrc)
     check("cost defaults: STT 0.1% and exchange 0.03503% on options", "sttPct: 0.1, exchPct: 0.03503" in dsrc)
+
+def test_ctx_and_intervals():
+    """Context history kept server-side (same arithmetic as the dashboard),
+    candles bucketed from 09:15 for every interval, clickable controls."""
+    import ast as _ast, time as _t, json as _j, math as _m
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    tree = _ast.parse(ssrc)
+    fns = {n.name: n for n in tree.body if isinstance(n, _ast.FunctionDef)}
+    ns = {"time": _t, "json": _j}
+    for name in ("_sess_bucket", "_ctx_point"):
+        check(f"{name} present", name in fns)
+        if name not in fns:
+            return
+        exec(compile(_ast.Module(body=[fns[name]], type_ignores=[]), "srv", "exec"), ns)
+    import datetime as _dt
+    IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    t915 = int(_dt.datetime(2026, 10, 15, 9, 15, tzinfo=IST).timestamp())
+    ok = all(ns["_sess_bucket"](t915 + 7 * 60 + 13, k) == t915 + (7 // k) * k * 60 for k in (1, 2, 3, 5, 10, 15))
+    check("candles: every interval (incl. 2m, 10m) starts at 09:15 IST", ok and ns["_sess_bucket"](t915, 10) == t915)
+    st = [{"strike": k, "ce_oi": 100.0, "pe_oi": 150.0 if k < 25000 else 50.0, "ce_ltp": 100, "pe_ltp": 90,
+           "ce_iv": 12.0, "pe_iv": 14.0} for k in range(24000, 26050, 50)]
+    pt = ns["_ctx_point"]({"strikes": st, "underlying_value": 25000, "strike_gap": 50, "dte": 4,
+                           "atm_iv": 13, "india_vix": 12.4}, t915 + 3600)
+    check("context point: PCR bands, straddle, skew, VIX, IV",
+          pt and pt["pcr"] and pt["pcr1d"] and pt["straddle"] == 190 and pt["skew"] == 2.0 and pt["vix"] == 12.4, str(pt))
+    check("context history served and recorded per index", "/api/ctx-history" in ssrc and "_ctx_record(symbol.upper(), data)" in ssrc)
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("dashboard merges the server's context history", "_ctxServerSync" in dsrc and "/api/ctx-history?symbol=" in dsrc)
+    check("context tick boxes built once, not on every redraw", "ctlEl.dataset.sig !== sig" in dsrc and ".ctx-ctrls" in dsrc)
+    check("panels hold their redraw while a click is in progress", "function _holdRender(box)" in dsrc
+          and "if (_holdRender(box)) return;" in dsrc)
+    check("chart intervals 1/2/3/5/10/15 with the selected one highlighted",
+          all(f'data-iv="{k}"' in dsrc for k in (1, 2, 3, 5, 10, 15)) and ".chart-iv.active {" in dsrc)
 
 
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_ctx_and_intervals, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
