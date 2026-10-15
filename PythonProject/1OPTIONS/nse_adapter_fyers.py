@@ -408,8 +408,10 @@ def _on_message(msg) -> None:
     try:
         if not isinstance(msg, dict):
             return
-        sym = msg.get("symbol") or msg.get("s") or msg.get("symbol_name")
+        sym = msg.get("symbol") or msg.get("symbol_name")
         if not sym:
+            if msg.get("message") or msg.get("type") in ("sub", "unsub", "cn", "ful", "lit"):
+                _sock_note("info", msg)
             return
         try:
             _raw_last.setdefault(sym, {})[str(msg.get("type") or "?")] = (time.time(), dict(msg))
@@ -545,6 +547,8 @@ def _on_socket_connect() -> None:
     unchanged for hours. Clear the sets and ask again for everything.
     """
     print("[fyers] market-data socket connected")
+    _sock_note("connect", f"connect #{_reconnects['n'] + 1}")
+    _retry_n.clear()
     _reconnects["n"] += 1
     _reconnects["last"] = time.time()
     with _lock:
@@ -567,6 +571,199 @@ def _on_socket_connect() -> None:
     threading.Thread(target=_again, daemon=True).start()
 
 
+# ── SUBSCRIPTION WATCHDOG ─────────────────────────────────────────────
+# The SDK's subscribe() first converts symbols to tokens with an HTTP call.
+# If that call fails - a network blip, a rate-limit reply, a timeout - the
+# SDK logs it internally and RETURNS SILENTLY: no exception, nothing sent.
+# This adapter then recorded those symbols as subscribed and never asked
+# again. After a reconnect (everything is re-requested in batches) losing
+# the index batch and the depth batch looks exactly like "options tick,
+# index and depth dead" - with every subscription count reporting healthy.
+#
+# So a subscription is now confirmed by what ARRIVES, not by the call
+# returning: the exchange answers every successful subscription with a
+# snapshot message. Unconfirmed symbols are re-requested with back-off, and
+# a feed that confirmed and then went quiet in market hours (index silent
+# while options tick; every depth book silent) is re-subscribed, then the
+# socket is reopened if that does not bring it back. Nothing here runs while
+# the feed is healthy, so normal API usage is unchanged.
+_sub_req: Dict[str, float] = {}       # symbol -> when its price stream was requested
+_dsub_req: Dict[str, float] = {}      # symbol -> when its depth stream was requested
+_retry_n: Dict[str, int] = {}
+_invalid_syms: set = set()            # rejected by the broker: never re-requested
+_sock_log: List[Any] = []             # (ts, kind, text) - errors, closes, acks, heals
+_wd: Dict[str, Any] = {"retried": 0, "heals": 0, "forced_reconnects": 0,
+                       "last_heal": 0.0, "last_force": 0.0, "last_pass": 0.0}
+
+
+def _sock_note(kind: str, text: Any) -> None:
+    try:
+        _sock_log.append((time.time(), kind, str(text)[:240]))
+        del _sock_log[:-60]
+    except Exception:
+        pass
+
+
+def _on_socket_error(m: Any) -> None:
+    _sock_note("error", m)
+    print(f"[fyers] socket error: {str(m)[:160]}")
+    try:
+        bad = (m or {}).get("invalid_symbols") if isinstance(m, dict) else None
+        if bad:
+            _invalid_syms.update(bad)
+            print(f"[fyers] broker rejected {len(bad)} symbol(s): {', '.join(map(str, bad[:8]))}")
+    except Exception:
+        pass
+
+
+def _ist_market_open(now: Optional[float] = None) -> bool:
+    t = time.gmtime((now or time.time()) + 19800)
+    m = t.tm_hour * 60 + t.tm_min
+    return t.tm_wday < 5 and 555 <= m <= 930
+
+
+def _last_of(types: tuple, syms) -> float:
+    best = 0.0
+    for s_ in syms:
+        by = _raw_last.get(s_) or {}
+        for ty in types:
+            v = by.get(ty)
+            if v and v[0] > best:
+                best = v[0]
+    return best
+
+
+def _force_reconnect(why: str) -> bool:
+    ws = getattr(_socket, "_FyersDataSocket__ws_object", None)
+    if ws is None:
+        return False
+    _sock_note("heal", f"reopening socket: {why}")
+    print(f"[fyers] watchdog: reopening the market-data socket - {why}")
+    _wd["forced_reconnects"] += 1
+    _wd["last_force"] = time.time()
+    try:
+        ws.close()          # the SDK reconnects; _on_socket_connect re-requests everything
+        return True
+    except Exception as e:  # noqa: BLE001
+        _sock_note("error", f"close failed: {e}")
+        return False
+
+
+def _watchdog_pass(now: Optional[float] = None) -> Dict[str, Any]:
+    now = now or time.time()
+    _wd["last_pass"] = now
+    acts: Dict[str, Any] = {}
+    if not _socket:
+        return acts
+    with _lock:
+        px = [s_ for s_, t in _sub_req.items() if s_ in _subscribed]
+        dp = [s_ for s_, t in _dsub_req.items() if s_ in _depth_subs]
+
+    # 1. requested but never confirmed -> the request was lost; back off
+    #    25 s, 50 s, 100 s ... capped at 10 min per symbol
+    def unconfirmed(reqs, pool, types):
+        out = []
+        for s_ in pool:
+            t0 = reqs.get(s_, now)
+            wait = min(600, 25 * (2 ** _retry_n.get(s_, 0)))
+            # confirmed = a message AFTER this request; anything older came
+            # from before a reconnect and proves nothing about this one
+            if now - t0 > wait and _last_of(types, (s_,)) < t0 - 1:
+                out.append(s_)
+        return out
+    lost_px = [s_ for s_ in unconfirmed(_sub_req, px, ("sf", "if", "?")) if s_ not in _invalid_syms]
+    lost_dp = unconfirmed(_dsub_req, dp, ("dp",))
+    if lost_px or lost_dp:
+        for s_ in lost_px + lost_dp:
+            _retry_n[s_] = _retry_n.get(s_, 0) + 1
+        with _lock:
+            _subscribed.difference_update(lost_px)
+            _depth_subs.difference_update(lost_dp)
+        _sock_note("heal", f"re-requesting {len(lost_px)} price + {len(lost_dp)} depth subscription(s) "
+                           f"that never confirmed: {', '.join((lost_px + lost_dp)[:5])}")
+        print(f"[fyers] watchdog: {len(lost_px)} price + {len(lost_dp)} depth subscription(s) "
+              f"never confirmed - requesting again")
+        if lost_px:
+            _subscribe(lost_px)
+        if lost_dp:
+            _subscribe_depth(lost_dp)
+        _wd["retried"] += len(lost_px) + len(lost_dp)
+        acts["retried"] = len(lost_px) + len(lost_dp)
+
+    # 2. confirmed, then silent, during market hours
+    if not _ist_market_open(now):
+        return acts
+    last_sf = _last_of(("sf",), px)
+    if now - last_sf > 30:
+        # nothing at all is ticking: the SDK's own reconnect owns this case
+        # unless it has clearly given up
+        if last_sf and now - last_sf > 180 and now - _wd["last_force"] > 900:
+            acts["forced"] = _force_reconnect(f"no price ticks for {int(now - last_sf)}s")
+        return acts
+    stalled_px, stalled_dp, why = [], [], []
+    idx = [s_ for s_ in px if s_.endswith("-INDEX") and "INDIAVIX" not in s_]
+    if idx and now - min(_sub_req.get(s_, now) for s_ in idx) > 60:
+        li = _last_of(("if", "sf"), idx)
+        if now - li > 90:
+            stalled_px = idx
+            why.append(f"index silent {int(now - li)}s")
+    if dp and now - min(_dsub_req.get(s_, now) for s_ in dp) > 60:
+        ld = _last_of(("dp",), dp)
+        if now - ld > 120:
+            stalled_dp = dp
+            why.append(f"all {len(dp)} depth books silent {int(now - ld)}s")
+    if not why:
+        return acts
+    if now - _wd["last_heal"] > 600:
+        _wd["heals"] += 1
+        _wd["last_heal"] = now
+        _sock_note("heal", "re-subscribing: " + "; ".join(why))
+        print(f"[fyers] watchdog: {'; '.join(why)} while options tick - re-subscribing")
+        with _lock:
+            _subscribed.difference_update(stalled_px)
+            _depth_subs.difference_update(stalled_dp)
+        if stalled_px:
+            _subscribe(stalled_px)
+        if stalled_dp:
+            _subscribe_depth(stalled_dp)
+        acts["resubscribed"] = len(stalled_px) + len(stalled_dp)
+    elif now - _wd["last_heal"] > 150 and now - _wd["last_force"] > 900:
+        acts["forced"] = _force_reconnect("still stalled after re-subscribing: " + "; ".join(why))
+    return acts
+
+
+def _watchdog_loop() -> None:
+    while True:
+        time.sleep(15)
+        try:
+            _watchdog_pass()
+        except Exception as e:  # noqa: BLE001
+            print(f"[fyers] watchdog error: {e}")
+
+
+def watchdog_state() -> Dict[str, Any]:
+    now = time.time()
+    with _lock:
+        px = [s_ for s_ in _sub_req if s_ in _subscribed]
+        dp = [s_ for s_ in _dsub_req if s_ in _depth_subs]
+    unconf_px = [s_ for s_ in px if now - _sub_req.get(s_, now) > 25
+                 and _last_of(("sf", "if", "?"), (s_,)) < _sub_req.get(s_, now) - 1]
+    unconf_dp = [s_ for s_ in dp if now - _dsub_req.get(s_, now) > 25
+                 and _last_of(("dp",), (s_,)) < _dsub_req.get(s_, now) - 1]
+    age = lambda t: round(now - t, 1) if t else None
+    return {
+        "price_requested": len(px), "price_unconfirmed": len(unconf_px), "price_unconfirmed_sample": unconf_px[:8],
+        "depth_requested": len(dp), "depth_unconfirmed": len(unconf_dp), "depth_unconfirmed_sample": unconf_dp[:8],
+        "last_sf_age_s": age(_last_of(("sf",), px)),
+        "last_index_age_s": age(_last_of(("if", "sf"), [s_ for s_ in px if s_.endswith("-INDEX")])),
+        "last_depth_age_s": age(_last_of(("dp",), dp)),
+        "invalid_symbols": sorted(_invalid_syms)[:20],
+        "retried": _wd["retried"], "heals": _wd["heals"], "forced_reconnects": _wd["forced_reconnects"],
+        "watchdog_pass_age_s": age(_wd["last_pass"]),
+        "log": [{"age_s": round(now - t, 1), "kind": k, "text": x} for t, k, x in _sock_log[-15:]][::-1],
+    }
+
+
 def _start_socket() -> None:
     global _socket
     if _socket is not None or not _client:
@@ -580,12 +777,13 @@ def _start_socket() -> None:
             litemode=False,          # full mode: we want OI, bid/ask, volume
             reconnect=True,
             on_message=_on_message,
-            on_error=lambda m: print(f"[fyers] socket error: {str(m)[:120]}"),
-            on_close=lambda m: print("[fyers] socket closed"),
+            on_error=_on_socket_error,
+            on_close=lambda m: (_sock_note("close", m), print("[fyers] socket closed")),
             on_connect=_on_socket_connect,
         )
         threading.Thread(target=s.connect, daemon=True).start()
         _socket = s
+        threading.Thread(target=_watchdog_loop, daemon=True, name="fyers-watchdog").start()
         with _lock:
             _status["streaming"] = True
     except Exception as e:  # noqa: BLE001
@@ -627,6 +825,9 @@ def _subscribe_depth(symbols: List[str]) -> None:
         try:
             _socket.subscribe(symbols=new, data_type="DepthUpdate")
             _depth_subs.update(new)
+            now_ = time.time()
+            for s_ in new:
+                _dsub_req[s_] = now_
             print(f"[fyers] L2 depth subscribed for {len(new)} contract(s) ({len(_depth_subs)} total)")
         except Exception as e:  # noqa: BLE001
             print(f"[fyers] depth subscribe failed: {e}")
@@ -678,6 +879,7 @@ def audit_state(sym: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         "lot_from_master": _master_lot(sym), "master_error": _master.get("err") or None,
         "lot_table": _LOTS.get((sym or "").upper()),
         "raw_rest": {k: v for k, v in _raw_rest.items()},
+        "watchdog": watchdog_state(),
     }
 
 
@@ -725,7 +927,7 @@ def _subscribe(symbols: List[str]) -> None:
     if not _socket or not symbols:
         return
     with _sub_lock:
-        new = [s for s in symbols if s not in _subscribed]
+        new = [s for s in symbols if s not in _subscribed and s not in _invalid_syms]
         if not new:
             return
         try:
@@ -734,6 +936,9 @@ def _subscribe(symbols: List[str]) -> None:
             for i in range(0, len(new), 200):
                 _socket.subscribe(symbols=new[i:i + 200], data_type="SymbolUpdate")
             _subscribed.update(new)
+            now_ = time.time()
+            for s_ in new:
+                _sub_req[s_] = now_
             with _lock:
                 _status["subscribed"] = len(_subscribed)
         except Exception as e:  # noqa: BLE001

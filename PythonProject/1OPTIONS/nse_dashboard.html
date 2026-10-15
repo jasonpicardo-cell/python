@@ -840,6 +840,15 @@
   body.light-mode .voloi-badge { color:#92400e; }
   body.light-mode .lvl-tag[style*="148, 163, 184"], body.light-mode .lvl-tag { text-shadow:none; }
 
+
+  /* ── scalp entry flash ── */
+  .scalp-flash { position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:9999; min-width:380px; max-width:92vw;
+    padding:10px 14px; border-radius:10px; color:#fff; background:var(--sf); border:2px solid #fff;
+    box-shadow:0 0 0 0 var(--sf); animation:sfPulse 1s ease-in-out infinite; font-family:inherit; }
+  .scalp-flash.lapsed { animation:none; filter:grayscale(.7) brightness(.8); }
+  @keyframes sfPulse { 0%,100% { box-shadow:0 0 0 0 var(--sf); } 50% { box-shadow:0 0 22px 6px var(--sf); } }
+  .sf-chip { display:inline-block; font-size:9px; font-weight:800; color:#fff; background:var(--sf); padding:0 5px; border-radius:3px; animation:sfBlink .9s steps(2,start) infinite; }
+  @keyframes sfBlink { to { visibility:hidden; } }
   /* ── GEX profile ── */
   .gex-flip-line { stroke:var(--gold); stroke-width:1.5; stroke-dasharray:4 3; }
   .gex-summary { display:flex; gap:14px; font-size:10px; color:var(--muted); padding:4px 0; flex-wrap:wrap; }
@@ -21312,6 +21321,549 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return bits.length ? `<div style="font-size:8.5px;color:#9ab;padding-left:2px;line-height:1.35;">${bits.join(' · ')}</div>` : '';
   }
 
+  // ══ STRIKE PICKER — the desk cheat sheet, applied to the live chain ═══
+  // The rules option desks actually teach, computed rather than remembered:
+  //
+  //  BUYING (scalps)  delta 0.50-0.60 - ATM to one strike in the money.
+  //    Highest gamma per rupee, decay you can outrun in minutes. Go further
+  //    in the money (0.65) on expiry day, when ATM theta is brutal, and when
+  //    VIX is high, because ITM carries less vega to lose when vol drops.
+  //    Deep OTM lottery tickets (delta < 0.30) are excluded on purpose.
+  //  SELLING          delta ~0.15 - about one sigma away, ~85% chance of
+  //    expiring worthless. Wider (0.10) when VIX is high, nearer (0.20) when
+  //    premiums are thin. Prefer AT OR BEYOND the OI wall - the strike the
+  //    writers are already defending. Never sell for pennies: a minimum
+  //    premium keeps the risk worth the reward.
+  //  REGIME           VIX low or ATM IV below VIX -> options cheap, buying
+  //    favoured. VIX high or IV above VIX -> premium rich, selling favoured.
+  //    Above the gamma flip dealers damp moves (ranges, selling); below it
+  //    they amplify them (trends, buying).
+  //  DIRECTION        the desk read, else the Trend Engine: the side with
+  //    the flow is starred for buying; the sell on the side the flow
+  //    protects moves a notch closer, the one it threatens a notch wider.
+  //
+  // Liquidity is a filter, not a footnote: a strike whose spread exceeds 2%
+  // of premium (or with no traded volume) is skipped for the next one.
+  // Picks are held until a new strike is CLEARLY better: recomputed every
+  // poll, a picker otherwise hops between neighbouring strikes and a strike
+  // that changes every refresh cannot be traded.
+  const _pickMem = {};
+  function _pickHold(slot, fresh, old, target, liquidFn) {
+    if (!fresh) return old && liquidFn(old) ? old : null;
+    if (!old || old.K === fresh.K || !liquidFn(old)) return fresh;
+    const e = g => Math.abs(Math.abs(g.delta) - target);
+    // hold unless clearly worse, and never once it has drifted 0.15 off target
+    return e(old) <= 0.15 && e(old) <= e(fresh) + 0.05 ? old : fresh;
+  }
+  function _depthFor(d, k, typ) {
+    for (const [kk, vv] of Object.entries(d?.depth?.strikes || {})) {
+      const m = /^(\d+(?:\.\d+)?)(CE|PE)$/i.exec(kk);
+      if (m && Math.round(+m[1]) === Math.round(k) && m[2].toUpperCase() === typ) return vv;
+    }
+    return null;
+  }
+  function _istNowMin() {
+    const g = new Date(); const i = new Date(g.getTime() + (5.5 * 60 + g.getTimezoneOffset()) * 60000);
+    return { m: i.getHours() * 60 + i.getMinutes(), wd: i.getDay() };
+  }
+
+  function _strikePicker(d) {
+    const spot = +d?.underlying_value, st = d?.strikes || [];
+    if (!spot || st.length < 6) return null;
+    const dte = Math.max(1 / 1440, +(d.dte ?? 1));
+    const T = _volT(dte);
+    const aiv = (+d.atm_iv || 0) / 100, vix = +d.india_vix || 0;
+    const ivFb = aiv > 0.01 ? aiv : (vix > 0 ? vix / 100 : 0.13);
+    const lot = +d.lot_size || 0;
+    const { m: istMin } = _istNowMin();
+    const expiryDay = dte < 1;
+    const sym = d.symbol || state.symbol, memKey = `${sym}|${d.expiry || ''}`;
+    const cfg = _scalpCfg();
+
+    // Greeks on the FORWARD, not spot: put-call parity at the money gives the
+    // forward the options are actually priced on (carry, dividends). Feeding
+    // bsGreeks S·e^-rT makes its internal forward equal that.
+    const strikes = st.map(x => x.strike).filter(k => k > 0).sort((a, b) => a - b);
+    let F = null;
+    try {
+      const atmK = strikes.reduce((a, b) => Math.abs(b - spot) < Math.abs(a - spot) ? b : a, strikes[0]);
+      const r0 = st.find(x => x.strike === atmK);
+      if (r0?.ce_ltp > 0 && r0?.pe_ltp > 0) {
+        const f = atmK + (r0.ce_ltp - r0.pe_ltp) * Math.exp(RISK_FREE * T);
+        if (Math.abs(f - spot) / spot < 0.03) F = f;
+      }
+    } catch (_) {}
+    const Sx = F ? F * Math.exp(-RISK_FREE * T) : spot;
+
+    // bias: desk read first (trades), then the Trend Engine
+    let bias = 0, biasWhy = 'no clear read';
+    const dr = window._deskReadLast;
+    if (dr && dr.have && Date.now() - dr.t < 120000 && Math.abs(dr.total) >= 2.5) {
+      bias = Math.sign(dr.total); biasWhy = `desk read ${dr.total > 0 ? '+' : ''}${dr.total.toFixed(1)}`;
+    } else if (window._trendLast && Date.now() - window._trendLast.at < 120000 && Math.abs(window._trendLast.score) >= 20) {
+      bias = Math.sign(window._trendLast.score); biasWhy = `Trend Engine ${window._trendLast.score > 0 ? '+' : ''}${window._trendLast.score}`;
+    }
+
+    // regime
+    let gex = null; try { gex = _computeGex(d); } catch (_) {}
+    const aboveFlip = gex?.flip ? spot >= gex.flip : null;
+    const ivVsVix = aiv > 0 && vix > 0 ? (aiv * 100) / vix : null;
+    let buyPts = 0, sellPts = 0; const why = [];
+    if (vix) {
+      if (vix < 12) { buyPts++; why.push(`VIX ${vix.toFixed(1)} low — options cheap`); }
+      else if (vix >= 16) { sellPts++; why.push(`VIX ${vix.toFixed(1)} elevated — premium rich`); }
+      else why.push(`VIX ${vix.toFixed(1)} normal`);
+    }
+    if (ivVsVix != null && !expiryDay) {
+      if (ivVsVix >= 1.15) { sellPts++; why.push(`ATM IV ${(aiv * 100).toFixed(1)} above VIX — this expiry priced rich`); }
+      else if (ivVsVix <= 0.9) { buyPts++; why.push(`ATM IV ${(aiv * 100).toFixed(1)} below VIX — this expiry priced cheap`); }
+    }
+    if (d.iv_rank != null) {
+      if (d.iv_rank >= 60) { sellPts++; why.push(`IV rank ${Math.round(d.iv_rank)} — high in its range`); }
+      else if (d.iv_rank <= 25) { buyPts++; why.push(`IV rank ${Math.round(d.iv_rank)} — low in its range`); }
+    }
+    if (aboveFlip != null) {
+      if (aboveFlip) { sellPts++; why.push(`above gamma flip ${fmtInt(Math.round(gex.flip))} — dealers damp moves`); }
+      else { buyPts++; why.push(`below gamma flip ${fmtInt(Math.round(gex.flip))} — dealers amplify moves`); }
+    }
+    // realised vs implied: is the tape actually moving as much as you pay for?
+    let rv = null;
+    try {
+      const hist = typeof _isHistorical === 'function' && _isHistorical();
+      const cs = (!_chart.optionMeta && !hist) ? (_chart.candles || []) : [];
+      const c = (_chart.liveBar ? cs.slice(0, -1) : cs).slice(-31);
+      if (c.length >= 16) {
+        const rets = []; for (let i = 1; i < c.length; i++) if (c[i - 1].c > 0) rets.push(Math.log(c[i].c / c[i - 1].c));
+        const mu = rets.reduce((a, b) => a + b, 0) / rets.length;
+        const sd = Math.sqrt(rets.reduce((a, b) => a + (b - mu) ** 2, 0) / Math.max(1, rets.length - 1));
+        const dts = []; for (let i = 1; i < c.length; i++) dts.push(c[i].t - c[i - 1].t);
+        dts.sort((a, b) => a - b);
+        const dt = Math.max(15, dts[dts.length >> 1] || 60);
+        rv = sd * Math.sqrt(252 * 22500 / dt) * 100;
+      }
+    } catch (_) {}
+    if (rv != null && aiv > 0) {
+      const k = rv / (aiv * 100);
+      if (k >= 1.1) { buyPts++; why.push(`realised vol ${rv.toFixed(1)} above IV — the tape outruns its price`); }
+      else if (k <= 0.7) { sellPts++; why.push(`realised vol ${rv.toFixed(1)} well below IV — buyers overpaying`); }
+    }
+    if (bias) buyPts += 0.5; else sellPts += 0.5;
+    if (expiryDay && istMin >= 780) { sellPts++; why.push('expiry afternoon — decay at its fastest'); }
+    const stance = buyPts - sellPts >= 1 ? 'buy' : sellPts - buyPts >= 1 ? 'sell' : 'neutral';
+
+    // per-strike greeks from each strike's own IV (smile included)
+    const greeks = (K, typ) => {
+      const r = st.find(x => x.strike === K) || {};
+      const p = typ === 'CE' ? 'ce' : 'pe';
+      const ivp = +r[p + '_iv'] || 0;
+      const iv = ivp > 1 ? ivp / 100 : ivFb;
+      const g = bsGreeks(Sx, K, T, iv, RISK_FREE, typ);
+      const ltp = +r[p + '_ltp'] || 0, bid = +r[p + '_bid'] || 0, ask = +r[p + '_ask'] || 0;
+      const spr = bid > 0 && ask > 0 && ask > bid ? ask - bid : null;
+      // round-trip cost of one lot in INDEX points: what spot must move
+      // before the trade makes a rupee (statutory + crossing the spread)
+      const tc = lot ? _tradeCost(ltp, ltp, 1, lot, spr ?? Math.max(0.05, ltp * 0.005), cfg) : null;
+      const costU = tc ? tc.total / lot : null;
+      return { K, typ, iv: iv * 100, ivOwn: ivp > 1, ltp, bid, ask, spr,
+               sprPct: spr != null && ltp > 0 ? spr / ltp : null,
+               vol: +r[p + '_volume'] || 0, oi: +r[p + '_oi'] || 0,
+               costU, costPts: costU != null && Math.abs(g.delta) > 0.02 ? costU / Math.abs(g.delta) : null, ...g };
+    };
+    const liquid = g => g && g.ltp > 0 && g.vol > 0 && (g.sprPct == null || g.sprPct <= 0.02 || (g.spr != null && g.spr <= 0.5));
+    const all = { CE: strikes.map(k => greeks(k, 'CE')), PE: strikes.map(k => greeks(k, 'PE')) };
+    const near = (typ, target) => all[typ].filter(g => g.ltp > 0)
+      .sort((a, b) => Math.abs(Math.abs(a.delta) - target) - Math.abs(Math.abs(b.delta) - target));
+
+    const sig15 = spot * ivFb * Math.sqrt(15 / 375 / 252);
+    const sigExp = spot * ivFb * Math.sqrt(T);
+    const sigDay = spot * (vix > 0 ? vix / 100 : ivFb) / Math.sqrt(252);
+
+    // BUY side: target delta, then within +-0.1 of it the strike with the
+    // best 15-minute edge = what a 1-sigma move earns minus decay minus cost
+    let bT = 0.55;
+    if (expiryDay) bT = 0.65;
+    else if (vix >= 18) bT = 0.65;
+    else if (vix > 0 && vix < 11 && dte >= 2) bT = 0.50;
+    const buyInfo = g => {
+      if (!g) return null;
+      const dec15 = Math.abs(g.theta) * 15 / 375;
+      const gain = Math.abs(g.delta) * sig15 + 0.5 * g.gamma * sig15 * sig15;
+      // edge per unit of delta = edge in index points: risk is sized in
+      // index points (the stop), so a higher-delta strike is not better just
+      // because it moves more rupees - it is traded in fewer lots
+      const ad = Math.max(0.05, Math.abs(g.delta));
+      return { ...g, dec15, gain15: gain, edge15: (gain - dec15 - (g.costU || 0)) / ad,
+               be15: Math.abs(g.delta) > 0 ? dec15 / Math.abs(g.delta) : null };
+    };
+    const pickBuy = typ => {
+      const c = near(typ, bT).filter(g => liquid(g) && Math.abs(Math.abs(g.delta) - bT) <= 0.10).map(buyInfo);
+      c.sort((a, b) => b.edge15 - a.edge15);
+      const fresh = c[0] || buyInfo(near(typ, bT).find(liquid) || null);
+      const old = _pickMem[`${memKey}|B${typ}`] ? buyInfo(all[typ].find(g => g.K === _pickMem[`${memKey}|B${typ}`])) : null;
+      const out = _pickHold('B' + typ, fresh, old, bT, liquid);
+      if (out) _pickMem[`${memKey}|B${typ}`] = out.K;
+      return out;
+    };
+    const buyCE = pickBuy('CE'), buyPE = pickBuy('PE');
+
+    // SELL-scalp side: fading a push into a wall wants a strike that RESPONDS -
+    // near the money (delta ~0.40), so the premium collapses when price
+    // reverts. A delta-0.15 strike barely moves in a scalp.
+    const fT = expiryDay ? 0.45 : 0.40;
+    const pickFade = typ => {
+      const fresh = near(typ, fT).find(g => liquid(g) && (typ === 'CE' ? g.K > spot : g.K < spot)) || null;
+      const k0 = _pickMem[`${memKey}|S${typ}`];
+      const old = k0 ? all[typ].find(g => g.K === k0) : null;
+      const out = _pickHold('S' + typ, fresh, old && (typ === 'CE' ? old.K > spot : old.K < spot) ? old : null, fT, liquid);
+      if (out) _pickMem[`${memKey}|S${typ}`] = out.K;
+      return out;
+    };
+    const fadeCE = pickFade('CE'), fadePE = pickFade('PE');
+
+    // positional theta sell (kept as one line): ~1 sigma, delta 0.10-0.20,
+    // at or beyond the OI wall when that still pays
+    let sT = 0.15;
+    if (vix >= 18) sT = 0.10; else if (vix > 0 && vix < 11) sT = 0.20;
+    const minPrem = Math.max(1, spot * 0.00012);
+    const wallAbove = st.filter(r => r.strike > spot && r.strike <= spot + 2 * sigExp).reduce((a, b) => (b.ce_oi || 0) > (a?.ce_oi || 0) ? b : a, null)?.strike || null;
+    const wallBelow = st.filter(r => r.strike < spot && r.strike >= spot - 2 * sigExp).reduce((a, b) => (b.pe_oi || 0) > (a?.pe_oi || 0) ? b : a, null)?.strike || null;
+    const posSell = (typ, tgt, wall) => {
+      let g = near(typ, tgt).find(x => liquid(x) && (typ === 'CE' ? x.K > spot : x.K < spot));
+      if (!g) return null;
+      if (wall && (typ === 'CE' ? wall > g.K : wall < g.K)) {
+        const w = all[typ].find(x => x.K === wall);
+        if (liquid(w) && w.ltp >= minPrem && Math.abs(w.delta) >= Math.max(0.06, tgt * 0.6)) g = w;
+      }
+      let guard = 0;
+      while (g && g.ltp < minPrem && guard++ < 6) {
+        const k2 = strikes[strikes.indexOf(g.K) + (typ === 'CE' ? -1 : 1)];
+        if (!k2 || (typ === 'CE' ? k2 <= spot : k2 >= spot)) break;
+        g = all[typ].find(x => x.K === k2);
+      }
+      return g || null;
+    };
+    const tilt = 0.05;
+    const posCE = posSell('CE', Math.max(0.07, sT + (bias < 0 ? tilt : bias > 0 ? -tilt : 0)), wallAbove);
+    const posPE = posSell('PE', Math.max(0.07, sT + (bias > 0 ? tilt : bias < 0 ? -tilt : 0)), wallBelow);
+
+    return { spot, F, dte, expiryDay, vix, aiv: aiv * 100, ivVsVix, rv, bias, biasWhy, stance, buyPts, sellPts, why,
+             sig15, sigExp, sigDay, bT, fT, sT, minPrem, lot, buyCE, buyPE, fadeCE, fadePE, posCE, posPE,
+             wallAbove, wallBelow, flip: gex?.flip || null, aboveFlip, istMin, sym };
+  }
+
+  // ══ SCALP ENTRY CONDITIONS ═══════════════════════════════════════
+  // Two setups, the two a scalper actually trades:
+  //   BUY  = pullback WITH the read: the flow is one way, price has come back
+  //          to value (VWAP / fast EMA) instead of running away, the premium
+  //          is not already being paid up, and there is room to the next wall
+  //          for at least 1.5R after costs.
+  //   SELL = fade INTO a wall AGAINST a stretched push: price tags the OI
+  //          wall or the +-1.5 sigma VWAP band on a day that is not trending
+  //          that way, the premium has been paid up into it, and VWAP is far
+  //          enough back for 1.5R. Stop just through the wall.
+  // MUSTs gate the alert; the soft checks must score at least 3 of 6. The
+  // alert fires only after the setup has held for two consecutive reads.
+  function _scalpSetups(d, p) {
+    if (!p) return [];
+    const spot = p.spot, s15 = p.sig15;
+    const hist = typeof _isHistorical === 'function' && _isHistorical();
+    const cs = (!_chart.optionMeta && !hist) ? (_chart.candles || []) : [];
+    const done = _chart.liveBar ? cs.slice(0, -1) : cs;
+    let vw = null, vsd = null, ema9 = null, dayT = null, budget = null;
+    try { if (cs.length >= 10) { const vb = _vwapBands(cs); vw = vb.vw[vb.vw.length - 1]; vsd = vb.sd[vb.sd.length - 1]; } } catch (_) {}
+    try { if (cs.length >= 12) { const e = _emaSeries(cs.map(c => c.c), 9); ema9 = e[e.length - 1]; } } catch (_) {}
+    try { dayT = _dayType(cs); } catch (_) {}
+    try { budget = _sessionBudget(d); } catch (_) {}
+    const z = vw != null && vsd > 0 ? (spot - vw) / vsd : null;
+    const swing = done.slice(-6);
+    const swLo = swing.length ? Math.min(...swing.map(c => c.l)) : null;
+    const swHi = swing.length ? Math.max(...swing.map(c => c.h)) : null;
+    const lastUp = done.length >= 2 ? done[done.length - 1].c >= done[done.length - 2].c : null;
+    const m = p.istMin;
+    const timeOk = m >= 565 && m < 915;
+    const lull = m >= 705 && m < 795;
+    const cons = d.constituents?.available ? d.constituents.score : null;
+    const futTk = d.flow?.futures?.near; const futBuy = futTk && futTk.b15 + futTk.s15 > 0 ? futTk.b15 / (futTk.b15 + futTk.s15) : null;
+    const buf = 0.1 * s15;
+    const out = [];
+    const legOf = g => { try { const bk = _depthFor(d, g.K, g.typ); return _deskLeg(d, { k: g.K, delta: g.delta, target: 'pk', book: _bookOf(bk) }, g.typ) || {}; } catch (_) { return {}; } };
+    const prem = (g, spotMove) => Math.max(0.05, g.ltp + g.delta * spotMove + 0.5 * g.gamma * spotMove * spotMove);
+    const lotsFor = (riskPerUnit) => p.lot && riskPerUnit > 0 ? Math.max(1, Math.floor((_scalpCfg().riskRs || 3000) / (riskPerUnit * p.lot))) : 1;
+
+    const mk = (side, g) => {
+      if (!g) return null;
+      const L = legOf(g);
+      const up = g.typ === 'CE';               // CE gains when spot rises
+      const dir = side === 'BUY' ? (up ? 1 : -1) : (up ? -1 : 1);   // index direction the trade wants
+      const checks = [];
+      const must = (name, ok, txt) => checks.push({ name, ok: !!ok, must: true, txt });
+      const soft = (name, ok, txt) => checks.push({ name, ok: !!ok, must: false, txt });
+      let stopSpot, targetSpot;
+      if (side === 'BUY') {
+        must('read', p.bias === dir, p.bias === dir ? p.biasWhy : `needs a ${dir > 0 ? 'bullish' : 'bearish'} read (${p.biasWhy})`);
+        const zz = z == null ? null : z * dir;
+        const ext = ema9 != null ? (spot - ema9) * dir : null;
+        must('at value', zz != null && zz >= -0.5 && zz <= 1.2 && (ext == null || ext <= 0.6 * s15),
+             zz == null ? 'needs index candles on the chart' : `${z >= 0 ? '+' : ''}${z.toFixed(1)}σ from VWAP${ext != null ? `, ${Math.round(Math.abs(spot - ema9))} pts from EMA9` : ''}${zz > 1.2 || (ext != null && ext > 0.6 * s15) ? ' — stretched, wait for a pullback' : ''}`);
+        must('not chasing', L.excess5 == null || L.excess5 <= Math.max(0.5, g.ltp * 0.01),
+             L.excess5 == null ? 'premium vs delta: no 5-min history yet' : `premium ${L.excess5 >= 0 ? '+' : ''}${L.excess5.toFixed(1)} vs delta in 5 min${L.excess5 > Math.max(0.5, g.ltp * 0.01) ? ' — already paid up' : ''}`);
+        const wall = dir > 0 ? p.wallAbove : p.wallBelow;
+        const lvl = dir > 0 ? Math.min(...[swLo, vw].filter(v => v != null)) : Math.max(...[swHi, vw].filter(v => v != null));
+        let stopD = isFinite(lvl) ? Math.abs(spot - lvl) + buf : 0.8 * s15;
+        stopD = Math.max(0.5 * s15, Math.min(1.5 * s15, stopD));
+        stopSpot = spot - dir * stopD;
+        // a scalp target must be reachable inside the hold: at most 1.5 sigma
+        // of 15 minutes, and short of the wall that will absorb the move
+        const tgtD = wall ? Math.min(Math.abs(wall - spot) - buf, 1.5 * s15) : 1.5 * s15;
+        targetSpot = spot + dir * Math.max(0, tgtD);
+      } else {
+        must('read', p.bias !== -dir, p.bias === -dir ? `read is ${p.biasWhy} — do not fade it` : `no read against the fade (${p.biasWhy})`);
+        const wall = dir < 0 ? p.wallAbove : p.wallBelow;           // fading up-moves at the call wall
+        const atWall = wall != null && (dir < 0 ? (wall - spot) <= 0.35 * s15 && spot - wall <= 0.2 * s15
+                                                : (spot - wall) <= 0.35 * s15 && wall - spot <= 0.2 * s15);
+        const zs = z == null ? null : -z * dir;                      // stretch toward the wall
+        const trendWith = dayT?.kind === 'trend' && dayT.dir === -dir;
+        must('at the wall', atWall || (zs != null && zs >= 1.5 && !trendWith),
+             atWall ? `spot ${Math.round(Math.abs(spot - wall))} pts from the ${dir < 0 ? 'call' : 'put'} wall ${fmtInt(wall)}`
+                    : zs != null && zs >= 1.5 ? (trendWith ? 'stretched, but it is a trend day that way — no fade' : `${z.toFixed(1)}σ from VWAP — stretched`)
+                    : `waiting for spot to reach ${wall ? (dir < 0 ? 'call' : 'put') + ' wall ' + fmtInt(wall) : 'the ±1.5σ band'}`);
+        const rich = (L.excess5 != null && L.excess5 > 0) || (L.div15 != null && L.div15 > 0.2) || (L.buy15 != null && L.buy15 >= 0.6);
+        must('premium paid up', rich, rich ? [L.excess5 > 0 ? `premium +${L.excess5.toFixed(1)} vs delta` : '', L.div15 > 0.2 ? `IV +${L.div15.toFixed(1)}` : '', L.buy15 >= 0.6 ? `takers ${Math.round(L.buy15 * 100)}% buy` : ''].filter(Boolean).join(', ') : 'premium not stretched — nothing to sell into');
+        const ref = dir < 0 ? Math.max(...[swHi, wall].filter(v => v != null)) : Math.min(...[swLo, wall].filter(v => v != null));
+        let stopD = isFinite(ref) ? Math.abs(ref - spot) + 0.3 * s15 : 0.8 * s15;
+        stopD = Math.max(0.5 * s15, Math.min(1.2 * s15, stopD));
+        stopSpot = spot - dir * stopD;
+        const tgtD = vw != null ? Math.min(Math.abs(spot - vw), 1.5 * s15) : 1.2 * s15;
+        targetSpot = spot + dir * Math.max(0, tgtD);
+      }
+      // plan in premium, both legs priced off delta and gamma
+      const mvT = targetSpot - spot, mvS = stopSpot - spot;
+      const entry = side === 'BUY' ? (g.ask || g.ltp) : (g.bid || g.ltp);
+      const tP = prem(g, mvT), sP = prem(g, mvS);
+      const costU = g.costU || 0;
+      const reward = side === 'BUY' ? tP - entry - costU : entry - tP - costU;
+      const risk = side === 'BUY' ? entry - sP + costU : sP - entry + costU;
+      const rr = risk > 0 ? reward / risk : null;
+      must('room ≥1.5R', rr != null && rr >= 1.5, rr == null ? '—' : `${rr.toFixed(1)}R after costs (target ${fmtInt(Math.round(targetSpot))}, stop ${fmtInt(Math.round(stopSpot))})`);
+      must('cheap to trade', g.costPts != null && g.costPts <= 0.35 * s15, g.costPts == null ? '—' : `round trip ${g.costPts.toFixed(1)} pts vs 15-min move ${s15.toFixed(0)}`);
+      must('time', timeOk, timeOk ? (lull ? 'midday lull' : 'ok') : (m < 565 ? 'opening 10 minutes — spreads and fakes' : 'after 15:15'));
+      if (side === 'BUY') {
+        const tk = L.buy15 != null ? L.buy15 : null;
+        soft('takers with you', (tk != null && tk >= 0.55) || (futBuy != null && (futBuy - 0.5) * dir >= 0.05),
+             tk != null ? `strike takers ${Math.round(tk * 100)}% buy` : futBuy != null ? `FUT takers ${Math.round(futBuy * 100)}% buy` : 'no flow yet');
+        soft('tape moving', p.rv != null && p.aiv > 0 && p.rv >= 0.8 * p.aiv, p.rv != null ? `realised ${p.rv.toFixed(1)} vs IV ${p.aiv.toFixed(1)}` : 'needs 15 candles');
+        soft('day not spent', budget ? budget.spent < 1.0 : true, budget ? `${Math.round(budget.spent * 100)}% of the day's move used` : '—');
+        soft('dealers amplify', p.aboveFlip === false, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — moves get damped' : 'below flip');
+        soft('not the lull', !lull, lull ? '11:45–13:15 lull — moves stall' : 'active hours');
+        soft('breadth / day type', (cons != null && cons * dir >= 30) || (dayT?.kind === 'trend' && dayT.dir === dir),
+             cons != null ? `constituents ${cons >= 0 ? '+' : ''}${cons}` : dayT?.kind ? `${dayT.kind} day` : '—');
+      } else {
+        soft('dealers damp', p.aboveFlip === true, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — ranges hold' : 'below flip — moves extend');
+        soft('premium rich', p.stance === 'sell' || (p.ivVsVix != null && p.ivVsVix >= 1), `stance ${p.stance}${p.ivVsVix != null ? `, IV/VIX ${p.ivVsVix.toFixed(2)}` : ''}`);
+        soft('day spent', budget ? budget.spent >= 0.8 : false, budget ? `${Math.round(budget.spent * 100)}% of the day's move used` : '—');
+        const bk = L.bookCheck, br = _bookOf(_depthFor(d, g.K, g.typ))?.ratio;
+        soft('offers stacked', br != null && br <= 0.8, br != null ? `book ${br.toFixed(2)}× bid/offer` : 'no book');
+        soft('push fading', lastUp != null && (dir < 0 ? !lastUp : lastUp), lastUp == null ? '—' : 'last candle ' + (lastUp ? 'up' : 'down'));
+        soft('breadth not with the push', cons == null || cons * -dir < 30, cons != null ? `constituents ${cons >= 0 ? '+' : ''}${cons}` : '—');
+      }
+      const musts = checks.filter(c => c.must), softs = checks.filter(c => !c.must);
+      const mOk = musts.filter(c => c.ok).length, sOk = softs.filter(c => c.ok).length;
+      const ready = mOk === musts.length && sOk >= 3;
+      const riskPerUnit = Math.max(0.05, risk);
+      return { id: `${p.sym}|${side}|${g.typ}|${g.K}`, side, typ: g.typ, K: g.K, g, checks, mOk, mN: musts.length, sOk, sN: softs.length, ready,
+               entry, stopPrem: sP, targetPrem: tP, stopSpot, targetSpot, rr, lots: lotsFor(riskPerUnit), missing: musts.filter(c => !c.ok).map(c => c.txt) };
+    };
+    for (const [side, g] of [['BUY', p.buyCE], ['BUY', p.buyPE], ['SELL', p.fadeCE], ['SELL', p.fadePE]]) {
+      const s = mk(side, g); if (s) out.push(s);
+    }
+    return out;
+  }
+
+  // ══ ENTRY ALERTS + OUTCOME LOG ═══════════════════════════════════
+  // The alert does not promise a profit; the log measures one. Every alert
+  // is recorded with its entry, stop and target premium and followed on the
+  // live chain until it hits the target, the stop, or 20 minutes pass, net of
+  // costs. After a couple of weeks that is the honest answer to "does this
+  // make money", per setup - and the setups that do not can be switched off.
+  const _SE_KEY = 'scalpEntryLogV1', _SE_CFG = 'scalpAlertCfgV1';
+  const _seState = { hold: {}, fired: {}, banner: null };
+  function _seCfg() { try { return Object.assign({ on: true, voice: true, buy: true, sell: true }, JSON.parse(localStorage.getItem(_SE_CFG) || '{}')); } catch (_) { return { on: true, voice: true, buy: true, sell: true }; } }
+  function _seLog() { try { return JSON.parse(localStorage.getItem(_SE_KEY) || '[]'); } catch (_) { return []; } }
+  function _seSave(a) { try { localStorage.setItem(_SE_KEY, JSON.stringify(a.slice(-300))); } catch (_) {} }
+
+  function _seTrack(d) {
+    const log = _seLog(); let ch = false;
+    const now = Date.now();
+    for (const e of log) {
+      if (e.res) continue;
+      if (now - e.t > 40 * 60000) { e.res = 'untracked'; ch = true; continue; }   // never seen again (other expiry / index)
+      if (e.sym !== (d.symbol || state.symbol) || e.exp !== (d.expiry || '')) continue;
+      const r = (d.strikes || []).find(x => Math.round(x.strike) === e.K);
+      const px = r ? +r[(e.typ === 'CE' ? 'ce' : 'pe') + '_ltp'] : 0;
+      if (!(px > 0)) continue;
+      e.hi = Math.max(e.hi ?? px, px); e.lo = Math.min(e.lo ?? px, px);
+      const buy = e.side === 'BUY';
+      let res = null;
+      if (buy ? px >= e.tgt : px <= e.tgt) res = 'target';
+      else if (buy ? px <= e.stop : px >= e.stop) res = 'stop';
+      else if (now - e.t > 20 * 60000) res = 'time';
+      if (res) {
+        e.res = res; e.exit = px; e.tEnd = now;
+        const per = (buy ? px - e.entry : e.entry - px) - (e.costU || 0);
+        e.pnlLot = per * (e.lot || 1);
+        e.R = e.riskU > 0 ? per / e.riskU : null;
+        ch = true;
+      }
+    }
+    if (ch) _seSave(log);
+    return log;
+  }
+  function _seStats(log, sym) {
+    const done = log.filter(e => e.res && e.res !== 'untracked' && (!sym || e.sym === sym));
+    const by = k => done.filter(e => e.side === k);
+    const st = a => {
+      if (!a.length) return null;
+      const w = a.filter(e => e.res === 'target').length, l = a.filter(e => e.res === 'stop').length;
+      const exp = a.reduce((s, e) => s + (e.pnlLot || 0), 0) / a.length;
+      const r = a.filter(e => e.R != null); const avgR = r.length ? r.reduce((s, e) => s + e.R, 0) / r.length : null;
+      return { n: a.length, w, l, t: a.length - w - l, exp, avgR };
+    };
+    return { all: st(done), buy: st(by('BUY')), sell: st(by('SELL')), open: log.filter(e => !e.res && (!sym || e.sym === sym)).length };
+  }
+
+  function _seEvaluate(d, setups) {
+    const cfg = _seCfg();
+    const { m, wd } = _istNowMin();
+    const live = wd > 0 && wd < 6 && m >= 555 && m <= 930 && !(typeof _isHistorical === 'function' && _isHistorical());
+    const now = Date.now();
+    for (const s of setups) {
+      const allowed = cfg.on && live && (s.side === 'BUY' ? cfg.buy : cfg.sell);
+      if (!s.ready || !allowed) { delete _seState.hold[s.id]; continue; }
+      const h = _seState.hold[s.id] || (_seState.hold[s.id] = { since: now, n: 0, last: 0 });
+      if (now - h.last >= 4000) { h.n++; h.last = now; }
+      if (h.n < 2) continue;                                   // must hold for two reads
+      const f = _seState.fired[s.id];
+      if (f && now - f < 180000) continue;                     // 3-minute cooldown per strike
+      _seState.fired[s.id] = now;
+      _seFire(d, s, cfg);
+    }
+    // a showing banner whose setup has lapsed is marked, not silently left up
+    const b = _seState.banner;
+    if (b && !setups.find(s => s.id === b.id && s.ready)) _seBannerLapsed(b.id);
+  }
+
+  function _seFire(d, s, cfg) {
+    const lot = +d.lot_size || 1;
+    const e = { t: Date.now(), sym: d.symbol || state.symbol, exp: d.expiry || '', side: s.side, typ: s.typ, K: s.K,
+                entry: +s.entry.toFixed(2), stop: +s.stopPrem.toFixed(2), tgt: +s.targetPrem.toFixed(2),
+                costU: s.g.costU || 0, lot, lots: s.lots, rr: s.rr,
+                riskU: Math.abs(s.entry - s.stopPrem) + (s.g.costU || 0), spot: d.underlying_value };
+    const log = _seLog(); log.push(e); _seSave(log);
+    const verb = s.side === 'BUY' ? 'BUY' : 'SELL';
+    const txt = `${verb} ${fmtInt(s.K)} ${s.typ} at ${s.entry.toFixed(1)}. Stop ${s.stopPrem.toFixed(1)}, target ${s.targetPrem.toFixed(1)}, ${s.rr.toFixed(1)} R`;
+    _seBanner(s);
+    try { if (typeof showToast === 'function') showToast(`${s.side === 'BUY' ? '🟢' : '🟠'} ${txt}`); } catch (_) {}
+    try { _pushAlertHistory(`Scalp ${verb} ${fmtInt(s.K)} ${s.typ}`, d.underlying_value, s.side === 'BUY' ? (s.typ === 'CE' ? 'pos' : 'neg') : (s.typ === 'CE' ? 'neg' : 'pos'), e.sym); } catch (_) {}
+    if (cfg.voice) {
+      const key = `scalp|${s.id}|${Math.round(Date.now() / 180000)}`;
+      const say = `${e.sym} scalp. ${txt}`;
+      try {
+        if (typeof _streamLive !== 'undefined' && _streamLive) _relayAlert(key, say, 'level', 180);
+        else _speakOnce(key, say, 180);
+      } catch (_) {}
+    }
+  }
+
+  function _seBanner(s) {
+    let el = document.getElementById('scalpFlash');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'scalpFlash';
+      document.body.appendChild(el);
+      el.addEventListener('click', ev => { if (ev.target.closest('[data-x]')) { el.style.display = 'none'; _seState.banner = null; } });
+    }
+    const buy = s.side === 'BUY';
+    const col = buy ? (s.typ === 'CE' ? '#1fae6a' : '#e0475a') : '#e39b1c';
+    el.className = 'scalp-flash';
+    el.style.cssText = `display:block;--sf:${col};`;
+    el.innerHTML = `
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
+        <b style="font-size:17px;letter-spacing:.3px;">${buy ? '▲ BUY' : '▼ SELL'} ${fmtInt(s.K)} ${s.typ}</b>
+        <span style="font-size:13px;">at ≤ ₹${s.entry.toFixed(1)}</span>
+        <span data-x style="margin-left:auto;cursor:pointer;opacity:.8;font-size:14px;" title="Dismiss">✕</span>
+      </div>
+      <div style="font-size:11.5px;margin-top:3px;">stop ₹${s.stopPrem.toFixed(1)} <span style="opacity:.75;">(spot ${fmtInt(Math.round(s.stopSpot))})</span> · target ₹${s.targetPrem.toFixed(1)} <span style="opacity:.75;">(spot ${fmtInt(Math.round(s.targetSpot))})</span> · <b>${s.rr.toFixed(1)}R</b> · ${s.lots} lot${s.lots > 1 ? 's' : ''}</div>
+      <div style="font-size:10px;opacity:.85;margin-top:2px;">${buy ? 'pullback with the read' : 'fade into the wall'} · ${s.mOk}/${s.mN} must + ${s.sOk}/${s.sN} supporting · ${new Date().toLocaleTimeString('en-IN', { hour12: false })}</div>
+      <div class="sf-status" style="font-size:10px;margin-top:2px;font-weight:700;">● setup live</div>`;
+    _seState.banner = { id: s.id, t: Date.now() };
+    clearTimeout(_seState.bannerTimer);
+    _seState.bannerTimer = setTimeout(() => { if (el) el.style.display = 'none'; _seState.banner = null; }, 120000);
+  }
+  window._seBannerPreview = s => _seBanner(s);   // console: preview the banner styling
+  function _seBannerLapsed(id) {
+    const el = document.getElementById('scalpFlash');
+    if (!el || el.style.display === 'none') return;
+    el.classList.add('lapsed');
+    const st = el.querySelector('.sf-status'); if (st) st.textContent = '○ conditions lapsed — do not chase the entry';
+    _seState.banner = null;
+  }
+
+  function _strikePickerHtml(p, setups, stats) {
+    if (!p) return '';
+    const n = v => fmtInt(Math.round(v));
+    const r2 = v => (v == null || !isFinite(v)) ? '—' : (+v).toFixed(Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2);
+    const stCol = p.stance === 'buy' ? 'var(--accent,#5b8cff)' : p.stance === 'sell' ? 'var(--gold,#d4af37)' : 'var(--muted)';
+    const stTxt = p.stance === 'buy' ? 'favours BUYING options' : p.stance === 'sell' ? 'favours SELLING options' : 'no strong edge either way';
+    const cfg = _seCfg();
+    const cell = (s, label) => {
+      if (!s) return `<span style="min-width:310px;color:var(--muted);">${label} — no liquid strike</span>`;
+      const g = s.g, buy = s.side === 'BUY';
+      const col = buy ? (s.typ === 'CE' ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)') : 'var(--gold,#d4af37)';
+      const chip = s.ready
+        ? `<span class="sf-chip" style="--sf:${col};">ENTER</span>`
+        : `<span style="font-size:9px;color:var(--muted);border:1px solid var(--border);border-radius:3px;padding:0 4px;">${s.mOk}/${s.mN} · ${s.sOk}/${s.sN}</span>`;
+      const tip = s.checks.map(c => `${c.ok ? '✓' : '✗'} ${c.must ? '' : '(supporting) '}${c.name}: ${c.txt}`).join('\n');
+      return `<span style="min-width:310px;" title="${escapeHtml(tip)}">
+        ${chip} <b style="color:${col};">${s.side} ${s.typ} ${n(s.K)}</b> ₹${r2(g.ltp)}
+        <span style="color:var(--muted);font-size:9px;">δ${Math.abs(g.delta).toFixed(2)} · IV ${g.iv.toFixed(1)}${g.ivOwn ? '' : '*'}${g.spr != null ? ` · spr ${r2(g.spr)}` : ''} · cost ${r2(g.costPts)} pts</span>
+        <div style="font-size:9px;color:var(--muted);padding-left:10px;">${s.ready
+          ? `<b style="color:var(--text);">entry ≤ ₹${r2(s.entry)} · stop ₹${r2(s.stopPrem)} · target ₹${r2(s.targetPrem)} · ${r2(s.rr)}R · ${s.lots} lot${s.lots > 1 ? 's' : ''}</b>`
+          : `waiting: ${escapeHtml((s.missing[0] || (s.sOk < 3 ? `only ${s.sOk}/${s.sN} supporting checks` : '')).slice(0, 90))}`}
+          ${buy && g.gain15 != null ? ` · 15-min 1σ +₹${r2(g.gain15)} vs θ ₹${r2(g.dec15)}` : ''}</div>
+      </span>`;
+    };
+    const S = k => setups.find(s => s.side === k[0] && s.typ === k[1]);
+    const stat = x => !x ? '—' : `${x.n} · ${x.w} target / ${x.l} stop / ${x.t} time-out · <b style="color:${x.exp >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${x.exp >= 0 ? '+' : '−'}₹${n(Math.abs(x.exp))}/lot</b>${x.avgR != null ? ` (${x.avgR >= 0 ? '+' : ''}${x.avgR.toFixed(2)}R)` : ''}`;
+    return `<div style="border:1px solid var(--border);border-radius:6px;padding:4px 6px;margin:3px 4px 5px;">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline;font-size:10px;">
+        <b style="font-size:10.5px;">SCALP ENTRIES</b>
+        <b style="color:${stCol};">${stTxt}</b>
+        <span style="color:var(--muted);">bias: ${escapeHtml(p.biasWhy)}</span>
+        <span style="color:var(--muted);">1σ: 15 min ±${r2(p.sig15)} · day ±${n(p.sigDay)} · expiry ±${n(p.sigExp)} pts${p.F ? ` · fwd ${n(p.F)}` : ''}</span>
+        <span style="margin-left:auto;display:flex;gap:8px;color:var(--muted);">
+          <label><input type="checkbox" class="se-cfg" data-k="on" ${cfg.on ? 'checked' : ''}> alerts</label>
+          <label><input type="checkbox" class="se-cfg" data-k="voice" ${cfg.voice ? 'checked' : ''}> voice</label>
+          <label><input type="checkbox" class="se-cfg" data-k="buy" ${cfg.buy ? 'checked' : ''}> buys</label>
+          <label><input type="checkbox" class="se-cfg" data-k="sell" ${cfg.sell ? 'checked' : ''}> sells</label>
+        </span>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:3px;font-size:10px;">${cell(S(['BUY', 'CE']), 'BUY CE')}${cell(S(['BUY', 'PE']), 'BUY PE')}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;padding-top:2px;font-size:10px;">${cell(S(['SELL', 'CE']), 'SELL CE')}${cell(S(['SELL', 'PE']), 'SELL PE')}</div>
+      <div style="font-size:9px;color:var(--muted);padding-top:3px;">positional theta sell (≈1σ, not a scalp): ${p.posCE ? `CE ${n(p.posCE.K)} ₹${r2(p.posCE.ltp)} δ${Math.abs(p.posCE.delta).toFixed(2)}` : '—'} · ${p.posPE ? `PE ${n(p.posPE.K)} ₹${r2(p.posPE.ltp)} δ${Math.abs(p.posPE.delta).toFixed(2)}` : '—'}${p.wallAbove ? ` · walls ${n(p.wallAbove)} / ${p.wallBelow ? n(p.wallBelow) : '—'}` : ''}</div>
+      <div style="font-size:9.5px;padding-top:3px;border-top:1px solid var(--border-soft);margin-top:3px;">
+        <b>Alert record</b> ${escapeHtml(p.sym || '')}: all ${stat(stats.all)} · buys ${stat(stats.buy)} · sells ${stat(stats.sell)}${stats.open ? ` · ${stats.open} open` : ''}
+        <span style="color:var(--muted);"> — the only honest answer to "is it profitable": each alert followed to target, stop or 20 min, net of costs.</span>
+      </div>
+      <div style="font-size:9px;color:var(--muted);padding-top:2px;">${escapeHtml(p.why.join(' · '))}${p.why.length ? ' · ' : ''}BUY = pullback to value with the read, not chased, ≥1.5R to the next wall · SELL = fade a paid-up push into the OI wall, stop through the wall, target VWAP · every MUST plus 3 of 6 supporting, held two reads, then the banner flashes. Hover a strike for its checklist. * = ATM IV used.</div>
+    </div>`;
+  }
+
+  document.addEventListener('change', ev => {
+    const el = ev.target.closest && ev.target.closest('.se-cfg');
+    if (!el) return;
+    const o = _seCfg(); o[el.dataset.k] = el.checked;
+    try { localStorage.setItem(_SE_CFG, JSON.stringify(o)); } catch (_) {}
+  });
   function renderDelta90(d) {
     const box = document.getElementById('d90Body');
     if (!box) return;
@@ -21447,8 +21999,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
     } catch (_) {}
 
+    let pickHtml = '';
+    try {
+      const pk = _strikePicker(d);
+      const su = _scalpSetups(d, pk);
+      const lg = _seTrack(d);
+      _seEvaluate(d, su);
+      window._scalpLast = su;                    // console inspection: the live checklists
+      pickHtml = _strikePickerHtml(pk, su, _seStats(lg, d.symbol || state.symbol));
+    } catch (e) { console.warn('[strike picker]', e.message); }
     box.innerHTML = `
       ${verdict ? `<div style="padding:2px 4px 3px;font-size:11px;color:${vcol};font-weight:700;" title="Trades and positioning count most: who took liquidity (takers), today's OI build, premium paid beyond delta. A heavy book only counts when takers confirm it.">${escapeHtml(verdict)}${vwhy ? `<span style="font-weight:400;color:#9ab;font-size:9.5px;"> — ${escapeHtml(vwhy)}</span>` : ''}</div>` : ''}
+      ${pickHtml}
       ${x.rows.map(r => `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:2px 4px;font-size:10px;align-items:flex-start;">
         <span style="min-width:34px;color:var(--muted);font-size:9px;font-weight:700;">δ${r.target.toFixed(2).slice(1)}</span>
         <span style="display:inline-flex;flex-direction:column;min-width:214px;">${cell('CE', r.ce, true)}${_deskSub(dk[`CE|${r.target}`])}</span>
@@ -24256,13 +24818,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _SCALP_KEY = 'scalpCalcCfg';
   function _scalpCfg() {
     try {
+      // STT on option sales has been 0.1% and NSE's option transaction
+      // charge 0.03503% since 1 Oct 2024; a saved config still carrying the
+      // old defaults (0.0625 / 0.05) is moved to the current rates.
+      const sv = JSON.parse(localStorage.getItem(_SCALP_KEY) || '{}');
+      if (sv.sttPct === 0.0625) sv.sttPct = 0.1;
+      if (sv.exchPct === 0.05) sv.exchPct = 0.03503;
       return Object.assign({ move: 30, mins: 20, riskRs: 3000, brokerage: 20,
-                             sttPct: 0.0625, exchPct: 0.05, gstPct: 18,
-                             stampPct: 0.003, slipTicks: 1 },
-                           JSON.parse(localStorage.getItem(_SCALP_KEY) || '{}'));
+                             sttPct: 0.1, exchPct: 0.03503, gstPct: 18,
+                             stampPct: 0.003, slipTicks: 1 }, sv);
     } catch (_) {
-      return { move: 30, mins: 20, riskRs: 3000, brokerage: 20, sttPct: 0.0625,
-               exchPct: 0.05, gstPct: 18, stampPct: 0.003, slipTicks: 1 };
+      return { move: 30, mins: 20, riskRs: 3000, brokerage: 20, sttPct: 0.1,
+               exchPct: 0.03503, gstPct: 18, stampPct: 0.003, slipTicks: 1 };
     }
   }
   function _scalpSave(o) { try { localStorage.setItem(_SCALP_KEY, JSON.stringify(o)); } catch (_) {} }
@@ -25152,6 +25719,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   function renderTrendPanel(t) {
+    if (t) window._trendLast = { score: t.score, at: Date.now() };
     const box = document.getElementById('trendBody');
     if (!box) return;
     if (!t) { box.innerHTML = '<div class="movers-loading">Load the chain and let the chart collect a few candles.</div>'; return; }

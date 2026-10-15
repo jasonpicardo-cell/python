@@ -805,11 +805,145 @@ def test_theme():
     check("tab bar wraps instead of overflowing", ".tabs { display: flex; flex-wrap: wrap;" in dsrc)
 
 
+def test_watchdog():
+    """Silent SDK subscribe failures are re-requested; an index/depth stall
+    in market hours is re-subscribed, then the socket reopened."""
+    import nse_adapter_fyers as A, datetime as _dt
+    IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    T = _dt.datetime(2026, 10, 15, 11, 0, tzinfo=IST).timestamp()      # Thursday 11:00 IST
+    calls = []
+    class _WS:
+        closed = 0
+        def close(self): _WS.closed += 1
+    class _S:
+        def subscribe(self, symbols, data_type=None): calls.append((data_type, list(symbols)))
+    s_ = _S(); setattr(s_, "_FyersDataSocket__ws_object", _WS())
+    saved = (A._socket, dict(A._raw_last), set(A._subscribed), set(A._depth_subs), dict(A._sub_req), dict(A._dsub_req), dict(A._wd))
+    try:
+        A._socket = s_
+        for x in (A._raw_last, A._sub_req, A._dsub_req, A._retry_n):
+            x.clear()
+        A._subscribed.clear(); A._depth_subs.clear()
+        A._wd.update(last_heal=0.0, last_force=0.0, heals=0, forced_reconnects=0, retried=0)
+        idx, opt, fut = "NSE:NIFTY50-INDEX", "NSE:NIFTY26OCT25000CE", "NSE:NIFTY26OCTFUT"
+        # subscribed at T-100; the option and future confirmed, the index never answered
+        A._subscribed.update([idx, opt]); A._depth_subs.add(fut)
+        A._sub_req.update({idx: T - 100, opt: T - 100}); A._dsub_req[fut] = T - 100
+        A._raw_last[opt] = {"sf": (T - 2, {})}
+        A._raw_last[fut] = {"dp": (T - 3, {})}
+        r = A._watchdog_pass(T)
+        check("watchdog: an unanswered subscription is requested again",
+              r.get("retried") == 1 and any(idx in c[1] for c in calls), f"{r} {calls}")
+        # now everything confirmed earlier, then index + depth went silent while options tick
+        calls.clear()
+        A._sub_req.update({idx: T - 400}); A._dsub_req[fut] = T - 400
+        A._subscribed.add(idx)
+        A._raw_last[idx] = {"if": (T - 300, {})}
+        A._raw_last[fut] = {"dp": (T - 300, {})}
+        A._raw_last[opt] = {"sf": (T - 1, {})}
+        r = A._watchdog_pass(T)
+        check("watchdog: silent index and depth are re-subscribed",
+              r.get("resubscribed") == 2 and ("DepthUpdate", [fut]) in calls, f"{r} {calls}")
+        # still silent three minutes later -> socket reopened, once
+        A._sub_req[idx] = T - 400; A._dsub_req[fut] = T - 400
+        A._raw_last[opt] = {"sf": (T + 179, {})}
+        A._subscribed.add(idx); A._depth_subs.add(fut)
+        r = A._watchdog_pass(T + 180)
+        check("watchdog: still stalled after re-subscribing -> socket reopened", r.get("forced") and _WS.closed == 1, str(r))
+        A._raw_last[opt] = {"sf": (T + 299, {})}
+        r = A._watchdog_pass(T + 300)
+        check("watchdog: reopen is rate-limited", _WS.closed == 1, str(r))
+        # outside market hours a quiet index is normal
+        A._wd.update(last_heal=0.0, last_force=0.0)
+        night = T + 11 * 3600
+        A._raw_last[opt] = {"sf": (night - 1, {})}
+        r = A._watchdog_pass(night)
+        check("watchdog: no stall action outside market hours", not r.get("resubscribed") and not r.get("forced"), str(r))
+        st = A.watchdog_state()
+        check("watchdog: state reported for the audit", "log" in st and "price_unconfirmed" in st)
+    finally:
+        A._socket = saved[0]
+        A._raw_last.clear(); A._raw_last.update(saved[1])
+        A._subscribed.clear(); A._subscribed.update(saved[2])
+        A._depth_subs.clear(); A._depth_subs.update(saved[3])
+        A._sub_req.clear(); A._sub_req.update(saved[4])
+        A._dsub_req.clear(); A._dsub_req.update(saved[5])
+        A._wd.clear(); A._wd.update(saved[6])
+
+
+def test_strike_picker():
+    """Strike picker runs on a synthetic chain: buy near delta 0.55, sell
+    OTM near 0.15, liquid only, and it is rendered in the desk read."""
+    import subprocess, re as _re, json as _json
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("strike picker rendered in the desk read widget", "${pickHtml}" in dsrc and "function _strikePicker(d)" in dsrc)
+    def grab(name):
+        i = dsrc.index(f"function {name}(")
+        depth, j = 0, dsrc.index("{", i)
+        for k in range(j, len(dsrc)):
+            depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+            if depth == 0:
+                return dsrc[i:k + 1]
+    code = "\n".join(grab(n) for n in ("bsErf", "bsNormCdf", "bsNormPdf", "bsD1D2", "bsGreeks", "_volT", "_strikePicker",
+                                         "_pickHold", "_istNowMin", "_tradeCost", "_scalpCfg", "_seTrack", "_seStats", "_seLog", "_seSave"))
+    harness = code + r"""
+const RISK_FREE = 0.07; const window = {}; const fmtInt = x => String(x);
+const _store = {}; const localStorage = { getItem: k => _store[k] ?? null, setItem: (k, v) => { _store[k] = String(v); } };
+const _SCALP_KEY = 'sc', _SE_KEY = 'se'; const _pickMem = {}; const state = { symbol: 'NIFTY' };
+const _chart = { candles: [] }; const _isHistorical = () => false;
+const _computeGex = () => ({ flip: 24800 });
+const spot = 25000, st = [];
+function px(K, typ, iv, T) { const g = bsD1D2(spot, K, T, iv, 0.07); const [d1, d2] = g;
+  return typ === 'CE' ? spot * bsNormCdf(d1) - K * Math.exp(-0.07 * T) * bsNormCdf(d2)
+                      : K * Math.exp(-0.07 * T) * bsNormCdf(-d2) - spot * bsNormCdf(-d1); }
+const T = _volT(4);
+for (let K = 24000; K <= 26000; K += 50) {
+  const c = Math.max(0.05, px(K, 'CE', 0.13, T)), p = Math.max(0.05, px(K, 'PE', 0.13, T));
+  st.push({ strike: K, ce_ltp: c, pe_ltp: p, ce_bid: c - 0.1, ce_ask: c + 0.1, pe_bid: p - 0.1, pe_ask: p + 0.1,
+            ce_iv: 13, pe_iv: 13, ce_volume: 100, pe_volume: 100, ce_oi: K === 25300 ? 9e5 : 1e5, pe_oi: K === 24700 ? 9e5 : 1e5 });
+}
+const r = _strikePicker({ underlying_value: spot, strikes: st, dte: 4, atm_iv: 13, india_vix: 13, lot_size: 65 });
+// hysteresis: a tiny change in spot must not move the pick
+const r2 = _strikePicker({ underlying_value: spot + 3, strikes: st, dte: 4, atm_iv: 13, india_vix: 13, lot_size: 65 });
+// outcome log: a buy that reaches its target is scored as a win, net of costs
+localStorage.setItem('se', JSON.stringify([{ t: Date.now(), sym: 'NIFTY', exp: '', side: 'BUY', typ: 'CE', K: 25000,
+  entry: 100, stop: 90, tgt: 115, costU: 1, lot: 65, riskU: 11 }]));
+const chain2 = { symbol: 'NIFTY', expiry: '', strikes: [{ strike: 25000, ce_ltp: 116 }] };
+const lg = _seTrack(chain2); const stt = _seStats(lg, 'NIFTY');
+console.log(JSON.stringify({ b: [r.buyCE.K, r.buyCE.delta, r.buyPE.K, r.buyPE.delta],
+  s: [r.posCE.K, r.posCE.delta, r.posPE.K, r.posPE.delta], f: [r.fadeCE.K, r.fadeCE.delta, r.fadePE.K, r.fadePE.delta],
+  hold: [r2.buyCE.K === r.buyCE.K, r2.buyPE.K === r.buyPE.K], log: [lg[0].res, Math.round(lg[0].pnlLot), stt.all.n, stt.all.w] }));
+"""
+    fn = os.path.join(HERE, "__pick_test.js")
+    open(fn, "w").write(harness)
+    try:
+        out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
+    finally:
+        os.remove(fn)
+    if out.returncode:
+        check("strike picker runs", False, out.stderr[-300:]); return
+    r = _json.loads(out.stdout.strip().splitlines()[-1])
+    b, s_ = r["b"], r["s"]
+    check("strike picker: buy strikes within 0.10 of delta 0.55", abs(abs(b[1]) - 0.55) <= 0.11 and abs(abs(b[3]) - 0.55) <= 0.11, str(b))
+    check("strike picker: positional sells OTM near delta 0.15 (or the OI wall)",
+          s_[0] > 25000 and s_[2] < 25000 and 0.06 <= abs(s_[1]) <= 0.25 and 0.06 <= abs(s_[3]) <= 0.25, str(s_))
+    f = r["f"]
+    check("strike picker: fade-sell strikes OTM near delta 0.40", f[0] > 25000 and f[2] < 25000
+          and 0.30 <= abs(f[1]) <= 0.50 and 0.30 <= abs(f[3]) <= 0.50, str(f))
+    check("strike picker: picks hold on a small spot change", all(r["hold"]), str(r["hold"]))
+    lg = r["log"]
+    check("entry log: target hit scored as a win net of costs", lg[0] == "target" and lg[1] == (116 - 100 - 1) * 65
+          and lg[2] == 1 and lg[3] == 1, str(lg))
+    check("entry alerts: flash banner, two-read hold, cooldown", "_seBanner(s)" in dsrc and "if (h.n < 2) continue;" in dsrc
+          and "now - f < 180000" in dsrc)
+    check("cost defaults: STT 0.1% and exchange 0.03503% on options", "sttPct: 0.1, exchPct: 0.03503" in dsrc)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

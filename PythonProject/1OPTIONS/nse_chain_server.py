@@ -2237,6 +2237,7 @@ def _enrich_adapter_payload(symbol: str, data: dict, band: int) -> dict:
 def _data_audit(symbol: str) -> dict:
     d, _m = _cached_chain(symbol, None, 12, client="audit", max_age=120)
     checks = []
+    sock_state = None
     # Outside 09:15-15:30 on a weekday nothing ticks, and a check that needs
     # live data says so instead of failing.
     _lt = time.gmtime(time.time() + 19800)          # IST wall clock
@@ -2288,13 +2289,26 @@ def _data_audit(symbol: str) -> dict:
             import nse_adapter_fyers as _fya
             a = _fya.audit_state(symbol, d)
             sa = a.get("spot_tick_age_s")
-            add("index ticking", sa is not None and sa < 15, f"last tick {sa}s ago", live=True)
+            wd = a.get("watchdog") or {}
+            errs = [e for e in (wd.get("log") or []) if e.get("kind") in ("error", "close", "heal")]
+            wd_txt = (f" · watchdog: {wd.get('heals', 0)} re-subscribe(s), {wd.get('forced_reconnects', 0)} socket reopen(s)"
+                      + (f" · last event {errs[0]['age_s']}s ago: {errs[0]['kind']} {errs[0]['text'][:90]}" if errs else ""))
+            add("index ticking", sa is not None and sa < 15, f"last tick {sa}s ago" + ("" if (sa is not None and sa < 15) else wd_txt), live=True)
+            uc = (wd.get("price_unconfirmed") or 0) + (wd.get("depth_unconfirmed") or 0)
+            add("subscriptions confirmed by the feed", uc == 0,
+                f"{wd.get('price_requested', 0)} price / {wd.get('depth_requested', 0)} depth requested · "
+                f"{wd.get('price_unconfirmed', 0)} / {wd.get('depth_unconfirmed', 0)} never answered"
+                + (f" ({', '.join(s_.split(':')[-1] for s_ in (wd.get('price_unconfirmed_sample') or []) + (wd.get('depth_unconfirmed_sample') or []))[:120]})" if uc else "")
+                + " - re-requested automatically with back-off"
+                + (f" · rejected by broker: {', '.join(wd['invalid_symbols'][:6])}" if wd.get("invalid_symbols") else ""),
+                warn=True)
             add("option price subscriptions", a["price_subscribed"] >= a["options"] * 0.9,
                 f"{a['price_subscribed']} of {a['options']} contracts")
             add("options ticking (last 60s)", a["ticking_60s"] >= a["options"] * 0.5,
                 f"{a['ticking_60s']} of {a['options']} - quiet far strikes are normal", warn=True, live=True)
             add("depth subscriptions", a["depth_subscribed"] > 0, f"{a['depth_subscribed']} contracts")
-            add("5-level depth arriving", a["ladders_fresh_120s"] > 0, f"{a['ladders_fresh_120s']} contracts updated in 2 min", live=True)
+            add("5-level depth arriving", a["ladders_fresh_120s"] > 0, f"{a['ladders_fresh_120s']} contracts updated in 2 min"
+                + ("" if a["ladders_fresh_120s"] > 0 else f" · last depth message {wd.get('last_depth_age_s')}s ago" + wd_txt), live=True)
             add("total bid / offer arriving", a["totals_fresh_120s"] > 0, f"{a['totals_fresh_120s']} contracts updated in 2 min", live=True)
             add("trade classification (takers)", a["flow_contracts"] > 0,
                 f"{a['flow_contracts']} contracts with classified prints - builds from server start", warn=True, live=True)
@@ -2316,6 +2330,7 @@ def _data_audit(symbol: str) -> dict:
                 (f"; last {rc['last_reconnect_age_s']}s ago" if rc.get('last_reconnect_age_s') is not None else "") +
                 " - subscriptions are re-requested on each")
             out_raw = a.get("raw_rest")
+            sock_state = wd
         except Exception as e:  # noqa: BLE001
             add("broker state", False, str(e))
             out_raw = None
@@ -2324,6 +2339,7 @@ def _data_audit(symbol: str) -> dict:
     bad = [c for c in checks if c["status"] == "FAIL"]
     warn = [c for c in checks if c["status"] == "warn"]
     return {"symbol": symbol, "verdict": "FAIL" if bad else ("WARN" if warn else "OK"),
+            "socket": sock_state,
             "failed": len(bad), "warnings": len(warn), "checks": checks,
             # the raw broker rows the checks were made from, so a field name can
             # be verified rather than assumed
