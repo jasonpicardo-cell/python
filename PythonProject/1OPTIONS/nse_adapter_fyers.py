@@ -2263,6 +2263,67 @@ def constituent_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+_hist_range_cache: Dict[str, Any] = {}
+
+
+def fetch_history_days(symbol: str, days: int = 60) -> List[Dict[str, Any]]:
+    """Several sessions of 1-minute index bars in ONE history request (Fyers
+    allows up to 100 days of minute data per call). Cached in memory and on
+    disk for the day, so a study built on it costs one call a day at most."""
+    days = max(5, min(95, int(days)))
+    ysym = FYERS_INDEX.get(symbol.upper())
+    if not ysym:
+        return []
+    g = time.gmtime(time.time() + 19800)
+    today = f"{g.tm_year:04d}-{g.tm_mon:02d}-{g.tm_mday:02d}"
+    key = f"{symbol.upper()}_{days}_{today}"
+    if key in _hist_range_cache:
+        return _hist_range_cache[key]
+    cdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history")
+    cpath = os.path.join(cdir, f"{key}.json")
+    try:
+        if os.path.exists(cpath):
+            with open(cpath) as f:
+                out = json.load(f)
+            _hist_range_cache[key] = out
+            return out
+    except Exception:
+        pass
+    if not connect():
+        return []
+    g0 = time.gmtime(time.time() + 19800 - days * 86400)
+    frm = f"{g0.tm_year:04d}-{g0.tm_mon:02d}-{g0.tm_mday:02d}"
+    try:
+        r = _count_rest("history") or _client.history({
+            "symbol": ysym, "resolution": "1", "date_format": "1",
+            "range_from": frm, "range_to": today, "cont_flag": "1"})
+    except Exception as e:  # noqa: BLE001
+        print(f"[fyers] multi-day history failed: {e}")
+        return []
+    if not isinstance(r, dict) or r.get("s") != "ok":
+        print(f"[fyers] multi-day history: {(r or {}).get('message', 'bad response')}")
+        return []
+    out = []
+    for c in (r.get("candles") or []):
+        if len(c) < 5:
+            continue
+        gg = time.gmtime(int(c[0]) + 19800)
+        if _in_session(gg.tm_hour * 60 + gg.tm_min):
+            out.append({"t": int(c[0]), "o": float(c[1]), "h": float(c[2]), "l": float(c[3]), "c": float(c[4])})
+    if out:
+        _hist_range_cache[key] = out
+        try:
+            os.makedirs(cdir, exist_ok=True)
+            tmp = cpath + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(out, f, separators=(",", ":"))
+            os.replace(tmp, cpath)
+        except Exception:
+            pass
+        print(f"[fyers] multi-day history: {len(out)} minute bars, {frm} to {today} (one call, cached for the day)")
+    return out
+
+
 def market_depth(symbol: str) -> Dict[str, Any]:
     """Level-2 depth — the input a genuine order-flow read needs."""
     if not connect():

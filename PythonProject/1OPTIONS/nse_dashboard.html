@@ -845,6 +845,18 @@
   /* ── chart interval: the selected one must be obvious ── */
   .chart-iv.active { background:var(--accent) !important; border-color:var(--accent) !important; color:#fff !important; font-weight:700; box-shadow:0 0 0 1px var(--accent); }
   .chart-iv:not(.active):hover { border-color:var(--accent); }
+
+  /* ── traffic light ── */
+  .tl-box { display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 8px 4px; border-radius:9px;
+    background:rgba(0,0,0,0.78); border:1px solid rgba(255,255,255,0.18); min-width:86px; cursor:help; }
+  body.light-mode .tl-box { background:rgba(255,255,255,0.92); border-color:rgba(15,23,42,0.18); }
+  .tl-head { display:flex; gap:6px; }
+  .tl-lamp { width:15px; height:15px; border-radius:50%; display:inline-block; }
+  .tl-blink { animation:tlBlink 1s ease-in-out infinite; }
+  @keyframes tlBlink { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+  .tl-word { font-size:15px; font-weight:800; letter-spacing:.6px; line-height:1.1; }
+  .tl-sub { font-size:8.5px; color:var(--muted); white-space:nowrap; }
+
   /* ── scalp entry flash ── */
   .scalp-flash { position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:9999; min-width:380px; max-width:92vw;
     padding:10px 14px; border-radius:10px; color:#fff; background:var(--sf); border:2px solid #fff;
@@ -2197,7 +2209,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label title="Previous day's high, low and close — the first targets and anchors of the session."><input type="checkbox" id="chk_pdhl"> PDH/L</label>
                 <label title="Today's point of control and 70% value area. Real volume at price when the feed has it, otherwise time at price (TPO)."><input type="checkbox" id="chk_vprof"> POC/VA</label>
                 <label title="Heikin Ashi only: a dot where a streak of three strong bars (no wick against the trend) begins, amber ring when a run is ageing, and colour flips marked confirmed (▲▼) only when the real close agrees with VWAP — a × otherwise."><input type="checkbox" id="chk_haMarks"> HA marks</label>
-                <label title="Desk box, bottom right above Move quality: stretch from VWAP in σ, share of the day's implied move used, premium tape, futures takers, ATM IV change, ATR, basis change and the risk governor."><input type="checkbox" id="chk_deskBox"> Desk box</label>
+                <label title="Vertical lines at the times of day where Nifty most often made a major turn over the last ~60 sessions: green = rallies started there, red = falls started, amber = both. Past sessions, not a forecast."><input type="checkbox" id="chk_turnTimes"> Turn times</label>
                 <button id="addAlertBtn" class="mini-btn" style="font-size:9px;padding:1px 6px;" title="Add a price alert. Shift-click the chart (or right-click) to place one at the price under the cursor.">🔔 Alert</button>
                 <span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.05);">
                   <select id="chartDataMode" class="ohlc-inp" style="font-size:9px;padding:1px 3px;" title="Live uses today's session. Historical replays a past date's 1-minute candles through the same chart and indicators.">
@@ -2224,6 +2236,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_ema50"> EMA50</label>
                 <label><input type="checkbox" id="chk_ema100"> EMA100</label>
                 <label><input type="checkbox" id="chk_ema200"> EMA200</label>
+                <span style="display:inline-flex;gap:3px;align-items:center;border-left:1px solid rgba(255,255,255,0.12);padding-left:6px;" title="EMA crossover lines on the chart: a GREEN vertical line where the fast EMA closes above the slow one (bullish), a RED one where it closes below (bearish). Judged on closed candles of the chart interval, so a line never appears and then vanishes. Drawn on Candles, Heikin Ashi (real closes, not HA averages) and Renko (on the brick in force at that time). Defaults 5 / 13.">
+                  <label><input type="checkbox" id="chk_emaX"> EMA cross</label>
+                  fast <input type="number" id="emaXFast" class="ohlc-inp" value="5" min="1" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
+                  slow <input type="number" id="emaXSlow" class="ohlc-inp" value="13" min="2" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
+                </span>
                 <label><input type="checkbox" id="chk_vwap"> VWAP</label>
               </span>
             </div>
@@ -2240,8 +2257,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                  Renko. As a sibling it survives both, and sitting above the
                  chart keeps the price panes contiguous below it. -->
             <div id="ctxChartBody" style="padding:0 6px 2px;"></div>
-            <div id="chartBody" style="padding:4px 6px;">
-              <div class="movers-loading">Loading candles…</div>
+            <!-- Market direction: the context series read together, directly
+                 above the candles -->
+            <div id="mktDirBody"></div>
+            <div style="position:relative;">
+              <!-- traffic light, top left over the candles: a sibling of
+                   chartBody so the chart redraws cannot destroy it -->
+              <div id="tlight" style="position:absolute;left:14px;top:10px;z-index:6;"></div>
+              <div id="chartBody" style="padding:4px 6px;">
+                <div class="movers-loading">Loading candles…</div>
+              </div>
             </div>
             <!-- RSI pane. A SIBLING of chartBody rather than a child, because
                  chartBody's innerHTML is replaced on every render and anything
@@ -3928,6 +3953,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     <section id="tab-numerology" class="tab-panel">
       <div class="builder-panel-head"><h3>Numerology<i class="hi" data-h="numo-tab">i</i></h3></div>
+
       <div class="eso-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;margin-bottom:8px;background:var(--panel-2,rgba(255,255,255,0.03));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:8px;">
         <span style="font-size:11px;font-weight:700;color:var(--gold,#d4af37);">📊 Instrument:</span>
         <input type="text" class="eso-sym-input ohlc-inp" placeholder="NSE stock e.g. RELIANCE" style="font-size:11px;width:180px;text-transform:uppercase;">
@@ -15300,6 +15326,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { _coilCheck(data); } catch (_) {}
     try { renderScalpCalc(data); } catch (_) {}
     try { _recordCtx(data); renderChartContext(data); renderCtxChart(); } catch (_) {}
+    try { renderMktDir(data); } catch (e) { console.warn('[market direction]', e.message); }
     try { _ladderRecord(data); } catch (_) {}
     _paintVis('ladderBody', () => renderLadder(data), 'renderLadder');
     _paintVis('regimeMapBody', () => renderRegime(data), 'renderRegime');
@@ -15309,6 +15336,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _paintVis('sentBody', () => renderSentiment(data), 'renderSentiment');
     _paintVis('budgetBody', () => renderBudget(data), 'renderBudget');
     try { renderDelta90(data); } catch (_) {}
+    try { renderTrafficLight(data); } catch (e) { console.warn('[traffic light]', e.message); }
     _paintVis('posnBody', () => renderPositioning(data), 'renderPositioning');
     try { _signalCheck(data); } catch (_) {}
     try { _grindCheck(); } catch (_) {}
@@ -15523,6 +15551,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (isFirstRender || data.symbol !== niftyState._lastSyncedSymbol) {
       niftyState._lastSyncedSymbol = data.symbol;
       _syncNiftyWidgetToSymbol(data.symbol);
+      try { _turnsFetch(); } catch (_) {}
     }
 
     // ─── Chain tab: incremental row updates, never full innerHTML ─────────
@@ -17345,10 +17374,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true }, emaX: { fast: 5, slow: 13 } }; }
   }
-  function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show })); } catch (_) {} }
+  function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show, emaX: _chart.emaX })); } catch (_) {} }
 
   // ── 9:20 lines: frozen once per day from the 9:20 chain snapshot ──
   // Transparent formula (NOT a clone of any vendor's proprietary levels):
@@ -17460,6 +17489,62 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     out[seedN - 1] = prev;
     for (let i = seedN; i < closes.length; i++) { prev = closes[i] * k + prev * (1 - k); out[i] = prev; }
     return out;
+  }
+  // ══ EMA CROSSOVER LINES ═══════════════════════════════════════════
+  // A vertical line at every candle where the fast EMA closed on the other
+  // side of the slow one: GREEN when it crossed above (bullish), RED when it
+  // crossed below (bearish). One definition for every chart type:
+  //  - always the REAL candle closes at the chart interval, so Heikin Ashi
+  //    shows the same crosses as Candles (HA prices are averages that never
+  //    traded) and Renko shows them on the brick in force at that time;
+  //  - the forming candle is left out, so a line never appears mid-bar and
+  //    then vanishes when the bar closes the other way;
+  //  - nothing is counted until the slow EMA has a full period of history,
+  //    so the seeding of the average cannot print a fake cross at the open.
+  // "Fast" is whichever period is shorter, so swapped boxes still read right.
+  const _emaXCache = { key: '', pts: [] };
+  function _emaCrossPoints() {
+    if (_chart.show?.emaX === false) return [];
+    const all = _chart.candles || [];
+    const bars = _chart.liveBar ? all.slice(0, -1) : all;
+    const cfg = _chart.emaX || { fast: 5, slow: 13 };
+    const pf = Math.min(cfg.fast, cfg.slow), ps = Math.max(cfg.fast, cfg.slow);
+    if (!(pf >= 1) || pf === ps || bars.length < ps + 2) return [];
+    const lb = bars[bars.length - 1];
+    const key = `${pf}|${ps}|${bars.length}|${bars[0].t}|${lb.t}|${lb.c}`;
+    if (_emaXCache.key === key) return _emaXCache.pts;
+    const closes = bars.map(b => b.c);
+    const f = _emaSeries(closes, pf), sl = _emaSeries(closes, ps);
+    const pts = [];
+    let side = 0;
+    for (let i = ps - 1; i < bars.length; i++) {
+      if (f[i] == null || sl[i] == null) continue;
+      const d = f[i] - sl[i];
+      const now = d > 0 ? 1 : d < 0 ? -1 : side;     // an exact tie keeps the side
+      if (side !== 0 && now !== side)
+        pts.push({ i, t: bars[i].t, dir: now > 0 ? 'bull' : 'bear', px: bars[i].c, f: f[i], s: sl[i], pf, ps });
+      side = now;
+    }
+    _emaXCache.key = key; _emaXCache.pts = pts;
+    return pts;
+  }
+  // xAt(t) -> x pixel for a candle time, or null when it is off the chart
+  function _emaCrossSvg(xAt, top, bottom) {
+    const pts = _emaCrossPoints();
+    if (!pts.length) return '';
+    const iv = _chart.interval || 1;
+    let s = '', lastX = null, stack = 0;
+    for (const p of pts) {
+      const sx = xAt(p.t);
+      if (sx == null || !isFinite(sx)) continue;
+      stack = lastX != null && Math.abs(sx - lastX) < 1 ? stack + 1 : 0; lastX = sx;
+      const bull = p.dir === 'bull', col = bull ? '#00e676' : '#ff1744';
+      const tip = `${_hm(p.t)} — EMA ${p.pf} crossed ${bull ? 'ABOVE' : 'BELOW'} EMA ${p.ps} on the closed ${iv}-minute candle (close ${fmtPrice(p.px)}; EMA ${p.pf} ${fmtPrice(p.f)}, EMA ${p.ps} ${fmtPrice(p.s)}). ${bull ? 'Bullish' : 'Bearish'} crossover.`;
+      s += `<g class="emax-line"><line x1="${sx.toFixed(1)}" y1="${top}" x2="${sx.toFixed(1)}" y2="${bottom}" stroke="${col}" stroke-width="1.3" opacity="0.75"/>
+        <text x="${(sx + 2).toFixed(1)}" y="${(bottom - 4 - stack * 10).toFixed(1)}" style="font-size:8.5px;font-weight:800;fill:${col};">${bull ? '▲' : '▼'}${p.pf}/${p.ps}</text>
+        <title>${escapeHtml(tip)}</title></g>`;
+    }
+    return s;
   }
   function _vwapSeries(cs) {
     // With a broker feed carrying real traded volume this is a genuine VWAP.
@@ -21350,6 +21435,193 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   //
   // Liquidity is a filter, not a footnote: a strike whose spread exceeds 2%
   // of premium (or with no traded volume) is skipped for the next one.
+  // ══ CONFLUENCE: the ITM option book + the heavyweight basket ═════════
+  // Two independent witnesses to the same trend:
+  //
+  //  1. ITM BOOK. In-the-money options near ATM (delta 0.60-0.85) trade like
+  //     the future with leverage. Total bids stacked 3x+ over offers on the
+  //     ITM CALLS is size waiting to buy upside; on the ITM PUTS, downside.
+  //     Three filters turn the raw ratio into evidence:
+  //       - MIRROR: the other side must NOT also be bid-heavy. Both sides bid
+  //         is volatility demand or low-ball orders, not direction.
+  //       - ITS OWN NORM: thin ITM strikes collect far-away low bids and can
+  //         sit at 3x all day. The ratio must be 1.5x the side's own session
+  //         median to count as unusual.
+  //       - HELD 60 s: a stack shown for one poll is a quote, or bait.
+  //  2. HEAVYWEIGHTS. The basket that carries ~60% of the index (HDFC Bank,
+  //     Reliance, ICICI, Infosys, Bharti, L&T, TCS, Axis, SBI, Kotak, M&M ...).
+  //     Their 5-minute move is converted to index points and measured in
+  //     units of the index's own 5-minute sigma, and it only counts when it is
+  //     BROAD: most of the basket moving, not one name carrying it.
+  //
+  // (_bookHwConf - not to be confused with _confluence, the vote panel.)
+  // Neither is new information alone - the index IS its stocks, and a book
+  // can be pulled - but a call-side stack while the heavyweights broadly rise
+  // is two different groups of participants saying the same thing. Each
+  // witness, and the pair, is logged to the Signal Scorecard so the claim is
+  // measured, not assumed.
+  const _cfH = { c: [], p: [], held: {}, bad: {} };
+  const _cfLatch = {};                       // symbol -> { dir, until }
+  // Held time with hysteresis: STARTS on the strict condition, CONTINUES on
+  // a looser one, and survives up to 20 s of failing even that - one refresh
+  // at 2.9x no longer resets a stack that has been there for ten minutes.
+  function _cfHeld(key, startOn, keepOn) {
+    const now = Date.now();
+    if (keepOn === undefined) keepOn = startOn;
+    const since = _cfH.held[key];
+    if (!since) {
+      if (startOn) { _cfH.held[key] = now; delete _cfH.bad[key]; }
+      return 0;
+    }
+    if (keepOn) { delete _cfH.bad[key]; return now - since; }
+    if (!_cfH.bad[key]) _cfH.bad[key] = now;
+    if (now - _cfH.bad[key] > 20000) { delete _cfH.held[key]; delete _cfH.bad[key]; return 0; }
+    return now - since;
+  }
+  function _median(a) { if (!a.length) return null; const b = a.slice().sort((x, y) => x - y); return b[b.length >> 1]; }
+
+  function _bookHwConf(d) {
+    const spot = +d?.underlying_value, st = d?.strikes || [];
+    if (!spot || st.length < 6) return null;
+    const T = _volT(Math.max(1 / 1440, +(d.dte ?? 1)));
+    const iv = (+d.atm_iv || +d.india_vix || 13) / 100;
+    const gap = +d.strike_gap || 50;
+    // ITM strikes nearest the money with delta 0.60-0.85, up to three a side.
+    // On expiry day deltas jump from 0.5 to 1 within a strike or two, so the
+    // band widens to 0.55-0.90 to keep more than one book in the sum.
+    const expD = (+d.dte ?? 1) < 1;
+    const dLo = expD ? 0.55 : 0.60, dHi = expD ? 0.90 : 0.85;
+    const itm = (typ) => st.filter(r => typ === 'CE' ? r.strike < spot : r.strike > spot)
+      .map(r => ({ K: r.strike, dl: Math.abs(bsGreeks(spot, r.strike, T, ((typ === 'CE' ? r.ce_iv : r.pe_iv) || iv * 100) / 100, RISK_FREE, typ).delta) }))
+      .filter(x => x.dl >= dLo && x.dl <= dHi)
+      .sort((a, b) => Math.abs(a.K - spot) - Math.abs(b.K - spot)).slice(0, 3);
+    const side = (typ) => {
+      const ks = itm(typ); let bid = 0, ask = 0, n = 0, stale = 0;
+      for (const x of ks) {
+        const b = _bookOf(_depthFor(d, x.K, typ));
+        if (!b) continue;
+        if (b.stale) { stale++; continue; }
+        bid += b.bid || 0; ask += b.ask || 0; n++;
+      }
+      // at least two live books: one strike's orders are one participant
+      return { strikes: ks.map(x => x.K), n, stale, bid, ask, ratio: n >= 2 && ask > 0 ? bid / ask : null };
+    };
+    const C = side('CE'), P = side('PE');
+    // Each side's NORMAL ratio, from QUIET periods only (ratio under 2x),
+    // sampled every 10 s over the last 3 hours. Built from every sample, the
+    // normal level rose to meet a stack that persisted - an hour of 3.5x
+    // made 3.5x "normal" and switched the signal off in the middle of the
+    // trend it was confirming.
+    const now = Date.now();
+    for (const [k, x] of [['c', C], ['p', P]]) {
+      const h = _cfH[k];
+      if (x.ratio != null && x.ratio < 2 && (!h.length || now - h[h.length - 1].t >= 10000)) h.push({ t: now, r: x.ratio });
+      while (h.length && now - h[0].t > 180 * 60000) h.shift();
+      x.norm = h.length >= 20 ? _median(h.map(q => q.r)) : null;
+      x.vsNorm = x.norm && x.ratio != null ? x.ratio / x.norm : null;
+    }
+    const rawBull = C.ratio != null && C.ratio >= 3, rawBear = P.ratio != null && P.ratio >= 3;
+    const unusual = x => x.vsNorm == null || x.vsNorm >= 1.5;      // no baseline yet: do not block
+    const bullOn = rawBull && (P.ratio == null || P.ratio <= 1.0) && unusual(C);
+    const bearOn = rawBear && (C.ratio == null || C.ratio <= 1.0) && unusual(P);
+    // continue on a looser test: 2.5x, mirror up to 1.2x
+    const bullKeep = C.ratio != null && C.ratio >= 2.5 && (P.ratio == null || P.ratio <= 1.2);
+    const bearKeep = P.ratio != null && P.ratio >= 2.5 && (C.ratio == null || C.ratio <= 1.2);
+    const heldRawBull = _cfHeld('rawBull', rawBull, C.ratio != null && C.ratio >= 2.5);
+    const heldRawBear = _cfHeld('rawBear', rawBear, P.ratio != null && P.ratio >= 2.5);
+    const heldBull = _cfHeld('bull', bullOn, bullKeep), heldBear = _cfHeld('bear', bearOn, bearKeep);
+    const book = heldBull >= 60000 ? 1 : heldBear >= 60000 ? -1 : 0;
+    const bookRaw = heldRawBull >= 60000 && !(heldRawBear >= 60000) ? 1 : heldRawBear >= 60000 && !(heldRawBull >= 60000) ? -1 : 0;
+
+    // heavyweight basket, in units of the index's 5-minute sigma
+    const D = spot * ((+d.india_vix && (d.symbol || state.symbol) === 'NIFTY') ? d.india_vix / 100 : iv) / Math.sqrt(252);
+    const sig5 = D * Math.sqrt(5 / 375);
+    const hwb = d.constituents?.available ? d.constituents.hw : null;
+    const m5 = hwb?.m5 || null, mo = hwb?.open || null;
+    const hwZ = m5 && sig5 > 0 ? m5.pts / sig5 : null;
+    const breadth = m5 && m5.n ? (m5.up - m5.dn) / m5.n : null;
+    const hwBroad = hwZ != null && breadth != null
+      ? (hwZ >= 0.5 && breadth >= 0.3 ? 1 : hwZ <= -0.5 && breadth <= -0.3 ? -1 : 0) : 0;
+    // the rest of the index (the other ~40% of weight) over the same window:
+    // agreeing or flat = broad; clearly the other way = narrow, so the
+    // heavyweight reading is halved and cannot confirm on its own
+    const rest = hwb?.rest_m5 || null;
+    let restState = null;                    // 'agrees' | 'flat' | 'opposes'
+    if (rest && m5 && sig5 > 0) {
+      const rz = rest.pts / sig5, rb = rest.n ? (rest.up - rest.dn) / rest.n : 0;
+      const s0 = Math.sign(m5.pts);
+      restState = (rz * s0 <= -0.25 && rb * s0 <= -0.2) ? 'opposes'
+                : (rz * s0 >= 0.15 || rb * s0 >= 0.2) ? 'agrees' : 'flat';
+    }
+    const narrow = restState === 'opposes';
+    const hw = narrow ? 0 : hwBroad;           // a narrow move does not count as a heavyweight trend
+    // who leads: the basket's implied points vs what the index actually did
+    let idx5 = null; try { const a5 = _dhAgo(300); if (a5?.spot) idx5 = spot - a5.spot; } catch (_) {}
+    const lead = m5 && idx5 != null ? m5.pts - idx5 : null;
+
+    // futures takers, last 15 minutes
+    const ft = d.flow?.futures?.near;
+    const futBuy = ft && ft.b15 + ft.s15 > 0 ? ft.b15 / (ft.b15 + ft.s15) : null;
+    const cons = d.constituents?.available ? d.constituents.score : null;
+
+    const clip = v => Math.max(-1, Math.min(1, v));
+    const bookS = book ? book : bookRaw ? bookRaw * 0.5 : 0;
+    // scaled so the heavyweights' "with you" level (0.5 sigma) is worth half
+    // its weight and 1 sigma all of it
+    const hwS = hwZ != null ? clip(hwZ / 1.0) * (breadth != null && Math.sign(breadth) === Math.sign(hwZ) ? 1 : 0.5) * (narrow ? 0.5 : 1) : 0;
+    const futS = futBuy != null ? clip((futBuy - 0.5) * 4) : 0;
+    const consS = cons != null ? clip(cons / 100) : 0;
+    const score = Math.round(100 * (0.40 * bookS + 0.35 * hwS + 0.15 * futS + 0.10 * consS));
+    // the same without the all-constituents term, for the Trend Engine, which
+    // already has its own Constituents input
+    const scoreCore = Math.round(100 * (0.45 * bookS + 0.40 * hwS + 0.15 * futS));
+    // Both witnesses must be on; the score only has to show the rest (futures
+    // takers, all constituents) is not pulling hard the other way. Book on
+    // (40) + heavyweights at their threshold (17.5) clears 50 by itself;
+    // futures takers firmly against it do not.
+    const confirmed = book !== 0 && hw === book && score * book >= 50 ? book : 0;
+    const label = confirmed > 0 ? 'UPTREND CONFIRMED' : confirmed < 0 ? 'DOWNTREND CONFIRMED'
+                : narrow && hwBroad ? `narrow ${hwBroad > 0 ? 'rally' : 'fall'} — rest of the index disagrees`
+                : score >= 30 ? 'leaning up' : score <= -30 ? 'leaning down' : 'no confluence';
+
+    // the Signal Scorecard measures each witness separately and the pair
+    try {
+      const sym = d.symbol || state.symbol;
+      if (bookRaw) _scoreRecord('ITM book 3x (raw)', bookRaw, spot, sym, `CE ${C.ratio?.toFixed(1)}× / PE ${P.ratio?.toFixed(1)}×`);
+      if (book) _scoreRecord('ITM book (mirror + norm)', book, spot, sym, `CE ${C.ratio?.toFixed(1)}× / PE ${P.ratio?.toFixed(1)}×`);
+      if (hwBroad) _scoreRecord('Heavyweights 5m (basket only)', hwBroad, spot, sym, `${m5.up}/${m5.n} up, ${m5.pts} pts`);
+      if (hw) _scoreRecord('Heavyweights 5m + rest agrees', hw, spot, sym, `rest ${rest ? rest.pts : '—'} pts`);
+      if (confirmed) _scoreRecord('Book + heavyweights', confirmed, spot, sym, `score ${score}`);
+    } catch (_) {}
+
+    const wsrc = d.constituents?.weight_source || null;
+    return { scoreCore, wsrc, C, P, book, bookRaw, heldBull, heldBear, hw, hwBroad, hwZ, breadth, m5, mo, hwb, sig5, idx5, lead, rest, restState, narrow,
+             futBuy, cons, score, confirmed, label };
+  }
+
+  function _confHtml(c) {
+    if (!c) return '';
+    const col = c.confirmed > 0 ? 'var(--pos,#26a69a)' : c.confirmed < 0 ? 'var(--neg,#ef5350)'
+              : c.score >= 30 ? 'var(--pos,#26a69a)' : c.score <= -30 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+    const r = v => v == null ? '—' : v.toFixed(1) + '×';
+    const held = ms => ms >= 60000 ? ` held ${Math.round(ms / 60000)}m` : ms > 0 ? ` ${Math.round(ms / 1000)}s` : '';
+    const side = (x, lab, ms) => `ITM ${lab} ${x.strikes.map(k => fmtInt(k)).join('/') || '—'} bids <b>${r(x.ratio)}</b> offers${x.vsNorm != null ? ` (${x.vsNorm.toFixed(1)}× its norm)` : ''}${held(ms)}${x.stale ? ` · ${x.stale} stale` : ''}`;
+    const m5 = c.m5;
+    const rs = c.rest;
+    const restCol = c.restState === 'opposes' ? 'var(--gold,#d4af37)' : 'inherit';
+    const hwTxt = m5 ? `heavyweights (${c.hwb.share}%) ${m5.ret >= 0 ? '+' : ''}${m5.ret.toFixed(2)}% in ${Math.round((c.hwb.win_s || 300) / 60)}m · <b>${m5.up}/${m5.n} up</b> · ≈${m5.pts >= 0 ? '+' : ''}${m5.pts} pts (${c.hwZ >= 0 ? '+' : ''}${c.hwZ.toFixed(1)}σ)` +
+                       (rs ? ` · <span style="color:${restCol};" title="The other constituents (${rs.share}% of the index) over the same window">rest ${rs.pts >= 0 ? '+' : ''}${rs.pts} pts, ${rs.up}/${rs.n} up${c.restState === 'opposes' ? ' — NARROW' : c.restState === 'agrees' ? ' — broad' : ''}</span>` : '')
+                     : 'heavyweights: 5-min history building';
+    const lead = c.lead != null && Math.abs(c.lead) >= 0.25 * c.sig5
+      ? ` · <span title="Index points the heavyweight basket implies minus what the index did over the same 5 minutes">${c.lead > 0 ? 'heavyweights ahead of the index' : 'index ahead of its heavyweights'} by ${Math.abs(Math.round(c.lead))} pts</span>` : '';
+    return `<div style="border:1px solid ${col};border-radius:5px;padding:3px 6px;margin-top:3px;font-size:9.5px;">
+      <b style="color:${col};font-size:10.5px;">${c.confirmed > 0 ? '▲ ' : c.confirmed < 0 ? '▼ ' : ''}${c.label} ${c.score >= 0 ? '+' : ''}${c.score}</b>
+      <span style="color:var(--muted);"> · ${side(c.C, 'CE', c.heldBull || _cfH.held.rawBull && Date.now() - _cfH.held.rawBull)} · ${side(c.P, 'PE', c.heldBear || _cfH.held.rawBear && Date.now() - _cfH.held.rawBear)}</span>
+      ${c.wsrc && /fallback/i.test(c.wsrc) ? `<div style="color:var(--gold,#d4af37);font-weight:700;">⚠ constituent weights from the built-in table (approximate, and index membership changes are not in it) — call /api/refresh-weights on the server once, and after each quarterly rebalance</div>` : ''}
+      <div style="color:var(--muted);">${hwTxt}${lead}${c.futBuy != null ? ` · FUT takers ${Math.round(c.futBuy * 100)}% buy` : ''}${c.cons != null ? ` · all constituents ${c.cons >= 0 ? '+' : ''}${c.cons}` : ''}</div>
+    </div>`;
+  }
+
   // Picks are held until a new strike is CLEARLY better: recomputed every
   // poll, a picker otherwise hops between neighbouring strikes and a strike
   // that changes every refresh cannot be traded.
@@ -21406,8 +21678,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const dr = window._deskReadLast;
     if (dr && dr.have && Date.now() - dr.t < 120000 && Math.abs(dr.total) >= 2.5) {
       bias = Math.sign(dr.total); biasWhy = `desk read ${dr.total > 0 ? '+' : ''}${dr.total.toFixed(1)}`;
-    } else if (window._trendLast && Date.now() - window._trendLast.at < 120000 && Math.abs(window._trendLast.score) >= 20) {
-      bias = Math.sign(window._trendLast.score); biasWhy = `Trend Engine ${window._trendLast.score > 0 ? '+' : ''}${window._trendLast.score}`;
+    } else if (window._trendLast && Date.now() - window._trendLast.at < 120000 && Math.abs(window._trendLast.scoreEx ?? window._trendLast.score) >= 20) {
+      // scoreEx: the Trend Engine without the book/heavyweight inputs, which
+      // the entries check on their own - one piece of evidence, counted once
+      const te = window._trendLast.scoreEx ?? window._trendLast.score;
+      bias = Math.sign(te); biasWhy = `Trend Engine ${te > 0 ? '+' : ''}${te} (ex book/constituents)`;
     }
 
     // regime
@@ -21504,10 +21779,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // from low to high. Comparing a day's range with D itself made a normal
     // day look exhausted and capped the targets just as moves got going.
     const ER = 1.6 * D;
-    let dayT = null, rng = null;
+    let dayT = null, rng = null, csR0 = [];
     try {
       const hist = typeof _isHistorical === 'function' && _isHistorical();
       const csR = (!_chart.optionMeta && !hist) ? (_chart.candles || []) : [];
+      csR0 = csR;
       dayT = csR.length ? _dayType(csR) : null;
       if (csR.length >= 5) {
         const hi = Math.max(...csR.map(c => c.h)), lo = Math.min(...csR.map(c => c.l));
@@ -21519,19 +21795,45 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 pathEff: path > 0 ? Math.abs(net) / path : 0 };
       }
     } catch (_) {}
-    const tl = window._trendLast && Date.now() - window._trendLast.at < 120000 ? window._trendLast : null;
+    const tl0 = window._trendLast && Date.now() - window._trendLast.at < 120000 ? window._trendLast : null;
+    const tl = tl0 ? { ...tl0, score: tl0.scoreEx ?? tl0.score } : null;
+    let conf = null; try { conf = _bookHwConf(d); } catch (_) {}
+    window._confLast = conf;
     // RANGE EXPANSION upgrades the day to a trend, whatever the opening read
     // said: a session that has already travelled a full sigma, mostly one
     // way, is trending - including the day that chopped across VWAP early and
     // rallied in the afternoon, which the 09:45 day-type read calls a range.
     const expanded = !!rng && rng.range >= 1.0 * D && rng.eff >= 0.6;
-    const trending = dayT?.kind === 'trend' || (tl && Math.abs(tl.score) >= 45) || expanded;
+    // BOOK + HEAVYWEIGHTS confirmed is a trend on its own evidence: size
+    // stacked on the ITM calls while the heavyweight basket broadly rises
+    // LATCH: a confirmation, once made, holds the trend label for 15 minutes.
+    // Without it the label, the targets, the strikes and whether fades are
+    // allowed all flickered with the book's 60-second hold. It ends early
+    // only on the opposite confirmation or when price closes back through
+    // VWAP against it (z beyond -0.3 the wrong way).
+    const lk = _cfLatch[sym] || null;
+    let confDir = conf?.confirmed || 0, latched = false;
+    if (confDir) _cfLatch[sym] = { dir: confDir, until: Date.now() + 15 * 60000 };
+    else if (lk && Date.now() < lk.until) {
+      let vwFail = false;
+      try {
+        if (csR0.length >= 10) {
+          const vb = _vwapBands(csR0), i = vb.vw.length - 1, sd = vb.sd[i];
+          const lastC = csR0[csR0.length - 1].c;
+          vwFail = sd > 0 && (lastC - vb.vw[i]) / sd * lk.dir < -0.3;
+        }
+      } catch (_) {}
+      if (vwFail) delete _cfLatch[sym];
+      else { confDir = lk.dir; latched = true; }
+    }
+    const trending = dayT?.kind === 'trend' || !!confDir || (tl && Math.abs(tl.score) >= 45) || expanded;
     const regime = trending ? 'trend' : 'range';
     const trendWhy = dayT?.kind === 'trend' ? 'trend day (held one side of VWAP)'
+                   : confDir ? `ITM ${confDir > 0 ? 'call' : 'put'} book + heavyweights confirm${latched ? ` (held — ${Math.ceil((_cfLatch[sym].until - Date.now()) / 60000)} min left unless reversed or VWAP fails)` : ''}`
                    : expanded ? `range expansion: ${Math.round(rng.range)} pts, ${Math.round(rng.eff * 100)}% one-way`
                    : tl && Math.abs(tl.score) >= 45 ? `Trend Engine ${tl.score > 0 ? '+' : ''}${tl.score}` : '';
     const trendDir = !trending ? 0
-      : (dayT?.kind === 'trend' ? dayT.dir : expanded ? Math.sign(rng.net) : Math.sign(tl?.score || 0)) || bias;
+      : (dayT?.kind === 'trend' ? dayT.dir : confDir ? confDir : expanded ? Math.sign(rng.net) : Math.sign(tl?.score || 0)) || bias;
     const FR = { trend: [cfg.trendMin ?? 0.30, cfg.trendMax ?? 0.70], range: [cfg.rangeMin ?? 0.34, cfg.rangeMax ?? 0.40] }[regime];
     // room left: against the expected RANGE (1.6 D), or 2.5 D on a trend day,
     // since trend days are the ones that run past their pricing
@@ -21612,7 +21914,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return { spot, F, dte, expiryDay, vix, aiv: aiv * 100, ivVsVix, rv, bias, biasWhy, stance, buyPts, sellPts, why,
              sig15, sigExp, sigDay, bT, fT, sT, minPrem, lot, posCE, posPE,
              wallAbove, wallBelow, flip: gex?.flip || null, aboveFlip, istMin, sym,
-             D, Dsrc, ER, rng, regime, trendDir, trendWhy, dayT, T1, T2, T2raw, H, FR, roomLeft, roomCap, choose, planFor };
+             D, Dsrc, ER, rng, regime, trendDir, trendWhy, conf, confDir, dayT, T1, T2, T2raw, H, FR, roomLeft, roomCap, choose, planFor };
   }
 
   // ══ SCALP / SWING ENTRY CONDITIONS ═══════════════════════════════
@@ -21688,6 +21990,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         soft(base, 'value beyond T1', vw == null || (vw - spot) * dir >= 0.8 * p.T1,
              vw == null ? '—' : `VWAP ${Math.round(Math.abs(spot - vw))} pts ${(vw - spot) * dir >= 0 ? 'ahead' : 'behind'}`);
       }
+      const cf = p.conf;
+      must(base, 'not against book + heavyweights', p.confDir !== -dir,
+           p.confDir === -dir ? `${cf?.confirmed ? cf.label : (dir > 0 ? 'DOWNTREND' : 'UPTREND') + ' confirmed (held)'} — the ITM book and the heavyweights say ${dir > 0 ? 'down' : 'up'}`
+                              : cf ? `confluence ${cf.score >= 0 ? '+' : ''}${cf.score}` : '—');
       must(base, 'time', timeOk, timeOk ? (lull ? 'midday lull' : 'ok') : (m < 565 ? 'opening 10 minutes — spreads and fakes' : 'after 15:15'));
       soft(base, 'room left today', p.roomLeft == null || p.roomLeft >= p.T1,
            p.roomLeft == null ? '—' : `≈${Math.round(p.roomLeft)} pts of the day's move left`);
@@ -21718,7 +22024,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         }
         if (trend) {
           softS('dealers amplify', p.aboveFlip === false, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — moves get damped' : 'below flip — moves extend');
-          softS('breadth with it', cons != null && cons * dir >= 30, cons != null ? `constituents ${cons >= 0 ? '+' : ''}${cons}` : '—');
+          softS('book + heavyweights with it', p.conf && p.conf.score * dir >= 30,
+                p.conf ? `${p.conf.label} ${p.conf.score >= 0 ? '+' : ''}${p.conf.score}` : '—');
+          // a move the heavyweights carry while the rest of the index fades
+          // is the one that reverses: it does not block, but it costs a check
+          softS('broad, not narrow', !(p.conf?.narrow && Math.sign(p.conf.m5?.pts || 0) === dir),
+                p.conf?.rest ? `rest of the index ${p.conf.rest.pts >= 0 ? '+' : ''}${p.conf.rest.pts} pts (${p.conf.restState})` : '—');
         } else {
           softS('dealers damp', p.aboveFlip === true, p.aboveFlip == null ? 'no gamma flip' : p.aboveFlip ? 'above flip — ranges hold' : 'below flip — moves extend');
           softS('push fading', lastUp != null && (dir > 0 ? lastUp : !lastUp), lastUp == null ? '—' : 'last candle ' + (lastUp ? 'up' : 'down'));
@@ -21954,6 +22265,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <label><input type="checkbox" class="se-cfg" data-k="sell" ${cfg.sell ? 'checked' : ''}> sells</label>
         </span>
       </div>
+      ${_confHtml(p.conf)}
       ${row(1)}${row(-1)}
       <div style="font-size:9px;color:var(--muted);padding-top:3px;">positional theta sell (≈1σ, not intraday): ${p.posCE ? `CE ${n(p.posCE.K)} ₹${r2(p.posCE.ltp)} δ${Math.abs(p.posCE.delta).toFixed(2)}` : '—'} · ${p.posPE ? `PE ${n(p.posPE.K)} ₹${r2(p.posPE.ltp)} δ${Math.abs(p.posPE.delta).toFixed(2)}` : '—'}${p.wallAbove ? ` · walls ${n(p.wallAbove)} / ${p.wallBelow ? n(p.wallBelow) : '—'}` : ''}</div>
       <div style="font-size:9.5px;padding-top:3px;border-top:1px solid var(--border-soft);margin-top:3px;">
@@ -22122,6 +22434,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let pickHtml = '';
     try {
       const pk = _strikePicker(d);
+      if (pk) window._pickLast = { regime: pk.regime, trendDir: pk.trendDir, at: Date.now() };
       const su = _scalpSetups(d, pk);
       const lg = _seTrack(d);
       _seEvaluate(d, su);
@@ -24058,7 +24371,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _CTX_FINE_MS = 20 * 60000;     // keep 400ms detail for the last 20 min
   const _CTX_COARSE_MS = 5000;         // older than that: one point per 5s
   const _CTX_MAX = 12000;              // ~5,000 needed for a session; headroom
-  const _CTX_KEY = 'ctxHistV1';
+  const _CTX_KEY = 'ctxHistV2';          // v2: soft-edged PCR (v1 points are not mixed in)
 
   function _ctxSessionStart() {
     const now = new Date();
@@ -24167,6 +24480,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         add++;
       }
       _ctxSrv.since = j.backfilling ? 0 : hi;     // re-read once the backfill lands
+      if (j.backfilling) setTimeout(_ctxServerSync, 5000);   // the rebuild takes seconds, not a minute
       if (add) {
         _ctxHist.sort((a, b) => a.ts - b.ts);
         _ctxPrune();
@@ -24181,6 +24495,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   setInterval(_ctxSave, 30000);          // cheap, and bounded by the coarse grid
   window.addEventListener('beforeunload', _ctxSave);
 
+  // PCR for the context-pane lines, with SOFT edges. The bands table uses a
+  // hard window - every strike within +-width of the ATM strike - and when
+  // spot crosses a strike midpoint the ATM strike changes, a whole strike's
+  // OI enters or leaves the sum at once, and the ratio steps. Plotted, those
+  // steps were the spikes. Here every strike counts with a Gaussian weight
+  // on its distance from SPOT (not the ATM strike), so the ratio slides as
+  // price moves instead of jumping. Same horizons as the bands: 'rod' =
+  // what price can reach in the session left, 'd1' = one full day.
+  function _pcrKernel(d, horizon, tsMs) {
+    const st = d?.strikes || [], spot = +d?.underlying_value;
+    if (!st.length || !spot) return null;
+    const gap = +d.strike_gap || 50;
+    const g = new Date((tsMs || Date.now()) + 5.5 * 3600000);
+    const minsLeft = Math.max(5, (15 * 60 + 40) - (g.getUTCHours() * 60 + g.getUTCMinutes()));
+    const ivF = (+d.atm_iv || 12) / 100;
+    const days = horizon === 'rod' ? minsLeft / 375 : 1;
+    const width = Math.max(1.5 * gap, spot * ivF * Math.sqrt(_volT(days)));
+    let ce = 0, pe = 0, n = 0;
+    for (const r of st) {
+      const z = (r.strike - spot) / width;
+      if (Math.abs(z) > 3) continue;
+      const w = Math.exp(-0.5 * z * z);
+      ce += w * (+r.ce_oi || 0); pe += w * (+r.pe_oi || 0);
+      if (w > 0.1 && (r.ce_oi || r.pe_oi)) n++;
+    }
+    return n >= 3 && ce > 0 ? pe / ce : null;
+  }
+
   function _recordCtx(d) {
     if (!d?.underlying_value) return;
     const sym = state.symbol;
@@ -24192,9 +24534,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     let pcr = null, pcr1d = null;
     try {
-      const b = _pcrByBand(d);
-      pcr = b?.bands?.find(x => x.k === 'rod')?.pcr ?? d.pcr ?? null;
-      pcr1d = b?.bands?.find(x => x.k === 'd1')?.pcr ?? null;
+      pcr = _pcrKernel(d, 'rod') ?? d.pcr ?? null;
+      pcr1d = _pcrKernel(d, 'd1');
+      // a poll with half the chain missing (a partial REST answer, OI not
+      // yet ticked in) produces a ratio of the strikes that DID arrive: drop
+      // it rather than plot a spike
+      const oiN = (d.strikes || []).filter(r => r.ce_oi > 0 && r.pe_oi > 0).length;
+      _recordCtx.oiN = Math.max(_recordCtx.oiN || 0, oiN);
+      if (oiN < 0.6 * _recordCtx.oiN) { pcr = null; pcr1d = null; }
     } catch (_) { pcr = d.pcr ?? null; }
     // ATM straddle: the market's own price of a move
     let straddle = null, skew = null;
@@ -24232,6 +24579,326 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       // the history is worth
       if (_ctxHist.length % 50 === 0) _ctxPrune();
     }
+  }
+
+  // ══ MARKET DIRECTION — the context-pane series read together ═══════
+  // Each series alone is ambiguous; read TOGETHER over a fixed window they
+  // separate a real move from a hollow one:
+  //   PRICE      how far, in units of the window's own sigma
+  //   CVD        buying vs selling behind it - a rise on falling CVD is
+  //              price without participation
+  //   PCR now    with price: rising PCR as price rises = puts WRITTEN under
+  //              the market (support, bullish); rising PCR as price falls =
+  //              puts BOUGHT (bearish). Falling PCR mirrors it.
+  //   VIX/ATM IV fear: falling into a rally is a healthy rally; rising with
+  //              price is a nervous one; rising into a fall is panic
+  //   SKEW       put IV minus call IV: rising = protection bid (bearish lean)
+  //   STRADDLE   no direction - rising while price is flat is premium being
+  //              paid ahead of a move (breakout risk); bleeding = range
+  // It describes the last 15 minutes; it does not forecast. Each call is
+  // logged to the Signal Scorecard and scored 15 minutes later.
+  const _md = { ema: null, label: null };
+  function _mktDir(d, W) {
+    const sym = state.symbol;
+    const pts = _ctxHist.filter(h => h.sym === sym);
+    if (pts.length < 5 || !d?.underlying_value) return null;
+    const now = Date.now();
+    const medAt = (get, agoMin, spanS = 60) => {
+      const t = now - agoMin * 60000;
+      const v = pts.filter(p => Math.abs(p.ts - t) <= spanS * 1000).map(get).filter(x => x != null && isFinite(x));
+      if (!v.length) return null;
+      v.sort((a, b) => a - b); return v[v.length >> 1];
+    };
+    // the window actually available: the first point inside the last W
+    // minutes (history can be shorter, or have a gap after a restart). It
+    // must still span at least 4 minutes to say anything.
+    const startT = now - W * 60000 - 30000;
+    const firstIn = pts.find(p => p.ts >= startT);
+    if (!firstIn) return null;
+    const Wm = (now - firstIn.ts) / 60000;
+    if (Wm < Math.min(W, 4)) return null;
+    const at0 = g => {
+      const v = pts.filter(p => p.ts >= firstIn.ts && p.ts <= firstIn.ts + 60000).map(g).filter(x => x != null && isFinite(x));
+      if (!v.length) return null;
+      v.sort((a, b) => a - b); return v[v.length >> 1];
+    };
+    const at1 = g => medAt(g, 0, 45);
+    const spot1 = at1(p => p.spot) ?? d.underlying_value, spot0 = at0(p => p.spot);
+    if (spot0 == null) return null;
+    const iv = (+d.atm_iv || +d.india_vix || 13) / 100;
+    const sigW = spot1 * iv * Math.sqrt(Wm / 375 / 252);
+    const dP = sigW > 0 ? (spot1 - spot0) / sigW : 0;
+    const pDir = Math.abs(dP) >= 0.3 ? Math.sign(dP) : 0;
+    const clip = v => Math.max(-1, Math.min(1, v));
+    const comp = [];
+    const add = (k, lab, w, s, txt) => { if (s != null && isFinite(s)) comp.push({ k, lab, w, s: clip(s), txt }); };
+
+    add('price', 'Price', 3, dP / 1.0, `${spot1 - spot0 >= 0 ? '+' : ''}${Math.round(spot1 - spot0)} pts (${dP >= 0 ? '+' : ''}${dP.toFixed(1)}σ)`);
+    // CVD from the candles over the same window
+    try {
+      const cs = _chart.candles || [];
+      if (_chart.hasVolume && cs.length > 5 && !_chart.optionMeta) {
+        const cv = _cvdSeries(cs);
+        const tCut = (now - Wm * 60000) / 1000;
+        let i0 = cv.findIndex(p => p.t >= tCut); if (i0 < 0) i0 = cv.length - 1;
+        const dc = cv[cv.length - 1].cum - cv[Math.max(0, i0 - 1)].cum;
+        const vals = cv.map(p => p.cum), span = (Math.max(...vals) - Math.min(...vals)) || 1;
+        const r = dc / span;
+        if (Math.abs(r) >= 0.04) add('cvd', 'CVD', 2.5, r / 0.25, `${r > 0 ? 'rising' : 'falling'} (${Math.round(r * 100)}% of the day's CVD range)`);
+        else add('cvd', 'CVD', 2.5, 0, 'flat');
+      }
+    } catch (_) {}
+    const pc1 = at1(p => p.pcr), pc0 = at0(p => p.pcr);
+    if (pc1 != null && pc0 != null) {
+      const rel = (pc1 - pc0) / (pc0 || 1);
+      let s = 0, txt = `${pc0.toFixed(2)} → ${pc1.toFixed(2)}`;
+      if (Math.abs(rel) >= 0.02) {
+        if (rel > 0) { s = pDir >= 0 ? 1 : -0.5; txt += pDir >= 0 ? ' — puts written under the market' : ' — puts bought into the fall'; }
+        else { s = pDir <= 0 ? -1 : 0.5; txt += pDir <= 0 ? ' — calls written over the market' : ' — calls bought into the rise'; }
+      } else txt += ' — steady';
+      add('pcr', 'PCR now', 2, s, txt);
+    }
+    const v1 = at1(p => p.vix), v0 = at0(p => p.vix);
+    if (v1 != null && v0 != null) {
+      const dv = v1 - v0;
+      let s = Math.abs(dv) < 0.1 ? 0 : -dv / 0.5, txt = `${dv >= 0 ? '+' : ''}${dv.toFixed(2)}`;
+      if (dv >= 0.1 && pDir > 0) { s = -0.5; txt += ' — nervous rally'; }
+      else if (dv <= -0.1 && pDir > 0) txt += ' — fear easing into the rise';
+      else if (dv >= 0.1 && pDir < 0) txt += ' — fear rising into the fall';
+      add('vix', 'VIX', 1.5, s, txt);
+    }
+    const i1 = at1(p => p.iv), i0v = at0(p => p.iv);
+    if (i1 != null && i0v != null) {
+      const di = i1 - i0v;
+      add('iv', 'ATM IV', 1, Math.abs(di) < 0.15 ? 0 : -di / 0.8, `${di >= 0 ? '+' : ''}${di.toFixed(2)}`);
+    }
+    const k1 = at1(p => p.skew), k0 = at0(p => p.skew);
+    if (k1 != null && k0 != null) {
+      const dk = k1 - k0;
+      add('skew', 'Skew', 1, Math.abs(dk) < 0.1 ? 0 : -dk / 0.6,
+          `${dk >= 0 ? '+' : ''}${dk.toFixed(2)}${Math.abs(dk) >= 0.1 ? (dk > 0 ? ' — protection bid' : ' — protection sold') : ''}`);
+    }
+    let note = '';
+    const s1 = at1(p => p.straddle), s0 = at0(p => p.straddle);
+    if (s1 != null && s0 > 0) {
+      const ch = (s1 - s0) / s0;
+      // decay alone shaves the straddle through the day, so only a change
+      // well beyond it means anything
+      if (ch >= 0.03 && Math.abs(dP) < 0.5) note = `straddle +${(ch * 100).toFixed(1)}% with price flat — premium bid ahead of a move: breakout risk`;
+      else if (ch <= -0.04 && Math.abs(dP) < 0.5) note = `straddle ${(ch * 100).toFixed(1)}% — premium bleeding: range conditions`;
+      comp.push({ k: 'straddle', lab: 'Straddle', w: 0, s: 0, txt: `${ch >= 0 ? '+' : ''}${(ch * 100).toFixed(1)}%` });
+    }
+    const W_ = comp.reduce((a, c) => a + c.w, 0);
+    if (!W_) return null;
+    const score = Math.round(100 * comp.reduce((a, c) => a + c.w * c.s, 0) / W_);
+    const cvdC = comp.find(c => c.k === 'cvd');
+    const conflict = cvdC && pDir && Math.sign(cvdC.s) === -pDir && Math.abs(cvdC.s) >= 0.3;
+    if (conflict) note = (note ? note + ' · ' : '') + `price ${pDir > 0 ? 'up' : 'down'} but CVD ${pDir > 0 ? 'falling' : 'rising'} — the move is not backed by ${pDir > 0 ? 'buying' : 'selling'}`;
+    return { score, comp, dP, pDir, conflict, note, Wm: Math.round(Wm), move: spot1 - spot0 };
+  }
+
+  function renderMktDir(d) {
+    const box = document.getElementById('mktDirBody');
+    if (!box) return;
+    const hist = typeof _isHistorical === 'function' && _isHistorical();
+    const r = hist ? null : _mktDir(d, 15);
+    if (!r) {
+      box.innerHTML = `<div style="font-size:10px;color:var(--muted);padding:2px 8px;">MARKET DIRECTION — ${hist ? 'not shown in replay' : 'building (needs a few minutes of PCR / VIX / IV history)'}</div>`;
+      return;
+    }
+    const r5 = _mktDir(d, 5);
+    // smoothed score with hysteresis, so the label does not flip on one poll
+    _md.ema = _md.ema == null ? r.score : _md.ema + 0.35 * (r.score - _md.ema);
+    const sc = Math.round(_md.ema);
+    const cvdOk = c => { const x = r.comp.find(q => q.k === 'cvd'); return !x || Math.sign(x.s) === c; };
+    const pick = () => {
+      const strongUp = sc >= 55 && r.pDir > 0 && cvdOk(1), strongDn = sc <= -55 && r.pDir < 0 && cvdOk(-1);
+      if (strongUp) return 'STRONG UP';
+      if (strongDn) return 'STRONG DOWN';
+      const prev = _md.label;
+      const up = sc >= (prev === 'UP' || prev === 'STRONG UP' ? 20 : 25), dn = sc <= (prev === 'DOWN' || prev === 'STRONG DOWN' ? -20 : -25);
+      return up ? 'UP' : dn ? 'DOWN' : 'SIDEWAYS';
+    };
+    const lab = pick();
+    _md.label = lab;
+    window._mdLast = { score: sc, label: lab, at: Date.now() };
+    const dir = /UP/.test(lab) ? 1 : /DOWN/.test(lab) ? -1 : 0;
+    const col = dir > 0 ? 'var(--pos,#26a69a)' : dir < 0 ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)';
+    const arrow = lab === 'STRONG UP' ? '⏫' : lab === 'UP' ? '▲' : lab === 'STRONG DOWN' ? '⏬' : lab === 'DOWN' ? '▼' : '◆';
+    try { if (dir) _scoreRecord(`Market direction (${lab.includes('STRONG') ? 'strong' : 'normal'})`, dir, d.underlying_value, d.symbol || state.symbol, `score ${sc}`); } catch (_) {}
+    const chip = c => {
+      const agree = dir ? Math.sign(c.s) === dir : c.s === 0;
+      const ccol = c.w === 0 ? 'var(--muted)' : Math.abs(c.s) < 0.15 ? 'var(--muted)' : (c.s > 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)');
+      return `<span style="white-space:nowrap;" title="${escapeHtml(c.lab + ': ' + c.txt + (c.w ? ` · weight ${c.w}` : ' · no direction, context only'))}"><b style="color:${ccol};">${c.lab}</b> <span style="color:var(--muted);">${escapeHtml(c.txt)}</span>${c.w && dir && Math.abs(c.s) >= 0.15 ? (agree ? ' ✓' : ' ✗') : ''}</span>`;
+    };
+    const r5lab = r5 ? (r5.score >= 25 ? `▲ ${r5.score}` : r5.score <= -25 ? `▼ ${r5.score}` : `◆ ${r5.score}`) : '—';
+    box.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:4px 8px;margin:2px 6px 4px;border:1px solid ${col};border-left:4px solid ${col};border-radius:6px;font-size:10px;"
+        title="Market direction over the last ${r.Wm} minutes, from price, CVD, PCR now, VIX, ATM IV, skew and the straddle read together. It describes the window; it does not forecast. Each call is scored 15 minutes later in the Signal Scorecard.">
+        <span style="font-size:9px;color:var(--muted);font-weight:700;letter-spacing:.4px;">MARKET DIRECTION</span>
+        <b style="font-size:14px;color:${col};">${arrow} ${lab}</b>
+        <b style="color:${col};">${sc >= 0 ? '+' : ''}${sc}</b>
+        <span style="color:var(--muted);">last ${r.Wm} min${r5 && r.Wm >= 8 ? ` · last 5 min ${r5lab}` : ''}</span>
+        ${r.comp.map(chip).join('<span style="color:var(--border);">|</span>')}
+        ${r.note ? `<span style="color:var(--gold,#d4af37);font-weight:700;">⚠ ${escapeHtml(r.note)}</span>` : ''}
+      </div>`;
+  }
+
+  // (the numerology timing test was removed; clear its cached copy from
+  // this browser so nothing of it stays on the laptop)
+  try { localStorage.removeItem('numoCacheV1'); } catch (_) {}
+  // ══ TURN TIMES on the chart ══════════════════════════════════════
+  // Vertical lines at the times of day where Nifty has most often made a
+  // major turn over the last ~60 sessions (server: /api/turn-times). Green
+  // = mostly lows there (rallies started), red = mostly highs (falls
+  // started), amber = turns both ways. A description of past sessions, not a
+  // forecast for today. Three strengths:
+  //   major (dashed)  big turns, clearly above an even spread over the session
+  //   midday (finer)  10:00-15:00 swings, clearly above the other midday slots
+  //   lean (dotted)   the busiest slot of an otherwise empty midday hour -
+  //                   above average but not clearly above chance
+  const _turns = { v: null, at: 0, busy: false };
+  async function _turnsFetch() {
+    if (_turns.busy) return;
+    const sym = state.symbol || 'NIFTY';
+    if (_turns.v && _turns.v.symbol === sym && Date.now() - _turns.at < 6 * 3600000) return;
+    _turns.busy = true;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/turn-times?symbol=${encodeURIComponent(sym)}&days=60`, { signal: AbortSignal.timeout(30000) })).json();
+      if (j && Array.isArray(j.buckets)) { _turns.v = j; _turns.at = Date.now(); try { renderPriceChart(); } catch (_) {} }
+    } catch (_) {} finally { _turns.busy = false; }
+  }
+  setTimeout(_turnsFetch, 6000);
+  setInterval(_turnsFetch, 300000);
+  function _turnLinesSvg(W, padL, padR, top, bottom) {
+    const v = _turns.v;
+    if (!v || v.symbol !== (state.symbol || 'NIFTY') || _chart.show.turnTimes === false) return '';
+    if (_isRenkoView && _isRenkoView()) return '';
+    const lines = [
+      ...(v.marked || []).map(b => ({ ...b, tier: 'major' })),
+      ...(v.midday || []).map(b => ({ ...b, tier: b.marked ? 'mid' : 'lean' })),
+    ].sort((x, y) => x.min - y.min);
+    if (!lines.length) return '';
+    const iv = _chart.interval || 1, slots = Math.max(1, Math.ceil(385 / iv));
+    const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    let s = '', lastX = -1e9, row = 0;
+    for (const b of lines) {
+      const m = b.min - 555;
+      const sx = padL + (m / iv + 0.5) / slots * (W - padL - padR);
+      if (sx > W - padR) continue;
+      const col = b.bias === 'rally' ? '#1fd17a' : b.bias === 'crash' ? '#ff3b4e' : '#f5b301';
+      const tag = b.bias === 'rally' ? '▲' : b.bias === 'crash' ? '▼' : '◆';
+      // stagger labels that would run into the previous one
+      row = sx - lastX < 70 ? (row + 1) % 3 : 0; lastX = sx;
+      const ly = top + 10 + row * 10;
+      const sty = b.tier === 'major' ? { w: 1.2, dash: '6,4', op: 0.85 }
+                : b.tier === 'mid'   ? { w: 1.0, dash: '4,4', op: 0.7 }
+                :                      { w: 0.8, dash: '1,4', op: 0.45 };
+      const lab = b.tier === 'major' ? `${tag} ${b.time} · ${b.turns}/${v.days}d`
+                : b.tier === 'mid'   ? `${tag} ${b.time} · ${b.ratio}×`
+                :                      `${tag} ${b.time} lean`;
+      const head = b.tier === 'major'
+        ? `${b.turns} major turns in ${v.days} sessions (an even spread over the session would give ${b.expected})`
+        : `${b.turns} midday swing turns in ${v.days} sessions, ${b.ratio}× the average midday slot (${b.expected})` +
+          (b.tier === 'lean' ? ' — the busiest slot of this hour, NOT clearly above chance' : '');
+      const tip = `${b.time}-${hhmm(b.min + 15)}: ${head} — ${b.lows} lows (rallies started), ${b.highs} highs (falls started). Average move in the next 30 min: ${b.follow30 ?? '—'} pts. p=${b.p}. Past sessions, not a forecast.`;
+      s += `<g opacity="${sty.op}"><line x1="${sx.toFixed(1)}" y1="${top}" x2="${sx.toFixed(1)}" y2="${bottom}" stroke="${col}" stroke-width="${sty.w}" stroke-dasharray="${sty.dash}"/>
+        <text x="${(sx + 3).toFixed(1)}" y="${ly.toFixed(1)}" style="font-size:8.5px;font-weight:${b.tier === 'lean' ? 500 : 700};fill:${col};">${lab}</text>
+        <title>${escapeHtml(tip)}</title></g>`;
+    }
+    return s;
+  }
+  // ══ TRAFFIC LIGHT — one BUY / SELL / WAIT from everything ══════════
+  // Six readers, each already on the screen, each turned into a vote from
+  // -1 to +1 and weighted:
+  //   Market direction (2)        the context series read together
+  //   Desk read (2)               trades and positioning on the 3-delta legs
+  //   Trend Engine (2)            price action x option positioning
+  //   ITM book + heavyweights (2) the two-witness trend confirmation
+  //   Trade-entry trend (1.5)     the regime the entry engine is running
+  //   Nifty constituents (1)      breadth across the index
+  // GREEN BUY  composite >= +40, at least 3 readers with it, at most 1 against
+  // RED SELL   the mirror
+  // AMBER WAIT anything else - including when the readers disagree, which is
+  //            itself the most useful thing a single light can say.
+  // Enter at 40, stay until 30: the light does not flicker on one poll.
+  // BUY means the long side (buy CE / sell PE), SELL the short side. It is a
+  // summary of the readers, not an order, and it is logged to the Signal
+  // Scorecard so its record can be checked against the parts.
+  const _tl = { state: 'WAIT', since: 0 };
+  function _trafficVotes(d) {
+    const now = Date.now(), fresh = o => o && now - (o.at ?? o.t ?? 0) < 120000;
+    const clip = v => Math.max(-1, Math.min(1, v));
+    const v = [];
+    const add = (lab, w, x, txt) => { if (x != null && isFinite(x)) v.push({ lab, w, v: clip(x), txt }); };
+    const md = window._mdLast;
+    if (fresh(md)) add('Market direction', 2, md.score / 60, `${md.label} ${md.score >= 0 ? '+' : ''}${md.score}`);
+    const dr = window._deskReadLast;
+    if (fresh(dr) && dr.have) add('Desk read', 2, dr.total / 5, `${dr.total >= 0 ? '+' : ''}${dr.total.toFixed(1)}`);
+    const te = window._trendLast;
+    if (fresh(te)) add('Trend Engine', 2, te.score / 60, `${te.score >= 0 ? '+' : ''}${te.score}`);
+    const cf = window._confLast;
+    if (cf && (cf.book || cf.hw || cf.score)) add('Book + heavyweights', 2, cf.confirmed ? cf.confirmed : cf.score / 80, cf.label + ` ${cf.score >= 0 ? '+' : ''}${cf.score}`);
+    const pk = window._pickLast;
+    if (fresh(pk)) add('Trade-entry trend', 1.5, pk.regime === 'trend' ? (pk.trendDir || 0) : 0,
+                       pk.regime === 'trend' ? `TREND ${pk.trendDir > 0 ? 'up' : pk.trendDir < 0 ? 'down' : ''}` : 'RANGE');
+    const cs = d?.constituents?.available ? d.constituents.score : null;
+    if (cs != null) add('Nifty constituents', 1, cs / 60, `${cs >= 0 ? '+' : ''}${cs}`);
+    return v;
+  }
+  function renderTrafficLight(d) {
+    const el = document.getElementById('tlight');
+    if (!el) return;
+    if (typeof _isHistorical === 'function' && _isHistorical()) { el.innerHTML = ''; return; }
+    const votes = _trafficVotes(d);
+    const W = votes.reduce((a, x) => a + x.w, 0);
+    const comp = W ? Math.round(100 * votes.reduce((a, x) => a + x.w * x.v, 0) / W) : 0;
+    const withUp = votes.filter(x => x.v >= 0.25).length, withDn = votes.filter(x => x.v <= -0.25).length;
+    const { m, wd } = _istNowMin();
+    const open = wd > 0 && wd < 6 && m >= 555 && m <= 930;
+    let st = _tl.state;
+    const buyOk = comp >= 40 && withUp >= 3 && withDn <= 1, sellOk = comp <= -40 && withDn >= 3 && withUp <= 1;
+    const buyKeep = comp >= 30 && withUp >= 2 && withDn <= 1, sellKeep = comp <= -30 && withDn >= 2 && withUp <= 1;
+    if (st === 'BUY' && !buyKeep) st = 'WAIT';
+    if (st === 'SELL' && !sellKeep) st = 'WAIT';
+    if (st === 'WAIT') st = buyOk ? 'BUY' : sellOk ? 'SELL' : 'WAIT';
+    if (votes.length < 3) st = 'WAIT';
+    if (st !== _tl.state) {
+      _tl.state = st; _tl.since = Date.now();
+      try { if (st !== 'WAIT' && open) _scoreRecord('Traffic light', st === 'BUY' ? 1 : -1, d.underlying_value, d.symbol || state.symbol, `composite ${comp}`); } catch (_) {}
+    }
+    const live = st !== 'WAIT' && open;
+    // closed: no lamp lit - a lit lamp after hours reads as a live call
+    const lit = k => open && st === k;
+    const lamp = (on, col) => `<span class="tl-lamp${on && live ? ' tl-blink' : ''}" style="background:${on ? col : 'rgba(128,128,128,0.18)'};box-shadow:${on ? `0 0 10px 2px ${col}` : 'none'};"></span>`;
+    const lean = st === 'WAIT' && Math.abs(comp) >= 20 ? (comp > 0 ? 'lean buy' : 'lean sell') : '';
+    const word = !open ? 'CLOSED' : st;
+    const col = st === 'BUY' ? '#1fd17a' : st === 'SELL' ? '#ff3b4e' : '#f5b301';
+    const tip = votes.map(x => `${x.v >= 0.25 ? '▲' : x.v <= -0.25 ? '▼' : '◆'} ${x.lab}: ${x.txt}`).join('\n') +
+      `\n\nComposite ${comp}. BUY = long side (buy CE / sell PE), SELL = short side. A summary of these readers, not an order.` +
+      `\nGreen/red needs composite ±40, three readers with it and at most one against; it holds until ±30.`;
+    const mins = _tl.since && st !== 'WAIT' ? Math.floor((Date.now() - _tl.since) / 60000) : null;
+    el.innerHTML = `<div class="tl-box" title="${escapeHtml(tip)}">
+        <div class="tl-head">${lamp(lit('SELL'), '#ff3b4e')}${lamp(lit('WAIT'), '#f5b301')}${lamp(lit('BUY'), '#1fd17a')}</div>
+        <div class="tl-word" style="color:${open ? col : 'var(--muted)'};">${word}</div>
+        <div class="tl-sub">${open ? `${comp >= 0 ? '+' : ''}${comp} · ${st === 'SELL' ? withDn : st === 'BUY' ? withUp : Math.max(withUp, withDn)}/${votes.length} agree${lean ? ` · ${lean}` : ''}${mins != null ? ` · ${mins}m` : ''}` : 'market closed'}</div>
+      </div>`;
+    _tlPlace();
+  }
+  // Sit over the PLOT, not over the strips chartBody draws above it: find
+  // the price SVG and pin to its top-left corner. Called after every data
+  // render and every chart redraw, since the strips above change height.
+  function _tlPlace() {
+    try {
+      const el = document.getElementById('tlight');
+      const wrap = el?.parentElement;
+      const svgEl = document.getElementById('chartSvg') || document.getElementById('renkoSvg');
+      if (wrap && svgEl) {
+        const a = wrap.getBoundingClientRect(), b = svgEl.getBoundingClientRect();
+        el.style.top = Math.max(0, Math.round(b.top - a.top + 8)) + 'px';
+        el.style.left = Math.max(0, Math.round(b.left - a.left + 10)) + 'px';
+      }
+    } catch (_) {}
   }
 
   function renderCtxChart() {
@@ -24319,13 +24986,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // points at one x cannot move forward, so it scribbled vertically inside
     // each slot and the smoothing overshot into spikes. Keeping the last value
     // per slot gives a strictly increasing x, which is what a line needs.
-    const perSlot = getter => {
+    // One value per slot: the MEDIAN of the slot's points, not the last one -
+    // a single bad poll at the end of a minute no longer becomes the minute.
+    // Then a Hampel filter: a slot more than 3 robust deviations from the
+    // median of its neighbours is an outlier and is replaced by that median.
+    // Real turns survive (they persist across slots); one-poll spikes do not.
+    const perSlot = (getter, ema) => {
       const m = new Map();
       for (const p of pts) {
         const v = getter(p);
-        if (v != null && isFinite(v)) m.set(slotOf(p.ts), v);
+        if (v == null || !isFinite(v)) continue;
+        const k = slotOf(p.ts);
+        (m.get(k) || m.set(k, []).get(k)).push(v);
       }
-      return [...m.entries()].sort((q, r) => q[0] - r[0]).map(([sl, v]) => ({ sl, v }));
+      const med = a => { const b = a.slice().sort((x, y) => x - y); const i = b.length >> 1; return b.length % 2 ? b[i] : (b[i - 1] + b[i]) / 2; };
+      let out = [...m.entries()].sort((q, r) => q[0] - r[0]).map(([sl, vs]) => ({ sl, v: med(vs) }));
+      if (out.length >= 5) {
+        const vals = out.map(o => o.v);
+        out = out.map((o, i) => {
+          const w = vals.slice(Math.max(0, i - 3), i + 4);
+          const mm = med(w), mad = med(w.map(x => Math.abs(x - mm))) * 1.4826;
+          return mad > 0 && Math.abs(o.v - mm) > 3 * mad ? { sl: o.sl, v: mm, fixed: true } : o;
+        });
+      }
+      if (ema && out.length > 2) {
+        let e = out[0].v;
+        out = out.map(o => { e = e + ema * (o.v - e); return { ...o, raw: o.v, v: e }; });
+      }
+      return out;
     };
     const xs = sl => padL + (sl + 0.5) / slots * (W - padL - padR);
     const niceTicks = (lo, hi, n) => {
@@ -24336,14 +25024,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(v);
       return out;
     };
+    // MONOTONE cubic (Fritsch-Carlson). The Catmull-Rom curve used before
+    // overshoots every step - a jump from 1.10 to 1.20 drew a hump to 1.23
+    // and a dip below 1.10 either side - so the spline itself was inventing
+    // spikes. A monotone curve never goes beyond the points it joins.
     const pathOf = (P) => {
-      if (P.length < 2) return '';
+      const n = P.length;
+      if (n < 2) return '';
+      const dx = [], dy = [], m = [];
+      for (let k = 0; k < n - 1; k++) { dx.push(P[k + 1][0] - P[k][0] || 1e-6); dy.push(P[k + 1][1] - P[k][1]); m.push(dy[k] / dx[k]); }
+      const t = [m[0]];
+      for (let k = 1; k < n - 1; k++) t.push(m[k - 1] * m[k] <= 0 ? 0 : (m[k - 1] + m[k]) / 2);
+      t.push(m[n - 2]);
+      for (let k = 0; k < n - 1; k++) {
+        if (m[k] === 0) { t[k] = 0; t[k + 1] = 0; continue; }
+        const a = t[k] / m[k], b = t[k + 1] / m[k], h = a * a + b * b;
+        if (h > 9) { const r = 3 / Math.sqrt(h); t[k] = r * a * m[k]; t[k + 1] = r * b * m[k]; }
+      }
       let dp = `M${P[0][0].toFixed(1)},${P[0][1].toFixed(1)}`;
-      for (let k = 0; k < P.length - 1; k++) {
-        const p0 = P[k - 1] || P[k], p1 = P[k], p2 = P[k + 1], p3 = P[k + 2] || P[k + 1];
-        dp += `C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)},${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)} ` +
-              `${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)},${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)} ` +
-              `${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+      for (let k = 0; k < n - 1; k++) {
+        const h = dx[k] / 3;
+        dp += `C${(P[k][0] + h).toFixed(1)},${(P[k][1] + t[k] * h).toFixed(1)} ` +
+              `${(P[k + 1][0] - h).toFixed(1)},${(P[k + 1][1] - t[k + 1] * h).toFixed(1)} ` +
+              `${P[k + 1][0].toFixed(1)},${P[k + 1][1].toFixed(1)}`;
       }
       return dp;
     };
@@ -24353,7 +25056,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // PCR and PCR 1-day share one axis because they are the same quantity;
     // normalising each to its own range made them impossible to compare.
     const pcrSeries = shown.filter(s => s.k === 'pcr' || s.k === 'pcr1d');
-    const pcrData = pcrSeries.map(s => ({ s, d: perSlot(s.get) })).filter(o => o.d.length >= 2);
+    const pcrData = pcrSeries.map(s => ({ s, d: perSlot(s.get, 0.45) })).filter(o => o.d.length >= 2);
     if (pcrData.length) {
       const all = pcrData.flatMap(o => o.d.map(p => p.v));
       let lo = Math.min(...all), hi = Math.max(...all);
@@ -24372,7 +25075,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const last = o.d[o.d.length - 1];
         svg += `<circle cx="${xs(last.sl).toFixed(1)}" cy="${yP(last.v).toFixed(1)}" r="2.4" fill="${o.s.col}"/>`;
         const chg = last.v - o.d[0].v;
-        legend.push(`<span style="color:${o.s.col};font-size:9.5px;">● ${o.s.lab} <b>${last.v.toFixed(2)}</b> <span style="opacity:.7;">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}</span></span>`);
+        legend.push(`<span style="color:${o.s.col};font-size:9.5px;" title="Line: smoothed (median per slot, outliers removed, light average). Latest unsmoothed reading: ${(last.raw ?? last.v).toFixed(3)}">● ${o.s.lab} <b>${last.v.toFixed(2)}</b> <span style="opacity:.7;">${chg >= 0 ? '+' : ''}${chg.toFixed(2)}</span></span>`);
       }
     }
 
@@ -25787,6 +26490,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         add(O, 'Order book tilt', 2, Math.max(-1, Math.min(1, bk.microTilt * 2)),
             `microprice ${bk.microTilt > 0 ? 'above' : 'below'} mid by ${Math.abs(bk.microTilt * 100).toFixed(0)}% of the spread`);
     } catch (_) {}
+    // 12a2. ITM book + heavyweight basket (see _bookHwConf)
+    try {
+      const cf = window._confLast;
+      if (cf && (cf.book || cf.hw))
+        add(O, 'ITM book + heavyweights', 3, Math.max(-1, Math.min(1, cf.scoreCore / 80)),
+            `${cf.label} — ITM CE ${cf.C.ratio != null ? cf.C.ratio.toFixed(1) : '—'}× / PE ${cf.P.ratio != null ? cf.P.ratio.toFixed(1) : '—'}×${cf.m5 ? `, heavyweights ${cf.m5.up}/${cf.m5.n} up in 5m` : ''}`);
+    } catch (_) {}
     // 12b. aggressor flow: who is paying the spread. Leads OI, because OI
     //      updates only after the exchange processes the position change.
     try {
@@ -25820,7 +26530,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // what you actually execute against
     const raw = (pScore * 0.55 + oScore * 0.45) * 100;
     const score = Math.round(raw);
-    return { score, pScore: Math.round(pScore * 100), oScore: Math.round(oScore * 100),
+    // the same score WITHOUT the constituent / book-and-heavyweight inputs:
+    // the trade entries read those directly, and taking them again through
+    // this score would count one heavyweight move twice
+    const exN = new Set(['Constituents', 'ITM book + heavyweights']);
+    const scoreEx = Math.round((wscore(P.filter(x => !exN.has(x.name))) * 0.55 + wscore(O.filter(x => !exN.has(x.name))) * 0.45) * 100);
+    return { score, scoreEx, pScore: Math.round(pScore * 100), oScore: Math.round(oScore * 100),
              agree, price: P, options: O, paOff, dayT,
              cons: d.constituents || null, consStale,
              label: score >= 45 ? 'BULLISH' : score <= -45 ? 'BEARISH'
@@ -25895,14 +26610,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span>vs prev close ${c.day.adv}↑ ${c.day.dec}↓ · net ${sg(c.net_pts)} pts</span>
         <span style="color:var(--muted);font-size:9.5px;">${c.n} names · ${escapeHtml(c.source || '')}${c.feed ? ` · ${c.feed.socket} streamed` : ''}${c.age_s != null ? ` · ${c.age_s}s old` : ''}</span>
       </div>
-      <div style="color:var(--muted);font-size:9.5px;margin-top:2px;">heavyweights since open: ${(c.heavy || []).map(h => `${escapeHtml(h.s)} <span style="color:${(h.open_pct || 0) >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${(h.open_pct ?? 0) >= 0 ? '+' : ''}${(h.open_pct ?? 0).toFixed(2)}%</span> (${(+h.w || 0).toFixed(1)}%)`).join(' · ')}</div>
+      <div style="color:var(--muted);font-size:9.5px;margin-top:2px;">heavyweights (${c.hw?.share ?? '—'}% of the index) since open${c.hw?.m5 ? ' / last 5 min' : ''}: ${(c.heavy || []).map(h => `${escapeHtml(h.s)} <span style="color:${(h.open_pct || 0) >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">${(h.open_pct ?? 0) >= 0 ? '+' : ''}${(h.open_pct ?? 0).toFixed(2)}%</span>${h.m5_pct != null ? `<span style="color:${h.m5_pct >= 0 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};opacity:.8;"> / ${h.m5_pct >= 0 ? '+' : ''}${h.m5_pct.toFixed(2)}</span>` : ''}`).join(' · ')}</div>
       ${t.consStale ? `<div style="color:var(--gold,#d4af37);font-weight:700;">constituent quotes are ${c.age_s}s old — left out of the score</div>` : ''}
       ${clash ? `<div style="color:var(--gold,#d4af37);font-weight:700;">Constituents disagree with the index price action — the move is narrow or about to turn; trust it less.</div>` : ''}
     </div>`;
   }
 
   function renderTrendPanel(t) {
-    if (t) window._trendLast = { score: t.score, at: Date.now() };
+    if (t) window._trendLast = { score: t.score, scoreEx: t.scoreEx ?? t.score, at: Date.now() };
     const box = document.getElementById('trendBody');
     if (!box) return;
     if (!t) { box.innerHTML = '<div class="movers-loading">Load the chain and let the chart collect a few candles.</div>'; return; }
@@ -27028,6 +27743,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
       svg += _chartAlertLines(y, lo, hi, W, padL, padR);
     } catch (_) {}
+    // ── EMA crossover lines, on the brick in force at each cross ──
+    try {
+      svg += _emaCrossSvg(t => {
+        if (!show.length || t < show[0].t) return null;
+        for (let k = 0; k < show.length; k++) if (show[k].t >= t) return padL + k * bw + bw / 2;
+        return padL + (show.length - 1) * bw + bw / 2;
+      }, padT, H - padB);
+    } catch (e) { console.warn('[emax]', e.message); }
     // ── desk signals, on the brick in force when each one triggered ──
     // Computed from the candles (the signal is a fact about traded prices),
     // then placed on the first brick that printed at or after its bar.
@@ -27042,10 +27765,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           return padL + (show.length - 1) * bw + bw / 2;
         };
         if (mq.leg) svg += _mqLegSvg(mq, brickAt(mq.leg.start_t), brickAt(mq.leg.now_t), y, lo, hi);
-        renkoMqBox = _mqBoxSvg(mq, W, H, padR, padB);
       }
     } catch (e) { console.warn('[mq]', e.message); }
-    try { renkoMqBox += _deskBoxSvg(W, H, padR, padB, _chart.candles, renkoMqBox ? (_mqBoxSvg.h || 0) : 0); } catch (e) { console.warn('[deskbox]', e.message); }
+    // boxes removed from the chart - see the traffic light
 
     // ── Bollinger bands over brick closes ──────────────────────────
     // Computed on the brick sequence, like the EMAs: bricks are not evenly
@@ -28622,6 +29344,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _chart._rkFast = null;
     const r = _renderPriceChartInner(...a);
     try { renderCtxChart(); } catch (_) {}
+    try { _tlPlace(); } catch (_) {}
     try {
       const box2 = document.getElementById('rsiPaneBody');
       const k = _chart._rsiCtx;
@@ -29241,12 +29964,14 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       if (mq) {
         const xAt = t => { const k = cs.findIndex(c => c.t >= t); return k < 0 ? (cs.length ? x(cs.length - 1) : null) : x(k); };
         if (mq.leg) svg += _mqLegSvg(mq, xAt(mq.leg.start_t), xAt(mq.leg.now_t), y, lo, hi);
-        _chart._mqBox = _mqBoxSvg(mq, W, H, padR, padB);
-      } else _chart._mqBox = '';
+      }
+      // The Move-quality and Desk boxes were removed from the chart: too much
+      // to read in the corner of a price pane. The traffic light (top left)
+      // now carries the one conclusion; the detail lives in its own panels.
+      _chart._mqBox = '';
     } catch (e) { console.warn('[desk]', e.message); }
-    try {
-      _chart._mqBox = (_chart._mqBox || '') + _deskBoxSvg(W, H, padR, padB, _chart.candles || cs, _chart._mqBox ? (_mqBoxSvg.h || 0) : 0);
-    } catch (e) { console.warn('[deskbox]', e.message); }
+    try { svg += _turnLinesSvg(W, padL, padR, padT, H - padB); } catch (_) {}
+    try { svg += _emaCrossSvg(t => padL + (slotOf(t) + 0.5) / slots * (W - padL - padR), padT, H - padB); } catch (_) {}
     // user alerts last, so they sit above the levels they were set against
     try { svg += _chartAlertLines(y, lo, hi, W, padL, padR); } catch (_) {}
     // hand the pane the same x-mapping and geometry the candles used, so the
@@ -30101,7 +30826,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       // listed it either way, which is not protection - it is
                       // an oversight that happens to work. Losing the morning
                       // to a settings reset is unrecoverable, so it is named.
-                      'ctxHistV1',
+                      'ctxHistV1', 'ctxHistV2',
                       // measured outcomes: the only evidence about what works
                       'signalScoreV1',
                       // price levels the user set by hand
@@ -30198,6 +30923,20 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   function _chartWire() {
     const cfg = _chartCfgLoad();
     _chart.interval = cfg.interval; _chart.show = cfg.show; _chart.pollSec = cfg.pollSec || 5;
+    _chart.emaX = Object.assign({ fast: 5, slow: 13 }, cfg.emaX || {});
+    // EMA crossover periods: whole numbers, and the two must differ. A bad
+    // entry is put back to the last good value rather than saved.
+    for (const [id, k] of [['emaXFast', 'fast'], ['emaXSlow', 'slow']]) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.value = String(_chart.emaX[k]);
+      el.addEventListener('change', () => {
+        const v = Math.round(+el.value);
+        const other = _chart.emaX[k === 'fast' ? 'slow' : 'fast'];
+        if (!(v >= 1 && v <= 500) || v === other) { el.value = String(_chart.emaX[k]); return; }
+        _chart.emaX[k] = v; _chartCfgSave(); renderPriceChart();
+      });
+    }
     const pollSel = document.getElementById('chartPoll');
     if (pollSel) {
       pollSel.value = String(_chart.pollSec);
@@ -30216,12 +30955,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       // new overlays default ON: a saved config predates them, and its
       // missing key must not read as a deliberate "off"
-      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox'].includes(k)) _chart.show[k] = true;
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
     }
@@ -36951,7 +37690,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
-    'reset-defaults':    '<strong>Reset to recommended defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens.',
+    'reset-defaults':    '<strong>Reset to recommended defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Chart defaults it restores include the EMA crossover lines ON with fast 5 / slow 13.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',

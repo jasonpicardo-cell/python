@@ -2597,13 +2597,23 @@ def _ctx_point(d: dict, ts: float):
         sig = lambda days: spot * ivf * (max(1 / 1440, days) / 365) ** 0.5
 
         def band(days):
-            w = max(gap, sig(days))
-            sel = [r for r in st if abs(float(r.get("strike") or 0) - atm) <= w]
-            if len(sel) < 3:
-                return None
-            ce = sum(float(r.get("ce_oi") or 0) for r in sel)
-            pe = sum(float(r.get("pe_oi") or 0) for r in sel)
-            return round(pe / ce, 4) if ce else None
+            # soft edges: Gaussian weight on distance from SPOT, as the
+            # dashboard's _pcrKernel - a hard window stepped every time spot
+            # crossed a strike midpoint
+            import math as _mm
+            w = max(1.5 * gap, sig(days))
+            ce = pe = 0.0
+            n = 0
+            for r in st:
+                z = (float(r.get("strike") or 0) - spot) / w
+                if abs(z) > 3:
+                    continue
+                k = _mm.exp(-0.5 * z * z)
+                ce += k * float(r.get("ce_oi") or 0)
+                pe += k * float(r.get("pe_oi") or 0)
+                if k > 0.1 and (r.get("ce_oi") or r.get("pe_oi")):
+                    n += 1
+            return round(pe / ce, 4) if n >= 3 and ce > 0 else None
         pcr = band(mins_left / 375)
         if pcr is None:
             pcr = d.get("pcr")
@@ -2639,7 +2649,7 @@ def _ctx_load(sym: str, day: str) -> list:
         if key in _ctx_mem:
             return _ctx_mem[key]
     pts = []
-    path = _os.path.join(_CTX_DIR, f"{sym}_{day}.jsonl")
+    path = _os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl")
     try:
         if _os.path.exists(path):
             with open(path) as f:
@@ -2695,7 +2705,7 @@ def _ctx_backfill_bg(sym: str, day: str) -> None:
                 cur.sort(key=lambda x: x.get("ts", 0))
             try:
                 _os.makedirs(_CTX_DIR, exist_ok=True)
-                with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.jsonl"), "a") as f:
+                with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl"), "a") as f:
                     for p in add:
                         f.write(json.dumps(p, separators=(",", ":")) + "\n")
             except Exception as e:  # noqa: BLE001
@@ -2725,7 +2735,7 @@ def _ctx_record(sym: str, d: dict) -> None:
             del pts[:len(pts) - 6000]
     try:
         _os.makedirs(_CTX_DIR, exist_ok=True)
-        with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.jsonl"), "a") as f:
+        with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl"), "a") as f:
             f.write(json.dumps(pt, separators=(",", ":")) + "\n")
     except Exception as e:  # noqa: BLE001
         print(f"[ctx] write: {e}")
@@ -2735,6 +2745,174 @@ def _ctx_history(sym: str, since: float = 0) -> list:
     pts = _ctx_load(sym, _ctx_day())
     with _ctx_lock:
         return [p for p in pts if p.get("ts", 0) > since]
+
+
+# ── TURN TIMES: when in the session Nifty has historically turned ─────────
+# For each past session: the MAJOR turns - a zigzag with a reversal threshold
+# of a quarter of that day's range (so 2-5 turns a day, not every wiggle),
+# plus the day's high and low. Each turn is filed in a 15-minute bucket of
+# the session, as a LOW (a rally started there) or a HIGH (a fall started
+# there), with the move that followed in the next 30 minutes.
+# A bucket is marked when it holds clearly more turns than an even spread
+# would put there (at least 1.5x and at least 3, binomial p < 0.10). A
+# second, MIDDAY tier (10:00-15:00, smaller swings, judged only against the
+# other midday slots) fills the middle of the session. It is a
+# description of past sessions - a time that has often turned - not a
+# promise about today.
+_turn_cache: dict = {}
+
+
+def _turn_study(symbol: str = "NIFTY", days: int = 60) -> dict:
+    import math as _m
+    sym = symbol.upper()
+    day_key = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 19800))
+    ck = (sym, days, day_key)
+    if ck in _turn_cache:
+        return _turn_cache[ck]
+    bars, src = [], None
+    if RUN_DATA_SOURCE == "fyers":
+        try:
+            import nse_adapter_fyers as _fy
+            if _fy.is_configured():
+                bars = _fy.fetch_history_days(sym, days)
+                src = "fyers 1-min history"
+        except Exception as e:  # noqa: BLE001
+            print(f"[turns] fyers history: {e}")
+    by_day: dict = {}
+    for b in bars:
+        d = time.strftime("%Y-%m-%d", time.gmtime(b["t"] + 19800))
+        by_day.setdefault(d, []).append((b["t"], b["c"]))
+    if not by_day and _os.path.isdir(_TICK_DIR):
+        # no broker history: the server's own minute archive
+        for f in sorted(_os.listdir(_TICK_DIR)):
+            if f.startswith(sym + "_") and f.endswith(".csv"):
+                d = f[len(sym) + 1:-4]
+                a = _load_archive(sym, d)
+                if a:
+                    by_day[d] = sorted((m * 60, v) for m, v in a.items())
+        src = "local minute archive"
+    today = day_key
+    by_day.pop(today, None)                     # today is what we are trading, not evidence
+    B = 25                                      # 15-minute buckets, 09:15 .. 15:29
+    lows = [0] * B; highs = [0] * B; follow = [[] for _ in range(B)]
+    n_days = 0
+
+    def _zig(px, thr):
+        # zigzag on closes: a turn is confirmed once price has come back by
+        # the threshold from the extreme it made
+        piv = []                                 # (index, 'H'|'L')
+        zdir, ext, lo_i, hi_i = 0, 0, 0, 0
+        for i in range(1, len(px)):
+            if zdir == 0:
+                if px[i] < px[lo_i]:
+                    lo_i = i
+                if px[i] > px[hi_i]:
+                    hi_i = i
+                if px[i] - px[lo_i] >= thr:
+                    piv.append((lo_i, "L")); zdir, ext = 1, i
+                elif px[hi_i] - px[i] >= thr:
+                    piv.append((hi_i, "H")); zdir, ext = -1, i
+            elif zdir == 1:
+                if px[i] > px[ext]:
+                    ext = i
+                elif px[ext] - px[i] >= thr:
+                    piv.append((ext, "H")); zdir, ext = -1, i
+            else:
+                if px[i] < px[ext]:
+                    ext = i
+                elif px[i] - px[ext] >= thr:
+                    piv.append((ext, "L")); zdir, ext = 1, i
+        return piv
+
+    # MIDDAY tier: 10:00-15:00 judged on its own. The open and the close
+    # hold most of a day's extremes, so against an even spread over the
+    # whole session the middle of the day can never stand out. Here the
+    # swings are smaller (12% of the day's range) and each 15-minute slot is
+    # compared only with the other midday slots.
+    M0, M1 = 600, 900
+    MB = (M1 - M0) // 15
+    mlows = [0] * MB; mhighs = [0] * MB; mfollow = [[] for _ in range(MB)]
+    for d, ser in by_day.items():
+        ser = [(t, p) for t, p in ser if 555 <= _ist_min_of(t) < 930]
+        if len(ser) < 120:
+            continue
+        n_days += 1
+        px = [p for _, p in ser]
+        rng = max(px) - min(px)
+        if rng <= 0:
+            continue
+        thr = max(rng * 0.25, px[0] * 0.0015)
+        piv = _zig(px, thr)
+        # the day's own extremes count too
+        ih, il = px.index(max(px)), px.index(min(px))
+        for k, kind in ((ih, "H"), (il, "L")):
+            if all(abs(k - j) > 5 for j, _ in piv):
+                piv.append((k, kind))
+        for k, kind in piv:
+            mn = _ist_min_of(ser[k][0])
+            b = min(B - 1, max(0, (mn - 555) // 15))
+            (lows if kind == "L" else highs)[b] += 1
+            j = min(len(px) - 1, k + 30)
+            follow[b].append(abs(px[j] - px[k]))
+        for k, kind in _zig(px, max(rng * 0.12, px[0] * 0.0008)):
+            mn = _ist_min_of(ser[k][0])
+            if not (M0 <= mn < M1):
+                continue
+            b = (mn - M0) // 15
+            (mlows if kind == "L" else mhighs)[b] += 1
+            j = min(len(px) - 1, k + 30)
+            mfollow[b].append(abs(px[j] - px[k]))
+    total = sum(lows) + sum(highs)
+    out = []
+    p0 = 1.0 / B
+    for b in range(B):
+        c = lows[b] + highs[b]
+        exp = total * p0
+        # binomial upper tail P(X >= c)
+        p = 0.0
+        if total and c:
+            for k in range(c, total + 1):
+                p += _m.comb(total, k) * p0 ** k * (1 - p0) ** (total - k)
+        mark = c >= 3 and c >= 1.5 * exp and p < 0.10
+        mn = 555 + b * 15
+        lab = f"{mn // 60:02d}:{mn % 60:02d}"
+        bias = "rally" if c and lows[b] / c >= 0.65 else "crash" if c and highs[b] / c >= 0.65 else "turn"
+        out.append({"bucket": b, "time": lab, "min": mn, "turns": c, "lows": lows[b], "highs": highs[b],
+                    "expected": round(exp, 1), "p": round(p, 3), "marked": bool(mark), "bias": bias,
+                    "follow30": round(sum(follow[b]) / len(follow[b]), 1) if follow[b] else None})
+    def _tail(c, n, q):
+        return sum(_m.comb(n, k) * q ** k * (1 - q) ** (n - k) for k in range(c, n + 1)) if n and c else 1.0
+    mtot = sum(mlows) + sum(mhighs)
+    mid = []
+    for b in range(MB):
+        c = mlows[b] + mhighs[b]
+        exp = mtot / MB
+        p = _tail(c, mtot, 1.0 / MB)
+        mn = M0 + b * 15
+        bias = "rally" if c and mlows[b] / c >= 0.65 else "crash" if c and mhighs[b] / c >= 0.65 else "turn"
+        mid.append({"bucket": b, "time": f"{mn // 60:02d}:{mn % 60:02d}", "min": mn, "turns": c,
+                    "lows": mlows[b], "highs": mhighs[b], "expected": round(exp, 1),
+                    "ratio": round(c / exp, 2) if exp else None, "p": round(p, 3),
+                    "marked": bool(c >= 3 and c >= 1.3 * exp and p < 0.10), "lean": False, "bias": bias,
+                    "follow30": round(sum(mfollow[b]) / len(mfollow[b]), 1) if mfollow[b] else None})
+    # each midday hour with nothing clear still shows its busiest slot, as a
+    # faint LEAN line, when that slot is above the midday average - so the
+    # chart says "most often around here" instead of going blank
+    major_min = {x["min"] for x in out if x["marked"]}
+    for h0 in range(M0, M1, 60):
+        hr = [x for x in mid if h0 <= x["min"] < h0 + 60]
+        if any(x["marked"] for x in hr):
+            continue
+        top = max(hr, key=lambda x: x["turns"], default=None)
+        if top and top["turns"] >= 2 and top["ratio"] and top["ratio"] > 1.0:
+            top["lean"] = True
+    midday = [x for x in mid if (x["marked"] or x["lean"]) and x["min"] not in major_min]
+    res = {"symbol": sym, "days": n_days, "turns": total, "source": src, "buckets": out,
+           "marked": [x for x in out if x["marked"]], "midday": midday, "midday_turns": mtot,
+           "asof": day_key}
+    if n_days:
+        _turn_cache[ck] = res
+    return res
 
 
 # ── one-time units migration of the replay archive ──────────────────────
@@ -5015,6 +5193,7 @@ def _constituent_score(sym: str, rows: list, data: dict, ts: float) -> dict:
             ref = (t0, snap)                     # newest snapshot >= 5 min old
     if ref is None and hist and ts - hist[0][0] >= 120:
         ref = hist[0]                            # warming up: use what exists
+    mret = lambda r: None
     if ref:
         old = ref[1]
         mret = lambda r: ((r["ltp"] - old[r["symbol"]]) / old[r["symbol"]] * 100) if old.get(r["symbol"]) else None
@@ -5025,10 +5204,56 @@ def _constituent_score(sym: str, rows: list, data: dict, ts: float) -> dict:
         mom_win = int(ts - ref[0])
 
     # heavyweights: the top five by weight, change since the open
-    heavy = sorted(rows, key=lambda r: -(r.get("weight_est") or 0))[:5]
+    ranked = sorted(rows, key=lambda r: -(r.get("weight_est") or 0))
+    heavy = ranked[:5]
     hw = sum(float(r.get("weight_est") or 0) for r in heavy) or 1.0
     heavy_open = sum(float(r.get("weight_est") or 0) * (opn(r) or 0) for r in heavy) / hw
     heavy_dir = max(-1.0, min(1.0, heavy_open / 0.5))
+
+    # THE HEAVYWEIGHT BASKET: the names that carry the index - enough of the
+    # top of the weight table to reach ~60% of it (Nifty: HDFC Bank, Reliance,
+    # ICICI, Infosys, Bharti, L&T, ITC, TCS, Axis, SBI, Kotak, M&M...), at
+    # least 5 and at most 12. What matters is not only how far they moved but
+    # how MANY moved: nine of eleven rising is a rally; one stock carrying the
+    # index is a print that fades.
+    basket, cum = [], 0.0
+    for r in ranked:
+        basket.append(r)
+        cum += float(r.get("weight_est") or 0) / tw * 100
+        if (len(basket) >= 5 and cum >= 60) or len(basket) >= 12:
+            break
+    bw = sum(float(r.get("weight_est") or 0) for r in basket) or 1.0
+    iv_ = float(data.get("index_value") or 0)
+
+    def _agg(fn):
+        vals = [(float(r.get("weight_est") or 0), fn(r)) for r in basket]
+        vals = [(w, v) for w, v in vals if v is not None]
+        if not vals:
+            return None
+        up = sum(1 for _, v in vals if v > FLAT)
+        dn = sum(1 for _, v in vals if v < -FLAT)
+        ret = sum(w * v for w, v in vals) / (sum(w for w, _ in vals) or 1)
+        # index points these names alone account for (weight share x move)
+        pts = sum(w / tw * v / 100 * iv_ for w, v in vals)
+        return {"ret": round(ret, 3), "up": up, "dn": dn, "n": len(vals), "pts": round(pts, 1)}
+    # THE REST OF THE INDEX over the same window: the other ~40% of weight.
+    # The basket rising while the rest drifts the other way is a narrow,
+    # fragile move; the rest agreeing (or flat) is a broad one.
+    bset = {r["symbol"] for r in basket}
+    rest = [r for r in rows if r["symbol"] not in bset]
+
+    def _rest(fn):
+        vals = [(float(r.get("weight_est") or 0), fn(r)) for r in rest]
+        vals = [(w, v) for w, v in vals if v is not None]
+        if not vals:
+            return None
+        return {"pts": round(sum(w / tw * v / 100 * iv_ for w, v in vals), 1),
+                "up": sum(1 for _, v in vals if v > FLAT), "dn": sum(1 for _, v in vals if v < -FLAT),
+                "n": len(vals), "share": round(sum(w for w, _ in vals) / tw * 100, 1)}
+    hw_block = {"names": len(basket), "share": round(bw / tw * 100, 1),
+                "m5": _agg(mret) if ref else None, "open": _agg(opn),
+                "rest_m5": _rest(mret) if ref else None, "rest_open": _rest(opn),
+                "win_s": int(ts - ref[0]) if ref else None}
 
     parts = [(0.40, open_w), (0.20, heavy_dir), (0.15, day_w)]
     if mom_w is not None:
@@ -5047,7 +5272,9 @@ def _constituent_score(sym: str, rows: list, data: dict, ts: float) -> dict:
         "mom": ({"adv": m_adv, "dec": m_dec, "w": round(mom_w, 3), "pts": mom_pts,
                  "win_s": mom_win} if mom_w is not None else None),
         "heavy": [{"s": r["symbol"], "w": r.get("weight_est"), "pct": r.get("pct_change"),
-                   "open_pct": round(opn(r), 2) if opn(r) is not None else None} for r in heavy],
+                   "open_pct": round(opn(r), 2) if opn(r) is not None else None,
+                   "m5_pct": round(mret(r), 3) if mret(r) is not None else None} for r in basket],
+        "hw": hw_block,
         "heavy_open_pct": round(heavy_open, 2),
         "net_pts": round(sum(float(r.get("pts_contributed") or 0) for r in rows), 1),
     }
@@ -6169,6 +6396,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(rep)
             return
 
+        if parsed.path == "/api/turn-times":
+            try:
+                sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+                dd = int(qs.get("days", ["60"])[0] or 60)
+                self._send_json(_turn_study(sym_, dd))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)}, status=500)
+            return
         if parsed.path == "/api/ctx-history":
             sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
             try:

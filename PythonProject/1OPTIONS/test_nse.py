@@ -893,6 +893,8 @@ const RISK_FREE = 0.07; const window = {}; const fmtInt = x => String(x);
 const _store = {}; const localStorage = { getItem: k => _store[k] ?? null, setItem: (k, v) => { _store[k] = String(v); } };
 const _SCALP_KEY = 'sc', _SE_KEY = 'se'; const _pickMem = {}; const state = { symbol: 'NIFTY' };
 const _chart = { candles: [] }; const _isHistorical = () => false; const _dayType = () => null; const _sessionBudget = () => null;
+const _cfLatch = {}; const _vwapBands = () => ({ vw: [], sd: [] });
+let CONF = 0; const _bookHwConf = () => ({ confirmed: CONF, score: CONF * 70 });
 const _computeGex = () => ({ flip: 24800 });
 const spot = 25000;
 function chain(vix) {
@@ -932,6 +934,14 @@ chop[chop.length - 1].c = 24750;
 _chart.candles = rally; const up = _strikePicker(chain(D203));
 _chart.candles = chop;  const ch = _strikePicker(chain(D203));
 _chart.candles = [];
+// latch: confirmed, then the confirmation drops -> still TREND for 15 min
+const realNow = Date.now; let TN = realNow();
+Date.now = () => TN;
+CONF = 1; const L1 = _strikePicker(chain(D203));
+CONF = 0; TN += 5 * 60000; const L2 = _strikePicker(chain(D203));
+TN += 11 * 60000; const L3 = _strikePicker(chain(D203));
+Date.now = realNow;
+window._trendLast = { score: 5, at: Date.now() };
 // outcome log: T1 reached, then T2 -> half at each, net of costs
 localStorage.setItem('se', JSON.stringify([{ t: Date.now(), sym: 'NIFTY', exp: '', side: 'BUY', typ: 'CE', K: 25000,
   entry: 100, stop: 90, tgt: 115, tgt2: 130, costU: 1, lot: 65, riskU: 11, hold: 60, regime: 'trend' }]));
@@ -942,6 +952,7 @@ console.log(JSON.stringify({
   trend: { D: Math.round(t.D), reg: t.regime, T1: t.T1, T2: t.T2, buy: [tb.K, tb.delta, tb.plan.rFull], sell: [ts.K, ts.delta] },
   range: { D: Math.round(r.D), reg: r.regime, T1: r.T1, T2: r.T2, buy: [rb.K, rb.delta], hold: rb2.K === rb.K },
   log: [lg[0].res, Math.round(lg[0].pnlLot), stt.all.n, stt.all.w, stt.trend.n],
+  latch: [L1.regime, L1.trendDir, L2.regime, L2.trendDir, L3.regime],
   oct15: { D: Math.round(up.D), ER: Math.round(up.ER), upReg: up.regime, upDir: up.trendDir, upT2: up.T2, upRoom: Math.round(up.roomLeft),
            chopReg: ch.regime, chopT2: ch.T2, chopT1: ch.T1 } }));
 """
@@ -961,6 +972,7 @@ console.log(JSON.stringify({
     check("trend buy: liquid strike between delta 0.35 and 0.80", 0.35 <= abs(t["buy"][1]) <= 0.80, str(t["buy"]))
     check("trend sell: the against-trend option, delta 0.20-0.55", t["sell"][0] and 0.20 <= abs(t["sell"][1]) <= 0.55, str(t["sell"]))
     check("range buy put chosen and held", 0.35 <= abs(g["buy"][1]) <= 0.80 and g["hold"], str(g))
+    check("a confirmed trend is held for 15 minutes, then released", r["latch"] == ["trend", 1, "trend", 1, "range"], str(r["latch"]))
     o = r["oct15"]
     check("expected range = 1.6 x the close-to-close move", abs(o["ER"] - 1.6 * o["D"]) <= 1, str(o))
     check("a one-way 374-pt day on a +-203 forecast is upgraded to TREND (up)", o["upReg"] == "trend" and o["upDir"] == 1, str(o))
@@ -1007,11 +1019,336 @@ def test_ctx_and_intervals():
           all(f'data-iv="{k}"' in dsrc for k in (1, 2, 3, 5, 10, 15)) and ".chart-iv.active {" in dsrc)
 
 
+def test_book_heavyweights():
+    """ITM call book 3x+ held 60 s with the put book not bid-heavy, plus the
+    heavyweight basket broadly rising, confirms an uptrend; the mirror case
+    confirms a downtrend; both sides bid-heavy confirms nothing."""
+    import subprocess, json as _json
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = dsrc.index(f"function {name}(")
+        depth, j = 0, dsrc.index("{", i)
+        for k in range(j, len(dsrc)):
+            depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+            if depth == 0:
+                return dsrc[i:k + 1]
+    code = "\n".join(grab(n) for n in ("bsErf", "bsNormCdf", "bsNormPdf", "bsD1D2", "bsGreeks", "_volT",
+                                        "_cfHeld", "_median", "_bookHwConf", "_depthFor", "_bookOf", "_ladderFresh"))
+    harness = code + r"""
+const RISK_FREE = 0.07; let NOW = 1792040000000; Date.now = () => NOW;
+const state = { symbol: 'NIFTY' }; const scored = [];
+const _scoreRecord = (src, dir) => scored.push(src + ':' + dir); const _dhAgo = () => null;
+let _cfH = { c: [], p: [], held: {}, bad: {} };
+function chain(ceR, peR, hwPts, up, dn, rest) {
+  const st = [], strikes = {};
+  for (let K = 24500; K <= 25500; K += 50) {
+    st.push({ strike: K, ce_iv: 13, pe_iv: 13, ce_ltp: 10, pe_ltp: 10 });
+    strikes[K + 'CE'] = { tbq: K < 25000 ? 1000 * ceR : 1000, tsq: 1000, tts: NOW / 1000 };
+    strikes[K + 'PE'] = { tbq: K > 25000 ? 1000 * peR : 1000, tsq: 1000, tts: NOW / 1000 };
+  }
+  return { symbol: 'NIFTY', underlying_value: 25000, strikes: st, dte: 4, atm_iv: 13, india_vix: 13, strike_gap: 50,
+           depth: { strikes }, constituents: { available: true, score: 40,
+           hw: { win_s: 300, share: 60, m5: { pts: hwPts, up, dn, n: 11, ret: 0.2 }, rest_m5: rest || null } } };
+}
+const run = (ceR, peR, hw, up, dn, rest) => { _cfH = { c: [], p: [], held: {}, bad: {} }; NOW = 1792040000000;
+  _bookHwConf(chain(ceR, peR, hw, up, dn, rest)); NOW += 70000; const r = _bookHwConf(chain(ceR, peR, hw, up, dn, rest));
+  return { book: r.book, raw: r.bookRaw, hw: r.hw, conf: r.confirmed, score: r.score, C: r.C.strikes, label: r.label }; };
+console.log(JSON.stringify({
+  up: run(4, 0.7, 40, 9, 1), down: run(0.7, 4, -40, 1, 9), both: run(4, 4, 40, 9, 1),
+  narrow: run(4, 0.7, 40, 3, 2), restOpp: run(4, 0.7, 40, 9, 1, { pts: -20, up: 6, dn: 30, n: 39, share: 40 }),
+  restOk: run(4, 0.7, 40, 9, 1, { pts: 8, up: 25, dn: 10, n: 39, share: 40 }),
+  sustained: (() => { _cfH = { c: [], p: [], held: {}, bad: {} }; NOW = 1792040000000;
+    for (let i = 0; i < 30; i++) { _bookHwConf(chain(1.0, 0.8, 0, 5, 5)); NOW += 11000; }     // quiet half hour
+    let r; for (let i = 0; i < 40; i++) { r = _bookHwConf(chain(3.5, 0.8, 40, 9, 1)); NOW += 90000; }   // an hour at 3.5x
+    return { book: r.book, vsNorm: r.C.vsNorm, conf: r.confirmed }; })(),
+  dip: (() => { _cfH = { c: [], p: [], held: {}, bad: {} }; NOW = 1792040000000;
+    _bookHwConf(chain(4, 0.7, 40, 9, 1)); NOW += 70000; _bookHwConf(chain(4, 0.7, 40, 9, 1)); NOW += 5000;
+    const a = _bookHwConf(chain(2.7, 0.8, 40, 9, 1)).book; NOW += 5000;           // one weak refresh
+    _bookHwConf(chain(1.5, 0.8, 40, 9, 1)); NOW += 25000;
+    const b = _bookHwConf(chain(1.5, 0.8, 40, 9, 1)).book;                         // 25 s below 2.5x
+    return { keptThroughDip: a, afterFade: b }; })(),
+  scored }));
+"""
+    fn = os.path.join(HERE, "__conf_test.js")
+    open(fn, "w").write(harness)
+    try:
+        out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
+    finally:
+        os.remove(fn)
+    if out.returncode:
+        check("book + heavyweights engine runs", False, out.stderr[-400:]); return
+    r = _json.loads(out.stdout.strip().splitlines()[-1])
+    check("ITM call book 4x + broad heavyweight rally -> UPTREND CONFIRMED",
+          r["up"]["conf"] == 1 and r["up"]["book"] == 1 and r["up"]["hw"] == 1 and r["up"]["score"] >= 60, str(r["up"]))
+    check("ITM put book 4x + broad heavyweight fall -> DOWNTREND CONFIRMED", r["down"]["conf"] == -1, str(r["down"]))
+    check("both books bid-heavy is not direction (mirror rule)", r["both"]["book"] == 0 and r["both"]["conf"] == 0, str(r["both"]))
+    check("one or two heavyweights carrying it is not broad", r["narrow"]["hw"] == 0 and r["narrow"]["conf"] == 0, str(r["narrow"]))
+    check("heavyweights up while the rest of the index falls is NARROW: no confirmation",
+          r["restOpp"]["conf"] == 0 and "narrow" in r["restOpp"]["label"], str(r["restOpp"]))
+    check("heavyweights up and the rest agreeing still confirms", r["restOk"]["conf"] == 1, str(r["restOk"]))
+    check("a call stack held for an hour is still unusual (normal built from quiet periods)",
+          r["sustained"]["book"] == 1 and (r["sustained"]["vsNorm"] or 0) >= 3, str(r["sustained"]))
+    check("one weak refresh does not reset a held stack; 20 s+ below 2.5x does",
+          r["dip"]["keptThroughDip"] == 1 and r["dip"]["afterFade"] == 0, str(r["dip"]))
+    check("ITM strikes are the ones just in the money", r["up"]["C"] and all(k < 25000 for k in r["up"]["C"]), str(r["up"]["C"]))
+    check("each witness and the pair go to the Signal Scorecard",
+          any(x.startswith("ITM book (mirror + norm):1") for x in r["scored"]) and any(x.startswith("Book + heavyweights:1") for x in r["scored"]))
+    check("trade entries: no trades against a confirmed book + heavyweights", "'not against book + heavyweights'" in dsrc)
+    check("no double counting: entries read the Trend Engine without its book/constituent inputs",
+          "scoreEx" in dsrc and "cf.scoreCore / 80" in dsrc)
+    check("a side's ratio needs at least two live books", "ratio: n >= 2 && ask > 0" in dsrc)
+
+
+def test_pcr_smooth():
+    """Context-pane PCR has soft edges (no step when spot crosses a strike
+    midpoint), outliers are filtered, and the curve cannot overshoot."""
+    import subprocess, json as _json
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = dsrc.index(f"function {name}(")
+        depth, j = 0, dsrc.index("{", i)
+        for k in range(j, len(dsrc)):
+            depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+            if depth == 0:
+                return dsrc[i:k + 1]
+    code = grab("_volT") + "\n" + grab("_pcrKernel")
+    harness = code + r"""
+const st = [];
+for (let K = 24000; K <= 26000; K += 50) st.push({ strike: K, ce_oi: 1000, pe_oi: K === 24800 ? 30000 : 1000 });
+const at = (spot) => _pcrKernel({ strikes: st, underlying_value: spot, strike_gap: 50, atm_iv: 12 }, 'rod', Date.UTC(2026, 9, 15, 9, 30));
+const a = at(24974), b = at(24976), b2 = at(24978), c = at(24990);
+console.log(JSON.stringify({ a, b, b2, c }));
+"""
+    fn = os.path.join(HERE, "__pcr_test.js")
+    open(fn, "w").write(harness)
+    try:
+        out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
+    finally:
+        os.remove(fn)
+    if out.returncode:
+        check("PCR kernel runs", False, out.stderr[-300:]); return
+    r = _json.loads(out.stdout.strip().splitlines()[-1])
+    # continuity: the 2-point change ACROSS the 24,975 midpoint is no bigger
+    # than the same 2-point change away from it - a slope, not a step
+    check("PCR does not step when spot crosses a strike midpoint",
+          abs(r["a"] - r["b"]) <= 1.2 * abs(r["b"] - r["b2"]) + 1e-6, str(r))
+    check("PCR still follows price (a big put strike weighs less as spot moves away)", r["c"] < r["a"], str(r))
+    check("context lines: median per slot, outlier filter, monotone curve",
+          "3 * mad" in dsrc and "Fritsch-Carlson" in dsrc and "perSlot(s.get, 0.45)" in dsrc)
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    check("server records the same soft-edged PCR to a new file version", "k = _mm.exp(-0.5 * z * z)" in ssrc and ".v2.jsonl" in ssrc)
+
+
+def test_market_direction():
+    """Market direction from price + PCR + VIX + IV + skew read together."""
+    import subprocess, json as _json
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("market direction strip sits directly above the candles",
+          dsrc.index('id="mktDirBody"') < dsrc.index('id="chartBody"') and "renderMktDir(data)" in dsrc)
+    def grab(name):
+        i = dsrc.index(f"function {name}(")
+        depth, j = 0, dsrc.index("{", i)
+        for k in range(j, len(dsrc)):
+            depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+            if depth == 0:
+                return dsrc[i:k + 1]
+    harness = grab("_mktDir") + r"""
+const state = { symbol: 'NIFTY' }; const _chart = { candles: [], hasVolume: false };
+let _ctxHist = [];
+function series(dSpot, dPcr, dVix, dSkew) {
+  _ctxHist = []; const now = Date.now();
+  for (let i = 0; i <= 20; i++) {
+    const f = i / 20;
+    _ctxHist.push({ sym: 'NIFTY', ts: now - (20 - i) * 60000, spot: 25000 + dSpot * f, pcr: 1.0 + dPcr * f,
+                    vix: 13 + dVix * f, iv: 13 + dVix * f, skew: 2 + dSkew * f, straddle: 300 });
+  }
+  return _mktDir({ underlying_value: 25000 + dSpot, atm_iv: 13 }, 15);
+}
+const up = series(60, 0.08, -0.4, -0.4), down = series(-60, 0.08, 0.5, 0.5), nervous = series(60, 0.0, 0.6, 0);
+console.log(JSON.stringify({ up: up.score, down: down.score, nervous: nervous.comp.find(c => c.k === 'vix'),
+  upPcr: up.comp.find(c => c.k === 'pcr').txt, downPcr: down.comp.find(c => c.k === 'pcr').txt }));
+"""
+    fn = os.path.join(HERE, "__md_test.js")
+    open(fn, "w").write(harness)
+    try:
+        out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
+    finally:
+        os.remove(fn)
+    if out.returncode:
+        check("market direction runs", False, out.stderr[-300:]); return
+    r = _json.loads(out.stdout.strip().splitlines()[-1])
+    check("rising price + put writing + VIX and skew falling reads UP", r["up"] >= 55, str(r))
+    check("falling price + puts bought + VIX and skew rising reads DOWN", r["down"] <= -55, str(r))
+    check("PCR read against price: written under a rise, bought into a fall",
+          "written" in r["upPcr"] and "bought" in r["downPcr"], str(r))
+    check("a rally with VIX rising is flagged nervous", r["nervous"] and "nervous" in r["nervous"]["txt"] and r["nervous"]["s"] < 0, str(r))
+
+
+def test_traffic_light():
+    """Traffic light: BUY when the readers agree, WAIT when they disagree,
+    hysteresis between 40 and 30; boxes removed from the chart."""
+    import subprocess, json as _json
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = dsrc.index(f"function {name}(")
+        depth, j = 0, dsrc.index("{", i)
+        for k in range(j, len(dsrc)):
+            depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+            if depth == 0:
+                return dsrc[i:k + 1]
+    harness = grab("_trafficVotes") + grab("renderTrafficLight") + r"""
+const window = {}; const state = { symbol: 'NIFTY' }; const _tl = { state: 'WAIT', since: 0 };
+const el = { innerHTML: '' }; const document = { getElementById: () => el };
+const _isHistorical = () => false; const _istNowMin = () => ({ m: 600, wd: 3 });
+const _scoreRecord = () => {}; const escapeHtml = x => x;
+const set = (md, dr, te, cf, regime, dir, cons) => {
+  const at = Date.now();
+  window._mdLast = { score: md, label: 'x', at }; window._deskReadLast = { total: dr, t: at, have: true };
+  window._trendLast = { score: te, at }; window._confLast = { score: cf, confirmed: 0, book: 1, hw: 0, label: 'x' };
+  window._pickLast = { regime, trendDir: dir, at };
+  return { underlying_value: 25000, constituents: { available: true, score: cons } };
+};
+const _tlPlace = () => {}; const word = () => (el.innerHTML.match(/tl-word[^>]*>([A-Z]+)</) || [])[1];
+renderTrafficLight(set(50, 4, 55, 70, 'trend', 1, 60)); const a = word();
+renderTrafficLight(set(35, 2, 30, 30, 'range', 0, 20)); const b = word();      // eases to ~+33: holds BUY
+renderTrafficLight(set(10, -1, 5, 0, 'range', 0, 0)); const c = word();       // fades: WAIT
+renderTrafficLight(set(60, -4, 50, -60, 'trend', -1, 50)); const dd = word();  // readers disagree: WAIT
+renderTrafficLight(set(-55, -4, -60, -70, 'trend', -1, -50)); const e = word();
+console.log(JSON.stringify({ a, b, c, dd, e }));
+"""
+    fn = os.path.join(HERE, "__tl_test.js")
+    open(fn, "w").write(harness)
+    try:
+        out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
+    finally:
+        os.remove(fn)
+    if out.returncode:
+        check("traffic light runs", False, out.stderr[-300:]); return
+    r = _json.loads(out.stdout.strip().splitlines()[-1])
+    check("traffic light: readers agreeing long -> BUY", r["a"] == "BUY", str(r))
+    check("traffic light: holds BUY while the composite stays above 30", r["b"] == "BUY", str(r))
+    check("traffic light: fades to WAIT", r["c"] == "WAIT", str(r))
+    check("traffic light: readers disagreeing -> WAIT", r["dd"] == "WAIT", str(r))
+    check("traffic light: readers agreeing short -> SELL", r["e"] == "SELL", str(r))
+    check("traffic light sits top-left over the candles; Desk and Move-quality boxes removed",
+          'id="tlight"' in dsrc and "_chart._mqBox = '';" in dsrc and "renkoMqBox +=" not in dsrc
+          and 'id="chk_deskBox"' not in dsrc)
+
+
+def test_turn_times():
+    """Turn-time study: a time where most sessions turn up is marked as a
+    rally time; turns spread evenly mark nothing."""
+    import ast as _ast, time as _t, os as _o, math as _m, datetime as _dt
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    tree = _ast.parse(ssrc)
+    fns = [n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name in ("_turn_study", "_ist_min_of")]
+    IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    arch_days = {}
+    import random as _r
+    _r.seed(7)
+    for i in range(30):
+        day = (_dt.date(2026, 8, 3) + _dt.timedelta(days=i)).isoformat()
+        base = int(_dt.datetime.fromisoformat(day + "T09:15").replace(tzinfo=IST).timestamp())
+        ser = {}
+        for k in range(375):
+            # falls into 11:30 every day, then rallies hard; small noise
+            p = 25000 - min(k, 135) * 0.8 + max(0, k - 135) * 1.2 + _r.uniform(-2, 2)
+            ser[(base + k * 60) // 60] = p
+        arch_days[day] = ser
+    ns = {"time": _t, "_os": _o, "RUN_DATA_SOURCE": "nse", "_TICK_DIR": "/nonexistent", "_turn_cache": {},
+          "_load_archive": lambda sym, d: arch_days.get(d, {})}
+    exec(compile(_ast.Module(body=fns, type_ignores=[]), "srv", "exec"), ns)
+    ns["_os"] = type("O", (), {"path": type("P", (), {"isdir": staticmethod(lambda p: True), "join": staticmethod(_o.path.join)}),
+                               "listdir": staticmethod(lambda p: [f"NIFTY_{d}.csv" for d in arch_days])})
+    r = ns["_turn_study"]("NIFTY", 60)
+    marked = {b["time"]: b for b in r["marked"]}
+    check("turn times: a time where most sessions bottom is marked as a RALLY time",
+          "11:30" in marked and marked["11:30"]["bias"] == "rally", str([(b["time"], b["bias"], b["turns"]) for b in r["marked"]]))
+    check("turn times: today is excluded and the study counts sessions", r["days"] == 30, str(r["days"]))
+    # midday tier: big moves at the open and close, plus a modest dip that
+    # bottoms at 12:45 every day - it should show as a midday rally line
+    arch2 = {}
+    for i in range(30):
+        day = (_dt.date(2026, 8, 3) + _dt.timedelta(days=i)).isoformat()
+        base = int(_dt.datetime.fromisoformat(day + "T09:15").replace(tzinfo=IST).timestamp())
+        ser = {}
+        for k in range(375):
+            if k < 30:   p = 25000 - k * 6                       # opening fall to 24820
+            elif k < 60: p = 24820 + (k - 30) * 6                # back to 25000
+            elif k < 210: p = 25000 - (k - 60) * (2 / 3)           # drift to 24900 at 12:45
+            elif k < 300: p = 24900 + (k - 210) * 1.2            # midday rally
+            else:        p = 25008 + (k - 300) * 4               # closing run
+            ser[(base + k * 60) // 60] = p + _r.uniform(-1, 1)
+        arch2[day] = ser
+    ns["_turn_cache"].clear(); arch_days.clear(); arch_days.update(arch2)
+    r2 = ns["_turn_study"]("NIFTY", 60)
+    mid = {b["time"]: b for b in r2.get("midday", [])}
+    check("turn times: midday tier marks a regular 12:45 low as a rally time",
+          "12:45" in mid and mid["12:45"]["marked"] and mid["12:45"]["bias"] == "rally",
+          str([(b["time"], b["bias"], b["turns"], b["marked"]) for b in r2.get("midday", [])]))
+    check("turn times: midday lines are limited to 10:00-15:00", all(600 <= b["min"] < 900 for b in r2.get("midday", [])))
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("turn-time lines drawn on the candle chart with a toggle", "_turnLinesSvg(W, padL, padR, padT, H - padB)" in dsrc and 'id="chk_turnTimes"' in dsrc)
+
+
+def test_ema_cross():
+    """EMA crossover lines: green on a bullish cross, red on a bearish one,
+    closed candles only, defaults 5/13 restored by Reset, on every chart type."""
+    import subprocess, json as _json
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = dsrc.index(f"function {name}(")
+        depth, j = 0, dsrc.index("{", i)
+        for k in range(j, len(dsrc)):
+            depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+            if depth == 0:
+                return dsrc[i:k + 1]
+    harness = "const _emaXCache = { key: '', pts: [] };\n" + grab("_emaSeries") + grab("_emaCrossPoints") + grab("_emaCrossSvg") + r"""
+const _hm = t => String(t); const fmtPrice = v => (+v).toFixed(1); const escapeHtml = x => x;
+const cs = [];
+for (let i = 0; i < 120; i++) {
+  // down, then up, then down: one bullish and one bearish cross
+  const p = i < 40 ? 25000 - i * 5 : i < 80 ? 24800 + (i - 40) * 6 : 25040 - (i - 80) * 7;
+  cs.push({ t: 1000 + i * 60, o: p, h: p + 1, l: p - 1, c: p });
+}
+const _chart = { candles: cs, liveBar: false, show: { emaX: true }, emaX: { fast: 5, slow: 13 }, interval: 1 };
+const a = _emaCrossPoints().map(p => p.dir);
+_emaXCache.key = ''; _chart.emaX = { fast: 13, slow: 5 };
+const b = _emaCrossPoints().map(p => p.dir);
+const svg = _emaCrossSvg(t => t - 1000, 0, 100);
+// a cross that exists only on the forming bar is not drawn
+const cs2 = cs.slice(0, 41).concat([{ t: 1000 + 41 * 60, o: 0, h: 0, l: 0, c: 26000 }]);
+_emaXCache.key = ''; _chart.candles = cs2; _chart.liveBar = true; _chart.emaX = { fast: 5, slow: 13 };
+const c = _emaCrossPoints().length;
+_chart.liveBar = false; _emaXCache.key = '';
+const d = _emaCrossPoints().length;
+_chart.show.emaX = false; _emaXCache.key = '';
+const e = _emaCrossPoints().length;
+console.log(JSON.stringify({ a, b, green: /#00e676/.test(svg), red: /#ff1744/.test(svg), c, d, e }));
+"""
+    r = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        o = _json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("ema cross: harness ran", False, (r.stderr or r.stdout)[:400]); return
+    check("ema cross: a bullish then a bearish cross are found", o["a"] == ["bull", "bear"], str(o["a"]))
+    check("ema cross: swapped fast/slow boxes read the same", o["b"] == o["a"], str(o["b"]))
+    check("ema cross: GREEN line for bullish, RED for bearish", o["green"] and o["red"])
+    check("ema cross: the forming candle cannot print a line", o["c"] == 0 and o["d"] == 1, f"{o['c']} {o['d']}")
+    check("ema cross: the checkbox turns the lines off", o["e"] == 0)
+    check("ema cross: fast 5 / slow 13 boxes beside the EMA checkboxes",
+          'id="emaXFast" class="ohlc-inp" value="5"' in dsrc and 'id="emaXSlow" class="ohlc-inp" value="13"' in dsrc
+          and dsrc.index('id="chk_ema200"') < dsrc.index('id="emaXFast"') < dsrc.index('id="chk_vwap"'))
+    check("ema cross: defaults 5/13 in the chart config, which Reset clears",
+          dsrc.count("emaX: true }, emaX: { fast: 5, slow: 13 } }") == 2 and "'chartCfg'," in dsrc)
+    check("ema cross: drawn by the candle/Heikin Ashi renderer and by Renko", dsrc.count("svg += _emaCrossSvg(") == 2)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_ctx_and_intervals, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
