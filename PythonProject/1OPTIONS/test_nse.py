@@ -1324,7 +1324,7 @@ _chart.liveBar = false; _emaXCache.key = '';
 const d = _emaCrossPoints().length;
 _chart.show.emaX = false; _emaXCache.key = '';
 const e = _emaCrossPoints().length;
-console.log(JSON.stringify({ a, b, green: /#00e676/.test(svg), red: /#ff1744/.test(svg), c, d, e }));
+console.log(JSON.stringify({ a, b, one: (svg.match(/emax-line/g) || []).length === 1, latestRed: /#ff1744/.test(svg) && !/#00e676/.test(svg), c, d, e }));
 """
     r = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
     try:
@@ -1333,7 +1333,7 @@ console.log(JSON.stringify({ a, b, green: /#00e676/.test(svg), red: /#ff1744/.te
         check("ema cross: harness ran", False, (r.stderr or r.stdout)[:400]); return
     check("ema cross: a bullish then a bearish cross are found", o["a"] == ["bull", "bear"], str(o["a"]))
     check("ema cross: swapped fast/slow boxes read the same", o["b"] == o["a"], str(o["b"]))
-    check("ema cross: GREEN line for bullish, RED for bearish", o["green"] and o["red"])
+    check("ema cross: only the most recent cross is drawn (here the bearish one, RED)", o["one"] and o["latestRed"])
     check("ema cross: the forming candle cannot print a line", o["c"] == 0 and o["d"] == 1, f"{o['c']} {o['d']}")
     check("ema cross: the checkbox turns the lines off", o["e"] == 0)
     check("ema cross: fast 5 / slow 13 boxes beside the EMA checkboxes",
@@ -1344,11 +1344,53 @@ console.log(JSON.stringify({ a, b, green: /#00e676/.test(svg), red: /#ff1744/.te
     check("ema cross: drawn by the candle/Heikin Ashi renderer and by Renko", dsrc.count("svg += _emaCrossSvg(") == 2)
 
 
+def test_turn_blink():
+    """The next turn-time line ahead of the clock blinks; passed lines do not;
+    lean lines are one yellow at one transparency."""
+    import subprocess, json as _json
+    dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    i = dsrc.index("function _turnLinesSvg(")
+    depth, j = 0, dsrc.index("{", i)
+    for k in range(j, len(dsrc)):
+        depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+        if depth == 0:
+            fn = dsrc[i:k + 1]; break
+    harness = fn + r"""
+const state = { symbol: 'NIFTY' }; const _chart = { interval: 1, show: {} }; const _isRenkoView = () => false;
+const escapeHtml = x => String(x); let NOW = 600, HIST = false;
+const _istNowMin = () => ({ m: NOW, wd: 3 }); const _isHistorical = () => HIST;
+const mk = (min, tier, bias) => ({ min, time: String(min), turns: 5, expected: 3, ratio: 1.4, lows: 3, highs: 2, p: 0.2, bias, follow30: 10, marked: tier === 'mid', lean: tier === 'lean' });
+const _turns = { v: { symbol: 'NIFTY', days: 60, marked: [{ ...mk(570, 'major', 'crash'), marked: true }],
+  midday: [mk(660, 'lean', 'rally'), mk(720, 'lean', 'crash'), mk(780, 'mid', 'rally')] } };
+const nextOf = svg => { const m = svg.match(/class="turn-next"[^>]*><line x1="([\d.]+)/); return m ? +m[1] : null; };
+const xs = svg => [...svg.matchAll(/<line x1="([\d.]+)"/g)].map(m => +m[1]);
+NOW = 560; const a = _turnLinesSvg(1000, 0, 0, 0, 100);
+NOW = 600; const b = _turnLinesSvg(1000, 0, 0, 0, 100);
+NOW = 700; const c = _turnLinesSvg(1000, 0, 0, 0, 100);
+NOW = 800; const d = _turnLinesSvg(1000, 0, 0, 0, 100);
+HIST = true; NOW = 600; const e = _turnLinesSvg(1000, 0, 0, 0, 100);
+const styles = [...b.matchAll(/<g opacity="([\d.]+)"><line[^>]*stroke="([^"]+)" stroke-width="([\d.]+)" stroke-dasharray="([^"]+)"/g)].map(m => [m[1], m[3], m[4]].join('|'));
+const leanCols = [...b.matchAll(/stroke="([^"]+)"[^>]*\/>\s*<text[^>]*>[^<]*lean/g)].map(m => m[1]);
+console.log(JSON.stringify({ a: nextOf(a) === xs(a)[0], b: nextOf(b) === xs(b)[1], c: nextOf(c) === xs(c)[2],
+  d: nextOf(d), e: nextOf(e), nBlink: (b.match(/turn-next/g) || []).length, uniform: new Set(styles).size === 1 && styles.length === 3, leanCols }));
+"""
+    r = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        o = _json.loads(r.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("turn blink: harness ran", False, (r.stderr or r.stdout)[:400]); return
+    check("turn blink: before 09:30 the 09:30 line blinks", o["a"])
+    check("turn blink: once a line's time passes, the next one blinks", o["b"] and o["c"] and o["nBlink"] == 1, str(o))
+    check("turn blink: nothing blinks after the last line or on a past date", o["d"] is None and o["e"] is None, str(o))
+    check("turn lines: lean lines drawn the same as the others (one dash, width, transparency)", o["uniform"], str(o))
+    check("turn lines: a lean line takes the same colour rule (rally lean green, crash lean red)", o["leanCols"] == ["#1fd17a", "#ff3b4e"], str(o["leanCols"]))
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_turn_blink, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
