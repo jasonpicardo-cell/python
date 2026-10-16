@@ -410,6 +410,8 @@ def _on_message(msg) -> None:
             return
         sym = msg.get("symbol") or msg.get("symbol_name")
         if not sym:
+            if msg.get("type") == "sub":
+                _answer_sub(True)
             if msg.get("message") or msg.get("type") in ("sub", "unsub", "cn", "ful", "lit"):
                 _sock_note("info", msg)
             return
@@ -549,6 +551,7 @@ def _on_socket_connect() -> None:
     print("[fyers] market-data socket connected")
     _sock_note("connect", f"connect #{_reconnects['n'] + 1}")
     _retry_n.clear()
+    _pending_sub.clear()
     _reconnects["n"] += 1
     _reconnects["last"] = time.time()
     with _lock:
@@ -593,7 +596,81 @@ _retry_n: Dict[str, int] = {}
 _invalid_syms: set = set()            # rejected by the broker: never re-requested
 _sock_log: List[Any] = []             # (ts, kind, text) - errors, closes, acks, heals
 _wd: Dict[str, Any] = {"retried": 0, "heals": 0, "forced_reconnects": 0,
-                       "last_heal": 0.0, "last_force": 0.0, "last_pass": 0.0}
+                       "last_heal": 0.0, "last_force": 0.0, "last_pass": 0.0,
+                       "force_streak": 0}
+# Every subscribe request gets a yes ("sub" 200) or no ("sub" 11011) from the
+# broker, in the order the requests were sent. Keeping the requests in a
+# queue lets a refusal be pinned on the batch it answered, so the feed check
+# can say WHAT was refused instead of "something failed".
+_pending_sub: List[Dict[str, Any]] = []
+_refusals: List[Dict[str, Any]] = []          # {ts, kind, n, sample, code}
+# One market-data socket per Fyers API app: when a second one connects (a
+# second copy of this server, a scanner, a notebook on the same app) the one
+# that connected last gets the data and the other's subscriptions are
+# refused. A lock file stops two copies of THIS server fighting that way.
+_sock_lock: Dict[str, Any] = {"fh": None, "blocked_by": None}
+
+
+def _track_sub(kind: str, syms: List[str]) -> None:
+    now = time.time()
+    _pending_sub.append({"kind": kind, "n": len(syms), "sample": list(syms[:4]), "ts": now})
+    _pending_sub[:] = [p for p in _pending_sub if now - p["ts"] < 30][-40:]
+
+
+def _answer_sub(ok: bool, code: Any = None) -> None:
+    now = time.time()
+    _pending_sub[:] = [p for p in _pending_sub if now - p["ts"] < 30]
+    req = _pending_sub.pop(0) if _pending_sub else {"kind": "?", "n": 0, "sample": []}
+    if not ok:
+        _refusals.append({"ts": now, "kind": req["kind"], "n": req["n"], "sample": req["sample"], "code": code})
+        del _refusals[:-50]
+
+
+def refusals_recent(window_s: float = 600.0, now: Optional[float] = None) -> Dict[str, Any]:
+    now = now or time.time()
+    r = [x for x in _refusals if now - x["ts"] < window_s]
+    return {"px": sum(1 for x in r if x["kind"] == "px"), "dp": sum(1 for x in r if x["kind"] == "dp"),
+            "auth": sum(1 for x in r if x["kind"] == "auth"), "total": len(r),
+            "last_age_s": round(now - r[-1]["ts"], 1) if r else None,
+            "last": ({k: r[-1][k] for k in ("kind", "n", "sample", "code")} if r else None)}
+
+
+def _force_gap() -> float:
+    # 15 min, then 30, 60, 120: reopening repeatedly re-requests every
+    # symbol (one more token-conversion call each time) and, if another
+    # socket on the same app is the reason, just fights it
+    return 900.0 * (2 ** min(3, _wd["force_streak"]))
+
+
+def _acquire_socket_lock() -> bool:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".fyers_socket.lock")
+    try:
+        fh = open(path, "a+")
+    except Exception:
+        return True                       # cannot even create the file: do not block the feed
+    try:
+        try:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except ImportError:               # Windows
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except Exception:
+        try:
+            fh.seek(0)
+            other = fh.read().strip()[:40]
+        except Exception:
+            other = ""
+        _sock_lock["blocked_by"] = other or "another process"
+        fh.close()
+        return False
+    try:
+        fh.seek(0); fh.truncate(); fh.write(f"pid {os.getpid()}"); fh.flush()
+    except Exception:
+        pass
+    _sock_lock["fh"] = fh                 # held for the life of the process
+    return True
 
 
 def _sock_note(kind: str, text: Any) -> None:
@@ -607,6 +684,15 @@ def _sock_note(kind: str, text: Any) -> None:
 def _on_socket_error(m: Any) -> None:
     _sock_note("error", m)
     print(f"[fyers] socket error: {str(m)[:160]}")
+    try:
+        if isinstance(m, dict):
+            code = m.get("code")
+            if m.get("type") == "sub" and code == 11011:
+                _answer_sub(False, code)
+            elif code == 11001:               # authentication refused
+                _refusals.append({"ts": time.time(), "kind": "auth", "n": 0, "sample": [], "code": code})
+    except Exception:
+        pass
     try:
         bad = (m or {}).get("invalid_symbols") if isinstance(m, dict) else None
         if bad:
@@ -640,6 +726,7 @@ def _force_reconnect(why: str) -> bool:
     _sock_note("heal", f"reopening socket: {why}")
     print(f"[fyers] watchdog: reopening the market-data socket - {why}")
     _wd["forced_reconnects"] += 1
+    _wd["force_streak"] += 1
     _wd["last_force"] = time.time()
     try:
         ws.close()          # the SDK reconnects; _on_socket_connect re-requests everything
@@ -673,6 +760,16 @@ def _watchdog_pass(now: Optional[float] = None) -> Dict[str, Any]:
         return out
     lost_px = [s_ for s_ in unconfirmed(_sub_req, px, ("sf", "if", "?")) if s_ not in _invalid_syms]
     lost_dp = unconfirmed(_dsub_req, dp, ("dp",))
+    # The broker is actively saying no: asking again costs a token-conversion
+    # call per batch and gets the same answer. Hold until it has been quiet
+    # for 5 minutes (or the socket reconnects, which clears the back-off).
+    rf = refusals_recent(300, now)
+    if rf["px"] + rf["auth"] >= 2:
+        lost_px = []
+        acts["held_px"] = True
+    if rf["dp"] + rf["auth"] >= 2:
+        lost_dp = []
+        acts["held_dp"] = True
     if lost_px or lost_dp:
         for s_ in lost_px + lost_dp:
             _retry_n[s_] = _retry_n.get(s_, 0) + 1
@@ -694,10 +791,13 @@ def _watchdog_pass(now: Optional[float] = None) -> Dict[str, Any]:
     if not _ist_market_open(now):
         return acts
     last_sf = _last_of(("sf",), px)
+    if now - last_sf < 30:
+        # prices flowing again: the next stall starts from a 15-minute gap
+        _wd["force_streak"] = 0
     if now - last_sf > 30:
         # nothing at all is ticking: the SDK's own reconnect owns this case
         # unless it has clearly given up
-        if last_sf and now - last_sf > 180 and now - _wd["last_force"] > 900:
+        if last_sf and now - last_sf > 180 and now - _wd["last_force"] > _force_gap():
             acts["forced"] = _force_reconnect(f"no price ticks for {int(now - last_sf)}s")
         return acts
     stalled_px, stalled_dp, why = [], [], []
@@ -714,7 +814,13 @@ def _watchdog_pass(now: Optional[float] = None) -> Dict[str, Any]:
             why.append(f"all {len(dp)} depth books silent {int(now - ld)}s")
     if not why:
         return acts
-    if now - _wd["last_heal"] > 600:
+    # while the broker is refusing, re-subscribing gets the same "no" and
+    # spends a token-conversion call; only the (backed-off) reopen below can
+    # change the answer, by making this socket the app's newest again
+    heal_px = [] if acts.get("held_px") else stalled_px
+    heal_dp = [] if acts.get("held_dp") else stalled_dp
+    if (heal_px or heal_dp) and now - _wd["last_heal"] > 600:
+        stalled_px, stalled_dp = heal_px, heal_dp
         _wd["heals"] += 1
         _wd["last_heal"] = now
         _sock_note("heal", "re-subscribing: " + "; ".join(why))
@@ -727,7 +833,11 @@ def _watchdog_pass(now: Optional[float] = None) -> Dict[str, Any]:
         if stalled_dp:
             _subscribe_depth(stalled_dp)
         acts["resubscribed"] = len(stalled_px) + len(stalled_dp)
-    elif now - _wd["last_heal"] > 150 and now - _wd["last_force"] > 900:
+    elif stalled_px and now - _wd["last_heal"] > 150 and now - _wd["last_force"] > _force_gap():
+        # Only a silent INDEX justifies tearing the socket down. Depth books
+        # going quiet while prices tick is a depth problem: reopening the
+        # whole socket for it re-requested all ~500 price subscriptions and
+        # interrupted the prices that were working.
         acts["forced"] = _force_reconnect("still stalled after re-subscribing: " + "; ".join(why))
     return acts
 
@@ -759,6 +869,9 @@ def watchdog_state() -> Dict[str, Any]:
         "last_depth_age_s": age(_last_of(("dp",), dp)),
         "invalid_symbols": sorted(_invalid_syms)[:20],
         "retried": _wd["retried"], "heals": _wd["heals"], "forced_reconnects": _wd["forced_reconnects"],
+        "next_reopen_gap_s": int(_force_gap()),
+        "refusals_10m": refusals_recent(600, now),
+        "socket_lock_blocked_by": _sock_lock["blocked_by"],
         "watchdog_pass_age_s": age(_wd["last_pass"]),
         "log": [{"age_s": round(now - t, 1), "kind": k, "text": x} for t, k, x in _sock_log[-15:]][::-1],
     }
@@ -767,6 +880,15 @@ def watchdog_state() -> Dict[str, Any]:
 def _start_socket() -> None:
     global _socket
     if _socket is not None or not _client:
+        return
+    if not _acquire_socket_lock():
+        msg = (f"another copy of this server ({_sock_lock['blocked_by']}) already holds the Fyers "
+               "market-data socket - Fyers allows one per API app, so this copy runs on REST "
+               "quotes only. Close the other copy and restart this one to stream.")
+        print(f"[fyers] {msg}")
+        _sock_note("error", msg)
+        with _lock:
+            _status["streaming"] = False
         return
     token = f"{_cfg('FYERS_CLIENT_ID')}:{_access_token()}"
     try:
@@ -824,6 +946,7 @@ def _subscribe_depth(symbols: List[str]) -> None:
             return
         try:
             _socket.subscribe(symbols=new, data_type="DepthUpdate")
+            _track_sub("dp", new)
             _depth_subs.update(new)
             now_ = time.time()
             for s_ in new:
@@ -935,6 +1058,7 @@ def _subscribe(symbols: List[str]) -> None:
             # chain does not silently drop the tail.
             for i in range(0, len(new), 200):
                 _socket.subscribe(symbols=new[i:i + 200], data_type="SymbolUpdate")
+                _track_sub("px", new[i:i + 200])
             _subscribed.update(new)
             now_ = time.time()
             for s_ in new:

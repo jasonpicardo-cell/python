@@ -1,6 +1,8 @@
 import os
 from fyers_apiv3 import fyersModel
-
+import os
+import pandas as pd
+from kiteconnect import KiteConnect
 # Internal cache and tracker variables
 _properties_cache = {}
 _last_modified_time = 0
@@ -207,3 +209,59 @@ def fetch_live_fyers_NSE_symbols():
     except Exception as e:
         print(f"❌ Error: {e}")
         return {}
+
+
+# 🛑 Replace these with ENV variables after regenerating your secret!
+ZERODHA_API_KEY = "g0zo9ykwec29xz7g"
+ZERODHA_API_SECRET = "2q80fu6jefnsp3jqn4cp1tph9b3c8zme"
+
+def get_zerodha_session():
+    """Authenticates with Zerodha and returns the Kite object."""
+    kite = KiteConnect(api_key=ZERODHA_API_KEY)
+
+    # Check if we already have a valid token saved today
+    token_file = "zerodha_access_token.txt"
+    if os.path.exists(token_file):
+        with open(token_file, 'r') as f:
+            access_token = f.read().strip()
+        kite.set_access_token(access_token)
+        try:
+            # Test the token
+            kite.profile()
+            print("✅ Zerodha Authenticated via saved token.")
+            return kite
+        except Exception:
+            print("⚠️ Saved token expired. Re-authenticating...")
+
+    # Generate new token
+    print("Log in here to authorize:")
+    print(kite.login_url())
+    request_token = input("Paste the 'request_token' from the redirect URL here: ").strip()
+
+    try:
+        data = kite.generate_session(request_token, api_secret=ZERODHA_API_SECRET)
+        kite.set_access_token(data["access_token"])
+        with open(token_file, 'w') as f:
+            f.write(data["access_token"])
+        print("✅ Zerodha Authenticated Successfully!")
+        return kite
+    except Exception as e:
+        print(f"❌ Zerodha Auth Failed: {e}")
+        return None
+
+def fetch_zerodha_nse_instruments(kite):
+    """
+    Zerodha requires an 'instrument_token' (e.g. 738561 for RELIANCE) to fetch history.
+    This downloads the master list and maps Trading Symbols to Tokens.
+    """
+    print("⏳ Downloading NSE instrument tokens from Zerodha...")
+    instruments = kite.instruments("NSE")
+
+    # Filter for regular equities (EQ) to match your Nifty list
+    nifty_map = {}
+    for inst in instruments:
+        if inst['segment'] == 'NSE' and inst['instrument_type'] == 'EQ':
+            nifty_map[inst['tradingsymbol']] = inst['instrument_token']
+
+    print(f"✅ Loaded {len(nifty_map)} NSE instruments.")
+    return nifty_map

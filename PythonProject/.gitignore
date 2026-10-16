@@ -35,3 +35,8 @@ institutional_signals.html
 /1OPTIONS/fyersRequests.log
 /1OPTIONS/replay/
 /1OPTIONS/history/
+/1OPTIONS/zerodha_cache/
+/1OPTIONS/.fyers_token
+/1OPTIONS/.zerodha_token
+/NSE_SYNC/fyers_token.txt
+/NSE_SYNC/zerodha_access_token.txt

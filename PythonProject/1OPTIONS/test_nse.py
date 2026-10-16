@@ -1255,7 +1255,7 @@ def test_turn_times():
             p = 25000 - min(k, 135) * 0.8 + max(0, k - 135) * 1.2 + _r.uniform(-2, 2)
             ser[(base + k * 60) // 60] = p
         arch_days[day] = ser
-    ns = {"time": _t, "_os": _o, "RUN_DATA_SOURCE": "nse", "_TICK_DIR": "/nonexistent", "_turn_cache": {},
+    ns = {"time": _t, "_os": _o, "RUN_DATA_SOURCE": "nse", "_is_broker": lambda: False, "_TICK_DIR": "/nonexistent", "_turn_cache": {},
           "_load_archive": lambda sym, d: arch_days.get(d, {})}
     exec(compile(_ast.Module(body=fns, type_ignores=[]), "srv", "exec"), ns)
     ns["_os"] = type("O", (), {"path": type("P", (), {"isdir": staticmethod(lambda p: True), "join": staticmethod(_o.path.join)}),
@@ -1386,11 +1386,484 @@ console.log(JSON.stringify({ a: nextOf(a) === xs(a)[0], b: nextOf(b) === xs(b)[1
     check("turn lines: a lean line takes the same colour rule (rally lean green, crash lean red)", o["leanCols"] == ["#1fd17a", "#ff3b4e"], str(o["leanCols"]))
 
 
+def test_defaults_pvsra_pivots():
+    """PVSRA and Pivots start unchecked, Reset clears both back to off, and
+    the Alerts button reads "Reset Defaults"."""
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("defaults: PVSRA off unless explicitly turned on",
+          "_pvSet.on = v === '1';" in d and "const _pvSet = { at: 0, spread: false, on: false };" in d
+          and 'id="pvsraToggle" checked' not in d)
+    check("defaults: chart Pivots off", d.count("pivots: false, pivotType: 'camarilla'") == 2 and 'id="chk_pivots" checked' not in d)
+    check("defaults: Pivots off in the alert chart sources", d.count("cone: true, pivots: false, tol: 20 }") == 2)
+    check("defaults: Reset clears the PVSRA, chart and alert-source keys",
+          all(f"'{k}'," in d for k in ("pvsraOn", "chartCfg", "chartAlertSources", "uiStateV1")))
+    check("defaults: Alerts button labelled Reset Defaults",
+          ">↺ Reset Defaults</button>" in d and ">↺ Reset to recommended defaults<" not in d)
+
+
+def test_broker_refusals():
+    """Fyers 11011 refusals are pinned on the batch they answered, retries are
+    held while the broker keeps saying no, depth silence never reopens the
+    socket, reopens back off, and a second server copy cannot take the socket."""
+    import nse_adapter_fyers as A, datetime as _dt, os as _o
+    IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    T = _dt.datetime(2026, 10, 16, 10, 0, tzinfo=IST).timestamp()      # Friday 10:00 IST
+    calls = []
+    class _WS:
+        closed = 0
+        def close(self): _WS.closed += 1
+    class _S:
+        def subscribe(self, symbols, data_type=None): calls.append((data_type, list(symbols)))
+    s_ = _S(); setattr(s_, "_FyersDataSocket__ws_object", _WS())
+    saved = (A._socket, dict(A._raw_last), set(A._subscribed), set(A._depth_subs), dict(A._sub_req),
+             dict(A._dsub_req), dict(A._wd), list(A._refusals), list(A._pending_sub))
+    try:
+        A._socket = s_
+        for x in (A._raw_last, A._sub_req, A._dsub_req, A._retry_n):
+            x.clear()
+        A._subscribed.clear(); A._depth_subs.clear(); A._refusals.clear(); A._pending_sub.clear()
+        A._wd.update(last_heal=0.0, last_force=0.0, heals=0, forced_reconnects=0, retried=0, force_streak=0)
+        # replies come back in request order: price batch refused, depth batch accepted
+        A._track_sub("px", ["NSE:NIFTY50-INDEX"]); A._track_sub("dp", ["NSE:NIFTY26OCTFUT"])
+        A._on_socket_error({"type": "sub", "code": 11011, "message": "subscription failed", "s": "error"})
+        A._on_message({"type": "sub", "code": 200, "message": "Subscribed", "s": "ok"})
+        rf = A.refusals_recent()
+        check("refusals: an 11011 is pinned on the batch it answered", rf["px"] == 1 and rf["dp"] == 0 and not A._pending_sub, str(rf))
+        # two refusals in 5 minutes -> unanswered price subscriptions are NOT re-sent
+        A._refusals.clear()
+        for k in range(2):
+            A._refusals.append({"ts": T - 30 - k, "kind": "px", "n": 200, "sample": [], "code": 11011})
+        idx, opt, fut = "NSE:NIFTY50-INDEX", "NSE:NIFTY26OCT25000CE", "NSE:NIFTY26OCTFUT"
+        A._subscribed.update([idx, opt]); A._sub_req.update({idx: T - 100, opt: T - 100})
+        A._raw_last[opt] = {"sf": (T - 2, {})}
+        calls.clear()
+        r = A._watchdog_pass(T)
+        check("refusals: retries are held while the broker keeps refusing", r.get("held_px") and not calls, f"{r} {calls}")
+        # depth silent, index and prices fine -> re-subscribe depth, never reopen the socket
+        A._refusals.clear(); calls.clear(); _WS.closed = 0
+        A._wd.update(last_heal=0.0, last_force=0.0)
+        A._sub_req.update({idx: T - 400, opt: T - 400}); A._depth_subs.add(fut); A._dsub_req[fut] = T - 400
+        A._raw_last[idx] = {"if": (T - 1, {})}; A._raw_last[opt] = {"sf": (T - 1, {})}; A._raw_last[fut] = {"dp": (T - 300, {})}
+        r1 = A._watchdog_pass(T)
+        A._depth_subs.add(fut); A._dsub_req[fut] = T - 400
+        A._raw_last[idx] = {"if": (T + 199, {})}; A._raw_last[opt] = {"sf": (T + 199, {})}
+        r2 = A._watchdog_pass(T + 200)
+        check("refusals: silent depth alone is re-subscribed but never reopens the socket",
+              r1.get("resubscribed") == 1 and not r2.get("forced") and _WS.closed == 0, f"{r1} {r2}")
+        # reopen back-off doubles, and resets once prices flow again
+        A._wd["force_streak"] = 0; g0 = A._force_gap(); A._wd["force_streak"] = 2; g2 = A._force_gap()
+        A._watchdog_pass(T + 200)
+        check("refusals: socket reopens back off 15 -> 30 -> 60 min and reset when prices flow",
+              g0 == 900 and g2 == 3600 and A._wd["force_streak"] == 0, f"{g0} {g2} {A._wd['force_streak']}")
+        st = A.watchdog_state()
+        check("refusals: reported in the watchdog state", "refusals_10m" in st and "next_reopen_gap_s" in st)
+    finally:
+        A._socket = saved[0]
+        A._raw_last.clear(); A._raw_last.update(saved[1])
+        A._subscribed.clear(); A._subscribed.update(saved[2])
+        A._depth_subs.clear(); A._depth_subs.update(saved[3])
+        A._sub_req.clear(); A._sub_req.update(saved[4])
+        A._dsub_req.clear(); A._dsub_req.update(saved[5])
+        A._wd.clear(); A._wd.update(saved[6])
+        A._refusals[:] = saved[7]; A._pending_sub[:] = saved[8]
+    # a second copy of the server cannot take the socket
+    lock = _o.path.join(_o.path.dirname(_o.path.abspath(A.__file__)), ".fyers_socket.lock")
+    existed = _o.path.exists(lock)
+    keep = dict(A._sock_lock)
+    try:
+        A._sock_lock.update(fh=None, blocked_by=None)
+        a = A._acquire_socket_lock(); first = A._sock_lock["fh"]
+        A._sock_lock["fh"] = None
+        b = A._acquire_socket_lock()
+        check("refusals: a second copy is blocked from opening the data socket",
+              a and not b and "pid" in (A._sock_lock["blocked_by"] or ""), f"{a} {b} {A._sock_lock}")
+        first.close()
+    finally:
+        A._sock_lock.clear(); A._sock_lock.update(keep)
+        if not existed:
+            try: _o.remove(lock)
+            except Exception: pass
+    srv = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    check("refusals: FEED CHECK explains a refused socket", "broker accepting subscriptions" in srv and "ONE market-data socket per API app" in srv)
+
+
+# ── Zerodha: a simulated Kite feed (KiteConnect REST + KiteTicker) ──────
+def _z_dates():
+    import datetime as _dt
+    IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    now = _dt.datetime.now(IST)
+    d = now.date()
+    while d.weekday() != 1 or (d == now.date() and now.hour * 60 + now.minute >= 930):
+        d += _dt.timedelta(days=1)
+    weeklies = [d + _dt.timedelta(days=7 * i) for i in range(3)]
+    import calendar
+    def last_tue(y, m):
+        x = calendar.monthrange(y, m)[1]
+        while calendar.weekday(y, m, x) != 1:
+            x -= 1
+        return _dt.date(y, m, x)
+    m1 = last_tue(now.year, now.month)
+    if m1 < now.date() or (m1 == now.date() and now.hour * 60 + now.minute >= 930):
+        y, m = (now.year + (now.month == 12), now.month % 12 + 1)
+        m1 = last_tue(y, m)
+    y2, mm2 = (m1.year + (m1.month == 12), m1.month % 12 + 1)
+    return IST, now, weeklies, [m1, last_tue(y2, mm2)]
+
+
+class _ZFakeKite:
+    """Enough of KiteConnect for the adapter: instruments, quote, history."""
+    SPOT = {"NIFTY": 25012.0, "BANKNIFTY": 56010.0}
+    calls: dict = {}
+
+    def __init__(self, api_key=None, **_k):
+        self.api_key = api_key
+        _ZFakeKite.calls = {"quote": 0, "historical": 0, "instruments": 0, "profile": 0, "quote_keys": []}
+        self.IST, self.now, self.weeklies, self.monthlies = _z_dates()
+        self._rows = {"NSE": [], "NFO": []}
+        tok = 1000
+        for sym, nm, t_ in (("NIFTY 50", "NIFTY 50", 256265), ("NIFTY BANK", "NIFTY BANK", 260105),
+                            ("INDIA VIX", "INDIA VIX", 264969)):
+            self._rows["NSE"].append({"instrument_token": t_, "tradingsymbol": sym, "name": nm, "expiry": "",
+                                      "strike": 0.0, "lot_size": 0, "instrument_type": "EQ",
+                                      "segment": "INDICES", "exchange": "NSE"})
+        for eq in ("RELIANCE", "HDFCBANK", "ICICIBANK"):
+            tok += 1
+            self._rows["NSE"].append({"instrument_token": tok, "tradingsymbol": eq, "name": eq, "expiry": "",
+                                      "strike": 0.0, "lot_size": 1, "instrument_type": "EQ",
+                                      "segment": "NSE", "exchange": "NSE"})
+        for name, gap, lot, spot in (("NIFTY", 50, 65, 25012.0), ("BANKNIFTY", 100, 30, 56010.0)):
+            for e in self.weeklies:
+                for k in range(int(spot // gap * gap) - 40 * gap, int(spot // gap * gap) + 41 * gap, gap):
+                    for side in ("CE", "PE"):
+                        tok += 1
+                        self._rows["NFO"].append({"instrument_token": tok,
+                            "tradingsymbol": f"{name}{e.strftime('%y')}{'OND'[e.month - 10] if e.month >= 10 else e.month}{e.day:02d}{k}{side}",
+                            "name": name, "expiry": e, "strike": float(k), "lot_size": lot,
+                            "instrument_type": side, "segment": "NFO-OPT", "exchange": "NFO"})
+            for e in self.monthlies:
+                tok += 1
+                self._rows["NFO"].append({"instrument_token": tok, "tradingsymbol": f"{name}{e.strftime('%y%b').upper()}FUT",
+                                          "name": name, "expiry": e, "strike": 0.0, "lot_size": lot,
+                                          "instrument_type": "FUT", "segment": "NFO-FUT", "exchange": "NFO"})
+        self.by_key = {f"{r['exchange']}:{r['tradingsymbol']}": r for x in self._rows.values() for r in x}
+        self.by_tok = {r["instrument_token"]: r for x in self._rows.values() for r in x}
+
+    def set_access_token(self, tok):
+        self.token = tok
+
+    def profile(self):
+        _ZFakeKite.calls["profile"] += 1
+        return {"user_name": "Test User"}
+
+    def instruments(self, exchange=None):
+        _ZFakeKite.calls["instruments"] += 1
+        return list(self._rows.get(exchange, []))
+
+    def price(self, r):
+        import math as _m
+        name = r["name"]
+        if r["segment"] == "INDICES":
+            return {"NIFTY 50": self.SPOT["NIFTY"], "NIFTY BANK": self.SPOT["BANKNIFTY"], "INDIA VIX": 12.85}[name]
+        if r["instrument_type"] == "EQ":
+            return 1000.0 + (r["instrument_token"] % 7) * 100
+        s = self.SPOT[name]
+        if r["instrument_type"] == "FUT":
+            return s + 40
+        T = max(1 / 365 / 24, ((r["expiry"].toordinal() - self.now.date().toordinal()) + 0.25) / 365)
+        k, v, call = r["strike"], 0.13, r["instrument_type"] == "CE"
+        d1 = (_m.log(s / k) + 0.5 * v * v * T) / (v * _m.sqrt(T)); d2 = d1 - v * _m.sqrt(T)
+        nc = lambda x: 0.5 * (1 + _m.erf(x / _m.sqrt(2)))
+        p = s * nc(d1) - k * nc(d2) if call else k * nc(-d2) - s * nc(-d1)
+        return max(0.05, round(p * 20) / 20)
+
+    def row_quote(self, r, oi_lots=1000):
+        p = self.price(r)
+        lot = r["lot_size"] or 1
+        q = {"instrument_token": r["instrument_token"], "last_price": p,
+             "ohlc": {"open": p * 0.99, "high": p * 1.02, "low": p * 0.97, "close": round(p * 0.95, 2)}}
+        if r["segment"] != "INDICES":
+            q.update({"volume": lot * 4321, "oi": (lot * oi_lots) if r["instrument_type"] != "EQ" else 0,
+                      "buy_quantity": lot * 700, "sell_quantity": lot * 200,
+                      "depth": {"buy": [{"price": round(p - 0.05 * (i + 1), 2), "quantity": lot * (i + 1), "orders": i + 1} for i in range(5)],
+                                "sell": [{"price": round(p + 0.05 * (i + 1), 2), "quantity": lot * (i + 2), "orders": i + 1} for i in range(5)]}})
+        return q
+
+    def quote(self, *instruments):
+        keys = instruments[0] if len(instruments) == 1 and isinstance(instruments[0], list) else list(instruments)
+        _ZFakeKite.calls["quote"] += 1
+        _ZFakeKite.calls["quote_keys"].append(len(keys))
+        return {k: self.row_quote(self.by_key[k]) for k in keys if k in self.by_key}
+
+    def historical_data(self, token, frm, to, interval, continuous=False, oi=False):
+        import datetime as _dt
+        _ZFakeKite.calls["historical"] += 1
+        r = self.by_tok.get(token) or {}
+        if interval == "day":
+            y = self.now.date() - _dt.timedelta(days=1)
+            return [{"date": _dt.datetime(y.year, y.month, y.day, tzinfo=self.IST), "open": 1, "high": 1,
+                     "low": 1, "close": 1, "volume": 1, "oi": (r.get("lot_size") or 1) * 900}]
+        step = {"minute": 1, "3minute": 3, "5minute": 5}.get(interval, 1)
+        d0 = _dt.date.fromisoformat(frm[:10]); d1 = _dt.date.fromisoformat(to[:10])
+        out = []
+        day = d0
+        while day <= d1:
+            if day.weekday() < 5:
+                t = _dt.datetime(day.year, day.month, day.day, 9, 15, tzinfo=self.IST)
+                for i in range(0, 375, step):
+                    ts = t + _dt.timedelta(minutes=i)
+                    if ts > self.now:
+                        break
+                    px = 25000 + 30 * __import__("math").sin(i / 40)
+                    out.append({"date": ts, "open": px, "high": px + 3, "low": px - 3, "close": px + 1,
+                                "volume": 0 if r.get("segment") == "INDICES" else 650 * (1 + i % 5)})
+            day += _dt.timedelta(days=1)
+        return out
+
+
+class _ZFakeTicker:
+    MODE_FULL, MODE_QUOTE, MODE_LTP = "full", "quote", "ltp"
+    last = None
+
+    def __init__(self, api_key, access_token, **_k):
+        self.subs, self.modes, self.closed = set(), {}, 0
+        self.on_ticks = self.on_connect = self.on_close = self.on_error = None
+        _ZFakeTicker.last = self
+
+    def connect(self, threaded=False, **_k):
+        pass
+
+    def subscribe(self, toks):
+        self.subs.update(toks)
+
+    def set_mode(self, mode, toks):
+        for t_ in toks:
+            self.modes[t_] = mode
+
+    def _close(self, code=None, reason=None):
+        self.closed += 1
+
+    def close(self, *a):
+        self.closed += 1
+
+
+def _z_setup(tmpdir):
+    import nse_adapter_zerodha as Z
+    Z.KiteConnect, Z.KiteTicker, Z.SDK_AVAILABLE = _ZFakeKite, _ZFakeTicker, True
+    os.environ["ZERODHA_API_KEY"] = "test_key"
+    os.environ["ZERODHA_ACCESS_TOKEN"] = "test_token"
+    Z._CACHE_DIR = tmpdir
+    Z._kite = Z._kws = Z._socket = None
+    Z._status.update(connected=False, streaming=False, last_error="")
+    for d_ in (Z._ticks, Z._depth, Z._qcache, Z._flow, Z._raw_last, Z._sub_req, Z._retry_n, Z._key2tok, Z._tok2key,
+               Z._kind, Z._lot_of, Z._opts, Z._futs, Z._idx_key, Z._eq_key, Z._oi_today, Z._dirty, Z._eq_rest_cache):
+        d_.clear()
+    Z._subscribed.clear(); Z._depth_subs.clear(); Z._invalid_syms.clear()
+    Z._inst["day"].clear()
+    Z._oi_prev.update(day=None, oi={}, complete=False, loaded_for="")
+    Z._oi_preopen.update(day="", oi={})
+    Z._oi_backfill_q.clear(); Z._oi_tried.clear()
+    Z._oi_dirty["busy"] = True          # no background threads in tests
+    Z._rl["quote"][1] = Z._rl["historical"][1] = Z._rl["other"][1] = 0.0
+    Z._start_oi_keeper = lambda: None
+    return Z
+
+
+def test_zerodha_adapter():
+    """The Zerodha adapter serves the same chain payload as the Fyers one:
+    every key, contracts not shares, OI change from the previous close,
+    futures, depth and flow from FULL-mode ticks, zero REST once streaming."""
+    import tempfile, ast as _ast, json as _json, shutil
+    tmp = tempfile.mkdtemp(prefix="ztest")
+    Z = _z_setup(tmp)
+    try:
+        # previous session's closing OI for one contract, recorded on disk
+        fk = _ZFakeKite()
+        ce_key = next(k for k, r in fk.by_key.items() if r["name"] == "NIFTY" and r["instrument_type"] == "CE"
+                      and r["strike"] == 25000 and r["expiry"] == fk.weeklies[0])
+        y = Z._ist_today(1)
+        with open(os.path.join(tmp, f"oi_close_{y}.json"), "w") as f:
+            _json.dump({"oi": {ce_key: 65 * 900}, "complete": True}, f)
+        tick_log = []
+        Z.set_tick_sink(lambda m: tick_log.append(m))
+        d = Z.fetch_chain("NIFTY", None, 12)
+        # every key the Fyers adapter emits
+        src = open(os.path.join(HERE, "nse_adapter_fyers.py"), encoding="utf-8").read()
+        fn = next(n for n in _ast.walk(_ast.parse(src)) if isinstance(n, _ast.FunctionDef) and n.name == "fetch_chain")
+        out_dict = next(n.value for n in _ast.walk(fn) if isinstance(n, _ast.Assign)
+                        and getattr(n.targets[0], "id", "") == "out" and isinstance(n.value, _ast.Dict))
+        fy_keys = {k.value for k in out_dict.keys if isinstance(k, _ast.Constant)}
+        missing = sorted(fy_keys - set(d))
+        check("zerodha: chain payload carries every key the Fyers adapter emits", not missing, str(missing))
+        check("zerodha: tagged as the zerodha source", d["_source"] == "zerodha" and d["oi_unit"] == "contracts")
+        row = next(r for r in d["strikes"] if r["strike"] == 25000)
+        check("zerodha: OI in CONTRACTS (Kite counts units)", row["ce_oi"] == 1000 and d["lot_size"] == 65 and d["qty_per_contract"] == 65,
+              f"{row['ce_oi']} lot {d['lot_size']}")
+        check("zerodha: OI change measured from the recorded previous close", row["ce_oi_chg"] == 100, str(row["ce_oi_chg"]))
+        check("zerodha: 51 strikes around spot, both sides priced", len(d["strikes"]) == 51 and row["ce_ltp"] > 0 and row["pe_ltp"] > 0,
+              str(len(d["strikes"])))
+        check("zerodha: implied vol solved from prices", d["iv_source"] == "solved" and 10 < d["atm_iv"] < 16, f"{d['iv_source']} {d['atm_iv']}")
+        check("zerodha: spot, VIX and previous close from the index", d["underlying_value"] == 25012.0 and d["india_vix"] == 12.85
+              and d["spot_prev_close"], f"{d['underlying_value']} {d['india_vix']}")
+        check("zerodha: near and next-month futures with OI in contracts",
+              d["futures_price"] == 25052.0 and d["futures_far_price"] and d["futures_oi"] == 1000
+              and d.get("futures_symbol", "").endswith("FUT") if "futures_symbol" in d else d["futures_oi"] == 1000,
+              f"{d['futures_price']} {d['futures_far_price']} {d['futures_oi']}")
+        check("zerodha: expiry list and fractional dte", d["expiry"] and len(d["all_expiries"]) == 3 and 0 < d["dte"] < 8,
+              f"{d['expiry']} {d['all_expiries']} {d['dte']}")
+        q0 = _ZFakeKite.calls["quote"]
+        check("zerodha: a cold chain costs two quote calls (head + strikes)", q0 == 2, str(_ZFakeKite.calls))
+        tk = _ZFakeTicker.last
+        sub_keys = {Z._tok2key[t_] for t_ in tk.subs}
+        check("zerodha: chain, index, VIX and futures subscribed in FULL mode (no REST)",
+              ce_key in sub_keys and "NSE:NIFTY 50" in sub_keys and "NSE:INDIA VIX" in sub_keys
+              and all(tk.modes.get(Z._key2tok[k]) == "full" for k in sub_keys), f"{len(sub_keys)}")
+        # stream the whole window as Kite FULL-mode ticks
+        def tick_for(key, vol_mult=1.0, ltp_bump=0.0):
+            r = fk.by_key[key]
+            qd = fk.row_quote(r)
+            t_ = {"instrument_token": r["instrument_token"], "mode": "full", "last_price": qd["last_price"] + ltp_bump,
+                  "ohlc": qd["ohlc"]}
+            if r["segment"] != "INDICES":
+                t_.update({"volume_traded": int(qd["volume"] * vol_mult), "oi": qd["oi"],
+                           "total_buy_quantity": qd["buy_quantity"], "total_sell_quantity": qd["sell_quantity"],
+                           "depth": qd["depth"]})
+            return t_
+        Z._on_ticks(None, [tick_for(Z._tok2key[t_]) for t_ in tk.subs])
+        d2 = Z.fetch_chain("NIFTY", None, 12)
+        check("zerodha: once streaming, a chain refresh costs ZERO REST calls", _ZFakeKite.calls["quote"] == q0, str(_ZFakeKite.calls))
+        bk = d2["depth"]["strikes"].get("25000CE") or {}
+        check("zerodha: five-level book and totals from the FULL tick",
+              len(bk.get("bids") or []) == 5 and len(bk.get("asks") or []) == 5 and bk.get("tbq") == 65 * 700, str(bk)[:200])
+        check("zerodha: futures books keyed near/far", (d2["depth"]["futures"].get("near") or {}).get("bids"))
+        # a print at the offer is a BUY
+        Z._on_ticks(None, [tick_for(ce_key, vol_mult=1.01, ltp_bump=0.05)])
+        fl = Z._flow_read(ce_key) or {}
+        check("zerodha: aggressor flow classifies a print at the offer as a buy", fl.get("b5", 0) > 0 and fl.get("s5", 0) == 0, str(fl))
+        check("zerodha: ticks pushed to the browsers keyed like the chain's _tokens",
+              any(ce_key in (m.get("t") or {}) for m in tick_log) and ce_key in d2["_tokens"])
+        # a chosen expiry
+        d3 = Z.fetch_chain("NIFTY", d["all_expiries"][1], 12)
+        check("zerodha: a chosen expiry is served", d3["expiry"] == d["all_expiries"][1], f"{d3['expiry']}")
+        # candles: index bars with the future's volume, one cached call pair
+        h0 = _ZFakeKite.calls["historical"]
+        c1 = Z.fetch_candles("NIFTY", 1, 1)
+        c2 = Z.fetch_candles("NIFTY", 1, 1)
+        ok_c = (not Z._ist_market_open()) or (c1 and all(b["v"] > 0 for b in c1))
+        check("zerodha: index candles carry the near future's volume (cached)", ok_c and c1 == c2
+              and _ZFakeKite.calls["historical"] - h0 <= 2, f"{len(c1)} {_ZFakeKite.calls['historical'] - h0}")
+        hd = Z.fetch_history_days("NIFTY", 60)
+        check("zerodha: 60 days of minute bars in ONE history call", hd and _ZFakeKite.calls["historical"] - h0 <= 3, str(len(hd)))
+        # constituents: REST first, socket afterwards
+        cq = Z.constituent_quotes(["RELIANCE", "HDFCBANK"])
+        qa = _ZFakeKite.calls["quote"]
+        Z._on_ticks(None, [{"instrument_token": fk.by_key[f"NSE:{n}"]["instrument_token"], "mode": "quote",
+                            "last_price": 1234.0, "volume_traded": 999, "ohlc": {"open": 1200, "high": 1240, "low": 1190, "close": 1210}}
+                           for n in ("RELIANCE", "HDFCBANK")])
+        cq2 = Z.constituent_quotes(["RELIANCE", "HDFCBANK"])
+        check("zerodha: constituents quoted, then served from the stream with no REST",
+              len(cq) == 2 and cq2["RELIANCE"]["lastPrice"] == 1234.0 and _ZFakeKite.calls["quote"] == qa
+              and Z._eq_stats["socket"] == 2, f"{cq2.get('RELIANCE')} {_ZFakeKite.calls['quote']} {qa}")
+        eq_tok = fk.by_key["NSE:RELIANCE"]["instrument_token"]
+        check("zerodha: equities streamed in QUOTE mode, not FULL", tk.modes.get(eq_tok) != "full")
+        # audit shape
+        a = Z.audit_state("NIFTY", d2)
+        need = {"socket", "spot_tick_age_s", "options", "price_subscribed", "ticking_60s", "depth_subscribed",
+                "ladders_fresh_120s", "totals_fresh_120s", "flow_contracts", "flow_coverage", "lot_from_data",
+                "lot_from_book", "lot_from_master", "lot_table", "raw_rest", "watchdog"}
+        check("zerodha: data-audit state has the fields the server reads", need <= set(a), str(sorted(need - set(a))))
+        st = Z.status()
+        check("zerodha: status names the login script", st.get("login_script") == "zerodha_login.py" and st["configured"])
+    finally:
+        Z.set_tick_sink(None)
+        shutil.rmtree(tmp, ignore_errors=True)
+        for f in os.listdir(os.path.join(HERE, "history")) if os.path.isdir(os.path.join(HERE, "history")) else []:
+            if f.startswith("NIFTY_60_"):
+                try: os.remove(os.path.join(HERE, "history", f))
+                except Exception: pass
+
+
+def test_zerodha_watchdog_and_oi():
+    """Stream watchdog (free remedies, spaced out), the pre-open OI capture,
+    the daily-candle OI back-fill and the token expiry rule."""
+    import tempfile, shutil, json as _json, datetime as _dt, time
+    tmp = tempfile.mkdtemp(prefix="ztest")
+    Z = _z_setup(tmp)
+    try:
+        Z.fetch_chain("NIFTY", None, 12)
+        tk = _ZFakeTicker.last
+        IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+        T = _dt.datetime(2026, 10, 16, 11, 0, tzinfo=IST).timestamp()           # Friday 11:00
+        idx = "NSE:NIFTY 50"
+        opt = next(k for k in Z._subscribed if Z._kind.get(k) == "OPT")
+        for k in Z._subscribed:
+            Z._sub_req[k] = T - 400
+            Z._ticks[k] = {"ltp": 1.0, "ts": T - 2}
+        Z._ticks[idx] = {"ltp": 25000.0, "ts": T - 200}
+        Z._wd.update(last_heal=0.0, last_force=0.0, heals=0, forced_reconnects=0, force_streak=0)
+        r = Z._watchdog_pass(T)
+        check("zerodha watchdog: a silent index is re-subscribed (no REST)", r.get("resubscribed") == 1, str(r))
+        for k in Z._subscribed:
+            Z._ticks[k] = {"ltp": 1.0, "ts": T - 300}
+        r2 = Z._watchdog_pass(T + 10)
+        check("zerodha watchdog: no ticks at all -> the stream is reopened (ticker reconnects itself)",
+              r2.get("forced") and tk.closed == 1, str(r2))
+        r3 = Z._watchdog_pass(T + 60)
+        check("zerodha watchdog: reopens are spaced out", not r3.get("forced") and tk.closed == 1 and Z._force_gap() == 600, str(r3))
+        # a strike that never ticks is retried a few times, never written off
+        for k in Z._subscribed:
+            Z._ticks[k] = {"ltp": 1.0, "ts": T + 1000}
+        Z._ticks.pop(opt, None); Z._sub_req[opt] = T; Z._retry_n[opt] = 4
+        Z._watchdog_pass(T + 1000)
+        check("zerodha watchdog: an untraded strike is not marked invalid", opt not in Z._invalid_syms)
+        # previous-close OI back-fill from the daily candle
+        Z._oi_prev.update(day=None, oi={}, complete=False, loaded_for=Z._ist_today())
+        Z._oi_backfill_one(opt)
+        check("zerodha OI: yesterday's close back-filled from Kite's daily candle", Z._oi_prev["oi"].get(opt) == 65 * 900,
+              str(Z._oi_prev["oi"].get(opt)))
+        # token rule: issued today after 06:00 -> valid; two days ago -> expired
+        tf = os.path.join(tmp, "tok.json")
+        os.environ.pop("ZERODHA_ACCESS_TOKEN", None)
+        os.environ["ZERODHA_TOKEN_FILE"] = tf
+        with open(tf, "w") as f:
+            _json.dump({"access_token": "x", "ts": time.time() - 60}, f)
+        g = time.gmtime(time.time() + 19800)
+        v1 = Z.token_validity()
+        with open(tf, "w") as f:
+            _json.dump({"access_token": "x", "ts": time.time() - 2 * 86400}, f)
+        v2 = Z.token_validity()
+        check("zerodha token: today's token valid (unless issued before 06:00), two-day-old expired",
+              (v1["valid"] or g.tm_hour < 6) and not v2["valid"] and "zerodha_login.py" in v2["reason"], f"{v1} {v2}")
+    finally:
+        os.environ.pop("ZERODHA_TOKEN_FILE", None)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_broker_neutral_server():
+    """DATA_SOURCE=zerodha reaches the Zerodha adapter everywhere the server
+    used to hard-wire Fyers, and the dashboard reads either broker."""
+    srv = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    import re as _re
+    direct = _re.findall(r"import nse_adapter_fyers as \w+", srv)
+    check("server: no call site imports the Fyers adapter directly (all go through _broker())",
+          direct == ["import nse_adapter_fyers as _m"], str(direct))
+    check("server: no broker branch tests for fyers alone", 'if RUN_DATA_SOURCE == "fyers":' not in srv
+          and 'if src == "fyers":' not in srv and 'if source == "fyers":' not in srv)
+    check("server: zerodha is a broker source with its own login script",
+          'BROKER_SOURCES = ("fyers", "zerodha")' in srv and '"zerodha_login.py"' in srv and "_ensure_broker_token()" in srv)
+    dash = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("dashboard: token warning and broker-feed badge read either broker",
+          "j?.broker || j?.fyers" in dash and "/(fyers|zerodha)\\(/" in dash)
+    check("zerodha_login.py present and never prints the secret or token",
+          os.path.exists(os.path.join(HERE, "zerodha_login.py"))
+          and "print(secret" not in open(os.path.join(HERE, "zerodha_login.py")).read()
+          and "print(access" not in open(os.path.join(HERE, "zerodha_login.py")).read())
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_turn_blink, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

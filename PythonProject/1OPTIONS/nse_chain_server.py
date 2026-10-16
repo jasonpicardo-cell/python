@@ -311,9 +311,36 @@ _load_dotenv()
 # (NSE_LAN, NSE_POLL, NSE_PORT, NSE_POLL_INTERVAL, NSE_CHAIN_TTL) sit in
 # between: they override these defaults but yield to explicit flags.
 # ══════════════════════════════════════════════════════════════════════
-# Market-data adapter: "nse" (scrape, polled) or "arrow" (broker, streamed).
+# Market-data adapter: "nse" (scrape, polled), or a broker feed (streamed):
+# "fyers", "zerodha" (Kite Connect) or "arrow".
 # Set DATA_SOURCE in .env; this is only the fallback when .env is absent.
 RUN_DATA_SOURCE = _os.environ.get("DATA_SOURCE", "nse").strip().lower()
+if RUN_DATA_SOURCE in ("kite", "zerodha-kite"):
+    RUN_DATA_SOURCE = "zerodha"
+# Brokers served by an adapter with the Fyers adapter's interface. Every
+# broker-specific branch below goes through _broker(), so adding one is a
+# new adapter file plus an entry here - nothing else in the server changes.
+BROKER_SOURCES = ("fyers", "zerodha")
+_BROKER_NAMES = {"fyers": "Fyers", "zerodha": "Zerodha", "arrow": "Arrow", "nse": "NSE"}
+BROKER_NAME = _BROKER_NAMES.get(RUN_DATA_SOURCE, RUN_DATA_SOURCE)
+# per broker: token-file env var, default token file, login script, auto-login switch
+_BROKER_LOGIN = {
+    "fyers": ("FYERS_TOKEN_FILE", ".fyers_token", "fyers_login.py", "NSE_FYERS_AUTO_LOGIN"),
+    "zerodha": ("ZERODHA_TOKEN_FILE", ".zerodha_token", "zerodha_login.py", "NSE_ZERODHA_AUTO_LOGIN"),
+}
+
+
+def _is_broker() -> bool:
+    return RUN_DATA_SOURCE in BROKER_SOURCES
+
+
+def _broker():
+    """The active broker adapter module (Fyers or Zerodha)."""
+    if RUN_DATA_SOURCE == "zerodha":
+        import nse_adapter_zerodha as _m
+    else:
+        import nse_adapter_fyers as _m
+    return _m
 
 RUN_LAN = True            # True  -> reachable from other computers (binds 0.0.0.0)
                           # False -> this machine only (127.0.0.1)
@@ -453,18 +480,18 @@ def _price_at_920(symbol: str, day: str):
     def _ist_min(ts):
         g = time.gmtime(ts + 5 * 3600 + 1800)
         return g.tm_hour * 60 + g.tm_min
-    if RUN_DATA_SOURCE == "fyers":
+    if _is_broker():
         try:
-            import nse_adapter_fyers as _fy9
+            _fy9 = _broker()
             best = None
             for c in _fy9.fetch_candles(symbol, 1, 1) or []:
                 m = _ist_min(c["t"])
                 if m == 559:                       # the 09:19 bar closes at 09:20
-                    return float(c["c"]), "fyers 09:19 close"
+                    return float(c["c"]), f"{RUN_DATA_SOURCE} 09:19 close"
                 if m < 560:
                     best = float(c["c"])
             if best:
-                return best, "fyers, last bar before 09:20"
+                return best, f"{RUN_DATA_SOURCE}, last bar before 09:20"
         except Exception as e:  # noqa: BLE001
             print(f"[9:20] {symbol}: history lookup failed ({e})")
     try:
@@ -1027,7 +1054,7 @@ def _cached_chain(symbol: str, expiry, band: int, client: str = "?", max_age: fl
         # far-expiry view never becomes the day's record. Still one snapshot
         # a minute per symbol, however many browsers ask.
         try:
-            if RUN_DATA_SOURCE in ("fyers", "arrow") and band >= 12 and isinstance(data, dict):
+            if RUN_DATA_SOURCE in ("fyers", "zerodha", "arrow") and band >= 12 and isinstance(data, dict):
                 exps = data.get("all_expiries") or []
                 near = exps[0] if exps else None
                 asked_near = not expiry or not near or str(expiry) == str(near)
@@ -1339,9 +1366,9 @@ def _reconcile_symbol(symbol: str) -> dict:
     # asking NSE's chart feed to repair holes, which needs a warmed NSE
     # session the server no longer maintains - so repairs silently did nothing.
     nse = {}
-    if RUN_DATA_SOURCE == "fyers":
+    if _is_broker():
         try:
-            import nse_adapter_fyers as _fy
+            _fy = _broker()
             for cd in _fy.fetch_candles(symbol, 1, 1):
                 nse[int(cd["t"] // 60)] = cd["c"]
         except Exception as e:  # noqa: BLE001
@@ -1381,7 +1408,7 @@ def _reconcile_symbol(symbol: str) -> dict:
            "filled": filled, "upgraded": upgraded,
            "still_missing": len(missing), "provisional": len(prov)}
     if filled or upgraded:
-        _srcname = "Fyers" if RUN_DATA_SOURCE == "fyers" else "NSE"
+        _srcname = BROKER_NAME if _is_broker() else "NSE"
         print(f"[reconcile] {symbol}: +{filled} filled, {upgraded} upgraded to {_srcname}, "
               f"{len(missing)} still missing ({len(series)}/{len(expected)} minutes)")
     return rep
@@ -1504,11 +1531,12 @@ def _attach_oi_rollups(symbol: str, data: dict) -> dict:
     return data
 
 
-def _fyers_token_date() -> str:
-    """IST date the saved Fyers token was generated, or '' if none."""
+def _broker_token_date() -> str:
+    """IST date the active broker's saved token was generated, or '' if none."""
     import json as _json
-    path = _os.environ.get("FYERS_TOKEN_FILE") or _os.path.join(
-        _os.path.dirname(_os.path.abspath(__file__)), ".fyers_token")
+    env_key, default_file, _script, _auto = _BROKER_LOGIN.get(RUN_DATA_SOURCE, _BROKER_LOGIN["fyers"])
+    path = _os.environ.get(env_key) or _os.path.join(
+        _os.path.dirname(_os.path.abspath(__file__)), default_file)
     if not _os.path.exists(path):
         return ""
     try:
@@ -1522,71 +1550,74 @@ def _fyers_token_date() -> str:
         return ""
 
 
-def _ensure_fyers_token() -> bool:
-    """Refresh the Fyers token at startup if it was not generated today.
+_fyers_token_date = _broker_token_date          # old name, kept for callers
 
-    Fyers tokens die at about 06:00 IST, so one generated yesterday is always
-    dead by the time the market opens - there is no case where yesterday's
-    token survives into a trading session. Rather than starting, failing on the
-    first chain request and falling back to NSE silently, this checks up front
-    and runs the interactive login.
 
-    The interactive part is the constraint: the login needs an auth code pasted
-    from a browser, so it can only run where somebody is watching. If stdin is
-    not a terminal - a service, a cron job, a startup item - blocking on input
-    would hang the server forever with no visible cause, so in that case it
-    prints what to do and carries on with the NSE fallback instead.
+def _ensure_broker_token() -> bool:
+    """Refresh the broker token at startup if it was not generated today.
+
+    Fyers and Zerodha tokens both die at about 06:00 IST, so one generated
+    yesterday is always dead by the time the market opens. Rather than
+    starting, failing on the first chain request and falling back to NSE
+    silently, this checks up front and runs the broker's interactive login.
+
+    The interactive part is the constraint: the login needs a browser, so it
+    can only run where somebody is watching. If stdin is not a terminal - a
+    service, a cron job, a startup item - blocking on input would hang the
+    server forever with no visible cause, so in that case it prints what to
+    do and carries on with the NSE fallback instead.
     """
+    tag = f"[{RUN_DATA_SOURCE}]"
+    _env_key, _file, script_name, auto_flag = _BROKER_LOGIN.get(RUN_DATA_SOURCE, _BROKER_LOGIN["fyers"])
     today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 3600 + 1800))
-    tok_date = _fyers_token_date()
+    tok_date = _broker_token_date()
     if tok_date == today:
-        print(f"[fyers] token generated today ({tok_date}) - no login needed")
+        print(f"{tag} token generated today ({tok_date}) - no login needed")
         return True
 
     reason = "no saved token" if not tok_date else f"token is from {tok_date}, not today"
-    print(f"[fyers] {reason}")
+    print(f"{tag} {reason}")
 
-    if not _envbool_g("NSE_FYERS_AUTO_LOGIN", True):
-        print("[fyers] auto-login disabled (NSE_FYERS_AUTO_LOGIN=false). "
-              "Run: python3 fyers_login.py")
+    if not _envbool_g(auto_flag, True):
+        print(f"{tag} auto-login disabled ({auto_flag}=false). Run: python3 {script_name}")
         return False
 
     if not sys.stdin.isatty():
-        # Headless: say exactly what is wrong and what to do, rather than
-        # blocking on an input nobody can provide.
-        print("[fyers] cannot run the interactive login: stdin is not a terminal.")
-        print("[fyers] Run this from a terminal first:  python3 fyers_login.py")
-        print("[fyers] Starting with NSE as the data source for now.")
+        print(f"{tag} cannot run the interactive login: stdin is not a terminal.")
+        print(f"{tag} Run this from a terminal first:  python3 {script_name}")
+        print(f"{tag} Starting with NSE as the data source for now.")
         return False
 
-    script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "fyers_login.py")
+    script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), script_name)
     if not _os.path.exists(script):
-        print(f"[fyers] fyers_login.py not found next to the server - cannot auto-login")
+        print(f"{tag} {script_name} not found next to the server - cannot auto-login")
         return False
 
     print("=" * 66)
-    print("  Fyers login required (tokens expire daily, around 06:00 IST)")
-    print("  A browser will open. Log in, then paste the redirected URL below.")
+    print(f"  {BROKER_NAME} login required (tokens expire daily, around 06:00 IST)")
+    print("  A browser will open. Log in, then follow the prompt below.")
     print("=" * 66)
     try:
         import subprocess
         # stdin/stdout inherited so the prompt and paste work normally
         rc = subprocess.call([sys.executable, script])
     except KeyboardInterrupt:
-        print("\n[fyers] login cancelled - starting with NSE instead")
+        print(f"\n{tag} login cancelled - starting with NSE instead")
         return False
     except Exception as e:  # noqa: BLE001
-        print(f"[fyers] login failed to run: {e}")
+        print(f"{tag} login failed to run: {e}")
         return False
     if rc != 0:
-        print(f"[fyers] login exited with code {rc} - starting with NSE instead")
+        print(f"{tag} login exited with code {rc} - starting with NSE instead")
         return False
-    if _fyers_token_date() == today:
-        print("[fyers] token refreshed - continuing startup")
+    if _broker_token_date() == today:
+        print(f"{tag} token refreshed - continuing startup")
         return True
-    print("[fyers] login finished but no fresh token was written - "
-          "starting with NSE instead")
+    print(f"{tag} login finished but no fresh token was written - starting with NSE instead")
     return False
+
+
+_ensure_fyers_token = _ensure_broker_token      # old name, kept for callers
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -2276,7 +2307,7 @@ def _data_audit(symbol: str) -> dict:
     add("previous close per option", pcf >= 0.5, f"{pcf:.0%} - needed for OI build (premium change with OI change)", warn=True)
     oicf = frac(lambda r: (r.get("ce_oi_chg") or 0) != 0 or (r.get("pe_oi_chg") or 0) != 0)
     add("OI change per strike", oicf >= 0.3, f"{oicf:.0%} non-zero", warn=True)
-    if src in ("fyers", "arrow"):
+    if src in ("fyers", "zerodha", "arrow"):
         add("quantities in contracts", d.get("oi_unit") == "contracts",
             f"oi_unit={d.get('oi_unit')} · {d.get('qty_per_contract')} shares per contract")
     lot = d.get("lot_size")
@@ -2288,17 +2319,19 @@ def _data_audit(symbol: str) -> dict:
     add("futures price", bool(fp), f"{fp} (basis {round(fp - sp, 1) if fp and sp else '—'})")
     add("next-month futures", bool(d.get("futures_far_price")), f"{d.get('futures_far_price')}", warn=True)
     add("futures OI", bool(d.get("futures_oi")),
-        f"{d.get('futures_oi')} - Fyers' quote carries no open interest, so rollover % and the futures OI build stay blank on this feed",
+        f"{d.get('futures_oi')}" + (" - Fyers' quote carries no open interest, so rollover % and the futures OI build stay blank on this feed"
+                                    if src == "fyers" else ""),
         warn=True)
     add("futures best bid / offer", bool(d.get("futures_bid")) or src == "nse", f"{d.get('futures_bid')} / {d.get('futures_ask')}", warn=True)
     add("India VIX", bool(d.get("india_vix")), f"{d.get('india_vix')}")
     ne = len(d.get("expiries_data") or {})
     add("other expiries loaded", ne > 0 or src == "nse",
-        f"{ne} - calendars, the Builder's other weeks and the term structure need them; on Fyers each expiry is one more option-chain call, so they are not fetched", warn=True)
+        f"{ne} - calendars, the Builder's other weeks and the term structure need them; on a broker feed each expiry is "
+        f"one more set of quotes, so they are not fetched", warn=True)
     add("session OHLC", bool(d.get("session_ohlc")), f"{d.get('session_ohlc')}", warn=True)
-    if src == "fyers":
+    if src in BROKER_SOURCES:
         try:
-            import nse_adapter_fyers as _fya
+            _fya = _broker()
             a = _fya.audit_state(symbol, d)
             sa = a.get("spot_tick_age_s")
             wd = a.get("watchdog") or {}
@@ -2306,6 +2339,43 @@ def _data_audit(symbol: str) -> dict:
             wd_txt = (f" · watchdog: {wd.get('heals', 0)} re-subscribe(s), {wd.get('forced_reconnects', 0)} socket reopen(s)"
                       + (f" · last event {errs[0]['age_s']}s ago: {errs[0]['kind']} {errs[0]['text'][:90]}" if errs else ""))
             add("index ticking", sa is not None and sa < 15, f"last tick {sa}s ago" + ("" if (sa is not None and sa < 15) else wd_txt), live=True)
+            # Fyers answers every subscribe request yes or no. A run of "no"
+            # (11011) while REST calls still work means the broker is refusing
+            # THIS socket - nearly always because another data socket on the
+            # same API app connected after it (Fyers serves one per app).
+            rf = wd.get("refusals_10m") or {}
+            blk = wd.get("socket_lock_blocked_by")
+            if src == "zerodha":
+                add("broker stream errors", not rf.get("total"),
+                    "none in the last 10 min" if not rf.get("total") else
+                    f"{rf.get('total')} stream error(s) in 10 min, last {rf.get('last_age_s')}s ago: "
+                    f"{((rf.get('last') or {}).get('text') or '')[:120]}"
+                    + (" - the Kite token was rejected: run zerodha_login.py and restart" if rf.get("auth") else ""),
+                    warn=True)
+                ob = a.get("oi_change_base") or {}
+                add("OI change baseline (previous close)", bool(ob.get("contracts")),
+                    f"{ob.get('contracts', 0)} contracts from {ob.get('previous_session') or '—'}"
+                    + ("" if ob.get("complete") else " (partial - topping up from Kite's daily candles)")
+                    + (f" · {ob['backfill_queue']} still queued" if ob.get("backfill_queue") else "")
+                    + " - Kite publishes no previous OI, so it is recorded at each close and back-filled once a day",
+                    warn=True)
+            elif blk:
+                add("broker accepting subscriptions", False,
+                    f"this copy is NOT streaming: {blk} already holds the Fyers data socket (one per API app). "
+                    "Close the other copy of the server and restart this one.")
+            else:
+                last = rf.get("last") or {}
+                what = {"px": "price", "dp": "depth", "auth": "login"}.get(last.get("kind"), "")
+                add("broker accepting subscriptions", not rf.get("total"),
+                    "no refusals in the last 10 min" if not rf.get("total") else
+                    f"Fyers REFUSED {rf.get('px', 0)} price, {rf.get('dp', 0)} depth"
+                    + (f" and {rf['auth']} login" if rf.get("auth") else "")
+                    + f" request(s) in 10 min (code 11011; last {rf.get('last_age_s')}s ago, a {what} batch of {last.get('n')}). "
+                    "Fyers serves ONE market-data socket per API app: if anything else uses this app's socket - "
+                    "a second copy of this server, an old python process that never exited, a scanner or notebook "
+                    "with the same app id - the one that connected last gets the data and this one is refused. "
+                    "Close the others, then restart this server. Retries are held meanwhile so they do not "
+                    f"spend API calls; the next automatic socket reopen is at most every {int((wd.get('next_reopen_gap_s') or 900) / 60)} min.")
             uc = (wd.get("price_unconfirmed") or 0) + (wd.get("depth_unconfirmed") or 0)
             add("subscriptions confirmed by the feed", uc == 0,
                 f"{wd.get('price_requested', 0)} price / {wd.get('depth_requested', 0)} depth requested · "
@@ -2366,12 +2436,12 @@ def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
     not the tool.
     """
     src = RUN_DATA_SOURCE
-    if src == "fyers":
+    if src in BROKER_SOURCES:
         try:
-            import nse_adapter_fyers as _fy
+            _fy = _broker()
             return _enrich_adapter_payload(symbol, _attach_oi_rollups(symbol, _fy.fetch_chain(symbol, expiry, band)), band)
         except Exception as e:  # noqa: BLE001
-            print(f"[adapter] fyers failed ({e}) - using NSE for this request")
+            print(f"[adapter] {RUN_DATA_SOURCE} failed ({e}) - using NSE for this request")
     if src == "arrow":
         try:
             import nse_adapter_arrow as _arrow
@@ -2387,7 +2457,7 @@ def _adapter_streams() -> bool:
     When it does, the NSE background poller is pointless (and would keep
     scraping a source we are no longer using), so it is not started.
     """
-    return RUN_DATA_SOURCE in ("arrow", "fyers")
+    return RUN_DATA_SOURCE in ("arrow",) + BROKER_SOURCES
 
 
 _poller_stop = threading.Event()
@@ -2688,7 +2758,7 @@ def _ctx_backfill_bg(sym: str, day: str) -> None:
                         snap = json.loads(line)
                     except Exception:
                         continue
-                    if snap.get("_source") in ("fyers", "arrow") and snap.get("oi_unit") != "contracts":
+                    if snap.get("_source") in ("fyers", "zerodha", "arrow") and snap.get("oi_unit") != "contracts":
                         pass                  # PCR is a ratio: units cancel
                     pt = _ctx_point(snap, float(snap.get("_replay_ts") or 0))
                     if pt and pt["ts"]:
@@ -2770,12 +2840,12 @@ def _turn_study(symbol: str = "NIFTY", days: int = 60) -> dict:
     if ck in _turn_cache:
         return _turn_cache[ck]
     bars, src = [], None
-    if RUN_DATA_SOURCE == "fyers":
+    if _is_broker():
         try:
-            import nse_adapter_fyers as _fy
+            _fy = _broker()
             if _fy.is_configured():
                 bars = _fy.fetch_history_days(sym, days)
-                src = "fyers 1-min history"
+                src = f"{RUN_DATA_SOURCE} 1-min history"
         except Exception as e:  # noqa: BLE001
             print(f"[turns] fyers history: {e}")
     by_day: dict = {}
@@ -2935,7 +3005,7 @@ def _snapshot_to_contracts(snap: dict):
     import math as _m
     if not isinstance(snap, dict):
         return False
-    if str(snap.get("_source") or "") not in ("fyers", "arrow"):
+    if str(snap.get("_source") or "") not in ("fyers", "zerodha", "arrow"):
         return False                       # the broker feed always counts shares
     # already in contracts: leave it - unless it was divided by an impossible
     # lot (the adapter briefly read the lot from OI and got 5); then undo that
@@ -4403,7 +4473,7 @@ def _compute_open_trade_pnl(trade: dict) -> float | None:
     # already polling (shared cache, up to a minute old) rather than scraping
     # NSE - which under Fyers was a second, slower, often-blocked source, and
     # the P&L it produced disagreed with the prices on screen.
-    if RUN_DATA_SOURCE in ("fyers", "arrow"):
+    if RUN_DATA_SOURCE in ("fyers", "zerodha", "arrow"):
         try:
             total = 0.0
             for leg in trade["legs"]:
@@ -5094,9 +5164,9 @@ def _build_constituents_result(sym: str, raw_stocks: list, source: str = "nse",
                if data_quality == "pre_open" else "")
         ),
     }
-    if source == "fyers":
+    if source in BROKER_SOURCES:
         try:
-            import nse_adapter_fyers as _fy
+            _fy = _broker()
             data["feed"] = {"socket": _fy._eq_stats.get("socket", 0),
                             "rest": _fy._eq_stats.get("rest", 0)}
         except Exception:
@@ -5144,13 +5214,13 @@ def _constituent_summary(symbol: str) -> dict | None:
         return None
     c = _nifty_cache.get(sym) or {}
     age = time.time() - c.get("ts", 0) if c else None
-    if RUN_DATA_SOURCE == "fyers" and (age is None or age > 4):
+    if _is_broker() and (age is None or age > 4):
         _const_refresh_bg(sym)
     data = c.get("data") or {}
     rows = [r for r in (data.get("stocks") or []) if r.get("ltp")]
     if not rows:
         return {"index": sym, "available": False,
-                "reason": ("loading constituent quotes" if RUN_DATA_SOURCE == "fyers"
+                "reason": ("loading constituent quotes" if _is_broker()
                            else "open the Home tab once - constituents load from NSE there")}
     return _constituent_score(sym, rows, data, c.get("ts", 0))
 
@@ -5311,9 +5381,9 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY", broker_only: bool = False) 
     # rate-limiting - which is exactly when the NSE strategies below fail and
     # the widget used to show "Server not reachable" despite the server being
     # perfectly healthy and the data sitting in the feed.
-    if RUN_DATA_SOURCE == "fyers":
+    if _is_broker():
         try:
-            import nse_adapter_fyers as _fy
+            _fy = _broker()
             if _fy.is_configured():
                 _cfg0 = _INDEX_CONFIG.get(symbol.upper()) if "_INDEX_CONFIG" in globals() else None
                 _names = list((_load_index_weights().get(symbol.upper()) or {}).get("weights") or {})
@@ -5323,10 +5393,10 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY", broker_only: bool = False) 
                     _q = _fy.constituent_quotes(_names)
                     if len(_q) >= max(3, len(_names) // 3):
                         if _fy._eq_stats.get("rest"):
-                            print(f"[constituents] {symbol}: {len(_q)} names from the Fyers feed "
+                            print(f"[constituents] {symbol}: {len(_q)} names from the {BROKER_NAME} feed "
                                   f"({_fy._eq_stats.get('socket', 0)} socket, {_fy._eq_stats.get('rest', 0)} REST)")
                         return _build_constituents_result(symbol, list(_q.values()),
-                                                          source="fyers",
+                                                          source=RUN_DATA_SOURCE,
                                                           data_quality="live")
                     if _q:
                         print(f"[constituents] fyers returned only {len(_q)}/{len(_names)} "
@@ -5527,24 +5597,24 @@ def _fetch_nifty_constituents(symbol: str = "NIFTY", broker_only: bool = False) 
     # the constituent list is already known from index_weights.json and the
     # broker can quote every name in it. Previously choosing a broker source
     # silently broke this widget, even though the data was in the feed.
-    if not raw_stocks and RUN_DATA_SOURCE == "fyers":
+    if not raw_stocks and _is_broker():
         try:
-            import nse_adapter_fyers as _fy
+            _fy = _broker()
             names = list((_load_index_weights().get(sym.upper()) or {}).get("weights") or {})
             if not names:
                 names = [n for n, _w in cfg["fallback_weights"]]
             q = _fy.constituent_quotes(names)
             if q:
                 raw_stocks = list(q.values())
-                print(f"[constituents] {sym}: {len(raw_stocks)} names from the Fyers feed")
+                print(f"[constituents] {sym}: {len(raw_stocks)} names from the {BROKER_NAME} feed")
         except Exception as e:  # noqa: BLE001
             print(f"[constituents] fyers fallback failed: {e}")
 
     if not raw_stocks:
         raise RuntimeError(
             f"No constituent data for {sym}. "
-            + ("Fyers returned nothing - check the token with /api/data-source."
-               if RUN_DATA_SOURCE == "fyers"
+            + (f"{BROKER_NAME} returned nothing - check the token with /api/data-source."
+               if _is_broker()
                else "Load an option chain first to warm the NSE session."))
 
     return _build_constituents_result(sym, raw_stocks, source="nse",
@@ -5694,7 +5764,7 @@ class Handler(BaseHTTPRequestHandler):
             # Raw Fyers messages for one contract, beside what the dashboard
             # computes from them: ?symbol=FUT, ?symbol=22700CE, ?symbol=NIFTY26OCTFUT
             try:
-                import nse_adapter_fyers as _fyd
+                _fyd = _broker()
                 q = (qs.get("symbol", ["FUT"])[0] or "FUT")
                 self._send_json({"match": q, "contracts": _fyd.raw_debug(q)})
             except Exception as e:  # noqa: BLE001
@@ -5707,7 +5777,7 @@ class Handler(BaseHTTPRequestHandler):
             # quiet - which is exactly the failure that freezes every index at
             # once. This reports whether ticks are actually arriving.
             try:
-                import nse_adapter_fyers as _fyx
+                _fyx = _broker()
                 st = _fyx.status()
                 with _fyx._lock:
                     last = max((v.get("ts", 0) for v in _fyx._ticks.values()), default=0)
@@ -6439,7 +6509,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "date must be YYYY-MM-DD"}, status=400)
                     return
                 try:
-                    import nse_adapter_fyers as _fyh
+                    _fyh = _broker()
                     print(f"[history] {symbol} {on_date} interval={interval}m requested")
                     # one 1-minute series per date, aggregated here: any
                     # interval (2m, 10m) and one cached call for all of them
@@ -6449,10 +6519,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"candles": [], "error": f"history fetch failed: {e}"})
                     return
                 if not rows:
-                    self._send_json({"candles": [], "source": f"fyers-history {on_date}",
+                    self._send_json({"candles": [], "source": f"{RUN_DATA_SOURCE}-history {on_date}",
                                      "error": f"No candles for {on_date}. "
                                               f"A market holiday, a weekend, or beyond what "
-                                              f"Fyers will serve at this resolution."})
+                                              f"{BROKER_NAME} will serve at this resolution."})
                     return
                 # coverage is a "HH:MM-HH:MM" STRING on the live path and the
                 # client splits it. Returning an object here threw
@@ -6465,7 +6535,7 @@ class Handler(BaseHTTPRequestHandler):
                 # has_volume was missing here, so a replayed day was drawn as if
                 # it had no volume: VWAP fell back to equal weights and every
                 # volume-based check silently switched off.
-                self._send_json({"candles": rows, "source": f"fyers-history {on_date}",
+                self._send_json({"candles": rows, "source": f"{RUN_DATA_SOURCE}-history {on_date}",
                                  "historical": True, "date": on_date,
                                  "coverage": cov, "gaps": [],
                                  "has_volume": any((r.get("v") or 0) > 0 for r in rows)})
@@ -6561,9 +6631,9 @@ class Handler(BaseHTTPRequestHandler):
             # backfill problem entirely rather than working around it, and it
             # is the only source here that carries real volume - NSE gives one
             # spot sample a minute, from which volume cannot be recovered.
-            if RUN_DATA_SOURCE == "fyers":
+            if _is_broker():
                 try:
-                    import nse_adapter_fyers as _fy
+                    _fy = _broker()
                     # ONE history series per symbol: the 1-minute bars, which
                     # every interval is built from here. Each chart interval
                     # used to be its own Fyers history call, so PCs on 1m, 3m
@@ -6583,7 +6653,7 @@ class Handler(BaseHTTPRequestHandler):
                             if not _in_session(g.tm_hour * 60 + g.tm_min):
                                 continue
                             ticks.append((float(cd["t"]), float(cd["c"])))
-                        srcs.append(f"fyers({len(fc)})")
+                        srcs.append(f"{RUN_DATA_SOURCE}({len(fc)})")
                         # real candles supersede reconstruction entirely
                         def _today_session(cd):
                             g = time.gmtime(cd["t"] + 5 * 3600 + 1800)
@@ -6607,7 +6677,7 @@ class Handler(BaseHTTPRequestHandler):
                         if out:
                             first = _ist_hm_g(out[0]["t"]); last = _ist_hm_g(out[-1]["t"])
                             self._send_json({"symbol": symbol, "interval": interval,
-                                             "source": f"fyers({len(out)})",
+                                             "source": f"{RUN_DATA_SOURCE}({len(out)})",
                                              "coverage": f"{first}-{last}",
                                              "gaps": fgaps,
                                              "gap_mins": sum(g["mins"] for g in fgaps),
@@ -7141,14 +7211,17 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/data-source":
             info = {"source": RUN_DATA_SOURCE, "streams": _adapter_streams(),
                     "polling": bool(_poller_symbols)}
-            if RUN_DATA_SOURCE == "fyers":
+            if _is_broker():
                 try:
-                    import nse_adapter_fyers as _fy
-                    info["fyers"] = _fy.status()
-                    info["fyers"]["rest_today"] = _fy.rest_usage()
+                    _fy = _broker()
+                    info["broker"] = _fy.status()
+                    info["broker"]["rest_today"] = _fy.rest_usage()
+                    info["broker"]["name"] = BROKER_NAME
+                    info["broker"].setdefault("login_script", _BROKER_LOGIN.get(RUN_DATA_SOURCE, ("", "", "", ""))[2])
+                    info[RUN_DATA_SOURCE] = info["broker"]
                     info["configured"] = _fy.is_configured()
                 except Exception as e:  # noqa: BLE001
-                    info["fyers"] = {"last_error": str(e)}
+                    info["broker"] = info[RUN_DATA_SOURCE] = {"last_error": str(e)}
             if RUN_DATA_SOURCE == "arrow":
                 try:
                     import nse_adapter_arrow as _arrow
@@ -8918,51 +8991,51 @@ def main():
     _start_session_rewarm_thread()
 
     # Background poller: keeps hot symbols warm so every browser hits cache.
-    if RUN_DATA_SOURCE == "fyers":
-        # Do this before anything else touches Fyers: connecting with a stale
-        # token just fails, and the fallback to NSE would be silent.
+    if _is_broker():
+        # Do this before anything else touches the broker: connecting with a
+        # stale token just fails, and the fallback to NSE would be silent.
         # Wrapped: a startup convenience must never be able to stop the
-        # server from starting. The first version raised NameError and took
-        # the whole process down - strictly worse than the stale token it
-        # was meant to catch.
+        # server from starting.
         try:
-            ok_tok = _ensure_fyers_token()
+            ok_tok = _ensure_broker_token()
         except Exception as e:  # noqa: BLE001
-            print(f"[fyers] token check failed ({type(e).__name__}: {e}) - continuing")
+            print(f"[{RUN_DATA_SOURCE}] token check failed ({type(e).__name__}: {e}) - continuing")
             ok_tok = False
         if not ok_tok:
-            print("[fyers] proceeding without a valid token - option-chain "
+            print(f"[{RUN_DATA_SOURCE}] proceeding without a valid token - option-chain "
                   "requests will fall back to NSE scraping")
 
-    if _adapter_streams() and RUN_DATA_SOURCE == "fyers":
-        print(f"[i] DATA_SOURCE=fyers: broker stream is the source - "
+    if _adapter_streams() and _is_broker():
+        _tag = f"[{RUN_DATA_SOURCE}]"
+        _login = _BROKER_LOGIN[RUN_DATA_SOURCE][2]
+        print(f"[i] DATA_SOURCE={RUN_DATA_SOURCE}: broker stream is the source - "
               f"NSE polling and cookie warm-up are DISABLED")
         try:
-            import nse_adapter_fyers as _fy
+            _fy = _broker()
             tv = _fy.token_validity()
             if not tv.get("valid"):
-                # Say this ONCE, clearly, at startup - rather than letting the
-                # first chain request fail with an auth error the user then has
-                # to interpret. A token lasts until ~06:00 IST tomorrow, so this
-                # is a once-a-morning step, not a once-per-restart step.
-                print(f"[fyers] TOKEN NOT USABLE: {tv.get('reason')}")
-                print(f"[fyers] Run:  python3 fyers_login.py")
-                print(f"[fyers] Falling back to NSE scraping until then.")
+                # Say this ONCE, clearly, at startup - a token lasts until
+                # ~06:00 IST tomorrow, so this is a once-a-morning step.
+                print(f"{_tag} TOKEN NOT USABLE: {tv.get('reason')}")
+                print(f"{_tag} Run:  python3 {_login}")
+                print(f"{_tag} Falling back to NSE scraping until then.")
             if _fy.is_configured() and tv.get("valid"):
                 _fy.set_tick_sink(_sse_broadcast_ticks)
                 _fy.connect()
-                for sym in [s.strip().upper() for s in
-                            _os.environ.get("FYERS_SYMBOLS", "NIFTY,BANKNIFTY").split(",") if s.strip()]:
+                _prime = (_os.environ.get(f"{RUN_DATA_SOURCE.upper()}_SYMBOLS")
+                          or _os.environ.get("BROKER_SYMBOLS")
+                          or _os.environ.get("FYERS_SYMBOLS") or "NIFTY,BANKNIFTY")
+                for sym in [s.strip().upper() for s in _prime.split(",") if s.strip()]:
                     try:
                         _fy.fetch_chain(sym, None, 12)     # prime + subscribe
-                        print(f"[fyers] {sym} chain primed and subscribed")
+                        print(f"{_tag} {sym} chain primed and subscribed")
                     except Exception as e:  # noqa: BLE001
-                        print(f"[fyers] {sym} prime failed: {e}")
+                        print(f"{_tag} {sym} prime failed: {e}")
             elif not _fy.is_configured():
-                print("[fyers] not configured - set FYERS_CLIENT_ID in your env "
-                      "file and run fyers_login.py")
+                _need = "FYERS_CLIENT_ID" if RUN_DATA_SOURCE == "fyers" else "ZERODHA_API_KEY and ZERODHA_API_SECRET"
+                print(f"{_tag} not configured - set {_need} in your env file and run {_login}")
         except Exception as e:  # noqa: BLE001
-            print(f"[fyers] startup failed: {e}")
+            print(f"{_tag} startup failed: {e}")
     elif _adapter_streams():
         print(f"[i] DATA_SOURCE={RUN_DATA_SOURCE}: broker stream is the source - "
               f"NSE polling and cookie warm-up are DISABLED")

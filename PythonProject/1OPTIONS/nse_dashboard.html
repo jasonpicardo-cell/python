@@ -4313,7 +4313,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <input type="checkbox" id="masterMute"> 🔇 Mute everything on this browser
           </label>
           <span id="alertStatusLine" style="font-size:10px;color:var(--muted,#789);"></span>
-          <i class="hi" data-h="reset-defaults" style="margin-left:auto;">i</i><button class="btn" id="alertResetBtn" style="font-size:9px;padding:2px 9px;" title="Restore every alert and chart setting to the recommended Nifty defaults on THIS browser. Your trade journal, watchlist, scorecard and paper trades are not touched.">↺ Reset to recommended defaults</button>
+          <i class="hi" data-h="reset-defaults" style="margin-left:auto;">i</i><button class="btn" id="alertResetBtn" style="font-size:9px;padding:2px 9px;" title="Restore every alert and chart setting to the recommended Nifty defaults on THIS browser. Your trade journal, watchlist, scorecard and paper trades are not touched.">↺ Reset Defaults</button>
         </div>
         <div id="alertMasterSlot" style="padding:4px 8px 8px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;"></div>
         <div style="padding:4px 8px 8px;border-top:1px solid rgba(255,255,255,0.06);">
@@ -11596,7 +11596,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // 3. premium tape
     const tp = _deskTape(d);
     let tpHtml;
-    if (!tp) tpHtml = `<div class="movers-loading" style="font-size:10px;">${d._source === 'fyers' ? 'Waiting for prints — classified flow builds up over a few minutes after the server starts.' : 'Needs the broker feed (DATA_SOURCE=fyers): prints are classified tick by tick on the server.'}</div>`;
+    if (!tp) tpHtml = `<div class="movers-loading" style="font-size:10px;">${(d._source === 'fyers' || d._source === 'zerodha') ? 'Waiting for prints — classified flow builds up over a few minutes after the server starts.' : 'Needs the broker feed (DATA_SOURCE=fyers or zerodha): prints are classified tick by tick on the server.'}</div>`;
     else {
       const bcol = v => Math.abs(v) < tp.gross * 0.05 ? 'var(--muted)' : v > 0 ? pos : neg;
       const fut = tp.fut && (tp.fut.b15 + tp.fut.s15) ? tp.fut.b15 / (tp.fut.b15 + tp.fut.s15) : null;
@@ -18863,7 +18863,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const d = data || state.lastData;
     const dep = d?.depth;
     if (!dep) {
-      box.innerHTML = '<div class="movers-loading">Level-2 depth needs a broker feed — set DATA_SOURCE=fyers. NSE publishes no order book.</div>';
+      box.innerHTML = '<div class="movers-loading">Level-2 depth needs a broker feed — set DATA_SOURCE=fyers or zerodha. NSE publishes no order book.</div>';
       return;
     }
     const rows = [];
@@ -19209,7 +19209,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!vp) {
       box.innerHTML = `<div class="movers-loading">${_chart.hasVolume
         ? 'Collecting volume — needs a few more candles.'
-        : 'No traded volume on this feed. Volume Profile needs a broker source (set DATA_SOURCE=fyers); NSE gives one spot sample a minute with no volume at all.'}</div>`;
+        : 'No traded volume on this feed. Volume Profile needs a broker source (set DATA_SOURCE=fyers or zerodha); NSE gives one spot sample a minute with no volume at all.'}</div>`;
       return;
     }
     const spot = state.lastData?.underlying_value || cs[cs.length - 1].c;
@@ -22337,7 +22337,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           : !anyDepth ? (src === 'nse'
               // Confirmed from the live schema: NSE's derivatives route carries
               // OI, volume and OHLC per contract but no book of any kind.
-              ? 'NSE publishes no bid/offer quantities — needs DATA_SOURCE=fyers'
+              ? 'NSE publishes no bid/offer quantities — needs DATA_SOURCE=fyers or zerodha'
               : 'depth block present but empty — broker sent none')
           : `not among the ${anyDepth} strikes with depth`;
         return `<span style="min-width:214px;"><b>${lab} ${fmtInt(leg.k)}</b> <span style="color:var(--muted);font-size:9px;">δ${Math.abs(leg.delta).toFixed(2)}</span> &nbsp;${_quoteHtml(_optQuote(d, leg.k, lab))}</span>
@@ -22430,7 +22430,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         vwhy = [...seen.values()].slice(0, 4).map(e => e.n > 1 ? `${e.w} (${e.n} legs)` : e.w).join(' · ');
       } else {
         verdict = !d.flow
-          ? 'No trade classification from the server — restart nse_chain_server.py so it loads the current nse_adapter_fyers.py'
+          ? 'No trade classification from the server — restart nse_chain_server.py so it loads the current broker adapter'
           : 'Waiting for trades — the desk read needs a few minutes of classified flow';
       }
     } catch (_) {}
@@ -24299,24 +24299,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
   // Both settings were read from localStorage once per candle per repaint -
   // hundreds of synchronous storage reads per frame. Cached for a second.
-  const _pvSet = { at: 0, spread: false, on: true };
+  const _pvSet = { at: 0, spread: false, on: false };
   function _pvSettings() {
     const now = Date.now();
     if (now - _pvSet.at > 1000) {
       _pvSet.at = now;
       try { _pvSet.spread = localStorage.getItem('pvsraSpread') === '1'; } catch (_) { _pvSet.spread = false; }
-      try { const v = localStorage.getItem('pvsraOn'); _pvSet.on = v === null ? true : v === '1'; } catch (_) { _pvSet.on = true; }
+      try { const v = localStorage.getItem('pvsraOn'); _pvSet.on = v === '1'; } catch (_) { _pvSet.on = false; }   // default OFF
     }
     return _pvSet;
   }
   function _pvsraSpreadOn() { return _pvSettings().spread; }
 
   function _pvsraOn() {
-    // ON by default. Reading volume relative to recent bars is more useful
-    // than a two-colour chart in almost every case, and where volume is
-    // absent (NSE) the colouring falls back on its own rather than misleading.
-    // An explicit '0' turns it off; an absent key means never chosen, so the
-    // default applies.
+    // OFF by default (user's choice): plain candles unless the PVSRA box is
+    // ticked. An explicit '1' turns it on; an absent key means never chosen,
+    // so the default applies - and Reset Defaults clears the key.
     return _pvSettings().on;
   }
 
@@ -29063,11 +29061,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const j = await (await fetch(`${base}/api/data-source`, { signal: AbortSignal.timeout(5000) })).json();
-      const t = j?.fyers?.token;
+      const b = j?.broker || j?.fyers || j?.zerodha;
+      const t = b?.token;
       if (!t) return;
       if (!t.valid && !_tokenWarned) {
         _tokenWarned = true;
-        showToast?.('⚠ Broker token expired — run fyers_login.py and restart. Falling back to NSE data.');
+        showToast?.(`⚠ Broker token expired — run ${b?.login_script || 'the broker login script'} and restart. Falling back to NSE data.`);
       } else if (t.valid && t.expires_in_h != null && t.expires_in_h < 1 && !_tokenWarned) {
         _tokenWarned = true;
         showToast?.(`⚠ Broker token expires in ${(t.expires_in_h * 60).toFixed(0)} min`);
@@ -30165,7 +30164,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
           <span style="color:#A5D6A7;opacity:.4;">▏</span><span style="color:#F48FB1;opacity:.4;">▏ord</span>
         </span>` : ''}
         <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts, yahoo = Yahoo Finance backfill used only where the others left gaps">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
-        ${/fyers\(/.test(_chart.src || '') ? `<span style="color:var(--pos,#26a69a);" title="Real OHLC with traded volume from the Fyers feed — not reconstructed from spot samples">⚡ broker feed${_chart.hasVolume ? ' · real volume' : ''}</span>` : ''}
+        ${/(fyers|zerodha)\(/.test(_chart.src || '') ? `<span style="color:var(--pos,#26a69a);" title="Real OHLC with traded volume from the broker feed — not reconstructed from spot samples">⚡ broker feed${_chart.hasVolume ? ' · real volume' : ''}</span>` : ''}
         ${/yahoo\(/.test(_chart.src || '') ? `<span style="color:var(--gold,#d4af37);" title="Part of this chart was filled from Yahoo Finance because NSE data was unavailable for those minutes. Yahoo is a derived feed: the shape is right, but prices will not match NSE tick for tick, so treat levels drawn from those minutes with that in mind.">⚠ partly Yahoo-filled</span>` : ''}
         ${_chart.coverage ? `<span title="Time span covered by the merged data">covers <b>${escapeHtml(_chart.coverage)}</b></span>` : ''}
         <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
@@ -30735,10 +30734,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   const _CSRC_KEY = 'chartAlertSources';
   function _csrcCfg() {
     try {
+      // Pivots default OFF, matching the chart's Pivots box (also off): a
+      // level that is not drawn should not be announced either
       return Object.assign({ m920: true, walls: true, cpr: true, maxpain: true,
-                             cone: true, pivots: true, tol: 20 },
+                             cone: true, pivots: false, tol: 20 },
                            JSON.parse(localStorage.getItem(_CSRC_KEY) || '{}'));
-    } catch (_) { return { m920: true, walls: true, cpr: true, maxpain: true, cone: true, pivots: true, tol: 20 }; }
+    } catch (_) { return { m920: true, walls: true, cpr: true, maxpain: true, cone: true, pivots: false, tol: 20 }; }
   }
   function _csrcSave(o) { try { localStorage.setItem(_CSRC_KEY, JSON.stringify(o)); } catch (_) {} }
   // map a level label to its source key
@@ -31052,7 +31053,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         try { localStorage.setItem('pvsraOn', pvT.checked ? '1' : '0'); } catch (_) {}
         _pvSet.at = 0;                        // take effect on this repaint, not in a second
         if (pvT.checked && !_chart.hasVolume)
-          showToast?.('PVSRA needs traded volume — switch DATA_SOURCE to fyers. NSE gives one spot sample a minute with no volume.');
+          showToast?.('PVSRA needs traded volume — switch DATA_SOURCE to fyers or zerodha. NSE gives one spot sample a minute with no volume.');
         renderPriceChart();
       });
     }
@@ -37709,7 +37710,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
-    'reset-defaults':    '<strong>Reset to recommended defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Chart defaults it restores include the EMA crossover lines ON with fast 5 / slow 13.',
+    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',

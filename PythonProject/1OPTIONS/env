@@ -9,9 +9,13 @@
 # ── Which market-data adapter to use ─────────────────────────────────
 #   nse    = scrape NSE's public option chain (no account, ~3-5 min stale
 #            OI, needs the cookie warm-up, polled on a timer)
+#   fyers  = Fyers API v3 (real-time WebSocket, depth, traded volume)
+#   zerodha = Zerodha Kite Connect (real-time WebSocket, 5-level depth for
+#            every strike on screen, traded volume; needs the paid Connect plan)
 #   arrow  = Arrow / iRage broker API (real-time, WebSocket streaming,
 #            OI + Greeks + volume; polling is switched OFF automatically)
-DATA_SOURCE=fyers
+#   Every broker source switches NSE polling OFF automatically.
+DATA_SOURCE=zerodha
 
 # ── Fyers API v3 ─────────────────────────────────────────────────────
 # The richest source available here: real-time WebSocket ticks, genuine OHLC
@@ -143,3 +147,46 @@ FYERS_FUT_REST_TTL=60
 FYERS_TICK_FRESH_S=15
 # Intraday history cache; the forming candle comes from the stream.
 FYERS_HISTORY_TTL=60
+
+# ── Zerodha Kite Connect ─────────────────────────────────────────────
+# Set DATA_SOURCE=zerodha to use it (DATA_SOURCE may be nse, fyers,
+# zerodha or arrow). Needs a Kite Connect app on the paid Connect plan -
+# the free Personal plan carries no live or historical data. Create one
+# at https://developers.kite.trade and paste its key and secret below.
+# Tokens expire DAILY (~06:00 IST) and the login is interactive, so run:
+#     python3 zerodha_login.py
+# each morning - the server runs it for you at startup when needed. It
+# writes .zerodha_token, which the adapter reads.
+ZERODHA_API_KEY=g0zo9ykwec29xz7g
+ZERODHA_API_SECRET=2q80fu6jefnsp3jqn4cp1tph9b3c8zme
+# Set the SAME address as the redirect URL of your Kite app; the login
+# then completes by itself instead of asking you to paste the address.
+ZERODHA_REDIRECT_URL=http://127.0.0.1:5010/kite
+# Optional: paste a token directly instead of using the token file.
+ZERODHA_ACCESS_TOKEN=
+# Where zerodha_login.py also drops a PLAIN-TEXT copy of the token
+# (zerodha_access_token.txt), relative to the login script.
+ZERODHA_SYNC_DIR=../NSE_SYNC
+# Run zerodha_login.py at server start when today's token is missing.
+NSE_ZERODHA_AUTO_LOGIN=true
+# Indices primed and streamed at startup, and strikes either side of ATM.
+ZERODHA_SYMBOLS=NIFTY,BANKNIFTY
+ZERODHA_STRIKE_COUNT=25
+# Tick pushes to browsers per second (coalesced).
+ZERODHA_PUSH_HZ=10
+# REST quotes fill in only what the stream has not delivered; reused this
+# long (5 min while the market is closed). Kite allows 1 quote call/s.
+ZERODHA_CHAIN_REST_TTL=15
+ZERODHA_FUT_REST_TTL=60
+# A streamed price older than this is treated as stale.
+ZERODHA_TICK_FRESH_S=15
+# Intraday history cache; the forming candle comes from the stream.
+ZERODHA_HISTORY_TTL=60
+# Kite's index candles carry no volume; 'futures' lays the near-month
+# future's volume on them (VWAP, volume profile, PVSRA). 'none' = off.
+ZERODHA_INDEX_VOLUME=futures
+# Kite publishes no previous-day OI. It is recorded at each close; any
+# contract still missing is back-filled once a day from daily candles.
+ZERODHA_OI_BACKFILL=1
+# Leave blank: OI/volume units are detected from the data (shares vs contracts).
+ZERODHA_QTY_UNIT=
