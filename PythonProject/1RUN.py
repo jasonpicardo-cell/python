@@ -5,9 +5,10 @@ import os
 
 def run_scripts_sequentially():
     scripts = [
-        "./NSE_SYNC/nse_macro_scanner.py",
+        #"./NSE_SYNC/nse_macro_scanner.py",
+        "./NSE_SYNC/nse_zerodha_macro_scanner.py",
         # "./RS.StageAnalysis.VCP.Accum.EMAADX/nse_scanner.py",
-        "./Camarilla/pivot_scanner.py",
+        #"./Camarilla/pivot_scanner.py",
         # "./DSZone/combined_screener.py",
         # "./DCF_SCAN/dcf_analysis.py"
     ]
