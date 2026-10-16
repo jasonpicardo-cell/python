@@ -249,19 +249,49 @@ def get_zerodha_session():
         print(f"❌ Zerodha Auth Failed: {e}")
         return None
 
+
 def fetch_zerodha_nse_instruments(kite):
     """
-    Zerodha requires an 'instrument_token' (e.g. 738561 for RELIANCE) to fetch history.
-    This downloads the master list and maps Trading Symbols to Tokens.
+    Downloads the master list and aggressively filters for pure Equity stocks.
     """
     print("⏳ Downloading NSE instrument tokens from Zerodha...")
     instruments = kite.instruments("NSE")
 
-    # Filter for regular equities (EQ) to match your Nifty list
     nifty_map = {}
+
+    # 🛑 THE ULTIMATE SHIELD: Blocks T-Bills, Partly Paid, Odd-Lots, and all Debt
+    junk_suffixes = (
+        '-SG', '-GS', '-GB', 'INAV', 'ETF', 'BEES',
+        '-SM', '-ST', '-BE', '-BZ', '-RR', '-IV',
+        '-TB', '-E1', '-SF', '-SZ', '-B',  # 🛑 NEW: T-Bills, Partly Paid, Odd-Lots
+        '-AL', '-AZ', '-BV', '-BS', '-BX', '-AK', '-AN', '-BC',  # 🛑 NEW: Obscure State Debt
+        '-N0', '-N1', '-N2', '-N3', '-N4', '-N5', '-N6', '-N7', '-N8', '-N9',
+        '-NA', '-NB', '-NC', '-ND', '-NE', '-NF', '-NG', '-NH', '-NI', '-NJ',
+        '-NK', '-NL', '-NM', '-NN', '-NO', '-NP', '-NQ', '-NR', '-NS', '-NT',
+        '-NU', '-NV', '-NW', '-NX', '-NY', '-NZ',
+        '-Y0', '-Y1', '-Y2', '-Y3', '-Y4', '-Y5', '-Y6', '-Y7', '-Y8', '-Y9',
+        '-YA', '-YB', '-YC', '-YD', '-YE', '-YF', '-YG', '-YH', '-YI', '-YJ',
+        '-YK', '-YL', '-YM', '-YN', '-YO', '-YP', '-YQ', '-YR', '-YS', '-YT',
+        '-YU', '-YV', '-YW', '-YX', '-YY', '-YZ',
+        '-Z0', '-Z1', '-Z2', '-Z3', '-Z4', '-Z5', '-Z6', '-Z7', '-Z8', '-Z9',
+        '-ZA', '-ZB', '-ZC', '-ZD', '-ZE', '-ZF', '-ZG', '-ZH', '-ZI', '-ZJ',
+        '-ZK', '-ZL', '-ZM', '-ZN', '-ZO', '-ZP', '-ZQ', '-ZR', '-ZS', '-ZT',
+        '-ZU', '-ZV', '-ZW', '-ZX', '-ZY', '-ZZ'
+    )
+
     for inst in instruments:
         if inst['segment'] == 'NSE' and inst['instrument_type'] == 'EQ':
-            nifty_map[inst['tradingsymbol']] = inst['instrument_token']
+            sym = inst['tradingsymbol']
 
-    print(f"✅ Loaded {len(nifty_map)} NSE instruments.")
+            # 1. Skip if it has a junk suffix
+            if sym.endswith(junk_suffixes):
+                continue
+
+            # 2. Skip if it is an INAV or ETF tracker
+            if 'INAV' in sym or 'ETF' in sym or 'BEES' in sym:
+                continue
+
+            nifty_map[sym] = inst['instrument_token']
+
+    print(f"✅ Filtered down to {len(nifty_map)} pure NSE Mainboard stocks.")
     return nifty_map
