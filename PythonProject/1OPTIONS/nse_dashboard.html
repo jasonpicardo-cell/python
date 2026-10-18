@@ -15,6 +15,12 @@
     --panel: #000000;
     --panel-2: #000000;
     --panel-3: #101114;
+    /* Widget surfaces. --wash is the faint tint some panels carry so they
+       read as cards in LIGHT mode; in dark mode it is nothing at all, so the
+       chart, the RSI pane, Trade entries and the tiles sit on true black.
+       --box is for floating containers (toasts, tooltips, result rows). */
+    --wash: transparent;
+    --box: #000000;
     --border: #262a33;
     --border-soft: #17191e;
     --text: #e8ebf2;
@@ -173,6 +179,51 @@
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--text); border-bottom-color: var(--accent); }
   .tab-panel { display: none; }
+  /* ── broker token banner (every tab) ── */
+  .token-banner { margin:4px 8px; padding:6px 10px; border-radius:8px; font-size:11.5px; }
+  .token-banner.warn { background:rgba(245,179,1,0.14); border:1px solid #f5b301; color:var(--text); }
+  .token-banner.bad { background:rgba(239,83,80,0.16); border:1px solid #ef5350; color:var(--text); }
+  .token-banner code { font-size:11px; padding:1px 5px; border-radius:4px; background:rgba(127,127,127,0.18); }
+  /* ── Diagnostics tab ── */
+  .diag-head { display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:11px; padding:6px 10px; margin:4px 0 8px;
+    border:1px solid var(--border); border-radius:8px; background:var(--panel-2); }
+  .diag-head b { font-weight:700; }
+  .diag-card { margin-bottom:10px; }
+  .diag-verdict { font-size:10px; font-weight:800; padding:2px 8px; border-radius:10px; margin-left:8px; letter-spacing:.3px; }
+  .diag-verdict.ok { color:#0b0e14; background:#26a69a; } .diag-verdict.warn { color:#0b0e14; background:#f5b301; }
+  .diag-verdict.bad { color:#fff; background:#ef5350; }
+  .diag-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:14px; padding:6px 4px 2px; }
+  .diag-sec h4 { margin:0 0 4px; font-size:10.5px; color:var(--muted); font-weight:700; text-transform:none; }
+  .diag-sec table { width:100%; border-collapse:collapse; font-size:10.5px; }
+  .diag-sec td { padding:3px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .diag-sec td:first-child { color:var(--muted); }
+  .diag-sec td:last-child { padding:3px 2px; }
+  .diag-dot { display:inline-block; width:8px; height:8px; border-radius:50%; }
+  .diag-dot.ok { background:#26a69a; } .diag-dot.warn { background:#f5b301; } .diag-dot.bad { background:#ef5350; }
+  .diag-log { font-size:10px; font-family:ui-monospace, Menlo, monospace; max-height:180px; overflow:auto; padding:4px 6px; }
+  .diag-log div { padding:1px 0; border-bottom:1px solid var(--border); }
+  .diag-log .k-error, .diag-log .k-close { color:#ef5350; } .diag-log .k-heal { color:#f5b301; } .diag-log .k-connect { color:#26a69a; }
+  .diag-audit table { width:100%; border-collapse:collapse; font-size:10.5px; }
+  .diag-audit td { padding:3px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .diag-audit td:nth-child(2) { white-space:nowrap; font-weight:600; }
+  /* the dashboard's global table rules right-align and never wrap; this tab
+     needs left-aligned, wrapping cells that stay inside their own column */
+  .diag-sec { min-width:0; overflow:hidden; }
+  #tab-diag table { table-layout:fixed; }
+  #tab-diag td { text-align:left !important; white-space:normal !important; word-break:break-word;
+    overflow-wrap:anywhere; font-family:inherit; text-transform:none; letter-spacing:normal; }
+  #tab-diag .diag-sec td:first-child { width:38%; white-space:normal !important; }
+  #tab-diag .diag-sec td:last-child { width:14px; }
+  #tab-diag .diag-audit td:first-child { width:14px; }
+  #tab-diag .diag-audit td:nth-child(2) { width:230px; }
+  .diag-chip { display:inline-block; font-size:10px; padding:1px 7px; border-radius:9px; margin:2px 4px 2px 0;
+    border:1px solid var(--border); }
+  .diag-chip.bad { border-color:#ef5350; color:#ef5350; } .diag-chip.ok { border-color:#26a69a; color:#26a69a; }
+  .diag-note { font-size:10px; color:var(--muted); padding:2px 6px 6px; }
+  .diag-st { font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:8px; white-space:nowrap; display:inline-block; min-width:34px; text-align:center; }
+  .diag-st.pass { background:#26a69a; color:#0b0e14; } .diag-st.warn { background:#f5b301; color:#0b0e14; }
+  .diag-st.fail { background:#ef5350; color:#fff; } .diag-st.skip { background:rgba(127,127,127,0.3); color:var(--text); }
+  @media (max-width: 640px) { .diag-grid { grid-template-columns:1fr; } #tab-diag .diag-audit td:nth-child(2) { width:40%; } }
   .tab-panel.active { display: block; animation: fadeIn .2s ease; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 
@@ -236,7 +287,7 @@
   @keyframes legAddedFlash { 0% { background: rgba(46,204,143,0.5) !important; } 100% { background: transparent; } }
   .toast {
     position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    background: var(--panel-3); border: 1px solid var(--accent); border-radius: 8px;
+    background: var(--box); border: 1px solid var(--accent); border-radius: 8px;
     padding: 10px 18px; font-size: 12.5px; color: var(--text); z-index: 100;
     box-shadow: 0 4px 20px rgba(0,0,0,0.4); opacity: 0; pointer-events: none; transition: opacity .2s ease;
   }
@@ -563,6 +614,7 @@
     --muted:#4b5563;--muted-2:#6b7280;--border:#d9dce1;--accent:#2563eb;
     --pos:#059669;--neg:#dc2626;--gold:#d97706;--warm:#ea580c;
     --panel-3:#f3f4f6;--border-soft:#f0f1f3;--accent-dim:rgba(37,99,235,.12);
+    --wash:rgba(15,23,42,0.03);--box:#f3f4f6;
     --pos-dim:rgba(5,150,105,.12);--neg-dim:rgba(220,38,38,.12); }
   body.light-mode .hi { background:#e5e7eb; color:#6b7280; }
   /* ── Light theme: colours written for a dark background ──────────────
@@ -1430,7 +1482,7 @@
   @keyframes levelFlash { 0%,100%{opacity:1} 50%{opacity:0.2} }
   .level-bar-row.touched { animation: levelFlash 0.6s ease 3; }
   .level-touch-toast {
-    position: fixed; top: 70px; right: 16px; background: var(--panel-3); border: 1.5px solid var(--gold);
+    position: fixed; top: 70px; right: 16px; background: var(--box); border: 1.5px solid var(--gold);
     border-radius: 8px; padding: 10px 16px; font-size: 12px; font-weight: 600; z-index: 200;
     box-shadow: 0 4px 20px rgba(0,0,0,0.4); color: var(--text); opacity: 0;
     transition: opacity .2s ease; pointer-events: none;
@@ -1581,7 +1633,7 @@
   }
   .optimizer-results { display: flex; flex-direction: column; gap: 6px; }
   .optimizer-result-row {
-    background: var(--panel-3); border-radius: 7px; padding: 9px 12px;
+    background: var(--box); border-radius: 7px; padding: 9px 12px;
     font-size: 11.5px; display: flex; flex-direction: column; gap: 7px;
   }
   .optimizer-result-row .or-head {
@@ -1613,7 +1665,7 @@
   }
   .draft-row {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    background: var(--panel-3); border-radius: 7px; padding: 8px 11px; font-size: 11.5px;
+    background: var(--box); border-radius: 7px; padding: 8px 11px; font-size: 11.5px;
   }
   .draft-row .dr-name { font-weight: 600; }
   .draft-row .dr-meta { color: var(--muted-2); font-size: 10px; }
@@ -1640,7 +1692,7 @@
     opacity: 0.35; pointer-events: none;
   }
   .chart-tooltip {
-    position: absolute; top: 8px; background: var(--panel-3); border: 1px solid var(--border);
+    position: absolute; top: 8px; background: var(--box); border: 1px solid var(--border);
     border-radius: 7px; padding: 8px 11px; font-size: 11px; pointer-events: none; white-space: nowrap;
     box-shadow: 0 4px 14px rgba(0,0,0,0.35); z-index: 5;
   }
@@ -2067,6 +2119,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <span id="retryCountdown" class="retry-countdown"></span><i class="hi" data-h="auto-retry">i</i>
   </div>
 
+  <div id="tokenBanner" class="token-banner" style="display:none;"></div>
   <nav class="tabs">
     <button class="tab active" data-tab="home">Home</button>
     <button class="tab" data-tab="today">Today</button>
@@ -2084,6 +2137,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     <button class="tab" data-tab="vedic">Vedic</button>
     <button class="tab" data-tab="alerts">🔔 Alerts</button>
     <button class="tab" data-tab="validate">Validation</button>
+    <button class="tab" data-tab="diag" title="The configured data source (DATA_SOURCE): login, live stream, API usage, caches and the full data audit">🩺 Diagnostics</button>
     <span id="healthDot" class="health-dot" title="Server health — green=fresh, amber=stale, red=unreachable" data-h="health-dot" style="margin-left:auto;margin-right:4px;color:var(--muted);">●</span>
     <span id="powerHourPill" style="display:none;" class="power-hour-pill">⚡ PH<i class="hi" data-h="power-hour">i</i></span>
     <span id="veloPill" class="velo-pill" style="display:none;" title="Spot velocity (pts/min over last 2 min)"></span>
@@ -2316,7 +2370,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <!-- Announced-alert tally. Sits under the chart because it is a
                  read on the SESSION rather than on any one signal. -->
             <!-- 0.90-delta book, directly above the tally as asked -->
-            <div id="d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:rgba(255,255,255,0.025);"></div>
+            <div id="d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:var(--wash);"></div>
             <div id="alertTally" style="margin:2px 6px 6px;padding:5px 8px;border:1px solid rgba(212,175,55,0.35);border-radius:6px;background:rgba(212,175,55,0.06);"></div>
           </div>
 
@@ -4484,6 +4538,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         can only validate the <em>data-backed</em> confluence sources (OI, max-pain, round numbers) since the geometric/astrological
         levels aren't stored in replay; and small samples are noisy — treat everything here as firming up over weeks, not days.
         If a high-confluence bucket does NOT bounce more than a low one, believe the data, not the geometry.
+      </div>
+    </section>
+
+    <section id="tab-diag" class="tab-panel">
+      <div class="builder-panel-head"><h3>Diagnostics — the data source in use<i class="hi" data-h="diag-tab">i</i></h3></div>
+      <div id="diagHead" class="diag-head">Loading…</div>
+      <div class="skew-chart-wrap diag-card">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">Self-test — a one-click pre-market check</span>
+          <span id="diagTestSum" style="font-size:10px;color:var(--muted);margin-left:8px;">token, stream, chain, book, candles, constituents, browsers, recording, clock, disk - against what is cached, no broker call</span>
+          <button class="btn" id="diagTestBtn" style="font-size:9px;padding:3px 12px;margin-left:auto;">Run self-test</button>
+        </div>
+        <div id="diagTest" class="diag-audit"></div>
+      </div>
+      <div id="diagBrokers"></div>
+      <div id="diagExtras"></div>
+      <div class="skew-chart-wrap diag-card">
+        <div class="skew-chart-head">
+          <span class="skew-chart-title">Data audit — every assumption the dashboard makes, checked against the feed</span>
+          <span id="diagAuditSym" style="font-size:10px;color:var(--muted);margin-left:8px;"></span>
+          <button class="btn" id="diagAuditBtn" style="font-size:9px;padding:3px 12px;margin-left:auto;">Run now</button>
+        </div>
+        <div id="diagAudit" class="diag-audit"><div class="movers-loading">Opens with the tab; refreshes every 30 s while it is open.</div></div>
       </div>
     </section>
   </main>
@@ -8987,7 +9064,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const box = document.createElement('div');
     box.className = 'eso-suggest';
     box._owner = inp;
-    box.style.cssText = 'position:absolute;z-index:9999;max-height:240px;overflow-y:auto;min-width:220px;background:#1a1d23;border:1px solid rgba(255,255,255,0.15);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.5);font-size:11px;';
+    box.style.cssText = 'position:absolute;z-index:9999;max-height:240px;overflow-y:auto;min-width:220px;background:var(--box);border:1px solid rgba(255,255,255,0.15);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.5);font-size:11px;';
     document.body.appendChild(box);
     const r = inp.getBoundingClientRect();
     box.style.left = (r.left + window.scrollX) + 'px';
@@ -13274,7 +13351,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const vr = _pulseVixRead(vix), pr = _pulsePcrRead(pcr);
     const dir = _pulseDirection(d);
     const tile = (label, val, sub, col, hint) =>
-      `<div style="flex:1 1 130px;min-width:130px;padding:6px 8px;border:1px solid rgba(255,255,255,0.08);border-radius:7px;background:rgba(255,255,255,0.02);" title="${escapeHtml(hint || '')}">
+      `<div style="flex:1 1 130px;min-width:130px;padding:6px 8px;border:1px solid rgba(255,255,255,0.08);border-radius:7px;background:var(--wash);" title="${escapeHtml(hint || '')}">
         <div style="font-size:8.5px;letter-spacing:0.5px;color:var(--muted,#789);font-weight:700;">${label}</div>
         <div style="font-size:17px;font-weight:800;color:${col};line-height:1.25;">${val}</div>
         <div style="font-size:9px;color:#9ab;">${sub}</div>
@@ -18559,7 +18636,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const bw = 236, rowH = 11, rows = Math.ceil(cells.length / 2);
     const bh = 17 + rows * rowH + 4;
     const x0 = W - padR - bw - 4, y0 = H - padB - (above || 0) - bh - (above ? 8 : 4);
-    let out = `<g><rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${bw}" height="${bh}" rx="4" fill="rgba(14,17,23,0.93)" stroke="rgba(255,255,255,0.18)"/>
+    let out = `<g><rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${bw}" height="${bh}" rx="4" fill="rgba(0,0,0,0.93)" stroke="rgba(255,255,255,0.18)"/>
       <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 12).toFixed(1)}" style="font-size:9px;font-weight:800;fill:#9ab;">DESK${read ? `<tspan dx="6" style="fill:${read[1]};">${read[0]} ${rd.total >= 0 ? '+' : ''}${rd.total.toFixed(1)}</tspan>` : ''}</text>`;
     cells.forEach((c, k) => {
       const cx = x0 + 7 + (k % 2) * (bw / 2 - 2), cy = y0 + 25 + Math.floor(k / 2) * rowH;
@@ -18576,7 +18653,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const msg = m.error
         ? (/no replay/.test(m.error) ? 'no recording for this day yet — the server records one snapshot a minute; scoring starts ~20 min after recording does' : m.error)
         : 'no move yet today — waiting for the first swing';
-      return `<g><rect x="${x2}" y="${y2}" width="${bw2}" height="${bh2}" rx="4" fill="rgba(14,17,23,0.93)" stroke="rgba(255,255,255,0.18)"/>
+      return `<g><rect x="${x2}" y="${y2}" width="${bw2}" height="${bh2}" rx="4" fill="rgba(0,0,0,0.93)" stroke="rgba(255,255,255,0.18)"/>
         <text x="${x2 + 7}" y="${y2 + 12}" style="font-size:9px;font-weight:800;fill:#9ab;">MOVE QUALITY</text>
         <text x="${x2 + 7}" y="${y2 + 25}" style="font-size:7.5px;fill:#789;">${escapeHtml(msg.length > 62 ? msg.slice(0, 60) + '…' : msg)}<title>${escapeHtml(msg)}</title></text></g>`;
     }
@@ -18604,7 +18681,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const retr = (L.retraced > 0.02 ? ` · ${Math.round(L.retraced * 100)}% given back` : '') +
       (L.since_ext_mins >= 2 ? ` · ${up ? 'high' : 'low'} ${L.since_ext_mins}m ago` : '');
     let out = `<g><rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="4"
-        fill="rgba(14,17,23,0.93)" stroke="rgba(255,255,255,0.18)"/>
+        fill="rgba(0,0,0,0.93)" stroke="rgba(255,255,255,0.18)"/>
       <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 12).toFixed(1)}" style="font-size:9.5px;font-weight:800;fill:${up ? '#26a69a' : '#ef5350'};">${head}<tspan style="font-weight:400;fill:#9ab;">${retr}</tspan></text>
       <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 26).toFixed(1)}" style="font-size:11px;font-weight:800;fill:${pCol};">${escapeHtml(pLine)}</text>
       <text x="${(x0 + 7).toFixed(1)}" y="${(y0 + 37).toFixed(1)}" style="font-size:7.5px;fill:#789;">${escapeHtml(sub)}</text>`;
@@ -19552,7 +19629,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _xmSvg(id, top, bottom, tagY) {
     return `<line id="${id}" x1="0" x2="0" y1="${top}" y2="${bottom}" stroke="rgba(230,235,245,0.55)" stroke-width="1" stroke-dasharray="3,3" style="display:none;pointer-events:none;"/>` +
-      (tagY != null ? `<g id="${id}T" style="display:none;pointer-events:none;"><rect x="0" y="${tagY - 9}" width="34" height="12" rx="2" fill="rgba(30,36,48,0.95)" stroke="rgba(255,255,255,0.25)"/><text x="17" y="${tagY}" text-anchor="middle" style="font-size:8.5px;fill:#e6ebf5;"></text></g>` : '');
+      (tagY != null ? `<g id="${id}T" style="display:none;pointer-events:none;"><rect x="0" y="${tagY - 9}" width="34" height="12" rx="2" fill="rgba(0,0,0,0.95)" stroke="rgba(255,255,255,0.25)"/><text x="17" y="${tagY}" text-anchor="middle" style="font-size:8.5px;fill:#e6ebf5;"></text></g>` : '');
   }
   function _xmTime(px, W, padL, padR) {
     const iv = _chart.interval || 1, slots = Math.max(1, Math.ceil(385 / iv));
@@ -19624,7 +19701,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const have = cs ? cs.length : 0;
       const mins = Math.max(0, (need - have) * (_chart.interval || 1));
       return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
-        <rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}" fill="rgba(255,255,255,0.022)"/>
+        <rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}" style="fill:var(--wash)"/>
         <text x="${(padL + 6)}" y="${(H / 2 + 3).toFixed(1)}" style="font-size:10px;fill:var(--muted,#789);">
           RSI ${cfg.period} warming up — ${have}/${need} bars${mins ? ` · about ${mins} more minute${mins > 1 ? 's' : ''} at ${_chart.interval}m` : ''}</text>
       </svg>`;
@@ -19638,7 +19715,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let s = '';
 
     // background, so the pane reads as its own plane rather than floating
-    s += `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${(H - padB + 2).toFixed(1)}" fill="rgba(255,255,255,0.022)"/>`;
+    s += `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${(H - padB + 2).toFixed(1)}" style="fill:var(--wash)"/>`;
     s += _timeGridSvg(W, padL, padR, 0, H - padB + 2, H - 3, cs, xOf);
 
     // Gradient fills for the extremes. Green above 80, red below 20 - the
@@ -20255,7 +20332,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <line x1="${padL}" y1="${yy.toFixed(1)}" x2="${(W - padR).toFixed(1)}" y2="${yy.toFixed(1)}"
             stroke="${col}" stroke-width="1.2" stroke-dasharray="7,4" opacity="0.9"/>
           <rect x="${x0.toFixed(1)}" y="${(yy - 8).toFixed(1)}" width="${w}" height="15" rx="3"
-            fill="rgba(20,24,32,0.88)" stroke="${col}" stroke-width="0.8"/>
+            fill="rgba(0,0,0,0.88)" stroke="${col}" stroke-width="0.8"/>
           <text x="${(x0 + 5).toFixed(1)}" y="${(yy + 3.5).toFixed(1)}"
             style="font-size:9px;fill:${col};font-weight:700;">${lbl}</text>
           <text data-alert-del="${r.id}" x="${(x0 + w - 8).toFixed(1)}" y="${(yy + 3.5).toFixed(1)}"
@@ -24825,6 +24902,185 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
     return s;
   }
+  // ══ DIAGNOSTICS TAB ══════════════════════════════════════════════
+  // One card for the source DATA_SOURCE names (the server sends only that
+  // one), built from rows the adapter reports as label / value / status, so
+  // a new broker needs no change here. Polled only while the tab is open.
+  const _diag = { timer: 0, auditAt: 0, busy: false };
+  const _diagEsc = x => escapeHtml(String(x ?? ''));
+  function _diagUp(sec) {
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return h ? `${h}h ${m}m` : `${m}m`;
+  }
+  function renderDiag(j) {
+    const head = document.getElementById('diagHead'), box = document.getElementById('diagBrokers');
+    if (!head || !box) return;
+    if (!j || j.error) { head.innerHTML = `<span style="color:#ef5350;">Diagnostics unavailable: ${_diagEsc(j?.error || 'no answer from the server')}</span>`; return; }
+    const sv = j.server || {}, fb = sv.fallbacks || {};
+    head.innerHTML = `<span>Source <b>${_diagEsc(j.name)}</b> <span style="color:var(--muted);">(DATA_SOURCE=${_diagEsc(j.source)})</span></span>
+      <span>Server up <b>${_diagUp(sv.uptime_s || 0)}</b></span>
+      <span>Browsers connected <b>${sv.browsers ?? '—'}</b></span>
+      <span>Cached chains <b>${sv.chain_cache ?? '—'}</b></span>
+      ${j.source !== 'nse' ? `<span title="${_diagEsc(fb.err || '')}">Requests that fell back to NSE <b style="color:${fb.n ? '#f5b301' : 'inherit'};">${fb.n || 0}</b>${fb.n ? ` (last ${_diagEsc(fb.last)})` : ''}</span>` : ''}
+      <span style="margin-left:auto;color:var(--muted);">updated ${new Date().toLocaleTimeString()}</span>`;
+    box.innerHTML = (j.brokers || []).map(b => `
+      <div class="skew-chart-wrap diag-card">
+        <div class="skew-chart-head"><span class="skew-chart-title">${_diagEsc(b.name)}</span>
+          <span class="diag-verdict ${_diagEsc(b.verdict)}">${b.verdict === 'ok' ? 'OK' : b.verdict === 'warn' ? 'CHECK' : 'PROBLEM'}</span>
+          <span style="font-size:10px;color:var(--muted);margin-left:8px;">${_diagEsc(b.summary)}</span></div>
+        <div class="diag-grid">
+          ${(b.sections || []).map(sc => `<div class="diag-sec"><h4>${_diagEsc(sc.title)}</h4><table>
+            ${(sc.rows || []).map(r => `<tr><td>${_diagEsc(r[0])}</td><td>${_diagEsc(r[1])}</td><td>${r[2] ? `<span class="diag-dot ${_diagEsc(r[2])}"></span>` : ''}</td></tr>`).join('')}
+          </table></div>`).join('')}
+        </div>
+        ${(b.log || []).length ? `<div class="diag-sec" style="padding:4px;"><h4>Recent stream events (newest first)</h4>
+          <div class="diag-log">${b.log.map(e => `<div class="k-${_diagEsc(e.kind)}">${_diagEsc((e.age_s < 120 ? Math.round(e.age_s) + 's' : Math.round(e.age_s / 60) + 'm'))} ago · ${_diagEsc(e.kind)} · ${_diagEsc(e.text)}</div>`).join('')}</div></div>` : ''}
+      </div>`).join('');
+  }
+  function renderDiagAudit(j, sym) {
+    const box = document.getElementById('diagAudit');
+    const lab = document.getElementById('diagAuditSym');
+    if (lab) lab.textContent = sym + (j?.verdict ? ` · ${j.verdict}` : '');
+    if (!box) return;
+    if (!j || j.error) { box.innerHTML = `<div class="movers-loading">Audit unavailable: ${_diagEsc(j?.error || 'no answer')}</div>`; return; }
+    const order = { FAIL: 0, warn: 1, ok: 2 };
+    const rows = [...(j.checks || [])].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
+    box.innerHTML = `<table>${rows.map(c => `<tr><td style="width:10px;"><span class="diag-dot ${c.status === 'FAIL' ? 'bad' : c.status === 'warn' ? 'warn' : 'ok'}"></span></td>
+      <td>${_diagEsc(c.check)}</td><td>${_diagEsc(c.detail)}</td></tr>`).join('')}</table>`;
+  }
+  // a small bar/line chart: [[t, v], ...]
+  function _diagSpark(pts, opt) {
+    const o = Object.assign({ w: 520, h: 70, bar: false, limit: null, color: '#45aaf2', fmt: v => v }, opt || {});
+    if (!pts || !pts.length) return '<div class="diag-note">no data yet</div>';
+    const xs = pts.map(p => p[0]), vs = pts.map(p => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs, x0 + 60);
+    const vmax = Math.max(...vs, o.limit || 0, 1e-9) * 1.1;
+    const X = t => 4 + (t - x0) / (x1 - x0) * (o.w - 8), Y = v => o.h - 12 - v / vmax * (o.h - 18);
+    let g = '';
+    if (o.bar) {
+      const bw = Math.max(1, (o.w - 8) / Math.max(30, (x1 - x0) / 60) - 0.5);
+      g = pts.map(p => `<rect x="${X(p[0]).toFixed(1)}" y="${Y(p[1]).toFixed(1)}" width="${bw.toFixed(1)}" height="${(o.h - 12 - Y(p[1])).toFixed(1)}" fill="${o.color}"><title>${new Date(p[0] * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}: ${o.fmt(p[1])}</title></rect>`).join('');
+    } else {
+      g = `<polyline fill="none" stroke="${o.color}" stroke-width="1.6" points="${pts.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ')}"/>`;
+    }
+    const lim = o.limit && o.limit < vmax ? `<line x1="4" x2="${o.w - 4}" y1="${Y(o.limit).toFixed(1)}" y2="${Y(o.limit).toFixed(1)}" stroke="#ef5350" stroke-dasharray="4,3"/><text x="${o.w - 6}" y="${(Y(o.limit) - 3).toFixed(1)}" text-anchor="end" style="font-size:9px;fill:#ef5350;">${_diagEsc(o.limitLabel || 'limit')}</text>` : '';
+    const lab = t => new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<svg viewBox="0 0 ${o.w} ${o.h}" style="width:100%;height:${o.h}px;display:block;">${g}${lim}
+      <text x="4" y="${o.h - 1}" style="font-size:9px;fill:var(--muted);">${lab(x0)}</text>
+      <text x="${o.w - 4}" y="${o.h - 1}" text-anchor="end" style="font-size:9px;fill:var(--muted);">${lab(x1)}</text>
+      <text x="4" y="9" style="font-size:9px;fill:var(--muted);">max ${_diagEsc(o.fmt(Math.max(...vs)))}</text></svg>`;
+  }
+  function renderDiagExtras(j) {
+    const box = document.getElementById('diagExtras');
+    if (!box) return;
+    const x = j?.extras || {};
+    if (x.error) { box.innerHTML = `<div class="movers-loading">Extras unavailable: ${_diagEsc(x.error)}</div>`; return; }
+    const nm = _istNowMin(), mkt = nm.wd >= 1 && nm.wd <= 5 && nm.m >= 555 && nm.m <= 930;
+    const card = (title, body, note) => `<div class="skew-chart-wrap diag-card"><div class="skew-chart-head"><span class="skew-chart-title">${title}</span>${note ? `<span class="diag-note" style="padding:0 0 0 8px;">${note}</span>` : ''}</div>${body}</div>`;
+    const tr = (a, b, st) => `<tr><td>${_diagEsc(a)}</td><td>${b}</td><td>${st ? `<span class="diag-dot ${st}"></span>` : ''}</td></tr>`;
+    const s1 = v => v == null ? '—' : `${(+v).toFixed(2)} s`;
+    let html = '';
+    // ── feed delay & clock ──
+    const L = x.latency || {}, C = x.clock || {}, off = C.ntp_offset_s;
+    const corr = v => (v == null || off == null) ? null : v + off;
+    const dSt = v => v == null ? '' : v < 1.5 ? 'ok' : v < 3 ? 'warn' : 'bad';
+    const bOff = _diag.browserOffsetMs;
+    const clockSt = v => v == null ? '' : Math.abs(v) < 1 ? 'ok' : Math.abs(v) < 3 ? 'warn' : 'bad';
+    if (j.source !== 'nse') {
+      html += card('Feed delay — exchange stamp to this server', `<div class="diag-grid"><div class="diag-sec"><table>
+        ${tr('Median, last 5 min', `${s1(L.p50)}${off != null ? ` &nbsp;·&nbsp; clock-corrected ${s1(corr(L.p50))}` : ''}`, mkt ? dSt(corr(L.p50) ?? L.p50) : '')}
+        ${tr('90% of updates within', s1(L.p90), mkt ? dSt(corr(L.p90) ?? L.p90) : '')}
+        ${tr('Worst, last 5 min', s1(L.max), '')}
+        ${tr('Samples', `${L.n ?? 0}${L.last_age_s != null ? ` · newest ${Math.round(L.last_age_s)}s ago` : ''}`, '')}
+        </table><div class="diag-note">Exchange stamps are whole seconds, so a healthy feed reads about 0.5 s. Above ~2 s your prices are late - the clock check beside this says whether the feed or the computer clock is to blame.</div></div>
+        <div class="diag-sec"><h4>Median delay per minute (30 min)</h4>${_diagSpark(L.series, { fmt: v => `${(+v).toFixed(2)} s`, color: '#45aaf2' })}</div></div>`);
+    }
+    html += card('Clock — this computer against true time', `<div class="diag-grid"><div class="diag-sec"><table>
+      ${tr('Server clock vs NTP', off == null ? `not measured${C.ntp_err ? ' - ' + _diagEsc(C.ntp_err) : ''}` : `${off >= 0 ? 'behind by' : 'ahead by'} ${Math.abs(off).toFixed(2)} s (${_diagEsc(C.ntp_server)}, checked ${Math.round(C.ntp_age_s || 0)}s ago)`, clockSt(off))}
+      ${j.source !== 'nse' ? tr('From the ticks', C.tick_min_delay_s == null ? '—' : C.tick_min_delay_s < -1 ? `this clock is at least ${(-C.tick_min_delay_s).toFixed(1)} s BEHIND the exchange` : `fastest update arrived ${C.tick_min_delay_s.toFixed(2)} s after its exchange stamp`, C.tick_min_delay_s != null && C.tick_min_delay_s < -1 ? 'bad' : '') : ''}
+      ${tr('This browser vs the server', bOff == null ? '—' : `${Math.abs(bOff / 1000).toFixed(2)} s ${bOff > 0 ? 'behind' : 'ahead'}`, clockSt(bOff == null ? null : bOff / 1000))}
+      </table><div class="diag-note">Candle boundaries, the turn-time lines and every alert time come from these clocks. Over a second off: turn on automatic time in the computer's settings.</div></div></div>`);
+    // ── silent ATM strikes ──
+    if (j.source !== 'nse') {
+      const S = x.silent || [];
+      html += card('Silent at-the-money strikes (ATM ±5, no tick for 60 s)', S.length ? `<div class="diag-grid">${S.map(r => `<div class="diag-sec"><h4>${_diagEsc(r.symbol)} · ATM ${_diagEsc(r.atm)} · ${r.checked} contracts checked</h4>
+        ${!mkt ? '<div class="diag-note">market closed - quiet strikes are expected</div>' : ''}
+        ${r.quiet.length ? r.quiet.map(q => `<span class="diag-chip ${mkt ? 'bad' : ''}">${q.strike}${q.side} ${q.age_s == null ? 'never' : q.age_s < 120 ? Math.round(q.age_s) + 's' : Math.round(q.age_s / 60) + 'm'}</span>`).join('') : '<span class="diag-chip ok">all ticking</span>'}</div>`).join('')}</div>` : '<div class="diag-note">no chain cached yet</div>',
+        'in market hours a quiet ATM strike is a broken subscription, not a quiet market');
+    }
+    // ── API calls per minute ──
+    if (x.api) {
+      const A = x.api;
+      html += card('API calls per minute today', `<div class="diag-grid"><div class="diag-sec">${_diagSpark(A.minutes, { bar: true, limit: A.limit_per_min, limitLabel: A.limit_label, color: '#a55eea', fmt: v => `${v} call(s)` })}
+        <div class="diag-note">peak ${A.peak}/min · ${_diagEsc(A.limit_label || '')}</div></div>
+        <div class="diag-sec"><h4>Who caused them (computer · endpoint, or a background job)</h4><table>
+        ${(A.by_client || []).map(([w, n]) => tr(w, `${n.toLocaleString()} call(s)`, '')).join('') || tr('—', 'no calls yet', '')}
+        </table></div></div>`);
+    }
+    // ── recording health ──
+    const R = x.recording || {};
+    const fmtA = a => a == null ? '—' : a < 120 ? `${a}s ago` : a < 7200 ? `${Math.round(a / 60)} min ago` : `${(a / 3600).toFixed(1)} h ago`;
+    html += card('Recording — today\'s archives being written', `<div class="diag-grid"><div class="diag-sec"><h4>Today's files</h4><table>
+      ${(R.files || []).map(f => tr(f.what, f.exists ? `written ${fmtA(f.age_s)} · ${f.kb} KB` : (f.status ? 'MISSING' : 'not due yet (writes from 09:15)'), f.status)).join('') || tr('—', 'nothing expected yet', '')}
+      </table></div><div class="diag-sec"><h4>Folders and disk</h4><table>
+      ${Object.entries(R.folders || {}).map(([k, v]) => tr(k + '/', `${v.files} files · ${v.mb} MB · newest ${fmtA(v.newest_age_s)}`, '')).join('')}
+      ${R.disk ? tr('Disk free', `${R.disk.free_gb} GB of ${R.disk.total_gb} GB`, R.disk.free_gb < 0.5 ? 'bad' : R.disk.free_gb < 2 ? 'warn' : 'ok') : ''}
+      ${tr('Weekly cleanup', `last ${_diagEsc(R.cleanup?.last)} · replay kept ${_diagEsc(R.cleanup?.keep_replay_days)} days`, '')}
+      </table></div></div><div class="diag-note">A gap here is invisible today and costs you weeks later - in replay, the context lines after a restart, and tomorrow's OI change.</div>`);
+    // ── server errors ──
+    const E = x.errors || [];
+    html += card(`Server errors and fallbacks (last ${E.length})`, E.length ? `<div class="diag-log" style="max-height:240px;">${E.map(e => `<div class="k-error">${new Date(e.ts * 1000).toLocaleTimeString()} · ${_diagEsc(e.line)}</div>`).join('')}</div>` : '<div class="diag-note">none since the server started</div>',
+      'lines from the server terminal that read like a problem');
+    box.innerHTML = html;
+  }
+  function renderSelfTest(j) {
+    const box = document.getElementById('diagTest'), sum = document.getElementById('diagTestSum');
+    if (!box) return;
+    if (!j || j.error) { box.innerHTML = `<div class="movers-loading">Self-test failed to run: ${_diagEsc(j?.error || 'no answer')}</div>`; return; }
+    if (sum) sum.innerHTML = `<span class="diag-st ${j.verdict === 'PASS' ? 'pass' : j.verdict === 'WARN' ? 'warn' : 'fail'}">${j.verdict}</span> ${_diagEsc(j.symbol)} · ${j.ms} ms · ${new Date().toLocaleTimeString()}`;
+    box.innerHTML = `<table>${(j.results || []).map(r => `<tr><td style="width:58px;"><span class="diag-st ${_diagEsc(r.status)}">${_diagEsc(r.status.toUpperCase())}</span></td><td>${_diagEsc(r.test)}</td><td>${_diagEsc(r.detail)}</td></tr>`).join('')}</table>`;
+  }
+  async function _diagSelfTest() {
+    const box = document.getElementById('diagTest');
+    if (box) box.innerHTML = '<div class="movers-loading">Running…</div>';
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const j = await (await fetch(`${base}/api/self-test?symbol=${encodeURIComponent(state.symbol || 'NIFTY')}`, { signal: AbortSignal.timeout(20000) })).json();
+      renderSelfTest(j);
+    } catch (e) { renderSelfTest({ error: e.message }); }
+  }
+  async function _diagPoll(forceAudit) {
+    if (_diag.busy) return;
+    const open = document.getElementById('tab-diag')?.classList.contains('active');
+    if (!open || document.hidden) return;
+    _diag.busy = true;
+    const base = els.serverUrl.value.replace(/\/+$/, '');
+    try {
+      const t0 = Date.now();
+      const j = await (await fetch(`${base}/api/broker-diag`, { signal: AbortSignal.timeout(8000) })).json();
+      const t1 = Date.now();
+      // server time minus this browser's time, half the round trip allowed for
+      if (j?.ts) _diag.browserOffsetMs = j.ts * 1000 - (t0 + t1) / 2;
+      renderDiag(j);
+      renderDiagExtras(j);
+    } catch (e) { renderDiag({ error: e.message }); }
+    if (forceAudit || Date.now() - _diag.auditAt > 30000) {
+      _diag.auditAt = Date.now();
+      const sym = state.symbol || 'NIFTY';
+      try {
+        const a = await (await fetch(`${base}/api/data-audit?symbol=${encodeURIComponent(sym)}`, { signal: AbortSignal.timeout(15000) })).json();
+        renderDiagAudit(a, sym);
+      } catch (e) { renderDiagAudit({ error: e.message }, sym); }
+    }
+    _diag.busy = false;
+  }
+  document.addEventListener('click', e => {
+    if (e.target.closest && e.target.closest('.tab[data-tab="diag"]')) setTimeout(() => _diagPoll(true), 60);
+    if (e.target.closest && e.target.closest('#diagAuditBtn')) _diagPoll(true);
+    if (e.target.closest && e.target.closest('#diagTestBtn')) _diagSelfTest();
+  });
+  setInterval(() => _diagPoll(false), 5000);
+
   // ══ TRAFFIC LIGHT — one BUY / SELL / WAIT from everything ══════════
   // Six readers, each already on the screen, each turned into a vote from
   // -1 to +1 and weighted:
@@ -27676,7 +27932,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const bxx = W - padR - boxW - 4;
         const byTop = padT + 4;
         svg += `<rect x="${bxx.toFixed(1)}" y="${byTop.toFixed(1)}" width="${boxW}" height="${totalH}" rx="4"
-            fill="rgba(20,24,32,0.94)" stroke="rgba(255,255,255,0.2)"/>`;
+            fill="rgba(0,0,0,0.94)" stroke="rgba(255,255,255,0.2)"/>`;
         P.forEach((p, ix) => {
           const ry = byTop + 11 + ix * rowH2;
           const col = p.u >= 60 ? '#26a69a' : p.u <= 40 ? '#ef5350' : 'var(--muted,#789)';
@@ -27708,7 +27964,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           const sw = 52;
           const sxx = Math.min(W - padR - sw - 2, sx + 7);
           svg += `<rect x="${sxx.toFixed(1)}" y="${(sy - 8).toFixed(1)}" width="${sw}" height="16" rx="3"
-              fill="rgba(20,24,32,0.9)" stroke="${fcol}" stroke-width="1"/>
+              fill="rgba(0,0,0,0.9)" stroke="${fcol}" stroke-width="1"/>
             <text x="${(sxx + sw / 2).toFixed(1)}" y="${(sy + 4).toFixed(1)}" text-anchor="middle"
               style="font-size:10px;font-weight:700;fill:${fcol};">▲${finalUp}/${100 - finalUp}</text>`;
         }
@@ -28021,9 +28277,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <g id="renkoCross" style="display:none;pointer-events:none;">
           <line id="renkoCrossV" y1="${padT}" y2="${H - padB}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
           <line id="renkoCrossH" x1="${padL}" x2="${W - padR}" stroke="rgba(255,255,255,0.35)" stroke-dasharray="3,3"/>
-          <rect id="renkoCrossPxBg" x="${W - padR}" width="66" height="14" rx="2" fill="rgba(20,24,32,0.95)" stroke="rgba(255,255,255,0.3)"/>
+          <rect id="renkoCrossPxBg" x="${W - padR}" width="66" height="14" rx="2" fill="rgba(0,0,0,0.95)" stroke="rgba(255,255,255,0.3)"/>
           <text id="renkoCrossPx" x="${W - padR + 4}" style="font-size:9px;fill:#fff;font-weight:700;"></text>
-          <rect id="renkoCrossTmBg" y="${H - padB + 2}" width="78" height="14" rx="2" fill="rgba(20,24,32,0.95)" stroke="rgba(255,255,255,0.3)"/>
+          <rect id="renkoCrossTmBg" y="${H - padB + 2}" width="78" height="14" rx="2" fill="rgba(0,0,0,0.95)" stroke="rgba(255,255,255,0.3)"/>
           <text id="renkoCrossTm" y="${H - padB + 12}" text-anchor="middle" style="font-size:9px;fill:#fff;font-weight:700;"></text>
         </g></svg>
       <div id="renkoHover" style="padding:2px 6px;font-size:10px;color:var(--muted);min-height:14px;"></div>
@@ -29056,24 +29312,39 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // Warn once when the broker token is close to expiring, so it is noticed
   // before the feed stops rather than after. Tokens die at about 06:00 IST,
   // so this only matters if the server has been left running overnight.
-  let _tokenWarned = false;
+  // A banner on EVERY tab, not a toast that scrolls away: from 30 minutes
+  // before the token expires, and while it is invalid. Checked every minute
+  // against the local server (no broker call). Dismissing hides it until the
+  // state changes (expiring -> expired, or a new token).
   async function _checkBrokerToken() {
+    const ban = document.getElementById('tokenBanner');
     try {
       const base = els.serverUrl.value.replace(/\/+$/, '');
       const j = await (await fetch(`${base}/api/data-source`, { signal: AbortSignal.timeout(5000) })).json();
       const b = j?.broker || j?.fyers || j?.zerodha;
       const t = b?.token;
-      if (!t) return;
-      if (!t.valid && !_tokenWarned) {
-        _tokenWarned = true;
-        showToast?.(`⚠ Broker token expired — run ${b?.login_script || 'the broker login script'} and restart. Falling back to NSE data.`);
-      } else if (t.valid && t.expires_in_h != null && t.expires_in_h < 1 && !_tokenWarned) {
-        _tokenWarned = true;
-        showToast?.(`⚠ Broker token expires in ${(t.expires_in_h * 60).toFixed(0)} min`);
-      }
+      if (!ban) return;
+      if (!t || (t.valid && (t.expires_in_h == null || t.expires_in_h >= 0.5))) { ban.style.display = 'none'; return; }
+      const name = b?.name || j?.source || 'Broker';
+      const cmd = `python3 ${b?.login_script || 'the broker login script'}`;
+      const stateKey = `${name}|${t.valid ? 'expiring' : 'expired'}|${t.age_h ?? ''}`;
+      let dismissed = '';
+      try { dismissed = sessionStorage.getItem('tokenBannerDismissed') || ''; } catch (_) {}
+      if (dismissed === stateKey) { ban.style.display = 'none'; return; }
+      ban.className = 'token-banner ' + (t.valid ? 'warn' : 'bad');
+      ban.innerHTML = t.valid
+        ? `⚠ <b>${escapeHtml(name)} token expires in ${Math.max(1, Math.round(t.expires_in_h * 60))} min</b> — run <code>${escapeHtml(cmd)}</code> before then, or the live feed stops.`
+        : `⛔ <b>${escapeHtml(name)} token is not valid</b> (${escapeHtml(t.reason || 'expired')}) — the dashboard is on fallback data. Run <code>${escapeHtml(cmd)}</code>; the server picks the new token up by itself.`;
+      ban.innerHTML += ` <button class="btn" style="font-size:9px;padding:1px 8px;margin-left:8px;" id="tokenBannerX">dismiss</button>`;
+      ban.style.display = 'block';
+      document.getElementById('tokenBannerX')?.addEventListener('click', () => {
+        try { sessionStorage.setItem('tokenBannerDismissed', stateKey); } catch (_) {}
+        ban.style.display = 'none';
+      });
     } catch (_) {}
   }
-  _visInterval(_checkBrokerToken, 15 * 60000, 'brokerToken');
+  _visInterval(_checkBrokerToken, 60000, 'brokerToken');
+  setTimeout(_checkBrokerToken, 4000);
 
   async function _fetchCandleHealth() {
     try {
@@ -30099,17 +30370,17 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
           (dsl ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:0 4px 5px;">${dsl}</div>` : '');
     } catch (_) {}
     box.innerHTML = regBar + dayBar +
-      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:rgba(255,255,255,0.015);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}${_chart._mqBox || ''}${_xmSvg('mainXM', padT, H - padB)}
+      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:var(--wash);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}${_chart._mqBox || ''}${_xmSvg('mainXM', padT, H - padB)}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
         <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
-        <rect id="ccPB" width="58" height="15" rx="3" fill="#1a1d23" stroke="#fff" stroke-width="0.5"/>
+        <rect id="ccPB" width="58" height="15" rx="3" fill="#000" stroke="#fff" stroke-width="0.5"/>
         <text id="ccP" style="font-size:9.5px;fill:#fff;font-weight:700;"></text>
-        <rect id="ccTB" width="52" height="15" rx="3" fill="#1a1d23" stroke="#fff" stroke-width="0.5"/>
+        <rect id="ccTB" width="52" height="15" rx="3" fill="#000" stroke="#fff" stroke-width="0.5"/>
         <text id="ccT" style="font-size:9.5px;fill:#fff;font-weight:700;" text-anchor="middle"></text>
       </g>
       <g id="lvlTip" style="display:none;pointer-events:none;">
-        <rect id="ltBg" rx="3" fill="#11141a" stroke="#fff" stroke-width="0.6" opacity="0.96"/>
+        <rect id="ltBg" rx="3" fill="#000" stroke="#fff" stroke-width="0.6" opacity="0.96"/>
         <text id="ltTx" style="font-size:10px;font-weight:700;"></text>
       </g></svg>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:4px 4px 2px;border-top:1px solid rgba(255,255,255,0.06);">
@@ -32080,7 +32351,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const w = _flowWalls(d);
     const fmtK = v => (Math.abs(v) >= 100000 ? (v / 100000).toFixed(1) + 'L' : Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : String(v));
     const tile = (label, lo, hi, sub, col) =>
-      `<div style="flex:1 1 210px;min-width:210px;padding:6px 9px;border:1px solid rgba(255,255,255,0.08);border-radius:7px;background:rgba(255,255,255,0.02);">
+      `<div style="flex:1 1 210px;min-width:210px;padding:6px 9px;border:1px solid rgba(255,255,255,0.08);border-radius:7px;background:var(--wash);">
         <div style="font-size:8.5px;letter-spacing:0.5px;color:var(--muted,#789);font-weight:700;">${label}</div>
         <div style="font-size:15px;font-weight:800;line-height:1.3;">
           <span style="color:var(--neg,#ef5350);">${fmtInt(Math.round(lo))}</span>
@@ -37710,6 +37981,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'gex-heat':          '<strong>GEX Heatmap &amp; King Node</strong>Gamma exposure per strike (rows) across the session (columns), rebuilt from the replay archive your server already records every minute — so it costs NSE nothing. Green means positive gamma at that strike (dealer hedging dampens moves there), red means negative (hedging amplifies), and intensity is size. The gold dashed line traces the KING NODE — the strike carrying the most gamma at each interval — and the white line is spot. What to watch: a king node that HOLDS all session is a stable pin, while one that MIGRATES means hedging pressure has relocated, which usually precedes the old level losing its grip. Below it, the flip-vs-spot path shows whether price is chasing the gamma flip or the flip is chasing price; the latter means positioning is being rebuilt around a new level. Above the flip is the positive-gamma regime (dips bought, ranges hold), below it the negative-gamma regime (moves extend, volatility feeds itself).',
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
+    'diag-tab':          '<strong>Diagnostics</strong>Shows only the source named in DATA_SOURCE (nse, fyers or zerodha): its login and token, the live stream (last ticks, subscriptions, reconnects, watchdog actions), API calls made today against that broker\'s limits, the caches that keep those calls down, and the recent stream events. Everything is read from the server\'s memory, so opening this tab costs no broker call. The data audit below runs the same checks as FEED CHECK for the index selected at the top. Green = fine, amber = worth a look, red = something is broken.',
     'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',

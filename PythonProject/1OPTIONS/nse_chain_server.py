@@ -445,8 +445,12 @@ def _sse_unregister(cl):
         except ValueError:
             pass
 
+_sse_last = {"ts": 0.0, "type": ""}
+
+
 def _sse_broadcast(event: dict):
     """Send an event to every client, electing one speaker per machine."""
+    _sse_last.update(ts=time.time(), type=str(event.get("type") or ""))
     with _sse_lock:
         by_ip = {}
         for cl in _sse_clients:
@@ -671,6 +675,7 @@ def _sse_broadcast_ticks(event: dict) -> None:
     skipped rather than waited on, so one slow laptop cannot stall the feed
     for everyone.
     """
+    _sse_last.update(ts=time.time(), type="ticks")
     with _sse_lock:
         targets = list(_sse_clients)
     if not targets:
@@ -1571,11 +1576,20 @@ def _ensure_broker_token() -> bool:
     _env_key, _file, script_name, auto_flag = _BROKER_LOGIN.get(RUN_DATA_SOURCE, _BROKER_LOGIN["fyers"])
     today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 5 * 3600 + 1800))
     tok_date = _broker_token_date()
-    if tok_date == today:
-        print(f"{tag} token generated today ({tok_date}) - no login needed")
+    # Generated today is not enough: both brokers expire every token at about
+    # 06:00 IST, so one generated just after midnight is dead by the open.
+    # Ask the adapter, which knows its broker's expiry rule.
+    try:
+        _tv = _broker().token_validity()
+    except Exception:  # noqa: BLE001
+        _tv = {}
+    if tok_date == today and _tv.get("valid", True):
+        print(f"{tag} token generated today ({tok_date}) and still valid - no login needed")
         return True
 
-    reason = "no saved token" if not tok_date else f"token is from {tok_date}, not today"
+    reason = ("no saved token" if not tok_date
+              else f"token is from {tok_date}, not today" if tok_date != today
+              else f"token from earlier today has expired ({_tv.get('reason', 'expired')})")
     print(f"{tag} {reason}")
 
     if not _envbool_g(auto_flag, True):
@@ -2441,6 +2455,9 @@ def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
             _fy = _broker()
             return _enrich_adapter_payload(symbol, _attach_oi_rollups(symbol, _fy.fetch_chain(symbol, expiry, band)), band)
         except Exception as e:  # noqa: BLE001
+            _fallbacks["n"] += 1
+            _fallbacks["last"] = time.time()
+            _fallbacks["err"] = f"{symbol}: {str(e)[:160]}"
             print(f"[adapter] {RUN_DATA_SOURCE} failed ({e}) - using NSE for this request")
     if src == "arrow":
         try:
@@ -2449,6 +2466,448 @@ def _fetch_via_adapter(symbol: str, expiry, band: int) -> dict:
         except Exception as e:  # noqa: BLE001
             print(f"[adapter] arrow failed ({e}) - using NSE for this request")
     return _build_response(symbol, expiry, band)
+
+
+_fallbacks = {"n": 0, "last": 0.0, "err": ""}     # broker requests served by NSE instead
+
+
+def _fmt_ago(ts: float) -> str:
+    if not ts:
+        return "never"
+    a = time.time() - ts
+    return f"{a:.0f}s ago" if a < 120 else f"{a / 60:.0f} min ago" if a < 7200 else f"{a / 3600:.1f} h ago"
+
+
+def _nse_diag() -> dict:
+    """The NSE scraper's state, in the same section/row shape the broker
+    adapters report. Memory only - no NSE request is made to build it."""
+    h = _build_health_response()
+    lt = time.gmtime(time.time() + 19800)
+    mkt = lt.tm_wday < 5 and 555 <= lt.tm_hour * 60 + lt.tm_min <= 930
+    ages = [time.time() - v.get("ts", 0) for v in _chain_cache.values() if isinstance(v, dict)]
+    newest = min(ages) if ages else None
+    cool = {k: v for k, v in _nse_chart_cooldown.items() if (v or 0) > time.time()} if isinstance(_nse_chart_cooldown, dict) else {}
+    sections = [
+        {"title": "NSE session (public site, cookie warm-up)", "rows": [
+            ["Session warmed", "yes" if h.get("session_warmed") else "no", "ok" if h.get("session_warmed") else "warn"],
+            ["Cookie age", f"{h['session_age_seconds'] // 60} min" if h.get("session_age_seconds") is not None else "—",
+             "ok" if h.get("session_fresh") else "warn"],
+            ["Re-warm", "every 25 minutes in the background", ""],
+            ["Last chain fetched from NSE", _fmt_ago(_last_fetch_time), ""],
+            ["Newest cached chain", f"{newest:.0f}s old" if newest is not None else "—",
+             "ok" if newest is not None and newest < 60 else ("bad" if mkt else "")],
+        ]},
+        {"title": "Polling and limits", "rows": [
+            ["Background poller", ", ".join(_poller_symbols) or "off", "ok" if _poller_symbols else "warn"],
+            ["Chain cache entries", f"{len(_chain_cache)}", ""],
+            ["Chart endpoint cooling down", ", ".join(cool) or "no", "warn" if cool else "ok"],
+            ["Bhavcopy files cached", f"{h.get('bhavcopy_cached', 0)}", ""],
+            ["What NSE cannot give", "no live ticks, no order book, no traded volume on the index, OI ~3-5 min stale", "warn"],
+        ]},
+    ]
+    bad = sum(1 for s_ in sections for r in s_["rows"] if r[2] == "bad")
+    warn = sum(1 for s_ in sections for r in s_["rows"] if r[2] == "warn" and r[0] != "What NSE cannot give")
+    return {"id": "nse", "name": "NSE (public option chain)",
+            "verdict": "bad" if bad else "warn" if warn else "ok",
+            "summary": (f"{bad} problem(s)" if bad else f"{warn} warning(s)" if warn else "healthy")
+                       + ("" if mkt else " · market closed"),
+            "sections": sections, "log": []}
+
+
+# ══ DIAGNOSTICS EXTRAS ═══════════════════════════════════════════════
+# Everything below is read from memory or the local disk. The only network
+# traffic is a single NTP packet every ten minutes for the clock check -
+# never a broker call.
+import collections as _dcoll
+import re as _dre
+import socket as _dsock
+import struct as _dstruct
+
+# ── server log: the last errors, for the tab instead of the terminal ──
+_log_ring = _dcoll.deque(maxlen=400)       # (ts, line)
+_err_ring = _dcoll.deque(maxlen=80)        # (ts, line)
+_ERR_RX = _dre.compile(r"(error|failed|failure|exception|traceback|refused|unavailable|cannot|not usable|"
+                       r"rejected|expired|using NSE|falling back|stalled|\[!\])", _dre.I)
+_ERR_SKIP = _dre.compile(r"(no refusals|errors? \(10 min\)|0 error|warnings\.warn|RequestsDependencyWarning)", _dre.I)
+
+
+class _LogTee:
+    """Pass everything through to the real stream; keep a copy of each line,
+    and of the ones that read like a problem."""
+    def __init__(self, stream):
+        self._s = stream
+        self._buf = ""
+
+    def write(self, text):
+        try:
+            self._s.write(text)
+        except Exception:
+            pass
+        try:
+            self._buf += str(text)
+            while "\n" in self._buf:
+                line, self._buf = self._buf.split("\n", 1)
+                line = line.rstrip()
+                if not line:
+                    continue
+                now = time.time()
+                _log_ring.append((now, line[:400]))
+                if _ERR_RX.search(line) and not _ERR_SKIP.search(line):
+                    _err_ring.append((now, line[:400]))
+        except Exception:
+            pass
+        return len(text) if isinstance(text, str) else 0
+
+    def flush(self):
+        try:
+            self._s.flush()
+        except Exception:
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._s, name)
+
+
+def _install_log_tee() -> None:
+    if not isinstance(sys.stdout, _LogTee):
+        sys.stdout = _LogTee(sys.stdout)
+    if not isinstance(sys.stderr, _LogTee):
+        sys.stderr = _LogTee(sys.stderr)
+
+
+# ── clock: this computer against an NTP server ──────────────────────
+_ntp = {"offset": None, "server": "", "ts": 0.0, "err": "", "busy": False, "rtt": None}
+_NTP_SERVERS = ("time.google.com", "pool.ntp.org", "time.cloudflare.com")
+
+
+def _ntp_query(host: str, timeout: float = 2.0, port: int = 123):
+    """SNTP: (offset seconds = true - local, round trip). One UDP packet."""
+    pkt = b"\x1b" + 47 * b"\0"
+    with _dsock.socket(_dsock.AF_INET, _dsock.SOCK_DGRAM) as s:
+        s.settimeout(timeout)
+        t0 = time.time()
+        s.sendto(pkt, (host, port))
+        data, _ = s.recvfrom(48)
+        t3 = time.time()
+    if len(data) < 48:
+        raise ValueError("short NTP reply")
+    def _ts(i):
+        sec, frac = _dstruct.unpack("!II", data[i:i + 8])
+        return sec - 2208988800 + frac / 2 ** 32
+    t1, t2 = _ts(32), _ts(40)                     # server receive / transmit
+    return ((t1 - t0) + (t2 - t3)) / 2.0, (t3 - t0) - (t2 - t1)
+
+
+def _ntp_refresh() -> None:
+    if _ntp["busy"]:
+        return
+    _ntp["busy"] = True
+    try:
+        for host in _NTP_SERVERS:
+            try:
+                off, rtt = _ntp_query(host)
+                _ntp.update(offset=round(off, 3), rtt=round(rtt, 3), server=host, ts=time.time(), err="")
+                return
+            except Exception as e:  # noqa: BLE001
+                _ntp["err"] = f"{host}: {e}"
+        _ntp["ts"] = time.time()                  # failed: retry in ten minutes, not every poll
+    finally:
+        _ntp["busy"] = False
+
+
+def _clock_check() -> dict:
+    if time.time() - _ntp["ts"] > 600:
+        threading.Thread(target=_ntp_refresh, daemon=True, name="ntp").start()
+    lat = {}
+    if _is_broker():
+        try:
+            lat = _broker().latency_stats(300)
+        except Exception:
+            lat = {}
+    off = _ntp.get("offset")
+    # the smallest delay seen is about the clock error plus the shortest
+    # network trip: a clearly NEGATIVE one means this clock runs behind
+    tick_est = lat.get("min")
+    return {"ntp_offset_s": off, "ntp_server": _ntp.get("server"), "ntp_rtt_s": _ntp.get("rtt"),
+            "ntp_age_s": round(time.time() - _ntp["ts"], 0) if _ntp["ts"] else None, "ntp_err": _ntp.get("err"),
+            "tick_min_delay_s": round(tick_est, 2) if tick_est is not None else None,
+            "server_time": time.time()}
+
+
+# ── silent ATM strikes ───────────────────────────────────────────────
+def _silent_strikes(width: int = 5, quiet_s: float = 60.0) -> list:
+    """ATM +/- `width` strikes with no tick for `quiet_s` - in market hours a
+    liquid strike going quiet is a broken subscription, not a quiet market."""
+    if not _is_broker():
+        return []
+    try:
+        A = _broker()
+        ticks = A._ticks
+    except Exception:
+        return []
+    now = time.time()
+    newest = {}
+    for k, e in list(_chain_cache.items()):
+        d = (e or {}).get("data") or {}
+        sym = d.get("symbol")
+        if not sym or not d.get("strikes"):
+            continue
+        if k.split("|")[1:2] != ["near"]:
+            continue                               # the default expiry is the one being traded
+        if sym not in newest or e["ts"] > newest[sym][0]:
+            newest[sym] = (e["ts"], d)
+    out = []
+    for sym, (_ts, d) in sorted(newest.items()):
+        atm, gap = d.get("atm"), d.get("strike_gap") or 50
+        if not atm:
+            continue
+        rows = []
+        for r in d["strikes"]:
+            if abs(r["strike"] - atm) > width * gap + 0.5:
+                continue
+            for p in ("ce", "pe"):
+                key = r.get(f"{p}_symbol")
+                if not key:
+                    continue
+                age = now - ((ticks.get(key) or {}).get("ts") or 0)
+                rows.append({"strike": int(r["strike"]), "side": p.upper(), "age_s": round(age, 0) if age < 1e8 else None})
+        quiet = [x for x in rows if x["age_s"] is None or x["age_s"] > quiet_s]
+        out.append({"symbol": sym, "atm": atm, "checked": len(rows), "quiet": quiet})
+    return out
+
+
+# ── recording health: today's archives being written ────────────────
+def _dir_stats(path: str) -> dict:
+    n = size = 0
+    newest = 0.0
+    try:
+        for root, _dirs, files in _os.walk(path):
+            for f in files:
+                try:
+                    st = _os.stat(_os.path.join(root, f))
+                except Exception:
+                    continue
+                n += 1
+                size += st.st_size
+                newest = max(newest, st.st_mtime)
+    except Exception:
+        pass
+    return {"files": n, "mb": round(size / 1e6, 1), "newest_age_s": round(time.time() - newest) if newest else None}
+
+
+def _recording_health() -> dict:
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 19800))
+    lt = time.gmtime(time.time() + 19800)
+    mins = lt.tm_hour * 60 + lt.tm_min
+    in_sess = lt.tm_wday < 5 and 555 <= mins <= 930
+    syms = sorted({(e or {}).get("data", {}).get("symbol") for e in _chain_cache.values()
+                   if (e or {}).get("data", {}).get("symbol")} | set(_poller_symbols or []))
+    files = []
+
+    def chk(label, path, expect):
+        exists = _os.path.exists(path)
+        age = round(time.time() - _os.path.getmtime(path)) if exists else None
+        size = _os.path.getsize(path) if exists else 0
+        if not expect:
+            st = "" if not exists else "ok"
+        elif not exists:
+            st = "bad" if in_sess else "warn"
+        else:
+            st = "ok" if (not in_sess or (age is not None and age < 180)) else "bad"
+        files.append({"what": label, "file": _os.path.relpath(path, here), "exists": exists,
+                      "age_s": age, "kb": round(size / 1024, 1), "status": st})
+
+    started = mins >= 555 or lt.tm_wday >= 5
+    for s_ in syms:
+        rp = [_os.path.join(_REPLAY_DIR, f"{s_}_{today}{ext}") for ext in (".v2.jsonl", ".jsonl")]
+        chk(f"{s_} chain replay", next((p for p in rp if _os.path.exists(p)), rp[0]), started and lt.tm_wday < 5)
+        chk(f"{s_} minute ticks", _os.path.join(_TICK_DIR, f"{s_}_{today}.csv"), started and lt.tm_wday < 5)
+        chk(f"{s_} context history", _os.path.join(_CTX_DIR, f"{s_}_{today}.v2.jsonl"), started and lt.tm_wday < 5)
+    if RUN_DATA_SOURCE == "zerodha":
+        chk("Zerodha closing OI (for tomorrow's OI change)",
+            _os.path.join(here, "zerodha_cache", f"oi_close_{today}.json"), started and lt.tm_wday < 5)
+    folders = {name: _dir_stats(_os.path.join(here, name)) for name in
+               ("replay", "ticks", "ctx", "history", "zerodha_cache", "nse_data_cache") if _os.path.isdir(_os.path.join(here, name))}
+    try:
+        import shutil as _sh
+        du = _sh.disk_usage(here)
+        disk = {"free_gb": round(du.free / 1e9, 1), "total_gb": round(du.total / 1e9, 1)}
+    except Exception:
+        disk = {}
+    return {"files": files, "folders": folders, "disk": disk,
+            "cleanup": {"last": _fmt_ago(_cleanup_state.get("last") or 0),
+                        "keep_replay_days": _os.environ.get("NSE_KEEP_REPLAY_DAYS", "60")}}
+
+
+def _diag_extras() -> dict:
+    out = {"clock": _clock_check(), "silent": _silent_strikes(), "recording": _recording_health(),
+           "errors": [{"ts": t, "line": l} for t, l in list(_err_ring)[-25:]][::-1]}
+    if _is_broker():
+        try:
+            A = _broker()
+            out["latency"] = A.latency_stats(300)
+            out["api"] = A.rest_timeline()
+        except Exception as e:  # noqa: BLE001
+            out["latency_err"] = str(e)
+    return out
+
+
+# ── self-test: a pre-market check, against what is cached ───────────
+def _self_test(symbol: str) -> dict:
+    t0 = time.time()
+    sym = (symbol or "NIFTY").upper()
+    lt = time.gmtime(time.time() + 19800)
+    mins = lt.tm_hour * 60 + lt.tm_min
+    mkt = lt.tm_wday < 5 and 555 <= mins <= 930
+    res = []
+
+    def add(name, status, detail):
+        res.append({"test": name, "status": status, "detail": detail})
+
+    A = _broker() if _is_broker() else None
+    # 1. token
+    if A:
+        try:
+            tv = A.token_validity()
+            add("broker token", "pass" if tv.get("valid") else "fail",
+                f"{tv.get('reason')}" + (f" · expires in {tv['expires_in_h']} h" if tv.get("expires_in_h") is not None else ""))
+        except Exception as e:  # noqa: BLE001
+            add("broker token", "fail", str(e))
+    # 2. stream
+    if A:
+        with A._lock:
+            last = max((t.get("ts") or 0 for t in A._ticks.values()), default=0)
+        age = time.time() - last if last else None
+        if not mkt:
+            add("live stream", "skip" if last else "warn",
+                "market closed" + (f" · last tick {age / 60:.0f} min ago" if age else " · nothing received yet"))
+        else:
+            add("live stream", "pass" if age is not None and age < 15 else "fail",
+                f"last tick {age:.1f}s ago" if age is not None else "no tick received")
+    # 3. chain (from the cache only)
+    best = None
+    for k, e in list(_chain_cache.items()):
+        if k.startswith(f"{sym}|near|") and (best is None or e["ts"] > best["ts"]):
+            best = e
+    if not best:
+        add("option chain", "warn", f"no cached {sym} chain yet - open the Option Chain or Home tab once")
+        d = {}
+    else:
+        d = best["data"] or {}
+        st = d.get("strikes") or []
+        ivf = sum(1 for r in st if (r.get("ce_iv") or 0) > 0) / max(1, len(st))
+        ok = len(st) >= 20 and (d.get("underlying_value") or 0) > 0 and ivf >= 0.5
+        add("option chain", "pass" if ok else "fail",
+            f"{len(st)} strikes · spot {d.get('underlying_value')} · IV on {ivf:.0%} · {time.time() - best['ts']:.0f}s old · source {d.get('_source')}")
+    # 4. depth
+    if A and d:
+        dep = (d.get("depth") or {}).get("strikes") or {}
+        fresh = sum(1 for v in dep.values() if v and v.get("lts") and time.time() - v["lts"] < 120)
+        add("order book (depth)", "pass" if (fresh or not mkt) and dep else ("fail" if mkt else "warn"),
+            f"{len(dep)} strikes with a book, {fresh} updated in 2 min" + ("" if mkt else " (market closed)"))
+    # 5. candles (from the history cache only)
+    if A:
+        ikey = (getattr(A, "_idx_key", {}) or {}).get(sym) or (getattr(A, "FYERS_INDEX", {}) or {}).get(sym)
+        hc = [(k, v) for k, v in list(getattr(A, "_history_cache", {}).items())
+              if isinstance(k, tuple) and len(k) >= 4 and k[0] == ikey and k[1] == 1 and not k[3]]
+        started = lt.tm_wday < 5 and mins >= 555
+        if not hc:
+            add("chart candles", "warn", "no cached 1-minute history yet - open the chart once")
+        elif not (hc[0][1][1] or []) and not started:
+            add("chart candles", "skip", "no session yet today - the chart fills from 09:15")
+        else:
+            bars = hc[0][1][1] or []
+            last_bar = (time.time() - bars[-1]["t"]) / 60 if bars else None
+            add("chart candles", "pass" if bars else "fail",
+                f"{len(bars)} bars" + (f" · last bar {last_bar:.0f} min ago" if last_bar is not None else "")
+                + (" · with volume" if any((b.get('v') or 0) > 0 for b in bars) else " · no volume"))
+    # 6. constituents
+    c = _nifty_cache.get(sym) or {}
+    rows = ((c.get("data") or {}).get("stocks") or [])
+    if sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
+        if not c:
+            add("index constituents", "warn", "not loaded yet")
+        else:
+            age = time.time() - c.get("ts", 0)
+            add("index constituents", "pass" if rows and (age < 120 or not mkt) else "warn",
+                f"{len(rows)} names · {age:.0f}s old")
+    # 7. browsers / alerts stream
+    with _sse_lock:
+        n_sse = len(_sse_clients)
+    add("alert & tick stream to browsers", "pass" if n_sse else "warn",
+        f"{n_sse} browser tab(s) connected · last event {_fmt_ago(_sse_last.get('ts', 0))}")
+    # 8. recording
+    rec = [f for f in _recording_health()["files"] if f["what"].startswith(sym)]
+    bad = [f for f in rec if f["status"] == "bad"]
+    add("today's recording", "fail" if bad else ("pass" if rec and all(f["status"] in ("ok", "") for f in rec) else "warn"),
+        "; ".join(f"{f['what'].split(' ', 1)[1]}: " + ("written " + _fmt_ago(time.time() - f["age_s"]) if f["exists"]
+                                                      else "not due yet" if f["status"] == "" else "MISSING")
+                  for f in rec) or "nothing expected yet")
+    # 9. clock
+    if time.time() - _ntp["ts"] > 600:
+        _ntp_refresh()
+    off = _ntp.get("offset")
+    add("computer clock", "skip" if off is None else ("pass" if abs(off) < 1 else "warn" if abs(off) < 3 else "fail"),
+        f"{off:+.2f}s against {_ntp.get('server')}" if off is not None else f"NTP unreachable ({_ntp.get('err') or 'no answer'})")
+    # 10. disk
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    try:
+        import shutil as _sh
+        free = _sh.disk_usage(here).free / 1e9
+        probe = _os.path.join(here, ".selftest_write")
+        with open(probe, "w") as f:
+            f.write("ok")
+        _os.remove(probe)
+        add("disk", "pass" if free > 2 else "warn" if free > 0.5 else "fail", f"{free:.1f} GB free · writable")
+    except Exception as e:  # noqa: BLE001
+        add("disk", "fail", f"cannot write next to the server: {e}")
+    # 11. fallbacks
+    if _is_broker():
+        add("broker requests served by NSE instead", "pass" if not _fallbacks["n"] else "warn",
+            f"{_fallbacks['n']}" + (f" · last {_fmt_ago(_fallbacks['last'])}: {_fallbacks['err'][:120]}" if _fallbacks["n"] else ""))
+    fails = sum(1 for r in res if r["status"] == "fail")
+    warns = sum(1 for r in res if r["status"] == "warn")
+    return {"symbol": sym, "verdict": "FAIL" if fails else "WARN" if warns else "PASS",
+            "ms": round((time.time() - t0) * 1000), "results": res}
+
+
+def _broker_diag() -> dict:
+    """One card per configured source - only the one DATA_SOURCE names."""
+    with _sse_lock:
+        n_sse = len(_sse_clients)
+    out = {"source": RUN_DATA_SOURCE, "name": BROKER_NAME, "ts": time.time(),
+           "server": {"uptime_s": round(time.time() - _SERVER_START_TIME), "browsers": n_sse,
+                      "fallbacks": {"n": _fallbacks["n"], "last": _fmt_ago(_fallbacks["last"]), "err": _fallbacks["err"]},
+                      "chain_cache": len(_chain_cache)},
+           "brokers": []}
+    try:
+        out["extras"] = _diag_extras()
+    except Exception as e:  # noqa: BLE001
+        out["extras"] = {"error": str(e)}
+    if _is_broker():
+        try:
+            m = _broker()
+            if hasattr(m, "diagnostics"):
+                out["brokers"].append(m.diagnostics())
+            else:
+                out["brokers"].append({"id": RUN_DATA_SOURCE, "name": BROKER_NAME, "verdict": "warn",
+                                       "summary": "adapter has no diagnostics", "sections": [], "log": []})
+        except Exception as e:  # noqa: BLE001
+            out["brokers"].append({"id": RUN_DATA_SOURCE, "name": BROKER_NAME, "verdict": "bad",
+                                   "summary": f"adapter unavailable: {e}", "sections": [], "log": []})
+    elif RUN_DATA_SOURCE == "arrow":
+        try:
+            import nse_adapter_arrow as _arrow
+            st = _arrow.status()
+            out["brokers"].append({"id": "arrow", "name": "Arrow", "verdict": "ok" if st.get("connected") else "bad",
+                                   "summary": st.get("last_error") or "status only",
+                                   "sections": [{"title": "Status", "rows": [[k, str(v), ""] for k, v in st.items()]}], "log": []})
+        except Exception as e:  # noqa: BLE001
+            out["brokers"].append({"id": "arrow", "name": "Arrow", "verdict": "bad", "summary": str(e), "sections": [], "log": []})
+    else:
+        out["brokers"].append(_nse_diag())
+    return out
 
 
 def _adapter_streams() -> bool:
@@ -5741,9 +6200,33 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
+        # name this request for the broker's call counter, so the Diagnostics
+        # tab can say WHICH computer and endpoint the API calls came from
+        if _is_broker() and parsed.path.startswith("/api/"):
+            try:
+                _broker()._who.name = f"{self.client_address[0] if self.client_address else '?'} {parsed.path}"
+            except Exception:
+                pass
 
         if parsed.path == "/api/health":
             self._send_json({"status": "ok"})
+            return
+
+        if parsed.path == "/api/self-test":
+            sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+            try:
+                self._send_json(_self_test(sym_))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)}, status=500)
+            return
+
+        if parsed.path == "/api/broker-diag":
+            # The Diagnostics tab: the configured source's login, stream,
+            # API usage and caches, read from memory - no broker call.
+            try:
+                self._send_json(_broker_diag())
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)}, status=500)
             return
 
         if parsed.path == "/api/data-audit":
@@ -8943,6 +9426,7 @@ def _start_session_rewarm_thread() -> None:
 
 
 def main():
+    _install_log_tee()          # keep recent errors for the Diagnostics tab
     ap = argparse.ArgumentParser(description="Local API server for the NSE options dashboard")
     env = _os.environ.get
     def _envbool(name, dflt):

@@ -419,6 +419,11 @@ def _on_message(msg) -> None:
             _raw_last.setdefault(sym, {})[str(msg.get("type") or "?")] = (time.time(), dict(msg))
         except Exception:
             pass
+        try:
+            if msg.get("exch_feed_time"):
+                _lat_note(float(msg["exch_feed_time"]))
+        except Exception:
+            pass
         # ── DepthUpdate, as the v3 SDK actually delivers it ──────────
         # FLAT numbered fields - bid_price1..5, bid_size1..5, bid_order1..5
         # and the same for ask, type "dp" - with no ltp, no volume and no
@@ -2147,6 +2152,10 @@ def _count_rest(kind: str) -> None:
         by = _rest_count.setdefault("by", {})
         by[kind] = by.get(kind, 0) + 1
         n = _rest_count["n"]
+        try:
+            _rest_attrib()
+        except Exception:
+            pass
     if n in (1000, 5000, 10000, 25000, 50000, 75000, 90000):
         print(f"[fyers] REST calls today: {n:,} (limit ~100,000)")
 
@@ -2470,3 +2479,149 @@ def shutdown() -> None:
     _socket = None
     with _lock:
         _status.update(streaming=False, connected=False)
+
+
+# ── feed delay and API-call timeline (read by the Diagnostics tab) ────
+# Delay: seconds between the exchange stamping an update and this server
+# receiving it, sampled at most twice a second. Exchange stamps are whole
+# seconds, so a healthy feed reads about 0.5 s on average; the clock check
+# on the Diagnostics tab separates a slow feed from a wrong computer clock.
+import collections as _collections
+
+_lat = _collections.deque(maxlen=4000)          # (received epoch, delay s)
+_lat_last = {"t": 0.0, "best": None}
+# REST calls per minute today, and which browser / endpoint caused them.
+_rest_min: Dict[int, int] = {}
+_rest_who: Dict[str, int] = {}
+_who = threading.local()                        # the server names the request being served
+
+
+def _lat_note(ex_ts: float, now: Optional[float] = None) -> None:
+    now = now or time.time()
+    if not ex_ts or ex_ts < 1e9:
+        return
+    best = _lat_last["best"]
+    if best is None or ex_ts > best:
+        _lat_last["best"] = ex_ts
+    if now - _lat_last["t"] >= 0.5:
+        _lat.append((now, now - (_lat_last["best"] or ex_ts)))
+        _lat_last.update(t=now, best=None)
+
+
+def _rest_attrib() -> None:
+    m = int(time.time() // 60)
+    _rest_min[m] = _rest_min.get(m, 0) + 1
+    if len(_rest_min) > 1500:
+        for k in sorted(_rest_min)[:-1440]:
+            _rest_min.pop(k, None)
+    who = getattr(_who, "name", None) or _bg_label(threading.current_thread().name)
+    _rest_who[who] = _rest_who.get(who, 0) + 1
+
+
+_BG_NAMES = {"_oi_keeper_loop": "OI back-fill", "zerodha-oi": "OI back-fill", "_watchdog_loop": "stream watchdog",
+             "fyers-watchdog": "stream watchdog", "zerodha-watchdog": "stream watchdog", "poller": "chain poller",
+             "_run": "server background job", "MainThread": "server startup", "_master_load": "symbol master"}
+
+
+def _bg_label(name: str) -> str:
+    """'Thread-12 (_run)' -> 'background · server background job'."""
+    target = name.split("(", 1)[1].rstrip(")") if "(" in name else name
+    return f"background · {_BG_NAMES.get(target) or _BG_NAMES.get(name) or target}"
+
+
+def latency_stats(window_s: float = 300.0) -> Dict[str, Any]:
+    now = time.time()
+    xs = sorted(d for t, d in list(_lat) if now - t <= window_s)
+    per_min: Dict[int, List[float]] = {}
+    for t, d in list(_lat):
+        if now - t <= 1800:
+            per_min.setdefault(int(t // 60), []).append(d)
+    pct = lambda a, q: a[min(len(a) - 1, int(q * len(a)))] if a else None
+    return {"n": len(xs), "p50": pct(xs, 0.5), "p90": pct(xs, 0.9), "max": xs[-1] if xs else None,
+            "min": xs[0] if xs else None, "last_age_s": round(now - _lat[-1][0], 1) if _lat else None,
+            "series": [[m * 60, round(sorted(v)[len(v) // 2], 2)] for m, v in sorted(per_min.items())]}
+
+
+def rest_timeline() -> Dict[str, Any]:
+    g = time.gmtime(time.time() + 19800)
+    day0 = int((time.time() + 19800) // 86400 * 86400 - 19800)
+    mins = [[m * 60, n] for m, n in sorted(_rest_min.items()) if m * 60 >= day0]
+    top = sorted(_rest_who.items(), key=lambda kv: -kv[1])[:12]
+    return {"limit_per_min": 200, "limit_label": "Fyers limit 200 calls/min", "minutes": mins, "peak": max((n for _m, n in mins), default=0), "by_client": top}
+
+
+# ── diagnostics: everything the Diagnostics tab shows, from memory only ──
+def _fmt_age(a: Optional[float]) -> str:
+    if a is None:
+        return "—"
+    return f"{a:.0f}s ago" if a < 120 else f"{a / 60:.0f} min ago" if a < 7200 else f"{a / 3600:.1f} h ago"
+
+
+def diagnostics() -> Dict[str, Any]:
+    """The broker's state in rows of (label, value, status) grouped into
+    sections - status is ok / warn / bad / '' . Reads memory only: opening
+    the Diagnostics tab costs no Fyers call."""
+    now = time.time()
+    st = status()
+    tv = st.get("token") or {}
+    wd = watchdog_state()
+    mkt = _ist_market_open(now)
+    age = lambda t: round(now - t, 1) if t else None
+    with _lock:
+        n_ticking = sum(1 for t in _ticks.values() if now - (t.get("ts") or 0) < 60)
+    a_sf, a_idx, a_dp = wd.get("last_sf_age_s"), wd.get("last_index_age_s"), wd.get("last_depth_age_s")
+    live = lambda a, lim: "ok" if a is not None and a < lim else ("bad" if mkt else "")
+    rest = rest_usage()
+    by = rest.get("by") or {}
+    n = rest.get("n", 0)
+    rf = wd.get("refusals_10m") or {}
+    blk = wd.get("socket_lock_blocked_by")
+    sections = [
+        {"title": "Login & token", "rows": [
+            ["SDK (fyers-apiv3)", "installed" if SDK_AVAILABLE else "missing - pip install fyers-apiv3", "ok" if SDK_AVAILABLE else "bad"],
+            ["Client id in env", "set" if _cfg("FYERS_CLIENT_ID") else "missing", "ok" if _cfg("FYERS_CLIENT_ID") else "bad"],
+            ["Access token", tv.get("reason") or "—", "ok" if tv.get("valid") else "bad"],
+            ["Token expires in", f"{tv['expires_in_h']} h" if tv.get("expires_in_h") is not None else "—",
+             "warn" if (tv.get("expires_in_h") or 99) < 1 else ""],
+            ["Authenticated", "yes" if st.get("connected") else "no", "ok" if st.get("connected") else "bad"],
+            ["Last error", st.get("last_error") or "none", "bad" if st.get("last_error") else "ok"],
+        ]},
+        {"title": "Live stream (Fyers data socket)", "rows": [
+            ["Streaming", "yes" if st.get("streaming") else "no", "ok" if st.get("streaming") else ("bad" if mkt else "warn")],
+            ["This server owns the socket", "NO - " + str(blk) + " holds it" if blk else "yes", "bad" if blk else "ok"],
+            ["Last price tick", _fmt_age(a_sf), live(a_sf, 30)],
+            ["Last index tick", _fmt_age(a_idx), live(a_idx, 15)],
+            ["Last depth message", _fmt_age(a_dp), live(a_dp, 120)],
+            ["Instruments ticking (60s)", f"{n_ticking}", ""],
+            ["Subscribed", f"{wd.get('price_requested', 0)} price, {wd.get('depth_requested', 0)} depth", ""],
+            ["Never answered", f"{wd.get('price_unconfirmed', 0)} price, {wd.get('depth_unconfirmed', 0)} depth",
+             "warn" if (wd.get("price_unconfirmed") or wd.get("depth_unconfirmed")) else "ok"],
+            ["Refused by Fyers (10 min)", f"{rf.get('px', 0)} price, {rf.get('dp', 0)} depth, {rf.get('auth', 0)} login batch(es)"
+             + (" - another data socket on this app?" if rf.get("total") else ""), "bad" if rf.get("total") else "ok"],
+            ["Rejected symbols", ", ".join(wd.get("invalid_symbols") or []) or "none", "warn" if wd.get("invalid_symbols") else "ok"],
+            ["Connects", f"{_reconnects['n']} (last {_fmt_age(age(_reconnects['last']))})", ""],
+            ["Watchdog", f"{wd.get('heals', 0)} re-subscribe(s), {wd.get('forced_reconnects', 0)} reopen(s), "
+                         f"next reopen no sooner than {int(wd.get('next_reopen_gap_s', 900) / 60)} min apart", ""],
+            ["Ticks received", f"{st.get('ticks', 0):,}", ""],
+        ]},
+        {"title": "API usage today (Fyers: about 100,000 REST calls a day)", "rows": [
+            ["REST calls", f"{n:,} ({n / 1000:.1f}% of the daily limit)", "bad" if n > 90000 else "warn" if n > 50000 else "ok"],
+            *[[f"  {k}", f"{v:,}", ""] for k, v in sorted(by.items(), key=lambda kv: -kv[1])],
+            ["Option-chain cache", f"{len(_oc_cache)} response(s), reused {_CHAIN_REST_TTL:.0f}s", ""],
+            ["Futures quote cache", f"reused {_FUT_REST_TTL:.0f}s", ""],
+            ["History cache", f"{len(_history_cache)} series (TTL {os.environ.get('FYERS_HISTORY_TTL', '60')}s)", ""],
+            ["Expiry lookups remembered", f"{len(_exp_ts_cache)}", ""],
+            ["Constituents", f"{_eq_stats.get('socket', 0)} from the socket, {_eq_stats.get('rest', 0)} needed REST "
+                             f"({_eq_stats.get('rest_calls', 0)} quote call(s) so far)", ""],
+            ["Symbol master (lot sizes)", f"{len(_master.get('lots') or {})} futures · {_master.get('day') or 'not loaded'}"
+             + (f" · error: {_master['err']}" if _master.get("err") else ""), "warn" if _master.get("err") else ""],
+        ]},
+    ]
+    bad = sum(1 for s_ in sections for r in s_["rows"] if r[2] == "bad")
+    warn = sum(1 for s_ in sections for r in s_["rows"] if r[2] == "warn")
+    return {"id": "fyers", "name": "Fyers API v3",
+            "verdict": "bad" if bad else "warn" if warn else "ok",
+            "summary": (f"{bad} problem(s)" if bad else f"{warn} warning(s)" if warn else "healthy")
+                       + ("" if mkt else " · market closed"),
+            "sections": sections,
+            "log": wd.get("log") or []}

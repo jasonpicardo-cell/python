@@ -1627,12 +1627,18 @@ class _ZFakeTicker:
     def __init__(self, api_key, access_token, **_k):
         self.subs, self.modes, self.closed = set(), {}, 0
         self.on_ticks = self.on_connect = self.on_close = self.on_error = None
+        self.ws, self.open = object(), True          # an open socket unless a test says otherwise
         _ZFakeTicker.last = self
+
+    def is_connected(self):
+        return self.open
 
     def connect(self, threaded=False, **_k):
         pass
 
     def subscribe(self, toks):
+        if not self.open:          # what the real ticker does with no socket yet
+            raise AttributeError("'NoneType' object has no attribute 'sendMessage'")
         self.subs.update(toks)
 
     def set_mode(self, mode, toks):
@@ -1641,6 +1647,9 @@ class _ZFakeTicker:
 
     def _close(self, code=None, reason=None):
         self.closed += 1
+
+    def stop_retry(self):
+        self.stopped = True
 
     def close(self, *a):
         self.closed += 1
@@ -1665,6 +1674,11 @@ def _z_setup(tmpdir):
     Z._oi_dirty["busy"] = True          # no background threads in tests
     Z._rl["quote"][1] = Z._rl["historical"][1] = Z._rl["other"][1] = 0.0
     Z._start_oi_keeper = lambda: None
+    # a fixed mid-session clock, so results do not depend on when the tests
+    # run (before 09:15 the adapter rightly takes OI as yesterday's close,
+    # and before 08:45 it treats Kite's instrument list as provisional)
+    Z._ist_min_now = lambda: 600
+    Z._fetched_early = lambda ts: False
     return Z
 
 
@@ -1859,11 +1873,226 @@ def test_broker_neutral_server():
           and "print(access" not in open(os.path.join(HERE, "zerodha_login.py")).read())
 
 
+def test_zerodha_fixes_and_diagnostics():
+    """Review fixes (provisional instrument list, 403 stops the reconnect loop,
+    connect cooldown, daily back-fill reset) and the Diagnostics tab."""
+    import tempfile, shutil, json as _json, time
+    tmp = tempfile.mkdtemp(prefix="ztest")
+    Z = _z_setup(tmp)
+    try:
+        Z.fetch_chain("NIFTY", None, 12)
+        n_inst = _ZFakeKite.calls["instruments"]
+        # 1. a list fetched before 08:45 is fetched again once it is later
+        real_min = Z._ist_min_now
+        Z._inst["fetched"]["NFO"] = time.time() - 86400 * 0 - 3600 * 24     # placeholder, overwritten below
+        import calendar
+        g = time.gmtime(time.time() + 19800)
+        early = time.time() - 3600              # an hour ago - "before 08:30" under the patched rule below
+        Z._inst["fetched"]["NFO"] = early
+        # rewrite the cached file as an early fetch too
+        path = os.path.join(tmp, f"instruments_NFO_{Z._ist_today()}.json")
+        j = _json.load(open(path)); j["fetched"] = early; _json.dump(j, open(path, "w"))
+        marker = time.time() - 1
+        Z._fetched_early = lambda ts: ts < marker          # anything fetched before now was "early"
+        Z._ist_min_now = lambda: 10 * 60
+        Z._ensure_instruments(("NFO",))
+        refetched = _ZFakeKite.calls["instruments"] == n_inst + 1
+        Z._ensure_instruments(("NFO",))
+        once = _ZFakeKite.calls["instruments"] == n_inst + 1
+        Z._ist_min_now = real_min
+        check("zerodha fix: a pre-08:30 instrument list is fetched again (once) after 08:45",
+              refetched and once and not Z._fetched_early(Z._inst["fetched"]["NFO"]), str(_ZFakeKite.calls["instruments"] - n_inst))
+        # 2. stream refused with 403 -> stop retrying, say why
+        tk = _ZFakeTicker.last
+        Z._status["token_rejected"] = False
+        Z._on_ws_close(None, 1006, "WebSocket connection upgrade failed (403 - Forbidden)")
+        check("zerodha fix: a 403 on the stream stops the reconnect loop and asks for a login",
+              getattr(tk, "stopped", False) and Z._status.get("token_rejected") and "zerodha_login" in Z._status["last_error"])
+        # 3. a failing token is not retried on every request; a new token is tried at once
+        class Bad(_ZFakeKite):
+            n = 0
+            def profile(self):
+                Bad.n += 1
+                raise RuntimeError("TokenException: Incorrect api_key or access_token")
+        Z.KiteConnect = Bad
+        Z._status["connected"] = False; Z._kite = None
+        Z._conn.update(fail_ts=0.0, fail_tok="")
+        a = Z.connect(); b = Z.connect(); c = Z.connect()
+        tried = Bad.n
+        os.environ["ZERODHA_ACCESS_TOKEN"] = "fresh_token"
+        Z.KiteConnect = _ZFakeKite
+        d = Z.connect()
+        check("zerodha fix: a rejected token costs one profile call a minute, not one per request; a new token connects at once",
+              not a and not b and not c and tried == 1 and d, f"tried={tried} new={d}")
+        # 4. back-fill bookkeeping resets with the day
+        Z._oi_tried.add("NFO:X"); Z._oi_prev["loaded_for"] = "2000-01-01"
+        Z._oi_load_prev()
+        check("zerodha fix: the back-fill 'done' list resets each day", "NFO:X" not in Z._oi_tried)
+        # diagnostics: shape, statuses, memory only
+        q0, h0 = _ZFakeKite.calls["quote"], _ZFakeKite.calls["historical"]
+        dg = Z.diagnostics()
+        rows = [r for s_ in dg["sections"] for r in s_["rows"]]
+        check("diagnostics (zerodha): sections of label/value/status rows and a verdict",
+              dg["id"] == "zerodha" and dg["verdict"] in ("ok", "warn", "bad") and len(dg["sections"]) >= 5
+              and all(len(r) == 3 and r[2] in ("ok", "warn", "bad", "") for r in rows), str(dg["summary"]))
+        check("diagnostics (zerodha): building it costs no Kite call",
+              _ZFakeKite.calls["quote"] == q0 and _ZFakeKite.calls["historical"] == h0)
+    finally:
+        os.environ["ZERODHA_ACCESS_TOKEN"] = "test_token"
+        Z.KiteConnect = _ZFakeKite
+        shutil.rmtree(tmp, ignore_errors=True)
+    import nse_adapter_fyers as F
+    df = F.diagnostics()
+    frows = [r for s_ in df["sections"] for r in s_["rows"]]
+    check("diagnostics (fyers): same shape, with the socket-ownership and refusal rows",
+          df["id"] == "fyers" and all(len(r) == 3 for r in frows)
+          and any("owns the socket" in r[0] for r in frows) and any("Refused" in r[0] for r in frows))
+    srv = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    check("diagnostics: /api/broker-diag serves only the DATA_SOURCE broker (NSE card when DATA_SOURCE=nse)",
+          '"/api/broker-diag"' in srv and "def _broker_diag()" in srv and "def _nse_diag()" in srv
+          and "_fallbacks[\"n\"] += 1" in srv)
+    dash = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("diagnostics: tab, panel and poller in the dashboard (only while the tab is open)",
+          'data-tab="diag"' in dash and 'id="tab-diag"' in dash and "function renderDiag(" in dash
+          and "/api/broker-diag" in dash and "classList.contains('active')" in dash)
+
+
+def test_zerodha_subscribe_before_connect():
+    """Subscriptions asked for before Kite's stream has connected are held,
+    not reported as failures, and all go out the moment it connects. A token
+    generated after midnight is dead at 06:00, so startup checks validity."""
+    import tempfile, shutil
+    tmp = tempfile.mkdtemp(prefix="ztest")
+    Z = _z_setup(tmp)
+    try:
+        Z.connect()
+        tk = _ZFakeTicker.last
+        tk.open = False                                  # handshake not finished yet
+        Z._sock_log.clear()
+        d = Z.fetch_chain("NIFTY", None, 12)             # subscribes ~108 instruments
+        errs = [x for x in Z._sock_log if x[1] == "error"]
+        check("zerodha: a subscribe before the stream connects is held, not an error",
+              not errs and Z._held["n"] > 100 and not tk.subs, f"errors={errs[:1]} held={Z._held['n']}")
+        tk.open = True
+        Z._on_ws_connect(tk, {})                         # the stream opens
+        want = {Z._key2tok[k] for k in Z._subscribed if k in Z._key2tok}
+        check("zerodha: on connect every held subscription goes out, in FULL mode",
+              want <= tk.subs and Z._held["n"] == 0 and all(tk.modes.get(Z._key2tok[k]) == "full"
+                                                            for k in d["_tokens"] if k in Z._key2tok), f"{len(tk.subs)}/{len(want)}")
+        rows = [r for s_ in Z.diagnostics()["sections"] for r in s_["rows"]]
+        check("zerodha diagnostics: shows whether the stream socket is open", any(r[0] == "Stream socket" and r[1] == "open" for r in rows))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    srv = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    check("startup login check asks the adapter whether today's token is still VALID (06:00 expiry)",
+          "_tv = _broker().token_validity()" in srv and 'tok_date == today and _tv.get("valid", True)' in srv)
+
+
+def test_diag_extras():
+    """Diagnostics extras: feed delay from exchange stamps (both brokers),
+    API calls attributed to the computer/endpoint, the NTP clock check, the
+    server error log, silent ATM strikes, and the dashboard pieces."""
+    import tempfile, shutil, datetime as _dt, ast as _ast, socket as _so, struct as _st, threading as _th, time as _t
+    tmp = tempfile.mkdtemp(prefix="ztest")
+    Z = _z_setup(tmp)
+    try:
+        Z.fetch_chain("NIFTY", None, 12)
+        Z._lat.clear(); Z._lat_last.update(t=0.0, best=None)
+        base = _t.time() - 30
+        for i in range(20):
+            Z._lat_note(base + i - 0.8, now=base + i)
+        ls = Z.latency_stats(600)
+        check("feed delay (zerodha): median of exchange-stamp delay", ls["n"] == 20 and abs(ls["p50"] - 0.8) < 0.01, str(ls)[:120])
+        Z._lat.clear(); Z._lat_last.update(t=0.0, best=None)
+        tok = next(iter(_ZFakeTicker.last.subs))
+        Z._on_ticks(None, [{"instrument_token": tok, "mode": "full", "last_price": 10.0,
+                            "exchange_timestamp": _dt.datetime.fromtimestamp(_t.time() - 1.5)}])
+        check("feed delay (zerodha): read off the FULL tick's exchange_timestamp", len(Z._lat) == 1 and 1.4 < Z._lat[0][1] < 2.0, str(list(Z._lat)))
+        Z._who.name = "192.168.1.9 /api/chain"
+        Z._count_rest("quote")
+        tl = Z.rest_timeline()
+        check("API timeline: calls per minute today, attributed to the computer and endpoint",
+              tl["minutes"] and any(w == "192.168.1.9 /api/chain" for w, _n in tl["by_client"]) and tl["limit_per_min"], str(tl)[:160])
+        Z._who.name = None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    import nse_adapter_fyers as F
+    F._lat.clear(); F._lat_last.update(t=0.0, best=None)
+    F._on_message({"symbol": "NSE:NIFTY50-INDEX", "ltp": 25000.0, "exch_feed_time": _t.time() - 1.2})
+    check("feed delay (fyers): read off exch_feed_time", len(F._lat) == 1 and 1.1 < F._lat[0][1] < 1.6, str(list(F._lat)))
+    # server helpers, run in isolation
+    src = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    tree = _ast.parse(src)
+    want = {"_ntp_query", "_LogTee", "_silent_strikes"}
+    nodes = [n for n in tree.body if isinstance(n, (_ast.FunctionDef, _ast.ClassDef)) and n.name in want]
+    import collections as _c, re as _re
+    ns = {"time": _t, "_dsock": _so, "_dstruct": _st, "_log_ring": _c.deque(maxlen=50), "_err_ring": _c.deque(maxlen=50),
+          "_ERR_RX": _re.compile(r"(error|failed|exception|traceback|using NSE)", _re.I), "_ERR_SKIP": _re.compile(r"(no refusals)", _re.I)}
+    exec(compile(_ast.Module(body=nodes, type_ignores=[]), "srv", "exec"), ns)
+    # a local NTP server whose clock is 5 s ahead of ours
+    srv = _so.socket(_so.AF_INET, _so.SOCK_DGRAM); srv.bind(("127.0.0.1", 0)); port = srv.getsockname()[1]
+    def answer():
+        data, addr = srv.recvfrom(48)
+        now = _t.time() + 5.0 + 2208988800
+        sec, frac = int(now), int((now % 1) * 2 ** 32)
+        pkt = bytearray(48); pkt[0] = 0x1c
+        pkt[32:40] = _st.pack("!II", sec, frac); pkt[40:48] = _st.pack("!II", sec, frac)
+        srv.sendto(bytes(pkt), addr)
+    th = _th.Thread(target=answer, daemon=True); th.start()
+    off, rtt = ns["_ntp_query"]("127.0.0.1", 2.0, port)
+    srv.close()
+    check("clock check: NTP offset measured (a server 5 s ahead reads +5 s)", 4.9 < off < 5.1 and rtt >= 0, f"{off} {rtt}")
+    import io
+    tee = ns["_LogTee"](io.StringIO())
+    tee.write("[zerodha] quote failed: timeout\nall good here\n[adapter] zerodha failed (x) - using NSE for this request\n")
+    errs = [l for _ts, l in ns["_err_ring"]]
+    check("server log: problem lines kept for the tab, ordinary lines passed through",
+          len(errs) == 2 and "quote failed" in errs[0] and len(ns["_log_ring"]) == 3, str(errs))
+    now = _t.time()
+    class _Ad:
+        _ticks = {"NFO:A25000CE": {"ts": now - 2}, "NFO:A25000PE": {"ts": now - 300}}
+    ns.update({"_is_broker": lambda: True, "_broker": lambda: _Ad,
+               "_chain_cache": {"NIFTY|near|12": {"ts": now, "data": {"symbol": "NIFTY", "atm": 25000, "strike_gap": 50,
+                   "strikes": [{"strike": 25000, "ce_symbol": "NFO:A25000CE", "pe_symbol": "NFO:A25000PE"},
+                               {"strike": 26000, "ce_symbol": "NFO:FAR", "pe_symbol": "NFO:FAR2"}]}}}})
+    sil = ns["_silent_strikes"]()
+    check("silent strikes: an ATM strike quiet for 5 min is listed; far strikes are not checked",
+          sil and sil[0]["checked"] == 2 and [q["strike"] for q in sil[0]["quiet"]] == [25000]
+          and sil[0]["quiet"][0]["side"] == "PE", str(sil))
+    check("server: self-test and diagnostics extras wired",
+          '"/api/self-test"' in src and "def _self_test(" in src and "def _recording_health(" in src
+          and 'out["extras"] = _diag_extras()' in src and "_install_log_tee()" in src)
+    dash = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("dashboard: token banner on every tab, checked every minute",
+          'id="tokenBanner"' in dash and "_visInterval(_checkBrokerToken, 60000" in dash)
+    check("dashboard: self-test button and the extra diagnostics cards",
+          'id="diagTestBtn"' in dash and "function renderDiagExtras(" in dash and "Silent at-the-money strikes" in dash
+          and "API calls per minute today" in dash and "Recording — today" in dash and "Feed delay" in dash)
+
+
+def test_true_black_widgets():
+    """Dark theme: widget surfaces are true black - panels use --wash (nothing
+    in dark, a faint tint in light) instead of a white overlay, and floating
+    boxes use --box."""
+    import re as _re
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    root = d[d.index("  :root {"):d.index("  }", d.index("  :root {"))]
+    check("theme: --wash is transparent and --box black in dark mode",
+          "--wash: transparent;" in root and "--box: #000000;" in root and "--wash:rgba(15,23,42,0.03)" in d)
+    check("theme: chart, RSI pane, Trade entries and the tiles sit on --wash",
+          'id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:var(--wash);' in d
+          and d.count('style="fill:var(--wash)"') == 2 and '"d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:var(--wash);"' in d)
+    faint = [m.group(0) for m in _re.finditer(r'background:rgba\(255,255,255,0\.0(1[0-9]?|2[0-9]?)\)', d)]
+    check("theme: no panel carries a faint white wash any more", not faint, str(faint[:3]))
+    check("theme: no near-black overlay colours left",
+          not _re.search(r'fill="rgba\((14,17,23|20,24,32|30,36,48),', d) and 'fill="#1a1d23"' not in d and 'background:#1a1d23' not in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

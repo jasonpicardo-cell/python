@@ -255,6 +255,7 @@ def _set_err(msg: str) -> None:
 _rl = {"quote": [0.0, 1.05], "historical": [0.0, 0.36], "other": [0.0, 0.12]}
 _rl_lock = threading.Lock()
 _rest_count: Dict[str, Any] = {"n": 0, "day": "", "by": {}}
+_rest_errors: List[Dict[str, Any]] = []
 
 
 def _throttle(kind: str) -> None:
@@ -275,6 +276,10 @@ def _count_rest(kind: str) -> None:
         _rest_count["n"] += 1
         by = _rest_count.setdefault("by", {})
         by[kind] = by.get(kind, 0) + 1
+        try:
+            _rest_attrib()
+        except Exception:
+            pass
 
 
 def rest_usage() -> Dict[str, Any]:
@@ -291,13 +296,26 @@ def _rest(kind: str, fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except Exception as e:  # noqa: BLE001
+        _rest_errors.append({"ts": time.time(), "kind": kind, "err": f"{type(e).__name__}: {str(e)[:140]}"})
+        del _rest_errors[:-30]
         if type(e).__name__ == "TokenException":
-            _set_err(f"token rejected ({e}) - run zerodha_login.py and restart")
+            _set_err(f"token rejected ({e}) - run zerodha_login.py")
+            _conn.update(fail_ts=time.time(), fail_tok=_conn.get("tok") or "")
         raise
 
 
 # ── instruments: the chain's skeleton, once a day ────────────────────
-_inst: Dict[str, Any] = {"day": {}, "rows": {}, "busy": threading.Lock()}
+_inst: Dict[str, Any] = {"day": {}, "rows": {}, "fetched": {}, "busy": threading.Lock()}
+# Kite publishes the day's instrument list at about 08:30 IST. A list taken
+# before that is YESTERDAY's - a weekly series listed this morning would be
+# missing from it all day - so one taken before 08:45 is provisional and is
+# fetched again, once, after 08:45.
+_INST_READY_MIN = 8 * 60 + 45
+
+
+def _fetched_early(ts: float) -> bool:
+    g = time.gmtime(ts + 19800)
+    return g.tm_hour * 60 + g.tm_min < _INST_READY_MIN
 _key2tok: Dict[str, int] = {}
 _tok2key: Dict[int, str] = {}
 _kind: Dict[str, str] = {}            # key -> IDX / EQ / OPT / FUT
@@ -335,7 +353,11 @@ def _load_instruments(exch: str) -> List[Dict[str, Any]]:
     try:
         if os.path.exists(path):
             with open(path) as f:
-                return json.load(f)
+                j = json.load(f)
+            rows_, fetched = (j, os.path.getmtime(path)) if isinstance(j, list) else (j.get("rows") or [], j.get("fetched") or 0)
+            if not (_fetched_early(fetched) and _ist_min_now() >= _INST_READY_MIN):
+                _inst["fetched"][exch] = fetched
+                return rows_
     except Exception:
         pass
     if not _kite:
@@ -343,11 +365,12 @@ def _load_instruments(exch: str) -> List[Dict[str, Any]]:
     raw = _rest("instruments", _kite.instruments, exch)
     rows = [r for r in (_compact(x) for x in (raw or [])) if _keep(exch, r)]
     if rows:
+        _inst["fetched"][exch] = time.time()
         try:
             os.makedirs(_CACHE_DIR, exist_ok=True)
             tmp = path + ".tmp"
             with open(tmp, "w") as f:
-                json.dump(rows, f, separators=(",", ":"))
+                json.dump({"fetched": time.time(), "rows": rows}, f, separators=(",", ":"))
             os.replace(tmp, path)
             for old in os.listdir(_CACHE_DIR):          # yesterday's lists are dead weight
                 if old.startswith(f"instruments_{exch}_") and old != os.path.basename(path):
@@ -387,12 +410,15 @@ def _index_rows(rows: List[Dict[str, Any]]) -> None:
 
 def _ensure_instruments(exchanges: Tuple[str, ...]) -> None:
     today = _ist_today()
-    need = [x for x in exchanges if _inst["day"].get(x) != today]
+    late = _ist_min_now() >= _INST_READY_MIN
+    stale = lambda x: (_inst["day"].get(x) != today or
+                       (late and _fetched_early(_inst["fetched"].get(x) or time.time())))
+    need = [x for x in exchanges if stale(x)]
     if not need:
         return
     with _inst["busy"]:
         for exch in need:
-            if _inst["day"].get(exch) == today:
+            if not stale(exch):
                 continue
             rows = _load_instruments(exch)
             if not rows:
@@ -435,6 +461,23 @@ def _exchanges_for(sym: str) -> Tuple[str, ...]:
 
 
 # ── connection ────────────────────────────────────────────────────────
+_conn = {"fail_ts": 0.0, "fail_tok": "", "tok": ""}
+
+
+def _restart_stream() -> None:
+    """A new token (zerodha_login.py was run again): retire the old stream
+    and open one with the new token - no server restart needed."""
+    global _kws, _socket
+    old = _kws
+    _kws = _socket = None
+    if old is not None:
+        try:
+            _ws_call(old.close)
+        except Exception:
+            pass
+    _start_socket()
+
+
 def connect() -> bool:
     global _kite
     if not SDK_AVAILABLE:
@@ -449,8 +492,14 @@ def connect() -> bool:
         _set_err(f"saved token {tv.get('reason')} (issued {tv.get('age_h')}h ago). Run: python3 zerodha_login.py")
         return False
     with _lock:
-        if _status["connected"] and _kite is not None:
+        if _status["connected"] and _kite is not None and token == _conn["tok"]:
             return True
+    # After a failure, wait a minute before asking Kite again - otherwise a
+    # bad token costs one profile call on EVERY chain request. A new token
+    # (the login was re-run) is tried at once.
+    if _conn["fail_ts"] and time.time() - _conn["fail_ts"] < 60 and token == _conn["fail_tok"]:
+        return False
+    renewed = bool(_conn["tok"]) and token != _conn["tok"]
     try:
         k = KiteConnect(api_key=api_key)
         k.set_access_token(token)
@@ -458,15 +507,21 @@ def connect() -> bool:
         prof = _rest("profile", k.profile)
         name = (prof or {}).get("user_name") or (prof or {}).get("user_shortname") or ""
         with _lock:
-            _status.update(connected=True, last_error="")
+            _status.update(connected=True, last_error="", token_rejected=False)
+        _conn.update(fail_ts=0.0, fail_tok="", tok=token)
         print(f"{_TAG} authenticated{f' as {name}' if name else ''}"
               + (f" - token valid for another {tv['expires_in_h']}h" if tv.get("expires_in_h") is not None else ""))
         _ensure_instruments(("NSE", "NFO"))
-        _start_socket()
+        if renewed and _kws is not None:
+            print(f"{_TAG} new token - reopening the market-data stream with it")
+            _restart_stream()
+        else:
+            _start_socket()
         _start_oi_keeper()
         return True
     except Exception as e:  # noqa: BLE001
         _kite = None
+        _conn.update(fail_ts=time.time(), fail_tok=token)
         _set_err(f"connect failed: {type(e).__name__} {e}. Tokens expire daily - run zerodha_login.py")
         return False
 
@@ -550,6 +605,15 @@ def _norm(t: Dict[str, Any]) -> Dict[str, Any]:
 def _on_ticks(_ws, ticks) -> None:
     now = time.time()
     push = False
+    # the freshest exchange stamp in the batch measures the feed's delay
+    # (the ticker builds it with fromtimestamp, so .timestamp() is the epoch)
+    try:
+        ex = max((t.get("exchange_timestamp").timestamp() for t in (ticks or [])
+                  if hasattr(t.get("exchange_timestamp"), "timestamp")), default=0)
+        if ex:
+            _lat_note(ex, now)
+    except Exception:
+        pass
     for t in (ticks or []):
         try:
             key = _tok2key.get(int(t.get("instrument_token") or 0))
@@ -609,16 +673,45 @@ def _ws_call(fn, *args) -> None:
     fn(*args)
 
 
+def _ws_ready() -> bool:
+    """Is the ticker's socket open right now? Before the first handshake
+    completes (and between a drop and the reconnect) the ticker has no
+    socket object at all, and a subscribe raises "'NoneType' object has no
+    attribute 'sendMessage'"."""
+    try:
+        return bool(_kws is not None and getattr(_kws, "ws", None) is not None and _kws.is_connected())
+    except Exception:
+        return False
+
+
+_held = {"n": 0, "noted": 0.0}
+
+
 def _send_subscribe(tokens: List[int], full: List[int]) -> None:
+    """Send a subscription now if the stream is open; otherwise HOLD it.
+    Nothing is lost by holding: every instrument is already on the
+    subscription list, and the connect handler subscribes the whole list the
+    moment the stream opens (the ticker itself re-subscribes after any
+    reconnect)."""
     if not _kws or not tokens:
         return
+    if not _ws_ready():
+        _held["n"] += len(tokens)
+        if time.time() - _held["noted"] > 60:
+            _held["noted"] = time.time()
+            _sock_note("info", f"{_held['n']} subscription(s) held until the stream connects - sent on connect")
+        return
+
     def _do():
+        if not _ws_ready():                      # dropped between the check and now
+            return
         try:
             _kws.subscribe(tokens)
             if full:
                 _kws.set_mode(_kws.MODE_FULL, full)
         except Exception as e:  # noqa: BLE001
-            _sock_note("error", f"subscribe failed: {e}")
+            # held, not lost: the next connect subscribes the whole list
+            _sock_note("info", f"subscribe deferred to the next connect ({type(e).__name__})")
     _ws_call(_do)
 
 
@@ -636,6 +729,9 @@ def _on_ws_connect(ws, _response) -> None:
     now = time.time()
     for k in keys:
         _sub_req[k] = now
+    if _held["n"]:
+        _sock_note("info", f"sending {len(toks)} subscription(s), including {_held['n']} held before the connect")
+        _held["n"] = 0
     # on the FIRST connect the ticker has nothing to resubscribe; after a
     # reconnect it resubscribes on its own, and repeating it is harmless
     if toks:
@@ -647,14 +743,35 @@ def _on_ws_connect(ws, _response) -> None:
             _sock_note("error", f"subscribe on connect failed: {e}")
 
 
+def _token_rejected_by_stream(code, reason) -> bool:
+    """Kite refuses the stream with HTTP 403 when the token is no longer
+    valid. Retrying cannot fix that - the ticker would reconnect every minute
+    for hours - so stop it and say what will."""
+    txt = f"{code} {reason}"
+    if "403" not in txt and "Forbidden" not in txt and "TokenException" not in txt:
+        return False
+    if not _status.get("token_rejected"):
+        _status["token_rejected"] = True
+        _set_err("the market-data stream was refused (403): the Kite token is no longer valid - "
+                 "run zerodha_login.py (the server picks the new token up by itself)")
+        try:
+            if _kws:
+                _ws_call(_kws.stop_retry)
+        except Exception:
+            pass
+    return True
+
+
 def _on_ws_close(_ws, code, reason) -> None:
     _sock_note("close", f"{code} {reason}")
     with _lock:
         _status["streaming"] = False
+    _token_rejected_by_stream(code, reason)
 
 
 def _on_ws_error(_ws, code, reason) -> None:
     _sock_note("error", f"{code} {reason}")
+    _token_rejected_by_stream(code, reason)
     _errors.append({"ts": time.time(), "code": code, "text": str(reason)[:160]})
     del _errors[:-50]
     print(f"{_TAG} stream error: {code} {str(reason)[:160]}")
@@ -673,10 +790,15 @@ def _start_socket() -> None:
         kws.on_error = _on_ws_error
         kws.on_reconnect = lambda _w, n: _sock_note("info", f"reconnecting (attempt {n})")
         kws.on_noreconnect = lambda _w: _sock_note("error", "ticker gave up reconnecting")
-        kws.connect(threaded=True)
+        # first time: starts Twisted's reactor in its own thread; later (a new
+        # token) the reactor is already running and the connect is scheduled
+        # on it, the only thread allowed to touch the network objects
+        _ws_call(kws.connect, True)
         _kws = kws
         _socket = kws
-        threading.Thread(target=_watchdog_loop, daemon=True, name="zerodha-watchdog").start()
+        if not _wd.get("thread"):
+            _wd["thread"] = True
+            threading.Thread(target=_watchdog_loop, daemon=True, name="zerodha-watchdog").start()
     except Exception as e:  # noqa: BLE001
         print(f"{_TAG} stream unavailable, REST quotes only: {e}")
         with _lock:
@@ -952,6 +1074,7 @@ def _oi_load_prev() -> None:
     if _oi_prev["loaded_for"] == today:
         return
     _oi_prev.update({"day": None, "oi": {}, "complete": False, "loaded_for": today})
+    _oi_tried.clear()                                    # a new day: every contract may be tried again
     try:
         files = sorted(f for f in os.listdir(_CACHE_DIR) if f.startswith("oi_close_") and f.endswith(".json"))
     except Exception:
@@ -2017,3 +2140,170 @@ def shutdown() -> None:
         pass
     with _lock:
         _status.update(streaming=False, connected=False)
+
+
+# ── feed delay and API-call timeline (read by the Diagnostics tab) ────
+# Delay: seconds between the exchange stamping an update and this server
+# receiving it, sampled at most twice a second. Exchange stamps are whole
+# seconds, so a healthy feed reads about 0.5 s on average; the clock check
+# on the Diagnostics tab separates a slow feed from a wrong computer clock.
+import collections as _collections
+
+_lat = _collections.deque(maxlen=4000)          # (received epoch, delay s)
+_lat_last = {"t": 0.0, "best": None}
+# REST calls per minute today, and which browser / endpoint caused them.
+_rest_min: Dict[int, int] = {}
+_rest_who: Dict[str, int] = {}
+_who = threading.local()                        # the server names the request being served
+
+
+def _lat_note(ex_ts: float, now: Optional[float] = None) -> None:
+    now = now or time.time()
+    if not ex_ts or ex_ts < 1e9:
+        return
+    best = _lat_last["best"]
+    if best is None or ex_ts > best:
+        _lat_last["best"] = ex_ts
+    if now - _lat_last["t"] >= 0.5:
+        _lat.append((now, now - (_lat_last["best"] or ex_ts)))
+        _lat_last.update(t=now, best=None)
+
+
+def _rest_attrib() -> None:
+    m = int(time.time() // 60)
+    _rest_min[m] = _rest_min.get(m, 0) + 1
+    if len(_rest_min) > 1500:
+        for k in sorted(_rest_min)[:-1440]:
+            _rest_min.pop(k, None)
+    who = getattr(_who, "name", None) or _bg_label(threading.current_thread().name)
+    _rest_who[who] = _rest_who.get(who, 0) + 1
+
+
+_BG_NAMES = {"_oi_keeper_loop": "OI back-fill", "zerodha-oi": "OI back-fill", "_watchdog_loop": "stream watchdog",
+             "fyers-watchdog": "stream watchdog", "zerodha-watchdog": "stream watchdog", "poller": "chain poller",
+             "_run": "server background job", "MainThread": "server startup", "_master_load": "symbol master"}
+
+
+def _bg_label(name: str) -> str:
+    """'Thread-12 (_run)' -> 'background · server background job'."""
+    target = name.split("(", 1)[1].rstrip(")") if "(" in name else name
+    return f"background · {_BG_NAMES.get(target) or _BG_NAMES.get(name) or target}"
+
+
+def latency_stats(window_s: float = 300.0) -> Dict[str, Any]:
+    now = time.time()
+    xs = sorted(d for t, d in list(_lat) if now - t <= window_s)
+    per_min: Dict[int, List[float]] = {}
+    for t, d in list(_lat):
+        if now - t <= 1800:
+            per_min.setdefault(int(t // 60), []).append(d)
+    pct = lambda a, q: a[min(len(a) - 1, int(q * len(a)))] if a else None
+    return {"n": len(xs), "p50": pct(xs, 0.5), "p90": pct(xs, 0.9), "max": xs[-1] if xs else None,
+            "min": xs[0] if xs else None, "last_age_s": round(now - _lat[-1][0], 1) if _lat else None,
+            "series": [[m * 60, round(sorted(v)[len(v) // 2], 2)] for m, v in sorted(per_min.items())]}
+
+
+def rest_timeline() -> Dict[str, Any]:
+    g = time.gmtime(time.time() + 19800)
+    day0 = int((time.time() + 19800) // 86400 * 86400 - 19800)
+    mins = [[m * 60, n] for m, n in sorted(_rest_min.items()) if m * 60 >= day0]
+    top = sorted(_rest_who.items(), key=lambda kv: -kv[1])[:12]
+    return {"limit_per_min": 600, "limit_label": "Kite 10 calls/s overall (quotes 1/s, history 3/s)", "minutes": mins, "peak": max((n for _m, n in mins), default=0), "by_client": top}
+
+
+# ── diagnostics: everything the Diagnostics tab shows, from memory only ──
+def _age(ts: Optional[float]) -> Optional[float]:
+    return round(time.time() - ts, 1) if ts else None
+
+
+def _fmt_age(a: Optional[float]) -> str:
+    if a is None:
+        return "—"
+    return f"{a:.0f}s ago" if a < 120 else f"{a / 60:.0f} min ago" if a < 7200 else f"{a / 3600:.1f} h ago"
+
+
+def diagnostics() -> Dict[str, Any]:
+    """The broker's state in rows of (label, value, status) grouped into
+    sections - status is ok / warn / bad / '' . Reads memory only: opening
+    the Diagnostics tab costs no Kite call."""
+    now = time.time()
+    st = status()
+    tv = st.get("token") or {}
+    wd = watchdog_state()
+    mkt = _ist_market_open(now)
+    with _lock:
+        last_any = max((t.get("ts") or 0 for k, t in _ticks.items() if _kind.get(k) in ("OPT", "FUT")), default=0)
+        last_idx = max((t.get("ts") or 0 for k, t in _ticks.items() if _kind.get(k) == "IDX"), default=0)
+        n_ticking = sum(1 for t in _ticks.values() if now - (t.get("ts") or 0) < 60)
+        n_full = len(_depth_subs)
+        n_eq = sum(1 for k in _subscribed if _kind.get(k) == "EQ")
+    a_any, a_idx = _age(last_any), _age(last_idx)
+    live = lambda a, lim: "ok" if a is not None and a < lim else ("bad" if mkt else "")
+    rest = rest_usage()
+    by = rest.get("by") or {}
+    errs10 = [e for e in _rest_errors if now - e["ts"] < 600]
+    rf = wd.get("refusals_10m") or {}
+    sections = [
+        {"title": "Login & token", "rows": [
+            ["SDK (kiteconnect)", "installed" if SDK_AVAILABLE else f"missing - pip install kiteconnect", "ok" if SDK_AVAILABLE else "bad"],
+            ["API key in env", "set" if _cfg("ZERODHA_API_KEY") else "missing", "ok" if _cfg("ZERODHA_API_KEY") else "bad"],
+            ["Access token", tv.get("reason") or "—", "ok" if tv.get("valid") else "bad"],
+            ["Token expires in", f"{tv['expires_in_h']} h" if tv.get("expires_in_h") is not None else "—",
+             "warn" if (tv.get("expires_in_h") or 99) < 1 else ""],
+            ["Authenticated", "yes" if st.get("connected") else "no", "ok" if st.get("connected") else "bad"],
+            ["Stream refused (403)", "yes - run zerodha_login.py" if st.get("token_rejected") else "no",
+             "bad" if st.get("token_rejected") else "ok"],
+            ["Last error", st.get("last_error") or "none", "bad" if st.get("last_error") else "ok"],
+        ]},
+        {"title": "Live stream (KiteTicker)", "rows": [
+            ["Streaming", "yes" if st.get("streaming") else "no", "ok" if st.get("streaming") else ("bad" if mkt else "warn")],
+            ["Stream socket", "open" if _ws_ready() else ("not started" if _kws is None else "connecting / reconnecting"),
+             "ok" if _ws_ready() else "warn"],
+            ["Held until connect", f"{_held['n']} subscription(s)" if _held["n"] else "none", "warn" if _held["n"] else "ok"],
+            ["Last contract tick", _fmt_age(a_any), live(a_any, 30)],
+            ["Last index tick", _fmt_age(a_idx), live(a_idx, 15)],
+            ["Instruments ticking (60s)", f"{n_ticking}", ""],
+            ["Subscribed", f"{len(_subscribed)} of {_MAX_TOKENS} allowed ({n_full} full-mode with book, {n_eq} equities)",
+             "warn" if len(_subscribed) > 0.9 * _MAX_TOKENS else "ok"],
+            ["Never answered", f"{wd.get('price_unconfirmed', 0)}" + (f" ({', '.join(x.split(':')[-1] for x in wd.get('price_unconfirmed_sample') or [])})" if wd.get('price_unconfirmed') else ""),
+             "warn" if wd.get("price_unconfirmed") else "ok"],
+            ["Connects", f"{_reconnects['n']} (last {_fmt_age(_age(_reconnects['last']))})", ""],
+            ["Watchdog", f"{wd.get('heals', 0)} re-subscribe(s), {wd.get('forced_reconnects', 0)} reopen(s), "
+                         f"next reopen no sooner than {int(wd.get('next_reopen_gap_s', 300) / 60)} min apart", ""],
+            ["Stream errors (10 min)", f"{rf.get('total', 0)}" + (f" - last: {((rf.get('last') or {}).get('text') or '')[:90]}" if rf.get("total") else ""),
+             "warn" if rf.get("total") else "ok"],
+            ["Ticks received", f"{st.get('ticks', 0):,}", ""],
+        ]},
+        {"title": "API usage today (Kite: quote 1/s, history 3/s, other 10/s - flat monthly plan)", "rows": [
+            ["REST calls", f"{rest.get('n', 0):,}", ""],
+            *[[f"  {k}", f"{v:,}", ""] for k, v in sorted(by.items(), key=lambda kv: -kv[1])],
+            ["Errors (10 min)", f"{len(errs10)}" + (f" - last: {errs10[-1]['kind']} {errs10[-1]['err']}" if errs10 else ""),
+             "warn" if errs10 else "ok"],
+            ["Quote cache", f"{len(_qcache)} contracts (reused {_CHAIN_REST_TTL:.0f}s; 300s with the market shut)", ""],
+            ["History cache", f"{len(_history_cache)} series (TTL {os.environ.get('ZERODHA_HISTORY_TTL', '60')}s)", ""],
+            ["Constituents", f"{_eq_stats.get('socket', 0)} from the stream, {_eq_stats.get('rest', 0)} needed REST "
+                             f"({_eq_stats.get('rest_calls', 0)} quote call(s) so far)", ""],
+        ]},
+        {"title": "Instrument lists (daily, cached on disk)", "rows": [
+            *[[x, f"{_inst['rows'].get(x, 0)} rows · {_inst['day'].get(x) or '—'} · fetched "
+                  f"{_fmt_age(_age(_inst['fetched'].get(x)))}"
+                  + (" (provisional - before Kite's 08:30 update)" if _inst['fetched'].get(x) and _fetched_early(_inst['fetched'][x]) else ""),
+               "ok" if _inst["day"].get(x) == _ist_today() else "warn"] for x in sorted(_inst["day"])],
+            ["Index symbols", ", ".join(f"{k}={v.split(':', 1)[-1]}" for k, v in sorted(_idx_key.items())) or "—", ""],
+        ]},
+        {"title": "OI change baseline (Kite publishes no previous OI)", "rows": [
+            ["Previous session", _oi_prev.get("day") or "—", "ok" if _oi_prev.get("day") else "warn"],
+            ["Contracts with a previous close", f"{len(_oi_prev.get('oi') or {})}"
+             + (" (complete)" if _oi_prev.get("complete") else " (partial)"), "ok" if _oi_prev.get("complete") else "warn"],
+            ["Captured before 09:15 today", f"{len(_oi_preopen['oi']) if _oi_preopen['day'] == _ist_today() else 0}", ""],
+            ["Back-fill queue", f"{len(_oi_backfill_q)} waiting, {len(_oi_tried)} done today", ""],
+        ]},
+    ]
+    bad = sum(1 for s_ in sections for r in s_["rows"] if r[2] == "bad")
+    warn = sum(1 for s_ in sections for r in s_["rows"] if r[2] == "warn")
+    return {"id": "zerodha", "name": "Zerodha Kite Connect",
+            "verdict": "bad" if bad else "warn" if warn else "ok",
+            "summary": (f"{bad} problem(s)" if bad else f"{warn} warning(s)" if warn else "healthy")
+                       + ("" if mkt else " · market closed"),
+            "sections": sections,
+            "log": wd.get("log") or []}
