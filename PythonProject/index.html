@@ -107,17 +107,20 @@
   /* ---- Tiny corner controls ---- */
   #controls {
     position: absolute;
-    top: 6px;
-    right: 6px;
+    bottom: 6px;
+    left: 6px;
     z-index: 2;
   }
   .btn {
     display: inline-block;
-    margin-left: 8px;
-    padding: 5px 10px;
+    vertical-align: middle;
+    margin-right: 8px;
+    padding: 6px;
+    width: 42px;
+    height: 42px;
     font-family: inherit;
-    font-size: 18px;
-    line-height: 1.2;
+    font-size: 0;
+    line-height: 0;
     background: #fff;
     color: #000;
     border: 2px solid #000;
@@ -137,8 +140,18 @@
 <body>
 <div id="stage">
   <div id="controls">
-    <button type="button" class="btn" id="themeBtn">DARK</button>
-    <button type="button" class="btn" id="rotateBtn">ROTATE</button>
+    <button type="button" class="btn" id="themeBtn" title="Dark / Bright" aria-label="Toggle theme">
+      <svg viewBox="0 0 24 24" width="26" height="26">
+        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/>
+        <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>
+      </svg>
+    </button>
+    <button type="button" class="btn" id="rotateBtn" title="Rotate" aria-label="Rotate">
+      <svg viewBox="0 0 24 24" width="26" height="26">
+        <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M20.5 3.5v5.5h-5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
   </div>
   <div id="clock">
     <div id="time"><span id="hms">--:--:--</span><span id="ampm">--</span></div>
@@ -271,7 +284,7 @@
     // Split: clock gets the top ~42%, calendar the rest
     var clockH = sh * 0.42;
     var calTop = clockH;
-    var calH = sh - calTop;
+    var calH = sh - calTop - 54; // keep a strip at the bottom for the icon buttons
 
     // Clock fonts: time + date (~1.6 lines of time height total)
     var t = Math.floor(Math.min(sw / 5.4, clockH / 1.75));
@@ -279,7 +292,7 @@
     timeEl.style.fontSize = t + "px";
     dateEl.style.fontSize = df + "px";
     var blockH = t + df * 1.5;
-    clockEl.style.top = Math.max(48, Math.round((clockH - blockH) / 2) + 6) + "px";
+    clockEl.style.top = Math.max(16, Math.round((clockH - blockH) / 2) + 6) + "px";
 
     // Calendar font: 7 cols per ~31% width, 8 lines (title + header + 6 weeks)
     var colW = (sw * 0.31) / 7;
@@ -291,7 +304,7 @@
 
   function applyTheme() {
     document.body.className = state.dark ? "dark" : "";
-    themeBtn.innerHTML = state.dark ? "BRIGHT" : "DARK";
+    themeBtn.title = state.dark ? "Bright" : "Dark";
   }
 
   rotateBtn.onclick = function () {
