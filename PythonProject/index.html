@@ -78,7 +78,7 @@
     border-bottom: 1px solid #000;
     letter-spacing: 0.05em;
   }
-  .month.cur .mtitle { border-bottom-width: 3px; }
+  .month.cur .mtitle { text-decoration: underline; }
   body.dark .mtitle { border-bottom-color: #fff; }
 
   .month table {
@@ -166,7 +166,7 @@
   var IST_OFFSET_MS = 330 * 60 * 1000; // +5:30, IST has no DST
   var DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   var MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  var WEEK_HDR = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]; // Monday first
+  var WEEK_HDR = ["M", "T", "W", "T", "F", "S", "S"]; // Monday first
 
   var stage = document.getElementById("stage");
   var clockEl = document.getElementById("clock");
@@ -181,18 +181,54 @@
   var state = { rot: 0, dark: false };
   var lastDate = "";
 
+  // ---- Persistence: saved three ways, because the Kindle browser can drop any one of them ----
+  //  1. localStorage   2. cookie (10 years)   3. URL hash, e.g. #r90-d1 (survives in bookmarks)
+  // On load the first valid source wins: URL hash, then localStorage, then cookie.
+
+  function parseSetting(str) {
+    // format "r<angle>-d<0|1>"
+    if (!str) { return null; }
+    var m = /r(0|90|180|270)-d([01])/.exec(str);
+    return m ? { rot: parseInt(m[1], 10), dark: m[2] === "1" } : null;
+  }
+
+  function settingStr() {
+    return "r" + state.rot + "-d" + (state.dark ? "1" : "0");
+  }
+
+  function readCookie() {
+    var m = /(?:^|;\s*)clk=([^;]+)/.exec(document.cookie || "");
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  function readStorage() {
+    try { return window.localStorage.getItem("clk"); } catch (e) { return null; }
+  }
+
   function load() {
-    try {
-      var r = parseInt(window.localStorage.getItem("clk_rot"), 10);
-      if (r === 0 || r === 90 || r === 180 || r === 270) { state.rot = r; }
-      state.dark = window.localStorage.getItem("clk_dark") === "1";
-    } catch (e) { /* storage unavailable: use defaults */ }
+    var s = parseSetting(window.location.hash) ||
+            parseSetting(readStorage()) ||
+            parseSetting(readCookie());
+    if (s) { state.rot = s.rot; state.dark = s.dark; }
   }
 
   function save() {
+    var v = settingStr();
+
+    try { window.localStorage.setItem("clk", v); } catch (e) { /* ignore */ }
+
     try {
-      window.localStorage.setItem("clk_rot", String(state.rot));
-      window.localStorage.setItem("clk_dark", state.dark ? "1" : "0");
+      var exp = new Date(new Date().getTime() + 3650 * 86400000).toUTCString();
+      document.cookie = "clk=" + encodeURIComponent(v) + "; expires=" + exp +
+                        "; max-age=315360000; path=/; SameSite=Lax";
+    } catch (e) { /* ignore */ }
+
+    try {
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, "", "#" + v);
+      } else {
+        window.location.replace("#" + v);
+      }
     } catch (e) { /* ignore */ }
   }
 
@@ -284,7 +320,7 @@
     // Split: clock gets the top ~42%, calendar the rest
     var clockH = sh * 0.42;
     var calTop = clockH;
-    var calH = sh - calTop - 54; // keep a strip at the bottom for the icon buttons
+    var calH = sh - calTop - 62; // keep a strip at the bottom for the icon buttons
 
     // Clock fonts: time + date (~1.6 lines of time height total)
     var t = Math.floor(Math.min(sw / 5.4, clockH / 1.75));
@@ -296,7 +332,7 @@
 
     // Calendar font: 7 cols per ~31% width, 8 lines (title + header + 6 weeks)
     var colW = (sw * 0.31) / 7;
-    var cf = Math.floor(Math.min(colW / 1.55, calH / 12.5));
+    var cf = Math.floor(Math.min(colW / 1.35, calH / 12.5));
     if (cf < 9) { cf = 9; }
     calEl.style.fontSize = cf + "px";
     calEl.style.top = Math.round(calTop + Math.max(0, (calH - cf * 12) / 2)) + "px";
@@ -319,10 +355,19 @@
     save();
   };
 
+  window.onhashchange = function () {
+    var s = parseSetting(window.location.hash);
+    if (s && (s.rot !== state.rot || s.dark !== state.dark)) {
+      state.rot = s.rot; state.dark = s.dark;
+      applyTheme(); layout(); save();
+    }
+  };
+
   window.onresize = layout;
   window.onorientationchange = function () { setTimeout(layout, 300); };
 
   load();
+  save();          // sync all three stores (and the URL) with what was loaded
   applyTheme();
   layout();
   tick();
