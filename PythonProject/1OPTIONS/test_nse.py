@@ -1340,7 +1340,7 @@ console.log(JSON.stringify({ a, b, one: (svg.match(/emax-line/g) || []).length =
           'id="emaXFast" class="ohlc-inp" value="5"' in dsrc and 'id="emaXSlow" class="ohlc-inp" value="13"' in dsrc
           and dsrc.index('id="chk_ema200"') < dsrc.index('id="emaXFast"') < dsrc.index('id="chk_vwap"'))
     check("ema cross: defaults 5/13 in the chart config, which Reset clears",
-          dsrc.count("emaX: true }, emaX: { fast: 5, slow: 13 } }") == 2 and "'chartCfg'," in dsrc)
+          dsrc.count("emaX: true, ttr: true }, emaX: { fast: 5, slow: 13 } }") == 2 and "'chartCfg'," in dsrc)
     check("ema cross: drawn by the candle/Heikin Ashi renderer and by Renko", dsrc.count("svg += _emaCrossSvg(") == 2)
 
 
@@ -2088,11 +2088,116 @@ def test_true_black_widgets():
           not _re.search(r'fill="rgba\((14,17,23|20,24,32|30,36,48),', d) and 'fill="#1a1d23"' not in d and 'background:#1a1d23' not in d)
 
 
+def _ttr_reference(bars):
+    """Independent Python re-implementation of the Pine script's maths, used
+    to check the dashboard's port bar for bar."""
+    import math as _m
+    L, OFF, SIG, DL, DM, SL, SM, AL = 34, 0.85, 6.0, 34, 0.65, 3, 0.08, 14
+    c = [b["c"] for b in bars]; h = [b["h"] for b in bars]; l = [b["l"] for b in bars]; n = len(c)
+    mm, s = OFF * (L - 1), L / SIG
+    w = [_m.exp(-((i - mm) ** 2) / (2 * s * s)) for i in range(L)]
+    alma = [None] * n
+    for t in range(L - 1, n):
+        alma[t] = sum(c[t - (L - 1 - i)] * w[i] for i in range(L)) / sum(w)
+    dev = [None] * n
+    for t in range(DL - 1, n):
+        win = c[t - DL + 1:t + 1]; mu = sum(win) / DL
+        dev[t] = _m.sqrt(sum((x - mu) ** 2 for x in win) / DL)
+    tr = [h[0] - l[0]] + [max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1])) for i in range(1, n)]
+    atr = [None] * n
+    for t in range(n):
+        if t == AL - 1:
+            atr[t] = sum(tr[:AL]) / AL
+        elif t >= AL:
+            atr[t] = (atr[t - 1] * (AL - 1) + tr[t]) / AL
+    trend, flips, pos = 0, [], None
+    for t in range(n):
+        a, d, at = alma[t], dev[t], atr[t]
+        a0 = alma[t - SL] if t >= SL else None
+        slope = ((a - a0) / at if at > 0 else 0.0) if None not in (a, a0, at) else None
+        bull = slope is not None and d is not None and slope > SM and c[t] > a + d * DM
+        bear = slope is not None and d is not None and slope < -SM and c[t] < a - d * DM
+        fl = 0
+        if trend != 1 and bull:
+            trend, fl = 1, 1
+        elif trend != -1 and bear:
+            trend, fl = -1, -1
+        if fl:
+            flips.append((t, fl))
+            dr = fl
+            win = bars[max(0, t - 12):t]
+            ss = (min(b["l"] for b in win) if dr == 1 else max(b["h"] for b in win)) if win else None
+            raw = None if ss is None else (c[t] - ss if dr == 1 else ss - c[t])
+            mn, mx = at * 0.75, at * 3.0
+            risk = min(max(mn if raw is None else raw, mn), mx)
+            pos = {"bar": t, "dir": dr, "entry": c[t], "stop": c[t] - dr * risk, "risk": risk, "hits": [False] * 4, "end": None}
+        if pos and pos["end"] is None:
+            if t > pos["bar"] and (l[t] <= pos["stop"] if pos["dir"] == 1 else h[t] >= pos["stop"]):
+                pos["end"] = t
+            else:
+                for i in range(4):
+                    tp = pos["entry"] + pos["dir"] * pos["risk"] * (i + 1)
+                    if not pos["hits"][i] and (h[t] >= tp if pos["dir"] == 1 else l[t] <= tp):
+                        pos["hits"][i] = True
+    return {"alma": alma, "dev": dev, "atr": atr, "flips": flips, "pos": pos}
+
+
+def test_trend_target_ribbon():
+    """The dashboard's port of Trend Target Ribbon matches an independent
+    implementation of the Pine maths: ALMA, deviation, ATR, every trend flip,
+    and the position's entry, stop, risk and target hits. Settings as chosen."""
+    import subprocess, json as _json, math as _m, random as _r
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    i0 = d.index("  const TTR = {"); j0 = d.index("  const _ttrCache")
+    _r.seed(11)
+    bars, p = [], 25000.0
+    for i in range(400):                      # trend up, chop, trend down, chop
+        drift = 2.2 if i < 110 else (0 if i < 190 else (-2.6 if i < 300 else 0))
+        o = p; p = p + drift + _r.gauss(0, 4); hi = max(o, p) + abs(_r.gauss(0, 2)); lo = min(o, p) - abs(_r.gauss(0, 2))
+        bars.append({"t": 1000 + 60 * i, "o": o, "h": hi, "l": lo, "c": p})
+    harness = d[i0:j0] + grab("_ttrCompute") + f"""
+const r = _ttrCompute({_json.dumps(bars)});
+console.log(JSON.stringify({{alma: r.alma, dev: r.dev, atr: r.atr,
+  flips: r.flip.map((f, i) => f ? [i, f] : null).filter(Boolean), pos: r.positions, TTR}}));
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        js = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("trend ribbon: harness ran", False, (res.stderr or res.stdout)[:400]); return
+    ref = _ttr_reference(bars)
+    close = lambda a, b: (a is None and b is None) or (a is not None and b is not None and abs(a - b) < 1e-6)
+    check("trend ribbon: ALMA(34, 0.85, 6), stdev(34) and ATR(14) match the Pine maths on every bar",
+          all(close(a, b) for a, b in zip(js["alma"], ref["alma"])) and all(close(a, b) for a, b in zip(js["dev"], ref["dev"]))
+          and all(close(a, b) for a, b in zip(js["atr"], ref["atr"])))
+    check("trend ribbon: every trend flip on the same bar and side", [tuple(x) for x in js["flips"]] == ref["flips"] and len(ref["flips"]) >= 2,
+          f"js={js['flips']} ref={ref['flips']}")
+    jp, rp = js["pos"][-1], ref["pos"]
+    check("trend ribbon: the latest position's entry, stop, 1R and target hits match",
+          jp["entryBar"] == rp["bar"] and jp["dir"] == rp["dir"] and abs(jp["entry"] - rp["entry"]) < 1e-9
+          and abs(jp["stop"] - rp["stop"]) < 1e-9 and abs(jp["risk"] - rp["risk"]) < 1e-9 and jp["hits"] == rp["hits"]
+          and (jp["endBar"] == rp["end"]), f"{jp} vs {rp}")
+    T = js["TTR"]
+    check("trend ribbon: settings - labels off, candle colouring off, Trend Glow columns of 4 in the trend colour, one position",
+          T["showLabels"] is False and T["paintBars"] is False and T["glow"]["style"] == "columns"
+          and T["glow"]["width"] == 4 and T["glow"]["color"] == "trend" and T["keepPositions"] == 1 and len(js["pos"]) == 1)
+    check("trend ribbon: drawn on the candle chart with a toggle (on by default)",
+          'id="chk_ttr"' in d and "if (_ttrL) svg += _ttrL.under;" in d and "if (_ttrL) svg += _ttrL.over;" in d
+          and d.count("emaX: true, ttr: true }") == 2)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

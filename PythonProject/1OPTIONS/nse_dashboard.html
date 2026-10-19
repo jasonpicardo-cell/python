@@ -2295,6 +2295,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_ema200"> EMA200</label>
                 <span style="display:inline-flex;gap:3px;align-items:center;border-left:1px solid rgba(255,255,255,0.12);padding-left:6px;" title="EMA crossover lines on the chart: a GREEN vertical line where the fast EMA closes above the slow one (bullish), a RED one where it closes below (bearish). Judged on closed candles of the chart interval, so a line never appears and then vanishes. Drawn on Candles, Heikin Ashi (real closes, not HA averages) and Renko (on the brick in force at that time). Defaults 5 / 13.">
                   <label><input type="checkbox" id="chk_emaX"> EMA cross</label>
+                  <label title="Trend Target Ribbon (BOSWaves port): ALMA trend ribbon, Trend Glow columns in the trend colour, flip diamonds, and the latest position's entry, stop and 1R-4R targets. Labels and candle colouring off."><input type="checkbox" id="chk_ttr"> Trend ribbon</label>
                   fast <input type="number" id="emaXFast" class="ohlc-inp" value="5" min="1" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
                   slow <input type="number" id="emaXSlow" class="ohlc-inp" value="13" min="2" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
                 </span>
@@ -17454,8 +17455,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true }, emaX: { fast: 5, slow: 13 } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true }, emaX: { fast: 5, slow: 13 } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show, emaX: _chart.emaX })); } catch (_) {} }
 
@@ -17570,6 +17571,197 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     for (let i = seedN; i < closes.length; i++) { prev = closes[i] * k + prev * (1 - k); out[i] = prev; }
     return out;
   }
+
+  // ══ TREND TARGET RIBBON (port of "Trend Target Ribbon [BOSWaves]", MPL-2.0) ══
+  // Same calculation as the TradingView script, bar for bar:
+  //   ALMA(close, 34, 0.85, 6) with +/- 0.65 x stdev(34) confirmation bands;
+  //   a trend needs the ALMA's 3-bar slope beyond 0.08 ATR(14) AND a close
+  //   outside the band. Each flip opens a position: entry at the close, stop
+  //   at the 12-bar swing (clamped to 0.75-3 ATR), targets at 1R..4R,
+  //   projected 30 bars ahead, stopped out on a touch, targets ticked on hit.
+  // Settings as chosen: position labels OFF, candle colouring OFF, Trend Glow
+  // drawn as COLUMNS of thickness 4 in the trend colour, one position kept.
+  // Computed on the REAL candles (Heikin Ashi shows the same signals) and on
+  // closed bars only, so a flip never appears mid-bar and then vanishes.
+  const TTR = {
+    almaLen: 34, almaOffset: 0.85, almaSigma: 6.0, devLen: 34, devMult: 0.65,
+    slopeLen: 3, slopeMin: 0.08, atrLen: 14,
+    stopLookback: 12, minStopAtr: 0.75, maxStopAtr: 3.0, targetCount: 4, zonePct: 0.06,
+    approachR: 0.65, extendBars: 30, keepPositions: 1,
+    showLabels: false, paintBars: false,
+    // Trend Glow as columns, thickness 4, coloured by the trend - green in a
+    // bull trend, pink-red in a bear trend, grey before the first one - at
+    // the plot's own 86% transparency, as TradingView draws it
+    glow: { style: 'columns', width: 4, color: 'trend', opacity: 0.14 },
+    buy: '#00FF00', sell: '#FF0066', tp: '#00FF00', sl: '#FF0066', white: '#FFFFFF', neutral: '#555555',
+  };
+  const _ttrCache = { key: '', v: null };
+  const _rgba = (hex, transp) => {
+    const h = hex.replace('#', ''); const n = parseInt(h, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${(1 - Math.max(0, Math.min(100, transp)) / 100).toFixed(3)})`;
+  };
+  function _ttrCompute(bars) {
+    const P = TTR, n = bars.length;
+    const c = bars.map(b => b.c), h = bars.map(b => b.h), l = bars.map(b => b.l);
+    // ALMA exactly as Pine's ta.alma (floor = false)
+    const m = P.almaOffset * (P.almaLen - 1), sg = P.almaLen / P.almaSigma;
+    const wts = []; let norm = 0;
+    for (let i = 0; i < P.almaLen; i++) { const w = Math.exp(-((i - m) ** 2) / (2 * sg * sg)); wts.push(w); norm += w; }
+    const alma = new Array(n).fill(null), dev = new Array(n).fill(null), atr = new Array(n).fill(null);
+    for (let t = P.almaLen - 1; t < n; t++) {
+      let sum = 0;
+      for (let i = 0; i < P.almaLen; i++) sum += c[t - (P.almaLen - 1 - i)] * wts[i];
+      alma[t] = sum / norm;
+    }
+    for (let t = P.devLen - 1; t < n; t++) {               // ta.stdev: population
+      let s1 = 0; for (let i = t - P.devLen + 1; i <= t; i++) s1 += c[i];
+      const mu = s1 / P.devLen; let s2 = 0;
+      for (let i = t - P.devLen + 1; i <= t; i++) s2 += (c[i] - mu) ** 2;
+      dev[t] = Math.sqrt(s2 / P.devLen);
+    }
+    const tr = c.map((_, i) => i === 0 ? h[0] - l[0] : Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])));
+    for (let t = 0; t < n; t++) {                           // ta.atr = RMA of true range
+      if (t === P.atrLen - 1) atr[t] = tr.slice(0, P.atrLen).reduce((a, b) => a + b, 0) / P.atrLen;
+      else if (t >= P.atrLen) atr[t] = (atr[t - 1] * (P.atrLen - 1) + tr[t]) / P.atrLen;
+    }
+    let trend = 0;
+    const out = { alma, dev, atr, trend: new Array(n).fill(0), flip: new Array(n).fill(0), edge: new Array(n).fill(null),
+                  mid: new Array(n).fill(null), almaDraw: new Array(n).fill(null), conv: new Array(n).fill(0), positions: [] };
+    let pos = null;
+    for (let t = 0; t < n; t++) {
+      const a = alma[t], d = dev[t], at = atr[t], a0 = t >= P.slopeLen ? alma[t - P.slopeLen] : null;
+      const slope = (a != null && a0 != null && at != null) ? (at > 0 ? (a - a0) / at : 0) : null;
+      const up = (a != null && d != null) ? a + d * P.devMult : null, dn = (a != null && d != null) ? a - d * P.devMult : null;
+      const bullSetup = slope != null && up != null && slope > P.slopeMin && c[t] > up;
+      const bearSetup = slope != null && dn != null && slope < -P.slopeMin && c[t] < dn;
+      let fl = 0;
+      if (trend !== 1 && bullSetup) { trend = 1; fl = 1; }
+      else if (trend !== -1 && bearSetup) { trend = -1; fl = -1; }
+      out.trend[t] = trend; out.flip[t] = fl;
+      if (a != null && at != null) {
+        const distance = at > 0 ? Math.abs(c[t] - a) / at : 0;
+        out.conv[t] = Math.max(0, Math.min(1, Math.abs(slope || 0) * 2 + distance * 0.35));
+      }
+      if (a != null && d != null) {
+        const edge = trend === 1 ? a - d * 0.55 : trend === -1 ? a + d * 0.55 : a;
+        if (!fl) { out.edge[t] = edge; out.mid[t] = (a + edge) / 2; out.almaDraw[t] = a; }
+      }
+      // ── positions ──
+      if (fl && pos && !pos.ended) { pos.ended = true; pos.endBar = t; pos.endReason = 'flip'; }
+      if (fl) {
+        const dir = trend === 1 ? 1 : -1;
+        const lo0 = Math.max(0, t - P.stopLookback);
+        const win = t >= 1 ? bars.slice(lo0, t) : [];
+        const structStop = win.length ? (dir === 1 ? Math.min(...win.map(b => b.l)) : Math.max(...win.map(b => b.h))) : null;
+        const raw = structStop == null ? null : (dir === 1 ? c[t] - structStop : structStop - c[t]);
+        const minR = (at || 0) * P.minStopAtr, maxR = (at || 0) * P.maxStopAtr;
+        const risk = Math.min(Math.max(raw == null ? minR : raw, minR), maxR);
+        pos = { dir, entryBar: t, entry: c[t], stop: c[t] - dir * risk, risk, ended: false, endBar: null, endReason: null,
+                hits: new Array(P.targetCount).fill(false), hitBar: new Array(P.targetCount).fill(null) };
+        out.positions.push(pos);
+        if (out.positions.length > P.keepPositions) out.positions.shift();
+      }
+      if (pos && !pos.ended) {
+        const stopped = t > pos.entryBar && (pos.dir === 1 ? l[t] <= pos.stop : h[t] >= pos.stop);
+        if (stopped) { pos.ended = true; pos.endBar = t; pos.endReason = 'stop'; }
+        else for (let i = 0; i < P.targetCount; i++) {
+          const tp = pos.entry + pos.dir * pos.risk * (i + 1);
+          if (!pos.hits[i] && (pos.dir === 1 ? h[t] >= tp : l[t] <= tp)) { pos.hits[i] = true; pos.hitBar[i] = t; }
+        }
+      }
+    }
+    out.lastClose = c[n - 1];
+    return out;
+  }
+  function _ttrState() {
+    if (_chart.show?.ttr === false) return null;
+    const all = _chart.candles || [];
+    const bars = _chart.liveBar ? all.slice(0, -1) : all;
+    if (bars.length < TTR.almaLen + 2) return null;
+    const lb = bars[bars.length - 1];
+    const key = `${bars.length}|${bars[0].t}|${lb.t}|${lb.c}|${_chart.interval}`;
+    if (_ttrCache.key !== key) { _ttrCache.key = key; _ttrCache.v = { bars, r: _ttrCompute(bars) }; }
+    return _ttrCache.v;
+  }
+  // xOfBar(i) for a bar index, xOfSlotAhead(k) for k bars past the last one
+  function _ttrSvg(xOfBar, xAhead, y, lo, hi, top, bottom, right) {
+    const st = _ttrState();
+    if (!st) return null;
+    const { bars, r } = st, P = TTR, n = bars.length;
+    const col = t => r.trend[t] === 1 ? P.buy : r.trend[t] === -1 ? P.sell : P.neutral;
+    const inY = v => v != null && v >= lo && v <= hi;
+    const clampY = v => y(Math.max(lo, Math.min(hi, v)));
+    let under = '', over = '';
+    // Trend Glow as COLUMNS: from the ribbon edge down to the bottom of the pane
+    const cwid = P.glow.width;
+    for (let t = 0; t < n; t++) {
+      const e = r.edge[t];
+      if (e == null || e < lo) continue;
+      const yy = clampY(e), xx = xOfBar(t);
+      const gc = P.glow.color === 'trend' ? col(t) : P.glow.color;
+      under += `<rect class="ttr-glow" x="${(xx - cwid / 2).toFixed(1)}" y="${yy.toFixed(1)}" width="${cwid}" height="${Math.max(0, bottom - yy).toFixed(1)}" fill="${gc}" opacity="${P.glow.opacity}"/>`;
+    }
+    // ribbon fills: edge<->mid (84% transparent), mid<->alma (93%)
+    for (let t = 1; t < n; t++) {
+      const ok = k => r.edge[k] != null && r.mid[k] != null && r.almaDraw[k] != null;
+      if (!ok(t) || !ok(t - 1)) continue;
+      if (![r.edge[t], r.edge[t - 1], r.almaDraw[t], r.almaDraw[t - 1]].every(inY)) continue;
+      const x0 = xOfBar(t - 1), x1 = xOfBar(t), cl = col(t);
+      under += `<polygon points="${x0.toFixed(1)},${y(r.edge[t - 1]).toFixed(1)} ${x1.toFixed(1)},${y(r.edge[t]).toFixed(1)} ${x1.toFixed(1)},${y(r.mid[t]).toFixed(1)} ${x0.toFixed(1)},${y(r.mid[t - 1]).toFixed(1)}" fill="${_rgba(cl, 84)}"/>`;
+      under += `<polygon points="${x0.toFixed(1)},${y(r.mid[t - 1]).toFixed(1)} ${x1.toFixed(1)},${y(r.mid[t]).toFixed(1)} ${x1.toFixed(1)},${y(r.almaDraw[t]).toFixed(1)} ${x0.toFixed(1)},${y(r.almaDraw[t - 1]).toFixed(1)}" fill="${_rgba(cl, 93)}"/>`;
+      // Trend Edge (width 3) and the ALMA core (width 1), per segment so the
+      // colour and transparency follow the conviction bar by bar
+      const edgeT = Math.round(82 - r.conv[t] * 16), coreT = Math.round(50 - r.conv[t] * 35);
+      over += `<line x1="${x0.toFixed(1)}" y1="${y(r.edge[t - 1]).toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y(r.edge[t]).toFixed(1)}" stroke="${_rgba(cl, edgeT)}" stroke-width="3" stroke-linecap="round"/>`;
+      over += `<line x1="${x0.toFixed(1)}" y1="${y(r.almaDraw[t - 1]).toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y(r.almaDraw[t]).toFixed(1)}" stroke="${_rgba(P.white, coreT)}" stroke-width="1"/>`;
+    }
+    // positions (only the latest - "Positions On Chart" = 1)
+    for (const pos of r.positions) {
+      const x0 = xOfBar(pos.entryBar);
+      const live = !pos.ended;
+      const x1 = Math.min(right, live ? xAhead(P.extendBars - (n - 1 - pos.entryBar)) : xOfBar(pos.endBar));
+      if (!(x1 > x0)) continue;
+      const act = pos.dir === 1 ? P.buy : P.sell;
+      const stopped = pos.endReason === 'stop';
+      const hl = (v, colr, w, title) => inY(v) ? `<line x1="${x0.toFixed(1)}" y1="${y(v).toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${colr}" stroke-width="${w}">${title ? `<title>${escapeHtml(title)}</title>` : ''}</line>` : '';
+      const box = (a, b, fill, stroke) => {
+        const yA = clampY(Math.max(a, b)), yB = clampY(Math.min(a, b));
+        return yB - yA > 0.3 ? `<rect x="${x0.toFixed(1)}" y="${yA.toFixed(1)}" width="${(x1 - x0).toFixed(1)}" height="${(yB - yA).toFixed(1)}" fill="${fill}"${stroke ? ` stroke="${stroke}" stroke-width="1"` : ''}/>` : '';
+      };
+      under += box(pos.entry, pos.stop, _rgba(P.sl, live ? 94 : stopped ? 87 : 97));
+      let prev = pos.entry;
+      for (let i = 0; i < P.targetCount; i++) {
+        const tp = pos.entry + pos.dir * pos.risk * (i + 1), hit = pos.hits[i];
+        const prox = Math.max(0, Math.min(1, 1 - Math.abs(r.lastClose - tp) / Math.max(pos.risk * P.approachR, 0.05)));
+        const glowT = live ? (hit ? 60 : Math.round(95 - prox * 30)) : (hit ? 80 : stopped ? 95 : 94);
+        const coreT = live ? (hit ? 4 : Math.round(88 - prox * 72)) : (hit ? 38 : stopped ? 82 : 72);
+        const zoneT = live ? (hit ? 84 : Math.round(98 - prox * 10)) : (hit ? 93 : stopped ? 99 : 98);
+        const bandT = live ? (hit ? Math.max(85, 90 - i * 2) : Math.round(97 - prox * 5)) : (hit ? 95 : 99);
+        const zh = pos.risk * P.zonePct;
+        under += box(prev, tp, _rgba(P.tp, bandT));
+        under += box(tp + zh, tp - zh, _rgba(P.tp, zoneT), _rgba(P.tp, Math.max(25, zoneT - 12)));
+        over += hl(tp, _rgba(P.tp, glowT), 8);
+        over += hl(tp, hit ? _rgba(P.white, coreT) : _rgba(P.tp, coreT), 1,
+                   `T${i + 1} ${i + 1}R ${fmtPrice(tp)}${hit ? ' - hit' : ''}`);
+        prev = tp;
+      }
+      over += hl(pos.entry, _rgba(act, live ? 76 : 88), 8);
+      over += hl(pos.entry, _rgba(P.white, live ? 10 : 50), 1, `${pos.dir === 1 ? 'LONG' : 'SHORT'} entry ${fmtPrice(pos.entry)} · risk ${pos.risk.toFixed(1)} pts (1R)`);
+      over += hl(pos.stop, _rgba(P.sl, live ? 74 : stopped ? 48 : 88), 8);
+      over += hl(pos.stop, stopped ? _rgba(P.white, 5) : _rgba(P.sl, live ? 2 : 48), 2, `SL -1R ${fmtPrice(pos.stop)}${stopped ? ' - stopped' : ''}`);
+    }
+    // flip diamonds: bull below the bar, bear above
+    for (let t = 0; t < n; t++) {
+      const f = r.flip[t];
+      if (!f) continue;
+      const b = bars[t], xx = xOfBar(t);
+      const yy = f > 0 ? Math.min(bottom - 4, y(Math.max(lo, b.l)) + 9) : Math.max(top + 4, y(Math.min(hi, b.h)) - 9);
+      const cl = f > 0 ? P.buy : P.sell;
+      over += `<path d="M${xx.toFixed(1)},${(yy - 4.5).toFixed(1)} L${(xx + 4).toFixed(1)},${yy.toFixed(1)} L${xx.toFixed(1)},${(yy + 4.5).toFixed(1)} L${(xx - 4).toFixed(1)},${yy.toFixed(1)} Z" fill="${cl}"><title>${f > 0 ? 'Bull' : 'Bear'} trend started (Trend Target Ribbon)</title></path>`;
+    }
+    return { under, over };
+  }
+
   // ══ EMA CROSSOVER LINES ═══════════════════════════════════════════
   // A vertical line at every candle where the fast EMA closed on the other
   // side of the slow one: GREEN when it crossed above (bullish), RED when it
@@ -29906,6 +30098,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
 
     let svg = orbSvg + volSvg + gapSvg;
+    // Trend Target Ribbon: fills, glow columns and zones under the candles
+    let _ttrL = null;
+    try {
+      const _rawN = (_chart.candles || []).length;
+      const _slotX = sl => padL + (sl + 0.5) / slots * (W - padL - padR);
+      _ttrL = _ttrSvg(i => x(i),
+        k => { const lastI = Math.max(0, (_chart.liveBar ? _rawN - 2 : _rawN - 1)); return _slotX(slotOf(cs[Math.min(lastI, cs.length - 1)].t) + k); },
+        y, lo, hi, padT, H - padB, W - padR);
+      if (_ttrL) svg += _ttrL.under;
+    } catch (e) { console.warn('[ttr]', e.message); }
     // Real candles at the same indices as cs. On Heikin Ashi cs is the
     // transformed series, and anything about traded prices - VWAP, its
     // bands, the day type - has to come from the real one.
@@ -30259,6 +30461,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // now carries the one conclusion; the detail lives in its own panels.
       _chart._mqBox = '';
     } catch (e) { console.warn('[desk]', e.message); }
+    if (_ttrL) svg += _ttrL.over;
     try { svg += _turnLinesSvg(W, padL, padR, padT, H - padB); } catch (_) {}
     try { svg += _emaCrossSvg(t => padL + (slotOf(t) + 0.5) / slots * (W - padL - padR), padT, H - padB); } catch (_) {}
     // user alerts last, so they sit above the levels they were set against
@@ -31246,12 +31449,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       // new overlays default ON: a saved config predates them, and its
       // missing key must not read as a deliberate "off"
-      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX'].includes(k)) _chart.show[k] = true;
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
     }
