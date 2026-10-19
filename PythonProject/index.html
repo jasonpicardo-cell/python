@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>IST Clock</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #fff;
+    color: #000;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: rgba(0,0,0,0);
+    touch-action: manipulation;
+  }
+  body.dark { background: #000; color: #fff; }
+
+  /* Rotating container; size/position set by JS */
+  #stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    -webkit-transform-origin: 50% 50%;
+    transform-origin: 50% 50%;
+  }
+
+  #clock {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    -webkit-transform: translateY(-50%);
+    transform: translateY(-50%);
+    text-align: center;
+  }
+
+  #time {
+    font-weight: bold;
+    line-height: 1;
+    white-space: nowrap;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  #ampm {
+    font-size: 0.32em;
+    margin-left: 0.15em;
+    letter-spacing: 0;
+  }
+  #date {
+    font-weight: bold;
+    margin-top: 0.6em;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+  #tz {
+    margin-top: 0.5em;
+    white-space: nowrap;
+  }
+
+  #controls {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+  }
+  .btn {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 10px 16px;
+    min-width: 64px;
+    font-family: inherit;
+    font-size: 18px;
+    font-weight: bold;
+    background: #fff;
+    color: #000;
+    border: 3px solid #000;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  body.dark .btn {
+    background: #000;
+    color: #fff;
+    border-color: #fff;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="controls">
+    <button type="button" class="btn" id="themeBtn">DARK</button>
+    <button type="button" class="btn" id="rotateBtn">ROTATE</button>
+  </div>
+  <div id="clock">
+    <div id="time"><span id="hms">--:--:--</span><span id="ampm">--</span></div>
+    <div id="date">&nbsp;</div>
+    <div id="tz">India Standard Time (GMT+5:30)</div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ES5 only: Kindle's browser engine is old.
+  var IST_OFFSET_MS = 330 * 60 * 1000; // +5:30, IST has no DST
+  var DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+  var stage = document.getElementById("stage");
+  var timeEl = document.getElementById("time");
+  var hmsEl = document.getElementById("hms");
+  var ampmEl = document.getElementById("ampm");
+  var dateEl = document.getElementById("date");
+  var tzEl = document.getElementById("tz");
+  var rotateBtn = document.getElementById("rotateBtn");
+  var themeBtn = document.getElementById("themeBtn");
+
+  var state = { rot: 0, dark: false };
+  var lastDate = "";
+
+  function load() {
+    try {
+      var r = parseInt(window.localStorage.getItem("clk_rot"), 10);
+      if (r === 0 || r === 90 || r === 180 || r === 270) { state.rot = r; }
+      state.dark = window.localStorage.getItem("clk_dark") === "1";
+    } catch (e) { /* storage unavailable: use defaults */ }
+  }
+
+  function save() {
+    try {
+      window.localStorage.setItem("clk_rot", String(state.rot));
+      window.localStorage.setItem("clk_dark", state.dark ? "1" : "0");
+    } catch (e) { /* ignore */ }
+  }
+
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+
+  function tick() {
+    var now = new Date();
+    var ist = new Date(now.getTime() + IST_OFFSET_MS);
+
+    var h24 = ist.getUTCHours();
+    var h12 = h24 % 12;
+    if (h12 === 0) { h12 = 12; }
+
+    hmsEl.innerHTML = pad(h12) + ":" + pad(ist.getUTCMinutes()) + ":" + pad(ist.getUTCSeconds());
+    ampmEl.innerHTML = h24 < 12 ? "AM" : "PM";
+
+    var d = DAYS[ist.getUTCDay()] + " " + pad(ist.getUTCDate()) + "-" +
+            MONTHS[ist.getUTCMonth()] + "-" + ist.getUTCFullYear();
+    if (d !== lastDate) {
+      dateEl.innerHTML = d;
+      lastDate = d;
+    }
+
+    // Align next update to the start of the next second
+    var wait = 1000 - (new Date().getTime() % 1000) + 15;
+    setTimeout(tick, wait);
+  }
+
+  function setTransform(el, value) {
+    el.style.webkitTransform = value;
+    el.style.transform = value;
+  }
+
+  function layout() {
+    var W = window.innerWidth || document.documentElement.clientWidth;
+    var H = window.innerHeight || document.documentElement.clientHeight;
+    var sideways = (state.rot % 180) !== 0;
+    var sw = sideways ? H : W;
+    var sh = sideways ? W : H;
+
+    stage.style.width = sw + "px";
+    stage.style.height = sh + "px";
+    stage.style.left = Math.round((W - sw) / 2) + "px";
+    stage.style.top = Math.round((H - sh) / 2) + "px";
+    setTransform(stage, "rotate(" + state.rot + "deg)");
+
+    // Fit "12:34:56 PM" to the available width/height
+    var t = Math.floor(Math.min(sw / 5.4, sh / 3.2));
+    timeEl.style.fontSize = t + "px";
+    dateEl.style.fontSize = Math.max(18, Math.floor(Math.min(t * 0.26, sw / 13))) + "px";
+    tzEl.style.fontSize = Math.max(14, Math.floor(Math.min(t * 0.14, sw / 26))) + "px";
+  }
+
+  function applyTheme() {
+    document.body.className = state.dark ? "dark" : "";
+    themeBtn.innerHTML = state.dark ? "BRIGHT" : "DARK";
+  }
+
+  rotateBtn.onclick = function () {
+    state.rot = (state.rot + 90) % 360;
+    layout();
+    save();
+  };
+
+  themeBtn.onclick = function () {
+    state.dark = !state.dark;
+    applyTheme();
+    save();
+  };
+
+  window.onresize = layout;
+  window.onorientationchange = function () { setTimeout(layout, 300); };
+
+  load();
+  applyTheme();
+  layout();
+  tick();
+})();
+</script>
+</body>
+</html>
