@@ -90,7 +90,9 @@
     text-align: center;
     padding: 0.18em 0;
     line-height: 1.15;
+    border: 1px solid #000;
   }
+  body.dark .month th, body.dark .month td { border-color: #fff; }
   .month th { font-weight: bold; }
   .month td.today {
     background: #000;
@@ -105,20 +107,20 @@
   /* ---- Tiny corner controls ---- */
   #controls {
     position: absolute;
-    top: 4px;
-    right: 4px;
+    top: 6px;
+    right: 6px;
     z-index: 2;
   }
   .btn {
     display: inline-block;
-    margin-left: 4px;
-    padding: 2px 5px;
+    margin-left: 8px;
+    padding: 5px 10px;
     font-family: inherit;
-    font-size: 9px;
+    font-size: 18px;
     line-height: 1.2;
     background: #fff;
     color: #000;
-    border: 1px solid #000;
+    border: 2px solid #000;
     border-radius: 3px;
     cursor: pointer;
     outline: none;
@@ -277,7 +279,7 @@
     timeEl.style.fontSize = t + "px";
     dateEl.style.fontSize = df + "px";
     var blockH = t + df * 1.5;
-    clockEl.style.top = Math.max(22, Math.round((clockH - blockH) / 2) + 6) + "px";
+    clockEl.style.top = Math.max(48, Math.round((clockH - blockH) / 2) + 6) + "px";
 
     // Calendar font: 7 cols per ~31% width, 8 lines (title + header + 6 weeks)
     var colW = (sw * 0.31) / 7;
