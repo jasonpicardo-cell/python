@@ -2193,11 +2193,28 @@ console.log(JSON.stringify({{alma: r.alma, dev: r.dev, atr: r.atr,
           and d.count("emaX: true, ttr: true }") == 2)
 
 
+def test_ctx_clock():
+    d = open(os.path.join(HERE, "nse_dashboard.html")).read()
+    check("context clock: 12-hour IST with seconds, ticking every second",
+          "timeZone: 'Asia/Kolkata'" in d and "second: '2-digit', hour12: true" in d
+          and "document.querySelectorAll('.ctx-clock-t')" in d)
+    check("context clock: stretched to fill the whole pane as a grey watermark under the lines",
+          'class="ctx-clock-t"' in d and 'textLength="992"' in d and 'lengthAdjust="spacingAndGlyphs"' in d
+          and 'preserveAspectRatio="none"' in d and ".ctx-clock { position:absolute; inset:0; z-index:0; pointer-events:none;" in d
+          and "fill:#808080; opacity:var(--clockOp" in d and ".ctx-plot { position:relative; z-index:1; }" in d)
+    check("context clock: indicator lines keep a halo so they read over the digits",
+          ".ctx-plot svg { filter:drop-shadow" in d)
+    check("context clock: opacity slider 0-100, default 30, saved per browser and cleared by Reset Defaults",
+          'data-ctxclock="1"' in d and 'min="0" max="100"' in d and "const CTX_CLOCK_OP_DEFAULT = 30;" in d
+          and "localStorage.setItem('ctxClockOpacity'" in d and "'ctxClockOpacity',     //" in d
+          and "opacity:var(--clockOp, 0.30)" in d and "--clockOp:0.30;" in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

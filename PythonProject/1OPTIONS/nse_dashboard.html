@@ -184,6 +184,20 @@
   .token-banner.warn { background:rgba(245,179,1,0.14); border:1px solid #f5b301; color:var(--text); }
   .token-banner.bad { background:rgba(239,83,80,0.16); border:1px solid #ef5350; color:var(--text); }
   .token-banner code { font-size:11px; padding:1px 5px; border-radius:4px; background:rgba(127,127,127,0.18); }
+  /* ── context pane clock watermark ── */
+  .ctx-wrap { position:relative; }
+  .ctx-clock { position:absolute; inset:0; z-index:0; pointer-events:none; overflow:hidden; --clockOp:0.30; }
+  .ctx-clock svg { width:100%; height:100%; display:block; }
+  .ctx-clock-t { font-family:'Arial Black','Helvetica Neue',Arial,sans-serif; font-weight:900; font-size:132px;
+    fill:#808080; opacity:var(--clockOp, 0.30); letter-spacing:0; }
+  body.light-mode .ctx-clock-t { fill:#9ca3af; }
+  .ctx-clock-ctl { display:inline-flex; align-items:center; gap:5px; font-size:9px; color:var(--muted,#789); user-select:none; }
+  .ctx-clock-ctl input[type=range] { width:90px; height:12px; margin:0; cursor:pointer; accent-color:#808080; }
+  .ctx-clock-ctl .v { min-width:2.4em; text-align:right; font-variant-numeric:tabular-nums; }
+  .ctx-plot { position:relative; z-index:1; }
+  /* the indicator lines stay crisp over the digits: a thin dark halo */
+  .ctx-plot svg { filter:drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000); }
+  body.light-mode .ctx-plot svg { filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff); }
   /* ── Diagnostics tab ── */
   .diag-head { display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:11px; padding:6px 10px; margin:4px 0 8px;
     border:1px solid var(--border); border-radius:8px; background:var(--panel-2); }
@@ -25366,6 +25380,42 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     } catch (_) {}
   }
 
+  // ── clock watermark in the context pane ─────────────────────────────
+  // 12-hour IST time with seconds, stretched to fill the whole plot, very
+  // heavy and grey, drawn UNDER the lines; the lines carry a thin dark halo
+  // so they stay crisp where they cross the digits.
+  const _ctxClockFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  function _ctxClockText() {
+    try { return _ctxClockFmt.format(new Date()); } catch (_) { return new Date().toLocaleTimeString('en-US', { hour12: true }); }
+  }
+  // Watermark strength, 0-100 (opacity %), saved per browser; default 30.
+  const CTX_CLOCK_OP_DEFAULT = 30;
+  function _ctxClockOp() {
+    try {
+      const v = parseInt(localStorage.getItem('ctxClockOpacity'), 10);
+      return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : CTX_CLOCK_OP_DEFAULT;
+    } catch (_) { return CTX_CLOCK_OP_DEFAULT; }
+  }
+  function _ctxClockApplyOp(v) {
+    document.querySelectorAll('.ctx-clock').forEach(e => e.style.setProperty('--clockOp', (v / 100).toFixed(2)));
+    document.querySelectorAll('.ctx-clock-ctl .v').forEach(e => { e.textContent = v + '%'; });
+  }
+  // Delegated, and live while dragging: only a CSS variable changes, the
+  // plot is not redrawn.
+  document.addEventListener('input', ev => {
+    if (!ev.target?.matches?.('input[data-ctxclock]')) return;
+    const v = Math.max(0, Math.min(100, parseInt(ev.target.value, 10) || 0));
+    try { localStorage.setItem('ctxClockOpacity', String(v)); } catch (_) {}
+    _ctxClockApplyOp(v);
+  });
+  setInterval(() => {
+    if (document.hidden) return;
+    const els_ = document.querySelectorAll('.ctx-clock-t');
+    if (!els_.length) return;
+    const t = _ctxClockText();
+    els_.forEach(e => { if (e.textContent !== t) e.textContent = t; });
+  }, 1000);
+
   function renderCtxChart() {
     const box = document.getElementById('ctxChartBody');
     if (!box) return;
@@ -25400,10 +25450,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // "takes several clicks" problem. They now live in their own container,
     // built once, and are only rebuilt when the settings actually change.
     if (!box.querySelector('.ctx-plot')) {
-      box.innerHTML = `<div class="ctx-plot"></div>
+      // The clock is a WATERMARK layer under the plot: built once, never
+      // replaced by the redraws, ticking on its own every second.
+      box.innerHTML = `<div class="ctx-wrap"><div class="ctx-clock" aria-hidden="true" style="--clockOp:${(_ctxClockOp() / 100).toFixed(2)};"><svg viewBox="0 0 1000 100" preserveAspectRatio="none"><text class="ctx-clock-t" x="4" y="97" textLength="992" lengthAdjust="spacingAndGlyphs">${_ctxClockText()}</text></svg></div><div class="ctx-plot"></div></div>
         <div style="display:flex;gap:14px;flex-wrap:wrap;padding:2px 8px 4px;align-items:center;">
           <span class="ctx-legend" style="display:contents;"></span>
           <span class="ctx-ctrls" style="margin-left:auto;"></span>
+          <label class="ctx-clock-ctl" title="Clock watermark strength: 0 hides it, 100 is solid grey. Default 30.">🕒 <input type="range" min="0" max="100" step="1" value="${_ctxClockOp()}" data-ctxclock="1" aria-label="Clock watermark opacity"><span class="v">${_ctxClockOp()}%</span></label>
         </div>
         <div class="oc-sub ctx-note" style="padding:0 8px 4px;font-size:9px;">Each line is scaled to its own range — they share no units, and one absolute axis would flatten two of the three. The range beside each legend entry is that series' span so far. <b>What to look for is ORDER, not level:</b> IV lifting while price is flat, or PCR turning before the candles do, is what a set of readouts cannot show you. History is kept by the server too, so a restart or a refresh does not lose the session.</div>`;
     }
@@ -31287,6 +31340,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'pcrAlertCfg',         // near-band PCR change alert
     'grindCfg',            // slow-trend detector
     'ctxChartCfg',         // which context series are drawn
+    'ctxClockOpacity',     // context-pane clock watermark strength (default 30)
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
     'levelVoiceCfg',       // spoken wording for level touches
@@ -38185,7 +38239,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
     'diag-tab':          '<strong>Diagnostics</strong>Shows only the source named in DATA_SOURCE (nse, fyers or zerodha): its login and token, the live stream (last ticks, subscriptions, reconnects, watchdog actions), API calls made today against that broker\'s limits, the caches that keep those calls down, and the recent stream events. Everything is read from the server\'s memory, so opening this tab costs no broker call. The data audit below runs the same checks as FEED CHECK for the index selected at the top. Green = fine, amber = worth a look, red = something is broken.',
-    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources.',
+    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources; context-pane clock watermark at 30.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',
