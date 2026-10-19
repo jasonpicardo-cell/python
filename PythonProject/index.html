@@ -30,16 +30,13 @@
     transform-origin: 50% 50%;
   }
 
+  /* ---- Clock (top area) ---- */
   #clock {
     position: absolute;
     left: 0;
     right: 0;
-    top: 50%;
-    -webkit-transform: translateY(-50%);
-    transform: translateY(-50%);
     text-align: center;
   }
-
   #time {
     font-weight: bold;
     line-height: 1;
@@ -54,32 +51,75 @@
   }
   #date {
     font-weight: bold;
-    margin-top: 0.6em;
+    margin-top: 0.35em;
     white-space: nowrap;
     letter-spacing: 0.02em;
   }
-  #tz {
-    margin-top: 0.5em;
+
+  /* ---- Calendar (bottom area) ---- */
+  #cal {
+    position: absolute;
+    left: 0;
+    right: 0;
+    text-align: center;
     white-space: nowrap;
   }
+  .month {
+    display: inline-block;
+    vertical-align: top;
+    width: 31%;
+    margin: 0 1%;
+    white-space: normal;
+  }
+  .mtitle {
+    font-weight: bold;
+    padding-bottom: 0.3em;
+    margin-bottom: 0.2em;
+    border-bottom: 1px solid #000;
+    letter-spacing: 0.05em;
+  }
+  .month.cur .mtitle { border-bottom-width: 3px; }
+  body.dark .mtitle { border-bottom-color: #fff; }
 
+  .month table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  .month th, .month td {
+    text-align: center;
+    padding: 0.18em 0;
+    line-height: 1.15;
+  }
+  .month th { font-weight: bold; }
+  .month td.today {
+    background: #000;
+    color: #fff;
+    font-weight: bold;
+  }
+  body.dark .month td.today {
+    background: #fff;
+    color: #000;
+  }
+
+  /* ---- Tiny corner controls ---- */
   #controls {
     position: absolute;
-    top: 14px;
-    right: 14px;
+    top: 4px;
+    right: 4px;
+    z-index: 2;
   }
   .btn {
     display: inline-block;
-    margin-left: 10px;
-    padding: 10px 16px;
-    min-width: 64px;
+    margin-left: 4px;
+    padding: 2px 5px;
     font-family: inherit;
-    font-size: 18px;
-    font-weight: bold;
+    font-size: 9px;
+    line-height: 1.2;
     background: #fff;
     color: #000;
-    border: 3px solid #000;
-    border-radius: 6px;
+    border: 1px solid #000;
+    border-radius: 3px;
     cursor: pointer;
     outline: none;
     -webkit-appearance: none;
@@ -101,8 +141,8 @@
   <div id="clock">
     <div id="time"><span id="hms">--:--:--</span><span id="ampm">--</span></div>
     <div id="date">&nbsp;</div>
-    <div id="tz">India Standard Time (GMT+5:30)</div>
   </div>
+  <div id="cal"></div>
 </div>
 
 <script>
@@ -111,13 +151,15 @@
   var IST_OFFSET_MS = 330 * 60 * 1000; // +5:30, IST has no DST
   var DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   var MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  var WEEK_HDR = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]; // Monday first
 
   var stage = document.getElementById("stage");
+  var clockEl = document.getElementById("clock");
   var timeEl = document.getElementById("time");
   var hmsEl = document.getElementById("hms");
   var ampmEl = document.getElementById("ampm");
   var dateEl = document.getElementById("date");
-  var tzEl = document.getElementById("tz");
+  var calEl = document.getElementById("cal");
   var rotateBtn = document.getElementById("rotateBtn");
   var themeBtn = document.getElementById("themeBtn");
 
@@ -141,6 +183,47 @@
 
   function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
+  // Build one month table. y/m may be out of range (e.g. m = -1); Date.UTC normalises it.
+  function monthHTML(y, m, todayY, todayM, todayD) {
+    var first = new Date(Date.UTC(y, m, 1));
+    var yy = first.getUTCFullYear();
+    var mm = first.getUTCMonth();
+    var daysIn = new Date(Date.UTC(yy, mm + 1, 0)).getUTCDate();
+    var lead = (first.getUTCDay() + 6) % 7; // Monday = 0
+    var isCur = (yy === todayY && mm === todayM);
+
+    var h = '<div class="month' + (isCur ? ' cur' : '') + '">';
+    h += '<div class="mtitle">' + MONTHS[mm] + ' ' + yy + '</div>';
+    h += '<table><tr>';
+    for (var i = 0; i < 7; i++) { h += '<th>' + WEEK_HDR[i] + '</th>'; }
+    h += '</tr>';
+
+    var day = 1;
+    for (var row = 0; row < 6; row++) { // always 6 rows so all three months line up
+      h += '<tr>';
+      for (var col = 0; col < 7; col++) {
+        var cell = row * 7 + col;
+        if (cell < lead || day > daysIn) {
+          h += '<td>&nbsp;</td>';
+        } else {
+          var cls = (isCur && day === todayD) ? ' class="today"' : '';
+          h += '<td' + cls + '>' + day + '</td>';
+          day++;
+        }
+      }
+      h += '</tr>';
+    }
+    h += '</table></div>';
+    return h;
+  }
+
+  function renderCalendar(y, m, d) {
+    calEl.innerHTML =
+      monthHTML(y, m - 1, y, m, d) +
+      monthHTML(y, m, y, m, d) +
+      monthHTML(y, m + 1, y, m, d);
+  }
+
   function tick() {
     var now = new Date();
     var ist = new Date(now.getTime() + IST_OFFSET_MS);
@@ -152,10 +235,11 @@
     hmsEl.innerHTML = pad(h12) + ":" + pad(ist.getUTCMinutes()) + ":" + pad(ist.getUTCSeconds());
     ampmEl.innerHTML = h24 < 12 ? "AM" : "PM";
 
-    var d = DAYS[ist.getUTCDay()] + " " + pad(ist.getUTCDate()) + "-" +
-            MONTHS[ist.getUTCMonth()] + "-" + ist.getUTCFullYear();
-    if (d !== lastDate) {
+    var y = ist.getUTCFullYear(), m = ist.getUTCMonth(), dd = ist.getUTCDate();
+    var d = DAYS[ist.getUTCDay()] + " " + pad(dd) + "-" + MONTHS[m] + "-" + y;
+    if (d !== lastDate) {           // date text + calendar only redraw once a day
       dateEl.innerHTML = d;
+      renderCalendar(y, m, dd);
       lastDate = d;
     }
 
@@ -182,11 +266,25 @@
     stage.style.top = Math.round((H - sh) / 2) + "px";
     setTransform(stage, "rotate(" + state.rot + "deg)");
 
-    // Fit "12:34:56 PM" to the available width/height
-    var t = Math.floor(Math.min(sw / 5.4, sh / 3.2));
+    // Split: clock gets the top ~42%, calendar the rest
+    var clockH = sh * 0.42;
+    var calTop = clockH;
+    var calH = sh - calTop;
+
+    // Clock fonts: time + date (~1.6 lines of time height total)
+    var t = Math.floor(Math.min(sw / 5.4, clockH / 1.75));
+    var df = Math.max(14, Math.floor(Math.min(t * 0.26, sw / 13)));
     timeEl.style.fontSize = t + "px";
-    dateEl.style.fontSize = Math.max(18, Math.floor(Math.min(t * 0.26, sw / 13))) + "px";
-    tzEl.style.fontSize = Math.max(14, Math.floor(Math.min(t * 0.14, sw / 26))) + "px";
+    dateEl.style.fontSize = df + "px";
+    var blockH = t + df * 1.5;
+    clockEl.style.top = Math.max(22, Math.round((clockH - blockH) / 2) + 6) + "px";
+
+    // Calendar font: 7 cols per ~31% width, 8 lines (title + header + 6 weeks)
+    var colW = (sw * 0.31) / 7;
+    var cf = Math.floor(Math.min(colW / 1.55, calH / 12.5));
+    if (cf < 9) { cf = 9; }
+    calEl.style.fontSize = cf + "px";
+    calEl.style.top = Math.round(calTop + Math.max(0, (calH - cf * 12) / 2)) + "px";
   }
 
   function applyTheme() {
