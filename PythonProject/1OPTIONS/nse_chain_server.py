@@ -667,6 +667,195 @@ def _archive_minutes(symbol: str, rows) -> None:
         print(f"[fyers] archive write failed: {e}")
 
 
+# ══════════════════════════════════════════════════════════════════════
+# INDICATOR WARM-UP: the previous trading session(s) of 1-minute bars
+# ══════════════════════════════════════════════════════════════════════
+# EMAs, RSI, ATR and the Trend Target Ribbon all need history before their
+# first value means anything. Seeded at 09:15 from nothing, an EMA 50 is
+# guessing for the first hour and the ribbon cannot flip until ~40 bars in.
+# The chart is sent the previous session(s) as warm-up bars: indicators run
+# over them, only today is drawn.
+#
+# API cost is bounded and small. A completed session never changes, so each
+# one is fetched ONCE (one history call per symbol per session) and kept on
+# disk; the server also saves today's own bars after the close, so tomorrow's
+# warm-up usually costs nothing at all. Weekends and NSE trading holidays are
+# skipped without asking the broker; a weekday the broker returns empty for
+# (an unlisted holiday) is skipped too and not re-asked for 15 minutes.
+_NSE_HOLIDAYS_BUILTIN = {
+    # NSE equity / F&O trading holidays 2026 (NSE circular, Dec 2025)
+    "2026-01-15", "2026-01-26", "2026-03-03", "2026-03-26", "2026-03-31",
+    "2026-04-03", "2026-04-14", "2026-05-01", "2026-05-28", "2026-06-26",
+    "2026-09-14", "2026-10-02", "2026-10-20", "2026-11-10", "2026-11-24",
+    "2026-12-25",
+}
+_WARM_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "warm_cache")
+_warm_mem: dict = {}          # (symbol, day) -> 1-minute bars of that session
+_warm_miss: dict = {}         # (symbol, day) -> time an empty answer came back
+_warm_lock = threading.Lock()
+_warm_sym_locks: dict = {}
+_warm_stats = {"broker_calls": 0, "disk_hits": 0, "saved_close": 0, "last": ""}
+
+
+def _nse_holidays() -> set:
+    """Built-in NSE holidays plus any listed in NSE_HOLIDAYS (comma separated
+    YYYY-MM-DD) - so next year's list, or a special closure, is one env line."""
+    extra = {d.strip() for d in (_os.environ.get("NSE_HOLIDAYS") or "").split(",") if d.strip()}
+    return _NSE_HOLIDAYS_BUILTIN | extra
+
+
+def _is_trading_day(day: str) -> bool:
+    try:
+        import datetime as _dt
+        wd = _dt.date(*(int(x) for x in day.split("-"))).weekday()
+    except Exception:
+        return False
+    return wd < 5 and day not in _nse_holidays()
+
+
+def _shift_day(day: str, n: int) -> str:
+    y, m, d = (int(x) for x in day.split("-"))
+    import datetime as _dt
+    return (_dt.date(y, m, d) + _dt.timedelta(days=n)).isoformat()
+
+
+def _prev_trading_days(base: str, limit: int = 12, max_back: int = 30) -> list:
+    """Up to `limit` trading days strictly before `base`, newest first."""
+    out, d = [], base
+    for _ in range(max_back):
+        d = _shift_day(d, -1)
+        if _is_trading_day(d):
+            out.append(d)
+            if len(out) >= limit:
+                break
+    return out
+
+
+def _warm_days_cfg() -> int:
+    try:
+        return max(0, min(5, int(_os.environ.get("NSE_WARM_DAYS", "2"))))
+    except ValueError:
+        return 2
+
+
+def _warm_path(symbol: str, day: str) -> str:
+    return _os.path.join(_WARM_DIR, f"{symbol}_{day}.json")
+
+
+def _warm_write(symbol: str, day: str, bars: list) -> None:
+    try:
+        _os.makedirs(_WARM_DIR, exist_ok=True)
+        path = _warm_path(symbol, day)
+        tmp = f"{path}.{threading.get_ident()}.tmp"
+        with open(tmp, "w") as fh:
+            json.dump({"symbol": symbol, "day": day, "bars": bars}, fh, separators=(",", ":"))
+        _os.replace(tmp, path)
+        # keep two weeks; older sessions are never asked for
+        cutoff = time.time() - 15 * 86400
+        for f in _os.listdir(_WARM_DIR):
+            fp = _os.path.join(_WARM_DIR, f)
+            if f.endswith(".json") and _os.path.getmtime(fp) < cutoff:
+                _os.remove(fp)
+    except Exception as e:  # noqa: BLE001
+        print(f"[warm] could not save {symbol} {day}: {e}")
+
+
+def _session_bars(symbol: str, day: str) -> list:
+    """1-minute OHLCV for one COMPLETED session: memory, then disk, then one
+    broker history call. Never asks the broker for today or a non-trading day."""
+    key = (symbol, day)
+    with _warm_lock:
+        if key in _warm_mem:
+            return _warm_mem[key]
+        miss = _warm_miss.get(key)
+    if miss and time.time() - miss < 900:
+        return []
+    path = _warm_path(symbol, day)
+    if _os.path.exists(path):
+        try:
+            with open(path) as fh:
+                bars = json.load(fh).get("bars") or []
+            if bars:
+                with _warm_lock:
+                    _warm_mem[key] = bars
+                _warm_stats["disk_hits"] += 1
+                return bars
+        except Exception:
+            pass
+    if not _is_broker() or day >= _ctx_day() or not _is_trading_day(day):
+        return []
+    try:
+        _warm_stats["broker_calls"] += 1
+        raw = _broker().fetch_candles(symbol, 1, 1, on_date=day) or []
+    except Exception as e:  # noqa: BLE001
+        print(f"[warm] {symbol} {day}: history failed: {e}")
+        raw = []
+    bars = [{"t": int(b["t"]), "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"],
+             "v": b.get("v", 0) or 0} for b in raw if b.get("c")]
+    with _warm_lock:
+        if bars:
+            _warm_mem[key] = bars
+            _warm_miss.pop(key, None)
+            if len(_warm_mem) > 60:
+                for k in list(_warm_mem)[:20]:
+                    _warm_mem.pop(k, None)
+        else:
+            _warm_miss[key] = time.time()
+    if bars and len(bars) >= 300:          # a full session: keep it for good
+        _warm_write(symbol, day, bars)
+    print(f"[warm] {symbol} {day}: {len(bars)} bar(s) from {RUN_DATA_SOURCE}"
+          f"{' - empty (holiday or no data), skipped' if not bars else ''}")
+    return bars
+
+
+def _warm_bars(symbol: str, base_day: str, n: int):
+    """The `n` trading sessions before base_day, oldest first, as one list of
+    1-minute bars plus the dates used. Skips sessions that come back empty."""
+    if n <= 0:
+        return [], []
+    with _warm_lock:
+        lk = _warm_sym_locks.setdefault(symbol, threading.Lock())
+    with lk:                                   # one fetch per symbol at a time
+        got = []
+        for day in _prev_trading_days(base_day, limit=n + 4):
+            bars = _session_bars(symbol, day)
+            if bars:
+                got.append((day, bars))
+                if len(got) >= n:
+                    break
+    got.reverse()
+    days = [d for d, _ in got]
+    out = [b for _, bs in got for b in bs]
+    _warm_stats["last"] = f"{symbol} {', '.join(days) or 'none'}"
+    return out, days
+
+
+def _warm_save_today(symbol: str, rows) -> None:
+    """After the close, today's own 1-minute bars become tomorrow's warm-up -
+    saved from data already fetched for the chart, so it costs no API call."""
+    try:
+        if not rows:
+            return
+        day = _ctx_day()
+        g = time.gmtime(time.time() + 19800)
+        if g.tm_hour * 60 + g.tm_min < 15 * 60 + 45 or not _is_trading_day(day):
+            return
+        if (symbol, day) in _warm_mem or _os.path.exists(_warm_path(symbol, day)):
+            return
+        bars = [{"t": int(b["t"]), "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"],
+                 "v": b.get("v", 0) or 0} for b in rows
+                if time.strftime("%Y-%m-%d", time.gmtime(b["t"] + 19800)) == day]
+        if len(bars) < 300:
+            return
+        with _warm_lock:
+            _warm_mem[(symbol, day)] = bars
+        _warm_write(symbol, day, bars)
+        _warm_stats["saved_close"] += 1
+        print(f"[warm] saved today's {len(bars)} bars for {symbol} - tomorrow's warm-up needs no API call")
+    except Exception as e:  # noqa: BLE001
+        print(f"[warm] could not save today's session: {e}")
+
+
 def _sse_broadcast_ticks(event: dict) -> None:
     """Fan price ticks out to every connected tab.
 
@@ -2907,6 +3096,22 @@ def _broker_diag() -> dict:
             out["brokers"].append({"id": "arrow", "name": "Arrow", "verdict": "bad", "summary": str(e), "sections": [], "log": []})
     else:
         out["brokers"].append(_nse_diag())
+    try:
+        if out["brokers"]:
+            with _warm_lock:
+                n_mem = len(_warm_mem)
+            out["brokers"][0].setdefault("sections", []).append({"title": "Indicator warm-up (previous sessions)", "rows": [
+                ["Sessions per chart", f"{_warm_days_cfg()} (NSE_WARM_DAYS)", ""],
+                ["Last served", _warm_stats["last"] or "not asked yet", ""],
+                ["History calls for warm-up", f"{_warm_stats['broker_calls']} this run (each session once, then disk)",
+                 "warn" if _warm_stats["broker_calls"] > 20 else "ok"],
+                ["From disk cache", str(_warm_stats["disk_hits"]), ""],
+                ["Sessions in memory", str(n_mem), ""],
+                ["Saved at today's close", str(_warm_stats["saved_close"]), ""],
+                ["Sessions before today", ", ".join(_prev_trading_days(_ctx_day(), limit=_warm_days_cfg() or 1)), ""],
+            ]})
+    except Exception:
+        pass
     return out
 
 
@@ -6968,6 +7173,34 @@ class Handler(BaseHTTPRequestHandler):
                              "backfilling": (sym_, _ctx_day()) in _ctx_backfilling})
             return
 
+        if parsed.path == "/api/warm-candles":
+            # Previous trading session(s) for indicator warm-up. The chart asks
+            # once per symbol, interval and day; the bars are drawn nowhere.
+            symbol = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+            try:
+                interval = max(1, min(60, int(qs.get("interval", ["1"])[0])))
+            except Exception:
+                interval = 1
+            base = (qs.get("date", [""])[0] or "").strip() or _ctx_day()
+            import re as _re3
+            if not _re3.match(r"^\d{4}-\d{2}-\d{2}$", base):
+                self._send_json({"error": "date must be YYYY-MM-DD"}, status=400)
+                return
+            try:
+                n = max(0, min(5, int(qs.get("days", [str(_warm_days_cfg())])[0])))
+            except ValueError:
+                n = _warm_days_cfg()
+            try:
+                bars, days = _warm_bars(symbol, base, n)
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"symbol": symbol, "candles": [], "dates": [], "error": str(e)})
+                return
+            rows = _aggregate_candles(bars, interval) if interval > 1 else bars
+            self._send_json({"symbol": symbol, "interval": interval, "base": base, "dates": days,
+                             "candles": rows, "count": len(rows), "source": RUN_DATA_SOURCE,
+                             "has_volume": any((r.get("v") or 0) > 0 for r in rows)})
+            return
+
         if parsed.path == "/api/intraday-candles":
             # Intraday OHLC candles for the chart widget.
             # Source 1: NSE chart-databyindex (live intraday data for indices);
@@ -7123,6 +7356,7 @@ class Handler(BaseHTTPRequestHandler):
                     # and 5m cost three calls a minute for one symbol.
                     fc1 = _fy.fetch_candles(symbol, 1, 1)
                     _archive_minutes(symbol, fc1)
+                    _warm_save_today(symbol, fc1)
                     fc = _aggregate_candles(fc1, interval) if interval > 1 else fc1
                     if fc:
                         today_yday = time.gmtime(time.time() + 5 * 3600 + 1800).tm_yday

@@ -1303,7 +1303,7 @@ def test_ema_cross():
             depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
             if depth == 0:
                 return dsrc[i:k + 1]
-    harness = "const _emaXCache = { key: '', pts: [] };\n" + grab("_emaSeries") + grab("_emaCrossPoints") + grab("_emaCrossSvg") + r"""
+    harness = "const _emaXCache = { key: '', pts: [] };\nconst _warmOf = () => [];\n" + grab("_emaSeries") + grab("_emaCrossPoints") + grab("_emaCrossSvg") + r"""
 const _hm = t => String(t); const fmtPrice = v => (+v).toFixed(1); const escapeHtml = x => x;
 const cs = [];
 for (let i = 0; i < 120; i++) {
@@ -2210,11 +2210,258 @@ def test_ctx_clock():
           and "opacity:var(--clockOp, 0.30)" in d and "--clockOp:0.30;" in d)
 
 
+def test_warmup_and_signals():
+    """Indicator warm-up from the previous trading session(s): weekends and NSE
+    holidays skipped without asking the broker, each session fetched once and
+    then served from memory/disk, today's bars saved at the close; indicators
+    on the chart run over warm-up + today; Buy/Sell lines in the context pane."""
+    import ast as _ast, tempfile, shutil, threading as _th, time as _t, json as _json, subprocess
+    src = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    tree = _ast.parse(src)
+    want = {"_nse_holidays", "_is_trading_day", "_shift_day", "_prev_trading_days", "_warm_days_cfg", "_warm_path",
+            "_warm_write", "_session_bars", "_warm_bars", "_warm_save_today", "_aggregate_candles", "_sess_bucket"}
+    nodes = [n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name in want]
+    hol = [n for n in tree.body if isinstance(n, _ast.Assign) and getattr(n.targets[0], "id", "") == "_NSE_HOLIDAYS_BUILTIN"]
+    tmp = tempfile.mkdtemp(prefix="warm")
+    calls = []
+    empty_days = set()
+
+    class _B:
+        @staticmethod
+        def fetch_candles(sym, iv, days, on_date=None):
+            calls.append(on_date)
+            if on_date in empty_days:
+                return []
+            import datetime as _dt
+            y, m, d = (int(x) for x in on_date.split("-"))
+            t0 = int(_dt.datetime(y, m, d, 9, 15, tzinfo=_dt.timezone(_dt.timedelta(hours=5, minutes=30))).timestamp())
+            return [{"t": t0 + 60 * i, "o": 100.0 + i, "h": 101.0 + i, "l": 99.0 + i, "c": 100.5 + i, "v": 10} for i in range(375)]
+
+    clock = {"now": _t.time()}
+
+    class _T:
+        time = staticmethod(lambda: clock["now"])
+        gmtime = staticmethod(_t.gmtime)
+        strftime = staticmethod(_t.strftime)
+        timezone = _t.timezone
+    ns = {"_os": os, "json": _json, "time": _T, "threading": _th, "_WARM_DIR": tmp, "_warm_mem": {}, "_warm_miss": {},
+          "_warm_lock": _th.Lock(), "_warm_sym_locks": {}, "_warm_stats": {"broker_calls": 0, "disk_hits": 0, "saved_close": 0, "last": ""},
+          "_is_broker": lambda: True, "_broker": lambda: _B, "_ctx_day": lambda: "2026-10-21", "RUN_DATA_SOURCE": "zerodha"}
+    try:
+        exec(compile(_ast.Module(body=hol + nodes, type_ignores=[]), "srv", "exec"), ns)
+        check("warm-up: previous trading days skip the weekend and Dussehra (20 Oct)",
+              ns["_prev_trading_days"]("2026-10-21", 2) == ["2026-10-19", "2026-10-16"], str(ns["_prev_trading_days"]("2026-10-21", 2)))
+        check("warm-up: Gandhi Jayanti (2 Oct) and the weekend skipped before 5 Oct",
+              ns["_prev_trading_days"]("2026-10-05", 2) == ["2026-10-01", "2026-09-30"])
+        os.environ["NSE_HOLIDAYS"] = "2026-10-19"
+        check("warm-up: NSE_HOLIDAYS in env adds a closure", not ns["_is_trading_day"]("2026-10-19"))
+        os.environ.pop("NSE_HOLIDAYS", None)
+        bars, days = ns["_warm_bars"]("NIFTY", "2026-10-21", 2)
+        check("warm-up: two sessions, oldest first, one history call each, the holiday never asked for",
+              days == ["2026-10-16", "2026-10-19"] and len(bars) == 750 and sorted(calls) == ["2026-10-16", "2026-10-19"]
+              and bars[0]["t"] < bars[-1]["t"], f"{days} {len(bars)} {calls}")
+        n0 = len(calls)
+        ns["_warm_bars"]("NIFTY", "2026-10-21", 2)
+        ns["_warm_mem"].clear()
+        b2, d2 = ns["_warm_bars"]("NIFTY", "2026-10-21", 2)
+        check("warm-up: asked again (and after a restart) it costs no API call - memory, then disk",
+              len(calls) == n0 and d2 == days and len(b2) == 750 and ns["_warm_stats"]["disk_hits"] >= 2, f"{len(calls) - n0}")
+        rows = ns["_aggregate_candles"](b2, 5)
+        check("warm-up: aggregated to the chart interval per session (75 x 5m bars a day)", len(rows) == 150, str(len(rows)))
+        # an unlisted holiday: the broker answers empty, the day is skipped and not re-asked for 15 minutes
+        ns["_warm_mem"].clear(); shutil.rmtree(tmp); os.makedirs(tmp)
+        calls.clear(); empty_days.add("2026-10-16")
+        _b, d3 = ns["_warm_bars"]("NIFTY", "2026-10-21", 2)
+        n1 = len(calls)
+        ns["_warm_mem"].clear()
+        ns["_warm_bars"]("NIFTY", "2026-10-21", 2)
+        check("warm-up: a weekday the broker has no data for is skipped, and not re-asked for 15 minutes",
+              d3 == ["2026-10-15", "2026-10-19"] and calls.count("2026-10-16") == 1, f"{d3} {calls[:n1]} {calls[n1:]}")
+        # today's own bars saved after the close -> tomorrow costs nothing
+        import datetime as _dt
+        ist = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+        clock["now"] = _dt.datetime(2026, 10, 21, 15, 50, tzinfo=ist).timestamp()
+        today = _B.fetch_candles("NIFTY", 1, 1, on_date="2026-10-21")
+        clock["now"] = _dt.datetime(2026, 10, 21, 15, 20, tzinfo=ist).timestamp()
+        ns["_warm_save_today"]("NIFTY", today)
+        before = os.path.exists(os.path.join(tmp, "NIFTY_2026-10-21.json"))
+        clock["now"] = _dt.datetime(2026, 10, 21, 15, 50, tzinfo=ist).timestamp()
+        ns["_warm_save_today"]("NIFTY", today)
+        ns["_warm_mem"].clear(); calls.clear()
+        ns["_ctx_day"] = lambda: "2026-10-22"
+        _b4, d4 = ns["_warm_bars"]("NIFTY", "2026-10-22", 1)
+        check("warm-up: today's bars saved after 15:45 (not before) and tomorrow's warm-up makes no API call",
+              not before and d4 == ["2026-10-21"] and calls == [], f"{before} {d4} {calls}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    check("server: /api/warm-candles route, today's close saved from the chart's own fetch, diagnostics section",
+          'parsed.path == "/api/warm-candles"' in src and "_warm_save_today(symbol, fc1)" in src
+          and '"Indicator warm-up (previous sessions)"' in src)
+
+    # ── the dashboard side ──
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    import re as _re
+    hjs = set(_re.findall(r"'(\d{4}-\d{2}-\d{2})'", d[d.index("const _NSE_HOLIDAYS = new Set("):d.index("]);", d.index("const _NSE_HOLIDAYS = new Set("))]))
+    hpy = set(_re.findall(r'"(\d{4}-\d{2}-\d{2})"', _ast.get_source_segment(src, hol[0])))
+    check("dashboard: holiday list identical to the server's (history date picker skips holidays too)", hjs == hpy and len(hjs) == 16)
+    i0 = d.index("  const TTR = {"); j0 = d.index("  const _ttrCache")
+    fns = ["_emaSeries", "_warmOf", "_warmSeries", "_warmHaBuild", "_heikinAshi", "_ttrCompute", "_ttrTrim", "_ttrState",
+           "_emaCrossPoints", "_warmCurKey", "_istDayKey", "_ctxSignalsOn", "_ctxSignalSvg"]
+    harness = """
+const store = {}; const localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+const window = {}; const state = { symbol: 'NIFTY' };
+const escapeHtml = s => String(s); const fmtPrice = v => v.toFixed(2); const _hm = t => String(t);
+const _chart = { interval: 1, candles: [], show: { ttr: true, emaX: true }, liveBar: false, emaX: { fast: 5, slow: 13 } };
+const _haMemo = { src: null, n: 0, out: null, seed: null };
+const _ttrCache = { key: '', v: null }; const _emaXCache = { key: '', pts: [] };
+const _rgba = () => '';
+const _warmLen = bars => _warmOf(bars).length;
+""" + d[i0:j0] + "\n".join(grab(f) for f in fns) + r"""
+let p = 25000; const all = [];
+for (let i = 0; i < 1125; i++) {           // two warm sessions + today, a few trend legs
+  const drift = Math.sin(i / 60) * 2.4; const o = p; p += drift + Math.sin(i * 1.7) * 3;
+  all.push({ t: (i < 750 ? 1000 : 900000) + 60 * i, o, h: Math.max(o, p) + 2, l: Math.min(o, p) - 2, c: p });
+}
+const warm = all.slice(0, 750), today = all.slice(750);
+_chart.candles = today; _chart.warm = warm; _chart.warmKey = _warmCurKey();
+_chart.warmHa = _warmHaBuild(warm); const lh = _chart.warmHa[_chart.warmHa.length - 1]; _chart._warmHaLast = { o: lh.o, c: lh.c };
+const R = {};
+const e200 = _warmSeries(today, cl => _emaSeries(cl, 200)), full = _emaSeries(all.map(b => b.c), 200);
+R.ema = { first: e200[0], want: full[750], noWarmFirst: _emaSeries(today.map(b => b.c), 200)[0] };
+const tr = _ttrState(true), tf = _ttrCompute(all);
+R.ttr = { flips: tr.r.flip.map((f, i) => f ? [i, f] : null).filter(Boolean),
+          want: tf.flip.slice(750).map((f, i) => f ? [i, f] : null).filter(Boolean),
+          alma0: tr.r.alma[0], almaWant: tf.alma[750], n: tr.r.trend.length };
+R.ttrNoWarmFirstFlip = _ttrCompute(today).flip.findIndex(f => f !== 0);
+const xs = _emaCrossPoints(); const fa = _emaSeries(all.map(b => b.c), 5), sa = _emaSeries(all.map(b => b.c), 13);
+const want = []; let side = 0;
+for (let j = 12; j < all.length; j++) { const dd = fa[j] - sa[j]; const now = dd > 0 ? 1 : dd < 0 ? -1 : side; if (side && now !== side && j >= 750) want.push(j - 750); side = now; }
+R.cross = { got: xs.map(x => x.i), want };
+const ha = _heikinAshi(today); R.ha = { o: ha[0].o, want: (lh.o + lh.c) / 2 };
+const svg = _ctxSignalSvg(ms => ms / 1000, 0, 100);
+R.sig = { lines: (svg.match(/<line /g) || []).length, buy: (svg.match(/ctx-sig-buy/g) || []).length, sell: (svg.match(/ctx-sig-sell/g) || []).length };
+store.ctxSignals = '0'; R.sigOff = _ctxSignalSvg(ms => ms, 0, 100);
+state.symbol = 'BANKNIFTY'; _ttrCache.key = ''; R.mismatch = _warmLen(today);
+console.log(JSON.stringify(R));
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("warm-up (dashboard): harness ran", False, (res.stderr or res.stdout)[:500]); return
+    check("warm-up (dashboard): EMA 200 has a settled value at 09:15, equal to the EMA run over warm-up + today",
+          R["ema"]["first"] is not None and abs(R["ema"]["first"] - R["ema"]["want"]) < 1e-9 and R["ema"]["noWarmFirst"] is None, str(R["ema"]))
+    check("warm-up (dashboard): Trend Target Ribbon carries yesterday's state - today's flips are those of the full run",
+          R["ttr"]["flips"] == R["ttr"]["want"] and R["ttr"]["n"] == 375 and abs(R["ttr"]["alma0"] - R["ttr"]["almaWant"]) < 1e-9
+          and len(R["ttr"]["flips"]) >= 2, str(R["ttr"])[:300])
+    check("warm-up (dashboard): EMA 5/13 crosses on today's bars are the full run's crosses",
+          R["cross"]["got"] == R["cross"]["want"] and len(R["cross"]["got"]) >= 2, str(R["cross"])[:200])
+    check("warm-up (dashboard): Heikin Ashi continues from the previous session's last HA bar",
+          abs(R["ha"]["o"] - R["ha"]["want"]) < 1e-9, str(R["ha"]))
+    check("warm-up (dashboard): never applied to another symbol's chart while its own loads", R["mismatch"] == 0)
+    check("context pane: one Buy/Sell line per ribbon signal today, green BUY / red SELL, switchable",
+          R["sig"]["lines"] == len(R["ttr"]["flips"]) and R["sig"]["buy"] + R["sig"]["sell"] == R["sig"]["lines"]
+          and R["sig"]["buy"] >= 1 and R["sig"]["sell"] >= 1 and R["sigOff"] == "", str(R["sig"]))
+    check("dashboard: warm-up fetched once per symbol/interval/day, shown in the status line, Signals box + Reset Defaults",
+          "/api/warm-candles?symbol=" in d and "_warmEnsure();          // previous session(s)" in d and "🔥 ${escapeHtml(_warmNote())}" in d
+          and 'data-ctxsig="1"' in d and "'ctxSignals',          //" in d and "_ctxSignalSvg(x, padT, H - padB)" in d)
+
+
+def test_day_swipe():
+    """Click-hold and drag sideways on the chart: right = previous trading day,
+    left = next, weekends and NSE holidays skipped, forward from the last past
+    day returns to Live; vertical drags stay a price pan."""
+    import subprocess, json as _json
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    i0 = d.index("  const _NSE_HOLIDAYS = new Set("); j0 = d.index("]);", i0) + 3
+    harness = d[i0:j0] + "\nconst window = {};\nconst _istDayKey = () => '2026-10-21';\n" + "\n".join(
+        grab(f) for f in ("_tradingDayShift", "_dayTarget", "_dayLabel")) + r"""
+const R = {};
+R.fromLive = _dayTarget(-1); R.liveFwd = _dayTarget(1);
+window._histDate = '2026-10-19'; R.back = _dayTarget(-1); R.fwd = _dayTarget(1);
+window._histDate = '2026-10-16'; R.fwd2 = _dayTarget(1);
+window._histDate = '2026-10-05'; R.back2 = _dayTarget(-1);
+R.label = _dayLabel('2026-10-19');
+console.log(JSON.stringify(R));
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("day swipe: harness ran", False, (res.stderr or res.stdout)[:400]); return
+    check("day swipe: from Live, dragging right goes to 19 Oct (Dussehra 20 Oct skipped); left has nothing newer",
+          R["fromLive"] == "2026-10-19" and R["liveFwd"] is None, str(R))
+    check("day swipe: 19 Oct back -> Fri 16 Oct (weekend skipped), forward -> Live; 16 Oct forward -> 19 Oct",
+          R["back"] == "2026-10-16" and R["fwd"] == "live" and R["fwd2"] == "2026-10-19", str(R))
+    check("day swipe: 5 Oct back -> 1 Oct (Gandhi Jayanti and the weekend skipped)", R["back2"] == "2026-10-01", str(R))
+    check("day swipe: label reads as a day", R["label"] == "Mon 19 Oct", R["label"])
+    check("day swipe: bound once on the document (mouse + touch), axis decided at 24px, vertical pan stands down, alert lines excluded",
+          "document.addEventListener('mousedown', ev => {\n    if (ev.button !== 0 || ev.shiftKey) return;\n    _daySwipeStart(" in d
+          and "Math.hypot(dx, dy) < 24" in d and "if (!d2 || _dragPendY == null || _daySwipe?.active) return;" in d
+          and "if (_daySwipe?.active) return;          // a sideways day-swipe owns this drag" in d
+          and "_alertHitTest({ clientX: x, clientY: y })" in d and "document.addEventListener('touchmove', ev => {\n    if (_daySwipe" in d)
+    check("day swipe: switches through the same Live/Historical controls, swallows the click after a swipe",
+          "modeSel.dispatchEvent(new Event('change'));" in d and "window.addEventListener('click', eat, { capture: true, once: true });" in d
+          and "drag sideways: ◀ prev / next ▶ day" in d)
+
+
+def test_render_performance():
+    """Performance fixes keep their output: cached number formatters match
+    toLocaleString, escapeHtml escapes quotes too, the ribbon is drawn as a
+    handful of batched paths (not one element per bar), chain-table repaints
+    on ticks only while the Chain tab is open, layout reads once per frame."""
+    import subprocess, json as _json
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    i0 = d.index("  const _nfInt = new Intl.NumberFormat("); j0 = d.index("function escapeHtml(s)", i0)
+    j0 = d.index("\n", j0)
+    harness = d[i0:j0] + r"""
+const R = { same: true, bad: [] };
+for (const v of [0, 1, -1, 12.34, 25012.55, -987654.321, 1234567.89, 0.05, NaN, null, '25000.4']) {
+  const a = fmtPrice(v), b = Number(v).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const c = fmtInt(v ?? 0), e = Math.round(v ?? 0).toLocaleString('en-IN');
+  if (a !== b || c !== e) { R.same = false; R.bad.push([v, a, b, c, e]); }
+}
+R.esc = escapeHtml(`a<b>&"c"'d'`); R.escNull = escapeHtml(null); R.signed = fmtSigned(1234.4);
+console.log(JSON.stringify(R));
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("perf: formatter harness ran", False, (res.stderr or res.stdout)[:400]); return
+    check("perf: cached Intl formatters give exactly the toLocaleString output", R["same"], str(R["bad"])[:300])
+    check("perf: escapeHtml escapes & < > and quotes (safe in attributes), null -> ''",
+          R["esc"] == "a&lt;b&gt;&amp;&quot;c&quot;&#39;d&#39;" and R["escNull"] == "" and R["signed"] == "+1,234", str(R))
+    ttr = d[d.index("function _ttrSvg("):d.index("// positions (only the latest", d.index("function _ttrSvg("))]
+    check("perf: Trend Target Ribbon glow, fills, edge and core batched into paths (no per-bar rect/polygon/line)",
+          "<rect class=\"ttr-glow\"" not in ttr and "<polygon" not in ttr and "<line" not in ttr
+          and "class=\"ttr-glow\" d=" in ttr and "const q4 = v => Math.round(v / 4) * 4;" in ttr)
+    check("perf: chain table repainted on ticks only while its tab is open; traffic-light placement once per frame",
+          "if (_activeTabNow() === 'chain') _safe(() => renderChainTable(data, true), 'chainTick');" in d
+          and "_tlRaf = requestAnimationFrame(() => { _tlRaf = 0; _tlPlaceNow(); });" in d)
+    check("perf: no per-call toLocaleString with options left in the hot formatters",
+          "function fmtPrice(n) { return _nfP1.format(Number(n)); }" in d and "d.textContent = s ?? ''" not in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

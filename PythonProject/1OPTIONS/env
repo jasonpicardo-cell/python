@@ -78,6 +78,16 @@ NSE_YAHOO_BACKFILL=true
 NSE_POLL=NIFTY,BANKNIFTY
 NSE_POLL_INTERVAL=5
 
+# Indicator warm-up: previous trading sessions of 1-minute bars run through
+# EMAs, RSI, Bollinger, Heikin Ashi, EMA cross and the Trend Target Ribbon
+# before 09:15, so they are settled at the open (only today is drawn).
+# Weekends and NSE holidays are skipped. Each session is one history call,
+# once, then kept on disk (warm_cache/); today's bars are saved after 15:45
+# so tomorrow normally costs no call at all. 0 turns warm-up off; max 5.
+NSE_WARM_DAYS=2
+# Extra closures beyond the built-in 2026 NSE holiday list (comma separated):
+# NSE_HOLIDAYS=YYYY-MM-DD,YYYY-MM-DD
+
 # ── Alert engine thresholds ──────────────────────────────────────────
 NSE_ALERT_OI_PCT=3
 NSE_ALERT_PREM_PCT=6

@@ -40,3 +40,4 @@ institutional_signals.html
 /1OPTIONS/.zerodha_token
 /NSE_SYNC/fyers_token.txt
 /NSE_SYNC/zerodha_access_token.txt
+/1OPTIONS/warm_cache/
