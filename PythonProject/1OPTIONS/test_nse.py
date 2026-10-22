@@ -2561,11 +2561,99 @@ console.log(JSON.stringify(R));
           d.count("pd-filtered") >= 3 and "'Ribbon signal · with PD zone' : 'Ribbon signal · against PD zone'" in d and "_pdScoreSignals();" in d)
 
 
+def test_pd_structure_psychology():
+    """Market Prep extensions: market structure & price behaviour (swings,
+    BOS / CHoCH, opening type, initial-balance extension) and present-day
+    market psychology (fear, writers, PCR, mood), on constructed sessions."""
+    import subprocess, json as _json, math as _m, datetime as _dt
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    mod = d[d.index("  const _pd = { key: ''"):d.index("  // ── the morning prep card (PDMP)")]
+    t0 = int(_dt.datetime(2026, 10, 21, 9, 15, tzinfo=_dt.timezone(_dt.timedelta(hours=5, minutes=30))).timestamp())
+    def session(sign):
+        out, prev = [], 25000.0
+        for i in range(150):
+            # a clean 30-minute drive from the open, then a trend with pullbacks
+            p = 25000 + sign * (4 * i + (60 * _m.sin((i - 30) / 8) if i >= 30 else 0))
+            o = prev; out.append({"t": t0 + 60 * i, "o": o, "h": max(o, p) + 2, "l": min(o, p) - 2, "c": p, "v": 0}); prev = p
+        return out
+    up, dn = session(1), session(-1)
+    harness = r"""
+const window = { _histDate: '' }; const state = { symbol: 'NIFTY', lastData: null };
+const escapeHtml = s => String(s ?? ''); const fmtInt = v => String(Math.round(v)); const fmtPrice = v => (+v).toFixed(2);
+const _hm = t => String(t); const els = {}; const _safe = f => f(); const _isHistorical = () => !!window._histDate;
+const _istDayKey = () => '2026-10-21';
+const _chart = { interval: 1, candles: [], liveBar: false, show: { pdZones: true, pdFvg: true, pdLiq: true }, warm: [], warmKey: '', hasVolume: false };
+const _vwapBands = cs => ({ vw: cs.map(() => cs[0].o), sd: cs.map(() => 10) });
+const _dayType = () => ({ label: 'TEST DAY' });
+let _ctxHist = [];
+""" + grab("_warmCurKey") + grab("_warmOf") + "\nconst _warmLen = bars => _warmOf(bars).length;\n" + mod + "\n" + d[d.index("  const _pdSlow = {"):d.index("  // both change slowly")] + r"""
+const R = {};
+_pd.daily = [{ day: '2026-10-19', o: 24900, h: 25100, l: 24800, c: 25000, t0: 1 }]; _pd.key = 'NIFTY|2026-10-21';
+_chart.candles = UPA;
+const su = _pdStructure();
+R.up = { label: su.label, structure: su.structure, ev: su.ev && su.ev.kind + (su.ev.dir > 0 ? '+' : '-'), open: su.openType,
+         ib: su.why.some(w => /extended UP/.test(w[1])), n: su.why.length };
+_chart.candles = DNA;
+const sd = _pdStructure();
+R.dn = { label: sd.label, structure: sd.structure, ev: sd.ev && sd.ev.kind + (sd.ev.dir > 0 ? '+' : '-'), open: sd.openType,
+         ib: sd.why.some(w => /extended DOWN/.test(w[1])) };
+// psychology: a calm rally (VIX easing, puts written, PCR rising with price)
+_chart.candles = UPA;
+const strikes = [24900, 24950, 25000, 25050, 25100].map(k => ({ strike: k, ce_oi_chg: 1000, pe_oi_chg: 5000 }));
+state.lastData = { underlying_value: UPA[0].o + 300, atm_iv: 13, atm: 25000, strike_gap: 50, strikes };
+_ctxHist = [{ sym: 'NIFTY', ts: 1, vix: 13.5, pcr: 0.9, skew: 1.0, straddle: 200 }, { sym: 'NIFTY', ts: 2, vix: 12.8, pcr: 1.0, skew: 0.8, straddle: 190 }];
+const pu = _pdPsych();
+R.psyUp = { mood: pu.mood, score: pu.score };
+// a falling market with fear rising, calls written, puts bought, protection bid
+_chart.candles = DNA;
+state.lastData = { underlying_value: DNA[0].o - 320, atm_iv: 13, atm: 25000, strike_gap: 50,
+  strikes: strikes.map(k => ({ ...k, ce_oi_chg: 6000, pe_oi_chg: 1000 })) };
+_ctxHist = [{ sym: 'NIFTY', ts: 1, vix: 12.0, pcr: 1.0, skew: 0.5, straddle: 190 }, { sym: 'NIFTY', ts: 2, vix: 13.6, pcr: 1.2, skew: 1.2, straddle: 220 }];
+const pd2 = _pdPsych();
+R.psyDn = { mood: pd2.mood, score: pd2.score, fearLine: pd2.why.some(w => /fear rising into the fall/.test(w[1])), hedge: pd2.why.some(w => /puts BOUGHT/.test(w[1])) };
+window._histDate = '2026-10-19'; R.histPsy = _pdPsych(); window._histDate = '';
+console.log(JSON.stringify(R));
+"""
+    harness = harness.replace("const R = {};", f"const R = {{}}; const UPA = {_json.dumps(up)}, DNA = {_json.dumps(dn)};", 1)
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(harness); hp = fh.name
+    try:
+        res = subprocess.run(["node", hp], capture_output=True, text=True)
+    finally:
+        os.unlink(hp)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("PD structure: harness ran", False, (res.stderr or res.stdout)[:600]); return
+    check("structure: a rising session reads TRENDING UP - HH/HL, BOS up, initial balance extended up",
+          R["up"]["label"] == "TRENDING UP" and R["up"]["structure"] == "BULLISH" and R["up"]["ev"] == "BOS+" and R["up"]["ib"], str(R["up"]))
+    check("structure: the mirror session reads TRENDING DOWN - LH/LL, BOS down, IB extended down",
+          R["dn"]["label"] == "TRENDING DOWN" and R["dn"]["structure"] == "BEARISH" and R["dn"]["ev"] == "BOS-" and R["dn"]["ib"], str(R["dn"]))
+    check("structure: a one-way first 30 minutes is an Open-Drive, in the right direction",
+          R["up"]["open"] == "Open-Drive ▲" and R["dn"]["open"] == "Open-Drive ▼", f'{R["up"]["open"]} / {R["dn"]["open"]}')
+    check("psychology: a calm rally with puts written and VIX easing reads CONFIDENT",
+          R["psyUp"]["mood"] == "CONFIDENT" and R["psyUp"]["score"] >= 3, str(R["psyUp"]))
+    check("psychology: a hard fall with VIX up, calls written, puts bought and protection bid reads PANIC",
+          R["psyDn"]["mood"] == "PANIC" and R["psyDn"]["fearLine"] and R["psyDn"]["hedge"], str(R["psyDn"]))
+    check("psychology: not read in historical replay (the option history is today's)", R["histPsy"] is None)
+    check("dashboard: structure and psychology sections in the prep card, labels in its header, slow-refreshed",
+          "Market structure &amp; price behaviour" in d and "Present day market psychology" in d
+          and "structure <b style=" in d and "mood <b style=" in d and "Date.now() - _pdSlow.at > 10000" in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

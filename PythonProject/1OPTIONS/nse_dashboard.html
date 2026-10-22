@@ -192,6 +192,8 @@
   .pd-prep-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:4px 14px; padding-top:4px; line-height:1.45; }
   .pd-k { font-size:8.5px; font-weight:700; letter-spacing:.3px; color:var(--muted,#789); text-transform:uppercase; }
   .pd-checks { display:flex; gap:12px; flex-wrap:wrap; padding-top:2px; }
+  .pd-sec { border-top:1px solid rgba(127,127,127,0.18); padding-top:3px; }
+  .pd-two { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:4px 18px; }
   .pd-checks label { cursor:pointer; white-space:nowrap; }
   /* ── drag sideways to change day ── */
   #chartBody.day-swiping { transition:none; cursor:grabbing; will-change:transform; }
@@ -18416,6 +18418,264 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     else if (loc <= 0.25 && r >= avg) t = 'trend down';
     return { t, r, avg, loc };
   }
+  // ── MARKET STRUCTURE & PRICE BEHAVIOUR ─────────────────────────────
+  // From today's closed candles, read on 5-minute bars (1-minute swings are
+  // mostly noise): swing sequence (HH/HL vs LH/LL), the last break of
+  // structure (BOS = with the trend, CHoCH = first break against it), the
+  // opening type (Dalton: drive / test-drive / rejection-reverse / auction),
+  // the initial balance (09:15-10:15) and whether it was extended, today's
+  // range against the 5-day average, VWAP behaviour and how efficient the
+  // move has been. Each read is a line with its sign, like the bias.
+  const _pdSlow = { key: '', at: 0, st: null, ps: null };
+  function _pdAgg5(bars) {
+    if ((_chart.interval || 1) >= 5) return bars.slice();
+    const out = [];
+    for (const b of bars) {
+      const k = Math.floor((b.t + 19800 - 555 * 60) / 300);
+      const cur = out[out.length - 1];
+      if (cur && cur._k === k) { cur.h = Math.max(cur.h, b.h); cur.l = Math.min(cur.l, b.l); cur.c = b.c; cur.v += b.v || 0; }
+      else out.push({ _k: k, t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 });
+    }
+    return out;
+  }
+  function _pdIstMin(t) { const d = new Date((t + 19800) * 1000); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
+  function _pdStructure() {
+    const all = _chart.optionMeta ? [] : (_chart.candles || []);
+    const bars = _chart.liveBar ? all.slice(0, -1) : all;
+    if (bars.length < 6) return null;
+    const why = [];
+    let s = 0;
+    const b5 = _pdAgg5(bars);
+    // swings on 5-minute bars, 2 bars each side
+    const K = 2, sw = [];
+    for (let i = K; i < b5.length - K; i++) {
+      let hi = true, lo = true;
+      for (let k = 1; k <= K; k++) {
+        if (b5[i - k].h >= b5[i].h || b5[i + k].h > b5[i].h) hi = false;
+        if (b5[i - k].l <= b5[i].l || b5[i + k].l < b5[i].l) lo = false;
+      }
+      if (hi) sw.push({ k: 'H', v: b5[i].h, i, t: b5[i].t });
+      if (lo) sw.push({ k: 'L', v: b5[i].l, i, t: b5[i].t });
+    }
+    const highs = sw.filter(x => x.k === 'H'), lows = sw.filter(x => x.k === 'L');
+    const seq = [];
+    for (const x of sw) {
+      const prev = (x.k === 'H' ? highs : lows).filter(y => y.i < x.i).pop();
+      if (prev) seq.push(x.k === 'H' ? (x.v > prev.v ? 'HH' : 'LH') : (x.v > prev.v ? 'HL' : 'LL'));
+    }
+    let structure = 'forming';
+    const h2 = highs.slice(-2), l2 = lows.slice(-2);
+    if (h2.length === 2 && l2.length === 2) {
+      const hh = h2[1].v > h2[0].v, hl = l2[1].v > l2[0].v;
+      structure = hh && hl ? 'BULLISH' : !hh && !hl ? 'BEARISH' : 'RANGING';
+      if (structure === 'BULLISH') { s++; why.push([1, `higher highs and higher lows (${seq.slice(-4).join(' · ')})`]); }
+      else if (structure === 'BEARISH') { s--; why.push([-1, `lower highs and lower lows (${seq.slice(-4).join(' · ')})`]); }
+      else why.push([0, `mixed swings (${seq.slice(-4).join(' · ')}) — rotation, not trend`]);
+    } else why.push([0, 'not enough 5-minute swings yet to call structure']);
+    // BOS / CHoCH on closes through the last confirmed swing
+    let trend = 0, lastH = null, lastL = null, ev = null, nBos = 0;
+    const confirmAt = new Map();
+    for (const x of sw) { const at = x.i + K; (confirmAt.get(at) || confirmAt.set(at, []).get(at)).push(x); }
+    for (let i = 0; i < b5.length; i++) {
+      for (const x of confirmAt.get(i) || []) { if (x.k === 'H') lastH = x; else lastL = x; }
+      const c = b5[i].c;
+      if (lastH && c > lastH.v && !lastH.broken) {
+        lastH.broken = true;
+        ev = { kind: trend < 0 ? 'CHoCH' : 'BOS', dir: 1, lvl: lastH.v, t: b5[i].t }; if (ev.kind === 'BOS') nBos++; trend = 1;
+      } else if (lastL && c < lastL.v && !lastL.broken) {
+        lastL.broken = true;
+        ev = { kind: trend > 0 ? 'CHoCH' : 'BOS', dir: -1, lvl: lastL.v, t: b5[i].t }; if (ev.kind === 'BOS') nBos++; trend = -1;
+      }
+    }
+    if (ev) {
+      s += ev.dir;
+      why.push([ev.dir, `${ev.kind} ${ev.dir > 0 ? 'up' : 'down'} at ${_hm(ev.t)} through ${fmtInt(ev.lvl)}${ev.kind === 'CHoCH' ? ' — character changed against the earlier swing' : ''}`]);
+    }
+    // opening type, from the first 30 minutes
+    const o30 = bars.filter(b => _pdIstMin(b.t) < 585);
+    let openType = null;
+    if (o30.length >= 5 && _pdIstMin(bars[bars.length - 1].t) >= 584) {
+      const O = o30[0].o, H = Math.max(...o30.map(b => b.h)), L = Math.min(...o30.map(b => b.l)), R = H - L || 1;
+      const c30 = o30[o30.length - 1].c, pos = (c30 - L) / R;
+      const first10 = o30.filter(b => _pdIstMin(b.t) < 565), d1 = Math.sign(first10[first10.length - 1].c - O);
+      if (pos >= 0.75 && (O - L) <= 0.15 * R) openType = ['Open-Drive ▲', 1, 'drove up from the open and never came back — strong conviction'];
+      else if (pos <= 0.25 && (H - O) <= 0.15 * R) openType = ['Open-Drive ▼', -1, 'drove down from the open and never came back — strong conviction'];
+      else if (pos >= 0.75 && d1 < 0) openType = ['Open-Test-Drive ▲', 1, 'tested lower first, found buyers, then drove up'];
+      else if (pos <= 0.25 && d1 > 0) openType = ['Open-Test-Drive ▼', -1, 'tested higher first, found sellers, then drove down'];
+      else if ((pos >= 0.65 && d1 < 0) || (pos <= 0.35 && d1 > 0)) openType = [`Open-Rejection-Reverse ${pos >= 0.5 ? '▲' : '▼'}`, pos >= 0.5 ? 1 : -1, 'the first move was rejected and reversed through the open'];
+      else openType = ['Open-Auction', 0, 'rotated around the open — no early conviction, expect two-way trade'];
+      s += openType[1];
+      why.push([openType[1], `${openType[0]}: ${openType[2]}`]);
+    }
+    // open against the previous day's range
+    const days = _pdPrevDays(), pd = days[days.length - 1];
+    if (pd) {
+      const O = bars[0].o;
+      why.push([0, O > pd.h ? `opened ABOVE yesterday's range (gap +${Math.round(O - pd.h)} over PDH) — acceptance above is bullish, a return inside is a failed gap`
+                 : O < pd.l ? `opened BELOW yesterday's range (gap ${Math.round(O - pd.l)} under PDL) — acceptance below is bearish, a return inside is a failed gap`
+                 : 'opened inside yesterday\'s range — balance until one edge breaks']);
+    }
+    // initial balance and its extension
+    const ib = bars.filter(b => _pdIstMin(b.t) < 615);
+    let ibTxt = null;
+    if (ib.length >= 5 && _pdIstMin(bars[bars.length - 1].t) >= 614) {
+      const ibH = Math.max(...ib.map(b => b.h)), ibL = Math.min(...ib.map(b => b.l));
+      const rest = bars.filter(b => _pdIstMin(b.t) >= 615);
+      const up = rest.some(b => b.h > ibH), dn = rest.some(b => b.l < ibL);
+      const avg = days.length ? days.reduce((a, d) => a + (d.h - d.l), 0) / days.length : null;
+      const ibPct = avg ? Math.round((ibH - ibL) / avg * 100) : null;
+      ibTxt = `IB ${fmtInt(ibL)}–${fmtInt(ibH)} (${Math.round(ibH - ibL)} pts${ibPct != null ? `, ${ibPct}% of the 5-day range` : ''})`;
+      const e = up && !dn ? 1 : dn && !up ? -1 : 0;
+      s += e;
+      why.push([e, `${ibTxt} — ${up && dn ? 'extended both ways (neutral / volatile day)' : up ? 'extended UP: initiative buyers' : dn ? 'extended DOWN: initiative sellers' : 'not extended yet: balance'}${ibPct != null && ibPct < 35 ? ' · narrow IB, extension likely' : ''}`]);
+    }
+    // range expansion so far
+    const dayH = Math.max(...bars.map(b => b.h)), dayL = Math.min(...bars.map(b => b.l));
+    const avgR = days.length ? days.reduce((a, d) => a + (d.h - d.l), 0) / days.length : null;
+    const rngPct = avgR ? Math.round((dayH - dayL) / avgR * 100) : null;
+    const loc = dayH > dayL ? (bars[bars.length - 1].c - dayL) / (dayH - dayL) : 0.5;
+    if (rngPct != null)
+      why.push([0, `range so far ${Math.round(dayH - dayL)} pts = ${rngPct}% of the 5-day average${rngPct >= 100 ? ' — already a full day\'s move, late entries chase' : rngPct < 50 ? ' — room left to expand' : ''}; price at ${Math.round(loc * 100)}% of the day's range`]);
+    // VWAP behaviour
+    try {
+      const vb = _vwapBands(bars);
+      let above = 0, crosses = 0, side = 0;
+      bars.forEach((b, i) => { const sd = b.c > vb.vw[i] ? 1 : -1; if (sd > 0) above++; if (side && sd !== side) crosses++; side = sd; });
+      const pa = Math.round(above / bars.length * 100), e = pa >= 70 ? 1 : pa <= 30 ? -1 : 0;
+      s += e;
+      const dt = _dayType(bars);
+      why.push([e, `${pa}% of bars above VWAP, ${crosses} cross${crosses === 1 ? '' : 'es'}${dt?.label ? ` · ${dt.label}` : ''}`]);
+    } catch (_) {}
+    // efficiency
+    // efficiency ratio over the last hour of closed bars: |net| / path length
+    {
+      const w = bars.slice(-Math.max(5, Math.round(60 / (_chart.interval || 1))));
+      let gross = 0;
+      for (let i = 1; i < w.length; i++) gross += Math.abs(w[i].c - w[i - 1].c);
+      const net = w[w.length - 1].c - w[0].c, er = gross > 0 ? Math.abs(net) / gross : 0;
+      if (w.length >= 5) why.push([er >= 0.45 ? Math.sign(net) : 0, `last hour: ${net >= 0 ? '+' : ''}${Math.round(net)} pts at ${Math.round(er * 100)}% efficiency — ${er >= 0.45 ? 'clean, directional' : er < 0.25 ? 'choppy, overlapping candles' : 'mixed'}`]);
+    }
+    const label = s >= 3 ? 'TRENDING UP' : s <= -3 ? 'TRENDING DOWN' : s >= 1 ? 'BULLISH LEAN' : s <= -1 ? 'BEARISH LEAN' : 'BALANCED';
+    return { label, score: s, structure, ev, nBos, openType: openType?.[0] || null, why };
+  }
+
+  // ── PRESENT DAY MARKET PSYCHOLOGY ──────────────────────────────────
+  // What today's traders are feeling, read from what they are paying for:
+  // VIX and ATM IV since the open (fear), PCR and option writing near the
+  // money (who is confident enough to sell), skew (demand for protection),
+  // the straddle (anticipation vs complacency), order flow against price
+  // (participation), and liquidity sweeps (who is trapped). Live only: the
+  // context history is today's.
+  function _pdPsych() {
+    if (_pdHist() || _chart.optionMeta) return null;
+    const d = state.lastData;
+    const sym = state.symbol || 'NIFTY';
+    const pts = (typeof _ctxHist !== 'undefined' ? _ctxHist : []).filter(h => h.sym === sym);
+    const cs = _chart.candles || [];
+    if (!d?.underlying_value || !cs.length) return null;
+    const why = [];
+    let s = 0;
+    const first = k => { for (const p of pts) if (p[k] != null && isFinite(p[k])) return p[k]; return null; };
+    const last = k => { for (let i = pts.length - 1; i >= 0; i--) if (pts[i][k] != null && isFinite(pts[i][k])) return pts[i][k]; return null; };
+    const px = d.underlying_value, o = cs[0].o, dP = px - o;
+    const sig = (px * ((d.atm_iv || 13) / 100)) * Math.sqrt(Math.max(1, cs.length) / 375 / 252);
+    const pz = sig > 0 ? dP / sig : 0, pDir = Math.abs(pz) >= 0.3 ? Math.sign(pz) : 0;
+    why.push([pDir, `price ${dP >= 0 ? '+' : ''}${Math.round(dP)} pts from the open (${pz >= 0 ? '+' : ''}${pz.toFixed(1)}σ)`]);
+    s += pDir;
+    // fear: VIX and ATM IV since the open
+    const v0 = first('vix'), v1 = last('vix');
+    let fear = 0;
+    if (v0 != null && v1 != null) {
+      const dv = v1 - v0;
+      fear = dv >= 0.4 ? 1 : dv <= -0.4 ? -1 : 0;
+      const txt = dv >= 0.4 ? (pDir < 0 ? 'fear rising into the fall' : pDir > 0 ? 'nervous rally — VIX up with price' : 'fear building while price waits')
+                : dv <= -0.4 ? (pDir > 0 ? 'fear draining — comfortable rally' : 'fear easing') : 'fear steady';
+      why.push([fear > 0 ? -1 : fear < 0 && pDir >= 0 ? 1 : 0, `VIX ${v0.toFixed(2)} → ${v1.toFixed(2)} (${dv >= 0 ? '+' : ''}${dv.toFixed(2)}): ${txt}`]);
+      s -= fear;
+    }
+    // option writers near the money: who is confident enough to sell
+    try {
+      const atm = d.atm, gap = d.strike_gap || 50;
+      const near = (d.strikes || []).filter(k => Math.abs(k.strike - atm) <= 2 * gap);
+      const ce = near.reduce((a, k) => a + (k.ce_oi_chg || 0), 0), pe = near.reduce((a, k) => a + (k.pe_oi_chg || 0), 0);
+      if (Math.abs(ce) + Math.abs(pe) > 0) {
+        let e = 0, txt;
+        if (pe > 0 && pe > ce * 1.3) { e = 1; txt = 'put writers adding near the money — sellers confident the floor holds'; }
+        else if (ce > 0 && ce > pe * 1.3) { e = -1; txt = 'call writers adding near the money — sellers confident the ceiling holds'; }
+        else if (ce < 0 && pe < 0) txt = 'both sides unwinding near the money — positions being closed, conviction low';
+        else txt = 'writing balanced on both sides — range expectation';
+        s += e;
+        why.push([e, `ATM ±2 strikes OI change: calls ${ce >= 0 ? '+' : ''}${fmtInt(ce)}, puts ${pe >= 0 ? '+' : ''}${fmtInt(pe)} — ${txt}`]);
+      }
+    } catch (_) {}
+    // PCR since the open
+    const p0 = first('pcr'), p1 = last('pcr');
+    if (p0 != null && p1 != null && p0 > 0) {
+      const rel = (p1 - p0) / p0;
+      if (Math.abs(rel) >= 0.03) {
+        const e = rel > 0 ? (pDir >= 0 ? 1 : -1) : (pDir <= 0 ? -1 : 1);
+        s += e;
+        why.push([e, `PCR ${p0.toFixed(2)} → ${p1.toFixed(2)}: ${rel > 0 ? (pDir >= 0 ? 'puts written under a rising market (support)' : 'puts BOUGHT into the fall (hedging, fear)') : (pDir <= 0 ? 'calls written over a falling market (lid)' : 'calls BOUGHT into the rise (chasing, FOMO)')}`]);
+      } else why.push([0, `PCR ${p1.toFixed(2)}, little changed since the open`]);
+    }
+    // skew: demand for protection
+    const k0 = first('skew'), k1 = last('skew');
+    if (k0 != null && k1 != null) {
+      const dk = k1 - k0;
+      if (Math.abs(dk) >= 0.15) { const e = dk > 0 ? -1 : 1; s += e; why.push([e, `skew ${dk > 0 ? '+' : ''}${dk.toFixed(2)}: ${dk > 0 ? 'protection being bid — hedgers worried' : 'protection being sold — hedgers relaxed'}`]); }
+    }
+    // straddle: anticipation vs complacency
+    const st0 = first('straddle'), st1 = last('straddle');
+    let calm = false;
+    if (st0 > 0 && st1 > 0) {
+      const ch = (st1 - st0) / st0;
+      calm = ch <= -0.04 && Math.abs(pz) < 0.6;
+      why.push([0, `ATM straddle ${ch >= 0 ? '+' : ''}${(ch * 100).toFixed(1)}%: ${ch >= 0.03 ? 'premium bid — the crowd expects a move' : calm ? 'premium bleeding — complacency, sellers in control' : 'premium decaying normally'}`]);
+    }
+    // participation: order flow against price
+    try {
+      if (_chart.hasVolume && cs.length > 10) {
+        const cv = _cvdSeries(cs), c0 = cv[0].cum, c1 = cv[cv.length - 1].cum;
+        const span = Math.max(...cv.map(x => x.cum)) - Math.min(...cv.map(x => x.cum)) || 1;
+        const r = (c1 - c0) / span, cd = Math.abs(r) >= 0.25 ? Math.sign(r) : 0;
+        if (cd && pDir && cd !== pDir) why.push([-pDir, `order flow ${cd > 0 ? 'buying' : 'selling'} while price goes ${pDir > 0 ? 'up' : 'down'} — the move lacks participation, a trap is possible`]);
+        else if (cd && !pDir) why.push([0, `net ${cd > 0 ? 'buying' : 'selling'} but price is flat — absorption: ${cd > 0 ? 'sellers are soaking up the buying' : 'buyers are soaking up the selling'}; the side that gives way moves price`]);
+        else if (cd) { s += cd; why.push([cd, `order flow backs the move — ${cd > 0 ? 'buyers lifting offers' : 'sellers hitting bids'}`]); }
+      }
+    } catch (_) {}
+    // trapped traders: today's sweeps
+    try {
+      const A = _pdArrays();
+      for (const P of (A?.pools || []).filter(P => P.state === 'swept').slice(-2)) {
+        const e = P.side > 0 ? -1 : 1;
+        why.push([e, `${P.side > 0 ? 'breakout buyers trapped above' : 'breakdown sellers trapped below'} ${P.lab} ${fmtInt(P.lvl)} (swept at ${_hm(A.ext[P.at].t)}) — their stops fuel the ${P.side > 0 ? 'fall' : 'rise'}`]);
+      }
+    } catch (_) {}
+    const v = v1 ?? +d.india_vix;
+    let mood;
+    if (s <= -3 && fear > 0 && pz <= -1.5) mood = 'PANIC';
+    else if (s <= -3) mood = 'FEARFUL';
+    else if (s <= -1) mood = 'ANXIOUS';
+    else if (s >= 3 && fear > 0) mood = 'EUPHORIC / FOMO';
+    else if (s >= 3) mood = 'CONFIDENT';
+    else if (s >= 1) mood = 'OPTIMISTIC';
+    else mood = calm ? 'COMPLACENT' : 'INDECISIVE';
+    return { mood, score: s, why, vix: v };
+  }
+  // both change slowly: recomputed at most every 10 s, or on a new closed bar
+  function _pdSlowReads() {
+    const cs = _chart.candles || [], lb = cs[_chart.liveBar ? cs.length - 2 : cs.length - 1];
+    const key = `${state.symbol}|${window._histDate || ''}|${cs.length}|${lb?.t}|${_pdPrevDays().length}|${_chart.interval}`;
+    if (_pdSlow.key !== key || Date.now() - _pdSlow.at > 10000) {
+      _pdSlow.key = key; _pdSlow.at = Date.now();
+      try { _pdSlow.st = _pdStructure(); } catch (e) { _pdSlow.st = null; console.warn('[pd structure]', e.message); }
+      try { _pdSlow.ps = _pdPsych(); } catch (e) { _pdSlow.ps = null; console.warn('[pd psych]', e.message); }
+    }
+    return { st: _pdSlow.st, ps: _pdSlow.ps };
+  }
+  const _pdWhyHtml = arr => (arr || []).map(w => `<span style="color:${w[0] > 0 ? 'var(--pos,#26a69a)' : w[0] < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)'};">${w[0] > 0 ? '▲' : w[0] < 0 ? '▼' : '◆'} ${escapeHtml(w[1])}</span>`).join('<br>') || '—';
+  const _pdLabCol = (s) => s > 0 ? 'var(--pos,#26a69a)' : s < 0 ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)';
+
   function renderPdPrep() {
     const box = document.getElementById('pdPrepBody');
     if (!box) return;
@@ -18479,7 +18739,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const zCol = B.z && B.z.pct >= 50 ? _PD_ZONE_COL.prem : _PD_ZONE_COL.disc;
     const upTxt = up ? `↑ ${up.lab} ${fmtInt(up.lvl)}${px ? ` (+${Math.round(up.lvl - px)})` : ''}` : '';
     const dnTxt = dn ? `↓ ${dn.lab} ${fmtInt(dn.lvl)}${px ? ` (−${Math.round(px - dn.lvl)})` : ''}` : '';
-    const sig = JSON.stringify([day, collapsed, B.bias, B.score, B.z?.name, ent.bias, ent.score, ent.checks, ent.note, up?.lab, dn?.lab, up?.lvl, dn?.lvl, gapTxt, hits, scored.length, open, B.R?.hi, B.R?.lo, hist, B.why.map(w => w[0]).join('')]);
+    const SR = _pdSlowReads(), ST = SR.st, PS = SR.ps;
+    const sig = JSON.stringify([ST && [ST.label, ST.score, ST.why], PS && [PS.mood, PS.score, PS.why], day, collapsed, B.bias, B.score, B.z?.name, ent.bias, ent.score, ent.checks, ent.note, up?.lab, dn?.lab, up?.lvl, dn?.lvl, gapTxt, hits, scored.length, open, B.R?.hi, B.R?.lo, hist, B.why.map(w => w[0]).join('')]);
     if (box.dataset.sig === sig) {
       const set = (sel, txt, col) => { const e = box.querySelector(sel); if (e && e.textContent !== txt) e.textContent = txt; if (e && col) e.style.color = col; };
       set('.pd-now', zTxt, zCol); set('.pd-up', upTxt); set('.pd-dn', dnTxt);
@@ -18495,6 +18756,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <span>now <b class="pd-now" style="color:${zCol};">${zTxt}</b></span>
         ${up ? `<span class="pd-mut pd-up">${escapeHtml(upTxt)}</span>` : ''}
         ${dn ? `<span class="pd-mut pd-dn">${escapeHtml(dnTxt)}</span>` : ''}
+        ${ST ? `<span title="Market structure & price behaviour">structure <b style="color:${_pdLabCol(ST.score)};">${ST.label}</b></span>` : ''}
+        ${PS ? `<span title="Present day market psychology">mood <b style="color:${_pdLabCol(PS.score)};">${PS.mood}</b></span>` : ''}
         ${scored.length ? `<span class="pd-mut" title="Morning bias against the day's close (open → close), last ${scored.length} directional days">bias log ${hits}/${scored.length}</span>` : ''}
         <span class="pd-mut" style="margin-left:auto;">${collapsed ? '▸' : '▾'}</span>
       </div>`;
@@ -18507,6 +18770,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         <div><div class="pd-k">Previous day</div><div>${dt ? `${dt.t} · range ${Math.round(dt.r)} (5-day avg ${Math.round(dt.avg)}) · closed at ${Math.round(dt.loc * 100)}%` : '—'}</div></div>
         <div><div class="pd-k">Unfilled gaps from before today</div><div>${gapTxt}</div></div>
         <div style="grid-column:1/-1;"><div class="pd-k">Why ${B.bias.toLowerCase()}</div><div>${B.why.map(w => `<span style="color:${w[0] > 0 ? 'var(--pos,#26a69a)' : w[0] < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)'};">${w[0] > 0 ? '▲' : w[0] < 0 ? '▼' : '◆'} ${escapeHtml(w[1])}</span>`).join('<br>') || '—'}</div></div>
+        <div style="grid-column:1/-1;" class="pd-two">
+        <div class="pd-sec"><div class="pd-k">Market structure &amp; price behaviour${ST ? ` — <span style="color:${_pdLabCol(ST.score)};">${ST.label}</span> <span class="pd-mut">(${ST.score >= 0 ? '+' : ''}${ST.score})</span>` : ''}</div><div>${ST ? _pdWhyHtml(ST.why) : '<span class="pd-mut">waiting for the first candles</span>'}</div></div>
+        <div class="pd-sec"><div class="pd-k">Present day market psychology${PS ? ` — <span style="color:${_pdLabCol(PS.score)};">${PS.mood}</span> <span class="pd-mut">(${PS.score >= 0 ? '+' : ''}${PS.score})</span>` : ''}</div><div>${PS ? _pdWhyHtml(PS.why) : `<span class="pd-mut">${hist ? 'live only — the option-market history is today\'s, not the replayed day\'s' : 'building — needs the chain and a few minutes of PCR / VIX history'}</span>`}</div></div>
+        </div>
         <div style="grid-column:1/-1;"><div class="pd-k">Event risk</div><div>${ev.length ? ev.map(escapeHtml).join(' · ') : '<span class="pd-mut">no expiry or holiday gap flagged</span>'}
           <input type="text" class="ohlc-inp" data-pdnote="1" placeholder="today's events (RBI, CPI, Fed, results…)" value="${escapeHtml(ent.note || '')}" style="width:260px;font-size:9px;margin-left:6px;" ${hist ? 'disabled' : ''}></div></div>
         <div style="grid-column:1/-1;" class="pd-checks">${_PD_CHECKS.map(([k, lab]) => `<label><input type="checkbox" data-pdcheck="${k}" ${checks[k] ? 'checked' : ''} ${hist ? 'disabled' : ''}> ${escapeHtml(lab)}</label>`).join('')}</div>
