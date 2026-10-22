@@ -1303,7 +1303,7 @@ def test_ema_cross():
             depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
             if depth == 0:
                 return dsrc[i:k + 1]
-    harness = "const _emaXCache = { key: '', pts: [] };\nconst _warmOf = () => [];\n" + grab("_emaSeries") + grab("_emaCrossPoints") + grab("_emaCrossSvg") + r"""
+    harness = "const _emaXCache = { key: '', pts: [] };\nconst _warmOf = () => [];\nconst _pdFilterOn = () => false, _pdVerdict = () => null, _pdFilterNote = () => '';\n" + grab("_emaSeries") + grab("_emaCrossPoints") + grab("_emaCrossSvg") + r"""
 const _hm = t => String(t); const fmtPrice = v => (+v).toFixed(1); const escapeHtml = x => x;
 const cs = [];
 for (let i = 0; i < 120; i++) {
@@ -2323,6 +2323,7 @@ const _haMemo = { src: null, n: 0, out: null, seed: null };
 const _ttrCache = { key: '', v: null }; const _emaXCache = { key: '', pts: [] };
 const _rgba = () => '';
 const _warmLen = bars => _warmOf(bars).length;
+const _pdFilterOn = () => false, _pdVerdict = () => null, _pdFilterNote = () => '';
 """ + d[i0:j0] + "\n".join(grab(f) for f in fns) + r"""
 let p = 25000; const all = [];
 for (let i = 0; i < 1125; i++) {           // two warm sessions + today, a few trend legs
@@ -2457,11 +2458,114 @@ console.log(JSON.stringify(R));
           "function fmtPrice(n) { return _nfP1.format(Number(n)); }" in d and "d.textContent = s ?? ''" not in d)
 
 
+def test_pd_premium_discount():
+    """PDA / PDMP: dealing ranges, premium/discount zones, fair value gaps
+    (open / filled), order blocks (intact / broken), liquidity pools (equal
+    highs swept and rejected, PDH taken), the signal filter, the bias reads,
+    and the dashboard wiring."""
+    import subprocess, json as _json, datetime as _dt
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    mod = d[d.index("  const _pd = { key: ''"):d.index("  // ── the morning prep card (PDMP)")]
+    t0 = int(_dt.datetime(2026, 10, 21, 9, 15, tzinfo=_dt.timezone(_dt.timedelta(hours=5, minutes=30))).timestamp())
+    B = {i: (100, 100.3, 99.7, 100) for i in range(6)}
+    B.update({6: (100.3, 100.5, 99.5, 99.6), 7: (99.6, 100.2, 99.4, 100.0), 8: (100.0, 106.0, 99.9, 105.8),
+              9: (105.8, 107.0, 103.0, 106.5), 10: (106.5, 106.8, 106.2, 106.5), 11: (106.5, 107.2, 106.3, 107.0),
+              12: (107.0, 108.0, 106.8, 107.5), 13: (107.5, 107.6, 106.9, 107.0), 14: (107.0, 107.3, 106.6, 106.8),
+              15: (106.8, 107.4, 106.7, 107.2), 16: (107.2, 108.02, 107.0, 107.6), 17: (107.6, 107.7, 107.0, 107.1),
+              18: (107.1, 107.5, 106.6, 106.8), 19: (106.8, 106.9, 103.6, 103.8), 20: (103.8, 104.5, 103.4, 104.0),
+              21: (104.0, 104.8, 103.8, 104.6), 22: (104.6, 105.6, 104.4, 105.4), 23: (105.4, 106.0, 105.0, 105.8),
+              24: (105.8, 106.3, 105.5, 106.1), 25: (106.1, 106.9, 105.9, 106.7), 30: (107.0, 108.5, 106.9, 107.4),
+              35: (107.0, 111.0, 106.9, 110.8)})
+    for i in list(range(26, 30)) + list(range(31, 35)):
+        B[i] = (107.0, 107.3, 106.7, 107.0)
+    for i in range(36, 41):
+        B[i] = (110.8, 111.1, 110.5, 110.8)
+    bars = [{"t": t0 + 60 * i, "o": B[i][0], "h": B[i][1], "l": B[i][2], "c": B[i][3]} for i in range(41)]
+    harness = r"""
+const window = { _histDate: '' }; const state = { symbol: 'NIFTY', lastData: null };
+const escapeHtml = s => String(s ?? ''); const fmtInt = v => String(Math.round(v)); const fmtPrice = v => (+v).toFixed(2);
+const _hm = t => String(t); const els = {}; const _safe = f => f(); const _isHistorical = () => false;
+const _istDayKey = () => '2026-10-21';
+const _chart = { interval: 1, candles: [], liveBar: false, show: { pdZones: true, pdFvg: true, pdOb: true, pdLiq: true, pdFilter: true, pdhl: false }, warm: [], warmKey: '' };
+""" + grab("_warmCurKey") + grab("_warmOf") + "\nconst _warmLen = bars => _warmOf(bars).length;\n" + mod + grab("_pdBias") + grab("_pdDayType") + r"""
+const R = {};
+_chart.candles = BARS;
+_pd.daily = [{ day: '2026-10-16', o: 98, h: 104, l: 94, c: 99, t0: 1 }, { day: '2026-10-19', o: 99, h: 110, l: 95, c: 108.5, t0: 2 }];
+_pd.key = 'NIFTY|2026-10-21';
+const rng = k => { _chart.show.pdRange = k; const r = _pdRange(); return r && [r.lo, r.hi, r.eq, r.label]; };
+R.ranges = { pd: rng('pd'), p2d: rng('p2d'), pw: rng('pw'), today: rng('today') };
+_chart.show.pdRange = 'pd';
+R.zones = [96, 101, 102.5, 104, 109, 111, 90].map(v => _pdZone(v, _pdRange()).name);
+R.verdict = { buyHigh: _pdVerdict(1, 8, 105.8), sellHigh: _pdVerdict(-1, 20, 104), buyLow: _pdVerdict(1, 3, 97) };
+const A = _pdArrays();
+R.fvgs = A.fvgs.map(g => [g.dir, g.mid, +g.bot.toFixed(2), +g.top.toFixed(2), g.filled]);
+R.obs = A.obs.map(o => [o.dir, o.j, o.top, o.bot, o.broken]);
+R.pools = A.pools.map(P => [P.lab, P.side, P.lvl, P.state, P.at]);
+const bands = _pdBandsSvg(v => 1000 - v, 90, 115, 0, 900);
+R.bands = { rects: (bands.under.match(/<rect /g) || []).length, eq: /EQ 103/.test(bands.over), edges: /R\.HI/.test(bands.over) };
+const arr = _pdArraysSvg(i => i * 10, v => 1000 - v, 90, 115, 0, 900, 0, 500);
+R.svg = { fvgB: /pd-fvgB/.test(arr.under), ob: /pd-obB/.test(arr.under), sweep: (arr.over.match(/pd-sweep/g) || []).length, liq: (arr.over.match(/pd-liq/g) || []).length };
+const b = _pdBias(), b0 = _pdBias(true);
+R.bias = { bias: b.bias, score: b.score, why: b.why.map(w => w[0] + ' ' + w[1].slice(0, 40)) };
+R.bias0 = { bias: b0.bias, score: b0.score, n: b0.why.length };
+R.dayType = _pdDayType(_pd.daily).t;
+R.tag = _pdTag();
+console.log(JSON.stringify(R));
+""".replace("BARS", _json.dumps(bars))
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("PD: harness ran", False, (res.stderr or res.stdout)[:600]); return
+    rg = R["ranges"]
+    check("PD: dealing ranges - previous day, two days, week (as many sessions as there are), today so far",
+          rg["pd"] == [95, 110, 102.5, "PDH–PDL"] and rg["p2d"][:2] == [94, 110] and rg["pw"][:2] == [94, 110]
+          and rg["pw"][3] == "prev 2 sessions" and rg["today"][:2] == [99.4, 111.1], str(rg))
+    check("PD: zone names - discount / equilibrium / premium / outside the range",
+          R["zones"] == ["DISCOUNT", "DISCOUNT", "EQUILIBRIUM", "PREMIUM", "PREMIUM", "ABOVE RANGE", "BELOW RANGE"], str(R["zones"]))
+    v = R["verdict"]
+    check("PD filter: BUY in premium fails, SELL in premium passes, BUY in discount passes",
+          v["buyHigh"]["pass"] is False and v["sellHigh"]["pass"] is True and v["buyLow"]["pass"] is True, str(v))
+    fv = R["fvgs"]
+    check("PD: bullish FVG 100.2-103 found at the displacement bar and still open",
+          [1, 8, 100.2, 103.0, None] in fv, str(fv))
+    check("PD: bearish FVG 104.5-106.6 found and marked filled when price traded back through it",
+          [-1, 19, 104.5, 106.6, 25] in fv, str(fv))
+    check("PD: order blocks - bullish OB (last down candle before the gap) intact, bearish OB broken by a close above it",
+          [1, 6, 100.5, 99.5, None] in R["obs"] and [-1, 16, 108.02, 107.0, 35] in R["obs"], str(R["obs"]))
+    pools = {p[0]: p for p in R["pools"]}
+    check("PD liquidity: equal highs swept and rejected; PDH taken (closed through); PDL untouched",
+          pools.get("EQH", [None] * 5)[2:5] == [108.02, "swept", 30] and pools["PDH"][3:5] == ["taken", 35]
+          and pools["PDL"][3] is None, str(R["pools"]))
+    check("PD drawing: two zone bands + EQ + range edges; FVG / OB boxes, sweep mark and pool lines",
+          R["bands"] == {"rects": 2, "eq": True, "edges": True} and R["svg"]["fvgB"] and R["svg"]["ob"]
+          and R["svg"]["sweep"] == 1 and R["svg"]["liq"] >= 2, str(R["bands"]) + str(R["svg"]))
+    check("PD bias: reasons with signs (above range -, closed top quarter +, HH/HL +, PDH taken -) net NEUTRAL",
+          R["bias"]["bias"] == "NEUTRAL" and R["bias"]["score"] == 0 and len(R["bias"]["why"]) == 4, str(R["bias"]))
+    check("PD bias at the open ignores intraday sweeps and Market Direction", R["bias0"]["n"] == 3, str(R["bias0"]))
+    check("PD: previous day typed (closed top quarter on a wide range = trend up)", R["dayType"] == "trend up", R["dayType"])
+    check("PD: status tag names the zone", "ABOVE RANGE" in R["tag"] and "PDH–PDL" in R["tag"], R["tag"][:120])
+    check("dashboard: PD toggles (zones, gaps, liquidity, prep on; OTE, OB, filter opt-in), range picker, prep card, reset key",
+          all(f'id="chk_{k}"' in d for k in ("pdZones", "pdOte", "pdFvg", "pdOb", "pdLiq", "pdFilter", "pdPrep"))
+          and "'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;" in d
+          and 'id="pdRange"' in d and '<div id="pdPrepBody"></div>' in d and "'pdPrepCollapsed'," in d
+          and "_pdEnsure();            // 5 previous sessions" in d and "/api/warm-candles?symbol=${encodeURIComponent(sym)}&interval=60&days=5" in d)
+    check("dashboard: filtered signals are faded (ribbon, EMA cross, context pane), and every ribbon signal is scored with/against the zone",
+          d.count("pd-filtered") >= 3 and "'Ribbon signal · with PD zone' : 'Ribbon signal · against PD zone'" in d and "_pdScoreSignals();" in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

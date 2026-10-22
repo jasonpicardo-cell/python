@@ -184,6 +184,15 @@
   .token-banner.warn { background:rgba(245,179,1,0.14); border:1px solid #f5b301; color:var(--text); }
   .token-banner.bad { background:rgba(239,83,80,0.16); border:1px solid #ef5350; color:var(--text); }
   .token-banner code { font-size:11px; padding:1px 5px; border-radius:4px; background:rgba(127,127,127,0.18); }
+  /* ── PDMP prep card ── */
+  .pd-prep { margin:2px 6px 4px; padding:4px 8px; border:1px solid rgba(212,175,55,0.45); border-left:4px solid var(--gold,#d4af37); border-radius:6px; font-size:10px; }
+  .pd-prep-head { display:flex; gap:12px; flex-wrap:wrap; align-items:center; cursor:pointer; user-select:none; }
+  .pd-prep-head b:first-child { font-size:9px; color:var(--muted); }
+  .pd-mut { color:var(--muted,#789); }
+  .pd-prep-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:4px 14px; padding-top:4px; line-height:1.45; }
+  .pd-k { font-size:8.5px; font-weight:700; letter-spacing:.3px; color:var(--muted,#789); text-transform:uppercase; }
+  .pd-checks { display:flex; gap:12px; flex-wrap:wrap; padding-top:2px; }
+  .pd-checks label { cursor:pointer; white-space:nowrap; }
   /* ── drag sideways to change day ── */
   #chartBody.day-swiping { transition:none; cursor:grabbing; will-change:transform; }
   #chartBody { transition:transform .18s ease-out, opacity .18s ease-out; }
@@ -2323,6 +2332,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 </span>
                 <label><input type="checkbox" id="chk_vwap"> VWAP</label>
               </span>
+              <span style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;" title="PDA / PDMP - premium, discount and market preparation (ICT). The dealing range's 50% line splits it into PREMIUM (look for shorts) and DISCOUNT (look for longs).">
+                <b style="color:var(--gold,#d4af37);">PD</b>
+                <label title="Shaded premium (red) and discount (green) halves of the dealing range, with the equilibrium (50%) line"><input type="checkbox" id="chk_pdZones"> Zones</label>
+                <select id="pdRange" class="ohlc-inp" style="font-size:9px;padding:1px 3px;" title="Dealing range: previous day (PDH-PDL), previous two days, previous week (5 sessions), or today's range so far">
+                  <option value="pd">Prev day</option>
+                  <option value="p2d">Prev 2 days</option>
+                  <option value="pw">Prev week</option>
+                  <option value="today">Today</option>
+                </select>
+                <label title="Optimal trade entry bands: 62-79% retracement into premium (shorts) and 21-38% into discount (longs)"><input type="checkbox" id="chk_pdOte"> OTE</label>
+                <label title="Fair value gaps: 3-candle imbalances of at least 0.3 ATR, drawn until filled. 'prev FVG' = left open by an earlier session"><input type="checkbox" id="chk_pdFvg"> FVG</label>
+                <label title="Order blocks: the last opposite candle before the displacement that left a gap, drawn until a close through it"><input type="checkbox" id="chk_pdOb"> OB</label>
+                <label title="Liquidity pools: previous day / week high and low, equal highs and lows. ✕ = swept and rejected (stop-run)"><input type="checkbox" id="chk_pdLiq"> Liquidity</label>
+                <label title="Buy/Sell signals (ribbon, EMA cross, context pane) against the zone - a BUY in premium or a SELL in discount - are drawn faded with ⊘. Nothing is deleted."><input type="checkbox" id="chk_pdFilter"> Filter signals</label>
+                <label title="Morning prep card above the chart: bias with reasons, open, liquidity, gaps, day type, event risk, checklist"><input type="checkbox" id="chk_pdPrep"> Prep card</label>
+              </span>
             </div>
             <!-- Context strip: the four numbers that decide how to trade what
                  the chart is showing. Kept next to the price rather than in a
@@ -2340,6 +2365,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <!-- Market direction: the context series read together, directly
                  above the candles -->
             <div id="mktDirBody"></div>
+            <!-- PDMP: morning prep card (premium, discount, market preparation) -->
+            <div id="pdPrepBody"></div>
             <div style="position:relative;">
               <!-- traffic light, top left over the candles: a sibling of
                    chartBody so the chart redraws cannot destroy it -->
@@ -17909,7 +17936,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const b = bars[t], xx = xOfBar(t);
       const yy = f > 0 ? Math.min(bottom - 4, y(Math.max(lo, b.l)) + 9) : Math.max(top + 4, y(Math.min(hi, b.h)) - 9);
       const cl = f > 0 ? P.buy : P.sell;
-      over += `<path d="M${xx.toFixed(1)},${(yy - 4.5).toFixed(1)} L${(xx + 4).toFixed(1)},${yy.toFixed(1)} L${xx.toFixed(1)},${(yy + 4.5).toFixed(1)} L${(xx - 4).toFixed(1)},${yy.toFixed(1)} Z" fill="${cl}"><title>${f > 0 ? 'Bull' : 'Bear'} trend started (Trend Target Ribbon)</title></path>`;
+      // PD filter: a signal against the zone is drawn faded, never removed
+      const pv = _pdFilterOn() ? _pdVerdict(f, t, b.c) : null, faded = pv && !pv.pass;
+      over += `<path class="ttr-flip${faded ? ' pd-filtered' : ''}" d="M${xx.toFixed(1)},${(yy - 4.5).toFixed(1)} L${(xx + 4).toFixed(1)},${yy.toFixed(1)} L${xx.toFixed(1)},${(yy + 4.5).toFixed(1)} L${(xx - 4).toFixed(1)},${yy.toFixed(1)} Z" fill="${cl}"${faded ? ' opacity="0.28"' : ''}><title>${f > 0 ? 'Bull' : 'Bear'} trend started (Trend Target Ribbon)${escapeHtml(_pdFilterNote(pv, f))}</title></path>`;
     }
     return { under, over };
   }
@@ -17971,13 +18000,540 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (sx == null || !isFinite(sx)) continue;
       stack = lastX != null && Math.abs(sx - lastX) < 1 ? stack + 1 : 0; lastX = sx;
       const bull = p.dir === 'bull', col = bull ? '#00e676' : '#ff1744';
-      const tip = `${_hm(p.t)} — EMA ${p.pf} crossed ${bull ? 'ABOVE' : 'BELOW'} EMA ${p.ps} on the closed ${iv}-minute candle (close ${fmtPrice(p.px)}; EMA ${p.pf} ${fmtPrice(p.f)}, EMA ${p.ps} ${fmtPrice(p.s)}). ${bull ? 'Bullish' : 'Bearish'} crossover.`;
-      s += `<g class="emax-line"><line x1="${sx.toFixed(1)}" y1="${top}" x2="${sx.toFixed(1)}" y2="${bottom}" stroke="${col}" stroke-width="1.3" opacity="0.75"/>
+      const pv = _pdFilterOn() ? _pdVerdict(bull ? 1 : -1, p.i, p.px) : null, faded = pv && !pv.pass;
+      const tip = `${_hm(p.t)} — EMA ${p.pf} crossed ${bull ? 'ABOVE' : 'BELOW'} EMA ${p.ps} on the closed ${iv}-minute candle (close ${fmtPrice(p.px)}; EMA ${p.pf} ${fmtPrice(p.f)}, EMA ${p.ps} ${fmtPrice(p.s)}). ${bull ? 'Bullish' : 'Bearish'} crossover.${_pdFilterNote(pv, bull ? 1 : -1)}`;
+      s += `<g class="emax-line${faded ? ' pd-filtered' : ''}"${faded ? ' opacity="0.3"' : ''}><line x1="${sx.toFixed(1)}" y1="${top}" x2="${sx.toFixed(1)}" y2="${bottom}" stroke="${col}" stroke-width="1.3" opacity="0.75"${faded ? ' stroke-dasharray="3,3"' : ''}/>
         <text x="${(sx + 2).toFixed(1)}" y="${(bottom - 4 - stack * 10).toFixed(1)}" style="font-size:8.5px;font-weight:800;fill:${col};">${bull ? '▲' : '▼'}${p.pf}/${p.ps}</text>
         <title>${escapeHtml(tip)}</title></g>`;
     }
     return s;
   }
+  // ══ PDA / PDMP: PREMIUM, DISCOUNT AND MARKET PREPARATION ═══════════
+  // The ICT daily routine, made mechanical so it behaves the same every day
+  // and can be scored:
+  //   DEALING RANGE   a high and a low - previous day (default), previous two
+  //                   days, previous week (5 sessions) or today's range so far.
+  //   EQUILIBRIUM     its 50% line. Above = PREMIUM (look for shorts), below =
+  //                   DISCOUNT (look for longs). OTE = 62-79% retracement.
+  //   PD ARRAYS       fair value gaps (3-candle imbalances at least 0.3 ATR,
+  //                   until filled), order blocks (the last opposite candle
+  //                   before the displacement that left a gap, until a close
+  //                   through it), and liquidity pools (previous day / week
+  //                   high and low, equal highs / lows) with a mark where one
+  //                   is swept and rejected.
+  //   FILTER          optional: Buy/Sell signals against the zone are drawn
+  //                   faded, never deleted. Every ribbon signal is logged to
+  //                   the Signal Scorecard as "with" or "against" the zone, so
+  //                   the filter can be judged on results.
+  //   PREP CARD       bias with its reasons, where the open landed, the
+  //                   nearest liquidity, gaps left from yesterday, the day
+  //                   type, event risk and a checklist - logged per day and
+  //                   scored against the day's close.
+  // All computed from candles already fetched (the warm-up sessions and one
+  // 5-session daily series, each cached by the server): no new broker calls
+  // beyond those sessions' one-time fetch.
+  const _pd = { key: '', daily: [], inflight: '', fail: null, cache: { key: '', v: null }, scored: new Set() };
+  const _PD_ZONE_COL = { prem: '#ff1744', disc: '#00e676' };
+  const _pdOn = k => !!_chart.show?.[k];
+  const _pdHist = () => typeof _isHistorical === 'function' && _isHistorical();
+  function _pdDayOf(t) {
+    const d = new Date((t + 19800) * 1000);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  }
+  function _pdDailyFrom(rows) {
+    const m = new Map();
+    for (const b of rows || []) {
+      const k = _pdDayOf(b.t), r = m.get(k);
+      if (!r) m.set(k, { day: k, o: b.o, h: b.h, l: b.l, c: b.c, t0: b.t });
+      else { r.h = Math.max(r.h, b.h); r.l = Math.min(r.l, b.l); r.c = b.c; }
+    }
+    return [...m.values()].sort((a, b) => a.t0 - b.t0);
+  }
+  async function _pdEnsure() {
+    if (_chart.optionMeta) return;
+    const sym = state.symbol || 'NIFTY', day = window._histDate || _istDayKey();
+    const key = `${sym}|${day}`;
+    if (_pd.key === key || _pd.inflight === key) return;
+    if (_pd.fail?.key === key && Date.now() - _pd.fail.at < 300000) return;
+    _pd.inflight = key;
+    try {
+      const base = els.serverUrl.value.replace(/\/+$/, '');
+      const j = await (await fetch(`${base}/api/warm-candles?symbol=${encodeURIComponent(sym)}&interval=60&days=5` +
+                                   (window._histDate ? `&date=${encodeURIComponent(window._histDate)}` : ''))).json();
+      const daily = _pdDailyFrom(j.candles || []);
+      if (!daily.length) { _pd.fail = { key, at: Date.now() }; return; }
+      if (`${state.symbol || 'NIFTY'}|${window._histDate || _istDayKey()}` !== key) return;
+      _pd.daily = daily; _pd.key = key; _pd.cache.key = '';
+      _safe(() => renderPriceChart(), 'renderPriceChart');
+    } catch (_) { _pd.fail = { key, at: Date.now() }; }
+    finally { if (_pd.inflight === key) _pd.inflight = ''; }
+  }
+  // previous sessions as daily bars: the 5-session series, else the warm-up
+  function _pdPrevDays() {
+    const k = `${state.symbol || 'NIFTY'}|${window._histDate || _istDayKey()}`;
+    if (_pd.key === k && _pd.daily.length) return _pd.daily;
+    const w = (_chart.warmKey === _warmCurKey() && !_chart.optionMeta) ? (_chart.warm || []) : [];
+    return _pdDailyFrom(w);
+  }
+  function _pdRangeKind() { return _chart.show?.pdRange || 'pd'; }
+  // the dealing range in force; for "today" it is the range up to bar `upto`
+  function _pdRange(upto, kindArg) {
+    const kind = kindArg || _pdRangeKind();
+    if (kind === 'today') {
+      const cs = _chart.candles || [];
+      const n = upto == null ? cs.length : Math.min(cs.length, upto + 1);
+      if (n < 2) return null;
+      let h = -Infinity, l = Infinity;
+      for (let i = 0; i < n; i++) { h = Math.max(h, cs[i].h); l = Math.min(l, cs[i].l); }
+      return h > l ? { hi: h, lo: l, eq: (h + l) / 2, kind, label: "today's range" } : null;
+    }
+    const days = _pdPrevDays();
+    if (!days.length) return null;
+    const use = kind === 'pw' ? days.slice(-5) : kind === 'p2d' ? days.slice(-2) : days.slice(-1);
+    const h = Math.max(...use.map(d => d.h)), l = Math.min(...use.map(d => d.l));
+    if (!(h > l)) return null;
+    const label = kind === 'pw' ? `prev ${use.length} sessions` : kind === 'p2d' ? 'prev 2 days' : 'PDH–PDL';
+    return { hi: h, lo: l, eq: (h + l) / 2, kind, label };
+  }
+  function _pdZone(px, R) {
+    if (!R || !isFinite(px)) return null;
+    const pct = (px - R.lo) / (R.hi - R.lo) * 100;
+    const name = pct > 100 ? 'ABOVE RANGE' : pct < 0 ? 'BELOW RANGE' : pct >= 55 ? 'PREMIUM' : pct <= 45 ? 'DISCOUNT' : 'EQUILIBRIUM';
+    return { pct, name, prem: pct >= 50 };
+  }
+  // A signal agrees with the zone when a BUY is at or below equilibrium
+  // (discount) and a SELL at or above it (premium). null = no range yet.
+  function _pdVerdict(dir, i, px) {
+    const R = _pdRangeKind() === 'today' ? _pdRange(i) : _pdRange();
+    const z = _pdZone(px, R);
+    if (!z) return null;
+    const pass = dir > 0 ? z.pct <= 50 : z.pct >= 50;
+    return { pass, pct: z.pct, name: z.name };
+  }
+  const _pdFilterOn = () => _pdOn('pdFilter');
+  // the price the PD reads use: live spot, or the last candle in replay
+  function _pdPx() {
+    const cs = _chart.candles || [];
+    if (_chart.optionMeta) return NaN;
+    if (!_pdHist() && isFinite(state.lastData?.underlying_value)) return state.lastData.underlying_value;
+    return cs.length ? cs[cs.length - 1].c : NaN;
+  }
+  function _pdFilterNote(v, dir) {
+    return v ? ` · PD zone: ${v.name} ${Math.round(v.pct)}%${v.pass ? '' : ` — FILTERED (${dir > 0 ? 'BUY in premium' : 'SELL in discount'})`}` : '';
+  }
+
+  // ── PD arrays on closed bars (warm-up + today), cached per closed bar ──
+  function _pdArrays() {
+    const all = _chart.candles || [];
+    const bars = _chart.liveBar ? all.slice(0, -1) : all;
+    if (bars.length < 3 && !_warmLen(bars)) return null;
+    const w = bars.length ? _warmOf(bars) : [];
+    const off = w.length, ext = off ? w.concat(bars) : bars;
+    const lb = bars[bars.length - 1];
+    const R = _pdRange();
+    const key = `${ext.length}|${ext[0]?.t}|${lb?.t}|${lb?.c}|${_chart.interval}|${R ? R.hi + '/' + R.lo : ''}|${_pdPrevDays().length}`;
+    if (_pd.cache.key === key) return _pd.cache.v;
+    const n = ext.length;
+    // ATR(14) as an RMA, for the gap-size floor and the equal-level tolerance
+    const atr = new Array(n).fill(null);
+    let a = null;
+    for (let i = 1; i < n; i++) {
+      const tr = Math.max(ext[i].h - ext[i].l, Math.abs(ext[i].h - ext[i - 1].c), Math.abs(ext[i].l - ext[i - 1].c));
+      a = a == null ? tr : (a * 13 + tr) / 14; atr[i] = a;
+    }
+    // fair value gaps
+    const fvgs = [];
+    for (let i = 2; i < n; i++) {
+      const A = ext[i - 2], C = ext[i], at = atr[i] || 0, minSz = Math.max(at * 0.3, 0.5);
+      if (C.l - A.h >= minSz) fvgs.push({ dir: 1, bot: A.h, top: C.l, i, mid: i - 1 });
+      else if (A.l - C.h >= minSz) fvgs.push({ dir: -1, bot: C.h, top: A.l, i, mid: i - 1 });
+    }
+    for (const g of fvgs) {                       // mitigation
+      g.cur = g.dir > 0 ? g.top : g.bot; g.filled = null;
+      for (let j = g.i + 1; j < n; j++) {
+        if (g.dir > 0) { if (ext[j].l <= g.bot) { g.filled = j; break; } if (ext[j].l < g.cur) g.cur = ext[j].l; }
+        else { if (ext[j].h >= g.top) { g.filled = j; break; } if (ext[j].h > g.cur) g.cur = ext[j].h; }
+      }
+    }
+    // order blocks: last opposite candle before the gap's displacement
+    const obs = [], seenOb = new Set();
+    for (const g of fvgs) {
+      for (let j = g.i - 2; j >= Math.max(0, g.i - 7); j--) {
+        const b = ext[j], opp = g.dir > 0 ? b.c < b.o : b.c > b.o;
+        if (!opp) continue;
+        if (seenOb.has(j)) break;
+        seenOb.add(j);
+        const ob = { dir: g.dir, top: b.h, bot: b.l, j, broken: null };
+        for (let k = g.i + 1; k < n; k++) {
+          if (g.dir > 0 ? ext[k].c < ob.bot : ext[k].c > ob.top) { ob.broken = k; break; }
+        }
+        obs.push(ob);
+        break;
+      }
+    }
+    // liquidity pools
+    const pools = [];
+    const days = _pdPrevDays(), pd = days[days.length - 1];
+    if (pd) {
+      pools.push({ side: 1, lvl: pd.h, lab: 'PDH', from: off, prior: true });
+      pools.push({ side: -1, lvl: pd.l, lab: 'PDL', from: off, prior: true });
+    }
+    if (days.length >= 3) {
+      pools.push({ side: 1, lvl: Math.max(...days.map(d => d.h)), lab: `P${days.length}DH`, from: off, prior: true });
+      pools.push({ side: -1, lvl: Math.min(...days.map(d => d.l)), lab: `P${days.length}DL`, from: off, prior: true });
+    }
+    // equal highs / lows: today's swing points (3 bars each side) within tolerance
+    const K = 3, sw = { 1: [], '-1': [] };
+    for (let i = off + K; i < n - K; i++) {
+      let hi = true, lo = true;
+      for (let k = 1; k <= K; k++) {
+        if (ext[i - k].h >= ext[i].h || ext[i + k].h > ext[i].h) hi = false;
+        if (ext[i - k].l <= ext[i].l || ext[i + k].l < ext[i].l) lo = false;
+      }
+      if (hi) sw[1].push(i);
+      if (lo) sw['-1'].push(i);
+    }
+    for (const side of [1, -1]) {
+      const pts = sw[side], used = new Set();
+      for (let p = 0; p < pts.length; p++) {
+        if (used.has(p)) continue;
+        const i = pts[p], v = side > 0 ? ext[i].h : ext[i].l;
+        const tol = Math.max((atr[i] || 0) * 0.15, v * 0.00015);
+        let lvl = v, last = null;
+        for (let q = p + 1; q < pts.length; q++) {
+          const v2 = side > 0 ? ext[pts[q]].h : ext[pts[q]].l;
+          if (Math.abs(v2 - v) <= tol) { used.add(q); last = pts[q]; lvl = side > 0 ? Math.max(lvl, v2) : Math.min(lvl, v2); }
+        }
+        if (last != null) pools.push({ side, lvl, lab: side > 0 ? 'EQH' : 'EQL', from: i, prior: false, after: last });
+      }
+    }
+    for (const P of pools) {                     // swept (rejected) or taken
+      P.state = null; P.at = null;
+      for (let j = P.prior ? off : P.after + 1; j < n; j++) {
+        const b = ext[j];
+        if (P.side > 0 ? b.h > P.lvl : b.l < P.lvl) {
+          P.at = j; P.state = (P.side > 0 ? b.c < P.lvl : b.c > P.lvl) ? 'swept' : 'taken';
+          break;
+        }
+      }
+    }
+    const v = { off, n, ext, fvgs, obs, pools, atr };
+    _pd.cache.key = key; _pd.cache.v = v;
+    return v;
+  }
+
+  // shaded zones, EQ and OTE - shared by the candle chart and Renko
+  function _pdBandsSvg(y, lo, hi, x0, x1, labelX) {
+    if (!_pdOn('pdZones')) return { under: '', over: '' };
+    const R = _pdRange();
+    if (!R) return { under: '', over: '' };
+    const clip = v => Math.max(lo, Math.min(hi, v));
+    const band = (a, b, fill) => {
+      const ya = y(clip(Math.max(a, b))), yb = y(clip(Math.min(a, b)));
+      return yb - ya > 0.5 ? `<rect x="${x0.toFixed(1)}" y="${ya.toFixed(1)}" width="${(x1 - x0).toFixed(1)}" height="${(yb - ya).toFixed(1)}" fill="${fill}" pointer-events="none"/>` : '';
+    };
+    let under = band(R.eq, R.hi, 'rgba(255,23,68,0.055)') + band(R.lo, R.eq, 'rgba(0,230,118,0.055)');
+    if (_pdOn('pdOte')) {
+      const s = R.hi - R.lo;
+      under += band(R.lo + s * 0.62, R.lo + s * 0.79, 'rgba(255,23,68,0.06)');
+      under += band(R.lo + s * 0.21, R.lo + s * 0.38, 'rgba(0,230,118,0.06)');
+    }
+    let over = '';
+    const hl = (v, col, dash, w, lab, tip) => {
+      if (v < lo || v > hi) return '';
+      const yy = y(v).toFixed(1);
+      return `<g class="pd-line"><line x1="${x0.toFixed(1)}" y1="${yy}" x2="${x1.toFixed(1)}" y2="${yy}" stroke="${col}" stroke-width="${w}" ${dash ? `stroke-dasharray="${dash}"` : ''} opacity="0.8"/>` +
+        (lab ? `<text x="${(labelX ?? x1 + 3).toFixed(1)}" y="${(+yy + 3).toFixed(1)}" style="font-size:8px;font-weight:700;fill:${col};">${lab}</text>` : '') +
+        `<title>${escapeHtml(tip)}</title></g>`;
+    };
+    over += hl(R.eq, '#d4af37', '6,4', 1.1, `EQ ${fmtInt(R.eq)}`, `Equilibrium (50%) of the dealing range (${R.label}): above = PREMIUM, look for shorts; below = DISCOUNT, look for longs`);
+    // range edges, unless PDH/PDL already draws them
+    if (!(R.kind === 'pd' && _chart.show?.pdhl)) {
+      over += hl(R.hi, 'rgba(255,23,68,0.7)', '2,3', 1, 'R.HI', `Dealing range high (${R.label}) ${fmtPrice(R.hi)}`);
+      over += hl(R.lo, 'rgba(0,230,118,0.7)', '2,3', 1, 'R.LO', `Dealing range low (${R.label}) ${fmtPrice(R.lo)}`);
+    }
+    return { under, over };
+  }
+
+  // FVGs, order blocks and liquidity on the candle chart
+  function _pdArraysSvg(xOfBar, y, lo, hi, x0, x1, top, bottom) {
+    const A = _pdArrays();
+    if (!A) return { under: '', over: '' };
+    const { off, ext, fvgs, obs, pools } = A;
+    const xi = j => j < off ? x0 : xOfBar(j - off);
+    const groups = new Map(), add = (k, d) => { const g = groups.get(k); if (g) g.push(d); else groups.set(k, [d]); };
+    const box = (k, a, b, xa, xb) => {
+      const ya = y(Math.min(hi, Math.max(a, b))), yb = y(Math.max(lo, Math.min(a, b)));
+      if (yb - ya < 0.3 || xb - xa < 0.5 || Math.max(a, b) < lo || Math.min(a, b) > hi) return;
+      add(k, `M${xa.toFixed(1)} ${ya.toFixed(1)}H${xb.toFixed(1)}V${yb.toFixed(1)}H${xa.toFixed(1)}Z`);
+    };
+    let over = '', tips = '';
+    if (_pdOn('pdFvg')) {
+      const open = fvgs.filter(g => g.filled == null).slice(-8);
+      for (const g of open) {
+        const xa = xi(g.mid), a = g.dir > 0 ? g.bot : g.cur, b = g.dir > 0 ? g.cur : g.top;
+        box(g.dir > 0 ? 'fvgB' : 'fvgS', a, b, xa, x1);
+        const yy = y(Math.min(hi, Math.max(lo, (a + b) / 2)));
+        if (Math.max(a, b) >= lo && Math.min(a, b) <= hi)
+          tips += `<text x="${(Math.max(xa, x0) + 2).toFixed(1)}" y="${(yy + 3).toFixed(1)}" style="font-size:7.5px;font-weight:700;fill:${g.dir > 0 ? '#00e676' : '#ff1744'};opacity:.75;" pointer-events="none">${g.mid < off ? 'prev ' : ''}FVG</text>`;
+      }
+    }
+    if (_pdOn('pdOb')) {
+      for (const side of [1, -1]) {
+        for (const ob of obs.filter(o => o.dir === side && o.broken == null).slice(-3))
+          box(side > 0 ? 'obB' : 'obS', ob.bot, ob.top, xi(ob.j), x1);
+      }
+    }
+    let under = '';
+    const st = { fvgB: 'fill="rgba(0,230,118,0.13)"', fvgS: 'fill="rgba(255,23,68,0.13)"',
+                 obB: 'fill="rgba(0,230,118,0.06)" stroke="rgba(0,230,118,0.55)" stroke-width="1"',
+                 obS: 'fill="rgba(255,23,68,0.06)" stroke="rgba(255,23,68,0.55)" stroke-width="1"' };
+    for (const [k, ds] of groups) under += `<path class="pd-${k}" d="${ds.join('')}" ${st[k]} pointer-events="none"/>`;
+    if (_pdOn('pdLiq')) {
+      const eqPools = pools.filter(P => !P.prior);
+      // equal highs / lows: the two most recent per side, untouched ones first
+      const pick = side => { const a = eqPools.filter(P => P.side === side); return [...a.filter(P => P.at == null).slice(-2), ...a.filter(P => P.state === 'swept').slice(-1)].slice(0, 2); };
+      const keep = [...pools.filter(P => P.prior), ...pick(1), ...pick(-1)];
+      for (const P of keep) {
+        if (P.lvl < lo || P.lvl > hi) continue;
+        if (P.prior && (P.lab === 'PDH' || P.lab === 'PDL') && _chart.show?.pdhl && !P.at) continue;   // PDH/L already drawn
+        const col = P.side > 0 ? '#ffb300' : '#40c4ff', yy = y(P.lvl).toFixed(1);
+        const xa = xi(P.from), xb = P.at != null ? xi(P.at) : x1;
+        const what = `${P.side > 0 ? 'Buy-side' : 'Sell-side'} liquidity ${P.lab} ${fmtPrice(P.lvl)}`;
+        over += `<g class="pd-liq"><line x1="${xa.toFixed(1)}" y1="${yy}" x2="${xb.toFixed(1)}" y2="${yy}" stroke="${col}" stroke-width="1" stroke-dasharray="1,3" opacity="0.85"/>` +
+          `<text x="${(xa + 2).toFixed(1)}" y="${(+yy - 2).toFixed(1)}" style="font-size:7.5px;font-weight:700;fill:${col};">${P.side > 0 ? 'BSL' : 'SSL'} ${P.lab}</text>` +
+          `<title>${escapeHtml(what + (P.state ? ` - ${P.state === 'swept' ? 'SWEPT and rejected' : 'taken (closed through)'} at ${_hm(ext[P.at].t)}` : ' - untouched'))}</title></g>`;
+        if (P.state === 'swept') {
+          const xx = xi(P.at), s2 = 4;
+          over += `<g class="pd-sweep"><path d="M${(xx - s2).toFixed(1)} ${(+yy - s2).toFixed(1)}L${(xx + s2).toFixed(1)} ${(+yy + s2).toFixed(1)}M${(xx - s2).toFixed(1)} ${(+yy + s2).toFixed(1)}L${(xx + s2).toFixed(1)} ${(+yy - s2).toFixed(1)}" stroke="${col}" stroke-width="2"/>` +
+            `<title>${escapeHtml(`${_hm(ext[P.at].t)} — ${what} SWEPT: price ran it and closed back ${P.side > 0 ? 'below' : 'above'} (a stop-run, often the turn)`)}</title></g>`;
+        }
+      }
+    }
+    return { under, over: over + tips };
+  }
+  // status-line tag: where price sits right now
+  function _pdTag() {
+    if (!_pdOn('pdZones') && !_pdFilterOn()) return '';
+    const R = _pdRange();
+    const z = _pdZone(_pdPx(), R);
+    if (!z) return '';
+    const col = z.pct >= 50 ? _PD_ZONE_COL.prem : _PD_ZONE_COL.disc;
+    return `<span style="color:${col};font-weight:700;" title="Where price sits in the dealing range (${escapeHtml(R.label)} ${fmtInt(R.lo)}–${fmtInt(R.hi)}, EQ ${fmtInt(R.eq)}). Premium: look for shorts. Discount: look for longs.">📍 ${z.name} ${Math.round(z.pct)}% · range ${escapeHtml(R.label)}</span>`;
+  }
+  // every ribbon signal is scored "with" or "against" the zone (live only)
+  function _pdScoreSignals() {
+    try {
+      if (_chart.optionMeta || _pdHist()) return;
+      const st = _ttrState(true);
+      if (!st) return;
+      const { bars, r } = st, i = bars.length - 1;
+      if (i < 0 || !r.flip[i]) return;
+      const sym = state.symbol || 'NIFTY', k = `${sym}|${bars[i].t}`;
+      if (_pd.scored.has(k)) return;
+      const v = _pdVerdict(r.flip[i], i, bars[i].c);
+      if (!v) return;
+      _pd.scored.add(k);
+      _scoreRecord(v.pass ? 'Ribbon signal · with PD zone' : 'Ribbon signal · against PD zone', r.flip[i],
+                   state.lastData?.underlying_value || bars[i].c, sym, `${v.name} ${Math.round(v.pct)}%`);
+    } catch (_) {}
+  }
+
+  // ── the morning prep card (PDMP) ─────────────────────────────────────
+  const _PD_CHECKS = [
+    ['bias', 'Bias written down'],
+    ['draw', 'Draw on liquidity identified'],
+    ['zone', 'Longs only in discount, shorts only in premium'],
+    ['levels', 'Key levels marked (range, EQ, gaps, pools)'],
+    ['events', 'Event risk checked'],
+    ['maxloss', 'Max loss for the day set'],
+  ];
+  function _pdLogLoad() { try { return JSON.parse(localStorage.getItem('pdPrepLog') || '{}') || {}; } catch (_) { return {}; } }
+  function _pdLogSave(o) {
+    try {
+      const ks = Object.keys(o).sort();
+      while (ks.length > 90) delete o[ks.shift()];
+      localStorage.setItem('pdPrepLog', JSON.stringify(o));
+    } catch (_) {}
+  }
+  function _pdExpiryToday(d, day) {
+    const m = String(d?.expiry || '').match(/(\d{1,2})-([A-Za-z]{3})-(\d{4})/);
+    if (!m) return false;
+    const mi = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(m[2].toLowerCase());
+    return mi >= 0 && `${m[3]}-${String(mi + 1).padStart(2, '0')}-${String(+m[1]).padStart(2, '0')}` === day;
+  }
+  // bias from five mechanical reads; each reason is listed with its sign
+  // atOpen: the read as of 09:15 - the open price, no intraday sweeps and no
+  // Market Direction - so the logged morning bias is the same whenever the
+  // page was first opened that day
+  function _pdBias(atOpen) {
+    const days = _pdPrevDays(), pd = days[days.length - 1], pp = days[days.length - 2];
+    const cs = _chart.optionMeta ? [] : (_chart.candles || []);
+    // (at the open "today's range" does not exist yet: the previous day stands in)
+    const R = atOpen && _pdRangeKind() === 'today' ? _pdRange(null, 'pd') : _pdRange(), why = [];
+    let s = 0;
+    const px = atOpen ? (cs.length ? cs[0].o : NaN) : _pdPx();
+    const z = _pdZone(px, R);
+    if (z) {
+      if (z.pct < 45) { s++; why.push([1, `price ${z.pct < 0 ? 'BELOW the range (deep discount)' : 'in DISCOUNT'} — look for longs; the draw is up, toward buy-side liquidity`]); }
+      else if (z.pct > 55) { s--; why.push([-1, `price ${z.pct > 100 ? 'ABOVE the range (deep premium)' : 'in PREMIUM'} — look for shorts; the draw is down, toward sell-side liquidity`]); }
+      else why.push([0, `price at EQUILIBRIUM — no edge from location; wait for premium or discount`]);
+    }
+    if (pd && pd.h > pd.l) {
+      const loc = (pd.c - pd.l) / (pd.h - pd.l);
+      if (loc >= 0.75) { s++; why.push([1, `previous day closed in its top quarter (${Math.round(loc * 100)}%)`]); }
+      else if (loc <= 0.25) { s--; why.push([-1, `previous day closed in its bottom quarter (${Math.round(loc * 100)}%)`]); }
+      else why.push([0, `previous day closed mid-range (${Math.round(loc * 100)}%)`]);
+    }
+    if (pd && pp) {
+      if (pd.h > pp.h && pd.l > pp.l) { s++; why.push([1, 'higher high and higher low than the day before']); }
+      else if (pd.h < pp.h && pd.l < pp.l) { s--; why.push([-1, 'lower high and lower low than the day before']); }
+      else if (pd.h <= pp.h && pd.l >= pp.l) why.push([0, 'inside day — compression, expect expansion']);
+    }
+    const A = cs.length && !atOpen ? _pdArrays() : null;
+    if (A) {
+      const ph = A.pools.find(P => P.lab === 'PDH'), pl = A.pools.find(P => P.lab === 'PDL');
+      if (ph?.at != null && pl?.at == null) { s--; why.push([-1, `PDH ${ph.state} — buy-side taken, PDL is the remaining draw`]); }
+      else if (pl?.at != null && ph?.at == null) { s++; why.push([1, `PDL ${pl.state} — sell-side taken, PDH is the remaining draw`]); }
+    }
+    const md = window._mdLast;
+    if (!atOpen && md && Date.now() - md.at < 120000 && !_pdHist()) {
+      if (/UP/.test(md.label)) { s++; why.push([1, `Market Direction ${md.label}`]); }
+      else if (/DOWN/.test(md.label)) { s--; why.push([-1, `Market Direction ${md.label}`]); }
+    }
+    const bias = s >= 2 ? 'BULLISH' : s <= -2 ? 'BEARISH' : 'NEUTRAL';
+    return { bias, score: s, why, z, R, px };
+  }
+  function _pdDayType(days) {
+    const pd = days[days.length - 1], pp = days[days.length - 2];
+    if (!pd) return null;
+    const r = pd.h - pd.l, avg = days.reduce((a, d) => a + (d.h - d.l), 0) / days.length;
+    const loc = r > 0 ? (pd.c - pd.l) / r : 0.5;
+    let t = 'rotational';
+    if (pp && pd.h <= pp.h && pd.l >= pp.l) t = 'inside day';
+    else if (r < avg * 0.7) t = 'narrow range';
+    else if (loc >= 0.75 && r >= avg) t = 'trend up';
+    else if (loc <= 0.25 && r >= avg) t = 'trend down';
+    return { t, r, avg, loc };
+  }
+  function renderPdPrep() {
+    const box = document.getElementById('pdPrepBody');
+    if (!box) return;
+    if (!_pdOn('pdPrep') || _chart.optionMeta) { if (box.innerHTML) box.innerHTML = ''; box.dataset.sig = ''; return; }
+    const hist = _pdHist();
+    const day = window._histDate || _istDayKey();
+    const days = _pdPrevDays(), pd = days[days.length - 1];
+    if (!pd) {
+      const msg = `<div class="pd-prep pd-prep-min"><b>MARKET PREP</b> <span class="pd-mut">waiting for the previous sessions…</span></div>`;
+      if (box.dataset.sig !== 'wait') { box.innerHTML = msg; box.dataset.sig = 'wait'; }
+      return;
+    }
+    const B = _pdBias(), A = _pdArrays();
+    const cs = _chart.candles || [];
+    const log = _pdLogLoad(), ent = log[day] || {};
+    // lock the morning bias once the session has started (live only)
+    if (!hist && cs.length && !ent.bias) {
+      const B0 = _pdBias(true);
+      ent.bias = B0.bias; ent.score = B0.score; ent.why = B0.why.map(w => w[1]); ent.at = _hm(cs[0].t);
+      ent.open = cs[0].o; log[day] = ent; _pdLogSave(log);
+    }
+    // score past logged biases against the day's close once that day is in the daily series
+    let changed = false;
+    for (const d of days) {
+      const e = log[d.day];
+      if (e && e.bias && !e.outcome) { e.outcome = d.c > d.o ? 'up' : d.c < d.o ? 'down' : 'flat'; changed = true; }
+    }
+    if (changed && !hist) _pdLogSave(log);
+    const scored = Object.entries(log).filter(([k, e]) => k !== day && e.outcome && e.bias && e.bias !== 'NEUTRAL').sort().slice(-20);
+    const hits = scored.filter(([, e]) => (e.bias === 'BULLISH') === (e.outcome === 'up')).length;
+    const dt = _pdDayType(days);
+    const open = cs.length ? cs[0].o : null, zOpen = open != null ? _pdZone(open, B.R) : null;
+    const gap = open != null ? open - pd.c : null;
+    // nearest untouched liquidity above / below
+    const px = B.px;
+    let up = null, dn = null;
+    if (A && px) {
+      for (const P of A.pools) {
+        if (P.at != null) continue;
+        if (P.lvl > px && (!up || P.lvl < up.lvl)) up = P;
+        if (P.lvl < px && (!dn || P.lvl > dn.lvl)) dn = P;
+      }
+    } else if (px) {
+      if (pd.h > px) up = { lvl: pd.h, lab: 'PDH' };
+      if (pd.l < px) dn = { lvl: pd.l, lab: 'PDL' };
+    }
+    const prevGaps = A ? A.fvgs.filter(g => g.mid < A.off && g.filled == null) : [];
+    const gapTxt = prevGaps.length ? prevGaps.slice(-3).map(g => `${g.dir > 0 ? '▲' : '▼'} ${fmtInt(Math.min(g.bot, g.top))}–${fmtInt(Math.max(g.bot, g.top))}`).join(' · ') : 'none';
+    // event risk
+    const ev = [];
+    if (_pdExpiryToday(state.lastData, day)) ev.push('EXPIRY DAY — gamma and pinning near max pain');
+    const nxt = _tradingDayShift(day, 1);
+    if (nxt) { const gapDays = Math.round((new Date(nxt + 'T12:00:00') - new Date(day + 'T12:00:00')) / 86400000); if (gapDays > 1) ev.push(`next session ${_dayLabel(nxt)} (${gapDays - 1} day${gapDays > 2 ? 's' : ''} closed) — carry risk`); }
+    const col = B.bias === 'BULLISH' ? 'var(--pos,#26a69a)' : B.bias === 'BEARISH' ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)';
+    const lockCol = ent.bias === 'BULLISH' ? 'var(--pos,#26a69a)' : ent.bias === 'BEARISH' ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)';
+    const collapsed = (() => { try { return localStorage.getItem('pdPrepCollapsed') === day; } catch (_) { return false; } })();
+    const zTxt = B.z ? `${B.z.name} ${Math.round(B.z.pct)}%` : '—';
+    // The live bits (zone %, distances to liquidity) are patched in place;
+    // the card is rebuilt only when its content really changes, so a tick
+    // never re-lays-out the panel above the chart.
+    const zCol = B.z && B.z.pct >= 50 ? _PD_ZONE_COL.prem : _PD_ZONE_COL.disc;
+    const upTxt = up ? `↑ ${up.lab} ${fmtInt(up.lvl)}${px ? ` (+${Math.round(up.lvl - px)})` : ''}` : '';
+    const dnTxt = dn ? `↓ ${dn.lab} ${fmtInt(dn.lvl)}${px ? ` (−${Math.round(px - dn.lvl)})` : ''}` : '';
+    const sig = JSON.stringify([day, collapsed, B.bias, B.score, B.z?.name, ent.bias, ent.score, ent.checks, ent.note, up?.lab, dn?.lab, up?.lvl, dn?.lvl, gapTxt, hits, scored.length, open, B.R?.hi, B.R?.lo, hist, B.why.map(w => w[0]).join('')]);
+    if (box.dataset.sig === sig) {
+      const set = (sel, txt, col) => { const e = box.querySelector(sel); if (e && e.textContent !== txt) e.textContent = txt; if (e && col) e.style.color = col; };
+      set('.pd-now', zTxt, zCol); set('.pd-up', upTxt); set('.pd-dn', dnTxt);
+      return;
+    }
+    // never rebuild under the cursor while a note is being typed
+    if (box.contains(document.activeElement) && document.activeElement.matches?.('input[type=text]')) return;
+    box.dataset.sig = sig;
+    const head = `<div class="pd-prep-head" data-pdtoggle="1" title="Click to ${collapsed ? 'expand' : 'collapse'}">
+        <b style="letter-spacing:.4px;">MARKET PREP</b>
+        <span>bias <b style="color:${col};">${B.bias}</b> <span class="pd-mut">(${B.score >= 0 ? '+' : ''}${B.score})</span></span>
+        ${ent.bias && !hist ? `<span class="pd-mut" title="${escapeHtml('Locked at the open and scored against the close: ' + (ent.why || []).join('; '))}">at open <b style="color:${lockCol};">${ent.bias}</b> (${ent.score >= 0 ? '+' : ''}${ent.score})</span>` : ''}
+        <span>now <b class="pd-now" style="color:${zCol};">${zTxt}</b></span>
+        ${up ? `<span class="pd-mut pd-up">${escapeHtml(upTxt)}</span>` : ''}
+        ${dn ? `<span class="pd-mut pd-dn">${escapeHtml(dnTxt)}</span>` : ''}
+        ${scored.length ? `<span class="pd-mut" title="Morning bias against the day's close (open → close), last ${scored.length} directional days">bias log ${hits}/${scored.length}</span>` : ''}
+        <span class="pd-mut" style="margin-left:auto;">${collapsed ? '▸' : '▾'}</span>
+      </div>`;
+    if (collapsed) { box.innerHTML = `<div class="pd-prep">${head}</div>`; return; }
+    const checks = ent.checks || {};
+    box.innerHTML = `<div class="pd-prep">${head}
+      <div class="pd-prep-grid">
+        <div><div class="pd-k">Dealing range</div><div>${escapeHtml(B.R?.label || '—')} ${B.R ? `${fmtInt(B.R.lo)}–${fmtInt(B.R.hi)} · EQ <b>${fmtInt(B.R.eq)}</b>` : ''}</div></div>
+        <div><div class="pd-k">Open</div><div>${open != null ? `${fmtInt(open)} · ${zOpen ? `${zOpen.name} ${Math.round(zOpen.pct)}%` : '—'} · gap ${gap >= 0 ? '+' : '−'}${Math.abs(Math.round(gap))} vs prev close` : 'not open yet'}</div></div>
+        <div><div class="pd-k">Previous day</div><div>${dt ? `${dt.t} · range ${Math.round(dt.r)} (5-day avg ${Math.round(dt.avg)}) · closed at ${Math.round(dt.loc * 100)}%` : '—'}</div></div>
+        <div><div class="pd-k">Unfilled gaps from before today</div><div>${gapTxt}</div></div>
+        <div style="grid-column:1/-1;"><div class="pd-k">Why ${B.bias.toLowerCase()}</div><div>${B.why.map(w => `<span style="color:${w[0] > 0 ? 'var(--pos,#26a69a)' : w[0] < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)'};">${w[0] > 0 ? '▲' : w[0] < 0 ? '▼' : '◆'} ${escapeHtml(w[1])}</span>`).join('<br>') || '—'}</div></div>
+        <div style="grid-column:1/-1;"><div class="pd-k">Event risk</div><div>${ev.length ? ev.map(escapeHtml).join(' · ') : '<span class="pd-mut">no expiry or holiday gap flagged</span>'}
+          <input type="text" class="ohlc-inp" data-pdnote="1" placeholder="today's events (RBI, CPI, Fed, results…)" value="${escapeHtml(ent.note || '')}" style="width:260px;font-size:9px;margin-left:6px;" ${hist ? 'disabled' : ''}></div></div>
+        <div style="grid-column:1/-1;" class="pd-checks">${_PD_CHECKS.map(([k, lab]) => `<label><input type="checkbox" data-pdcheck="${k}" ${checks[k] ? 'checked' : ''} ${hist ? 'disabled' : ''}> ${escapeHtml(lab)}</label>`).join('')}</div>
+      </div>
+      <div class="pd-mut" style="font-size:8.5px;padding:2px 2px 0;">Mechanical reads, not a forecast. The morning bias is locked at the first bar and scored against the day's close; every ribbon signal is logged to the Signal Scorecard as with / against the zone.</div>
+    </div>`;
+  }
+  document.addEventListener('click', ev => {
+    if (!ev.target?.closest?.('[data-pdtoggle]')) return;
+    const day = window._histDate || _istDayKey();
+    try {
+      if (localStorage.getItem('pdPrepCollapsed') === day) localStorage.removeItem('pdPrepCollapsed');
+      else localStorage.setItem('pdPrepCollapsed', day);
+    } catch (_) {}
+    renderPdPrep();
+  });
+  document.addEventListener('change', ev => {
+    const t = ev.target;
+    const k = t?.dataset?.pdcheck, note = t?.dataset?.pdnote;
+    if (!k && !note) return;
+    const day = _istDayKey(), log = _pdLogLoad(), ent = log[day] || (log[day] = {});
+    if (k) { ent.checks = ent.checks || {}; ent.checks[k] = t.checked; }
+    else ent.note = String(t.value || '').slice(0, 200);
+    _pdLogSave(log);
+    renderPdPrep();
+  });
+
   function _vwapSeries(cs) {
     // With a broker feed carrying real traded volume this is a genuine VWAP.
     // On NSE data there is no volume, so the fallback below weights every
@@ -25569,9 +26125,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const buy = r.flip[t] > 0, b = bars[t], xx = xOfMs(b.t * 1000);
       if (!isFinite(xx)) return;
       const col = buy ? '#00e676' : '#ff1744', latest = k === sig.length - 1;
-      const tip = `${_hm(b.t)} — ${buy ? 'BUY' : 'SELL'} signal (Trend Target Ribbon: ${buy ? 'bull' : 'bear'} trend started) on the closed ${_chart.interval || 1}-minute candle, close ${fmtPrice(b.c)}`;
-      out += `<g class="ctx-sig ctx-sig-${buy ? 'buy' : 'sell'}"><line x1="${xx.toFixed(1)}" y1="${top}" x2="${xx.toFixed(1)}" y2="${bottom}" stroke="${col}" stroke-width="${latest ? 1.8 : 1.2}" opacity="${latest ? 0.95 : 0.7}"/>
-        <text x="${(xx + 2).toFixed(1)}" y="${(top + 8).toFixed(1)}" style="font-size:8.5px;font-weight:800;fill:${col};">${buy ? '▲ BUY' : '▼ SELL'}</text>
+      const pv = _pdFilterOn() ? _pdVerdict(buy ? 1 : -1, t, b.c) : null, faded = pv && !pv.pass;
+      const tip = `${_hm(b.t)} — ${buy ? 'BUY' : 'SELL'} signal (Trend Target Ribbon: ${buy ? 'bull' : 'bear'} trend started) on the closed ${_chart.interval || 1}-minute candle, close ${fmtPrice(b.c)}${_pdFilterNote(pv, buy ? 1 : -1)}`;
+      out += `<g class="ctx-sig ctx-sig-${buy ? 'buy' : 'sell'}${faded ? ' pd-filtered' : ''}"${faded ? ' opacity="0.3"' : ''}><line x1="${xx.toFixed(1)}" y1="${top}" x2="${xx.toFixed(1)}" y2="${bottom}" stroke="${col}" stroke-width="${latest ? 1.8 : 1.2}" opacity="${latest ? 0.95 : 0.7}"${faded ? ' stroke-dasharray="3,3"' : ''}/>
+        <text x="${(xx + 2).toFixed(1)}" y="${(top + 8).toFixed(1)}" style="font-size:8.5px;font-weight:800;fill:${col};">${buy ? '▲ BUY' : '▼ SELL'}${faded ? ' ⊘' : ''}</text>
         <title>${escapeHtml(tip)}</title></g>`;
     });
     return out;
@@ -28148,6 +28705,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             style="font-size:8px;fill:${l.col};">${escapeHtml(String(l.lab))}</text>`;
       }
     } catch (_) {}
+    // PD premium / discount zones and EQ: horizontal prices, so they carry over
+    try { const pb = _pdBandsSvg(y, lo, hi, padL, W - padR); svg = pb.under + svg + pb.over; } catch (_) {}
 
     // ── opening range and its Fib projections ──────────────────────
     // These were missing from Renko because they are built inside the candle
@@ -29978,6 +30537,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       try { _priceMaCheck(); } catch (_) {}
       renderPriceChart();
       _warmEnsure();          // previous session(s) for indicator warm-up: once per symbol/interval/day
+      _pdEnsure();            // 5 previous sessions as daily bars for the PD dealing range: once per symbol/day
     } catch (e) { box.innerHTML = `<div class="movers-loading">Chart unavailable: ${escapeHtml(e.message)}</div>`; }
   }
   // ── drag panning: state + globally-bound handlers (bound exactly once) ──
@@ -30221,6 +30781,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _chart._rkFast = null;
     const r = _renderPriceChartInner(...a);
     try { renderCtxChart(); } catch (_) {}
+    try { renderPdPrep(); } catch (e) { console.warn('[pd prep]', e.message); }
+    _pdScoreSignals();
     try { _tlPlace(); } catch (_) {}
     try {
       const box2 = document.getElementById('rsiPaneBody');
@@ -30493,7 +31055,14 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       } catch (_) {}
     }
 
-    let svg = orbSvg + volSvg + gapSvg;
+    // PD zones (furthest back), then FVG / order-block boxes; their lines,
+    // liquidity pools and sweep marks go over the candles further down
+    let _pdB = { under: '', over: '' }, _pdA = { under: '', over: '' };
+    try {
+      _pdB = _pdBandsSvg(y, lo, hi, padL, W - padR);
+      _pdA = _pdArraysSvg(i => x(i), y, lo, hi, padL, W - padR, padT, H - padB);
+    } catch (e) { console.warn('[pd]', e.message); }
+    let svg = _pdB.under + orbSvg + volSvg + gapSvg + _pdA.under;
     // Trend Target Ribbon: fills, glow columns and zones under the candles
     let _ttrL = null;
     try {
@@ -30860,6 +31429,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // now carries the one conclusion; the detail lives in its own panels.
       _chart._mqBox = '';
     } catch (e) { console.warn('[desk]', e.message); }
+    svg += _pdB.over + _pdA.over;
     if (_ttrL) svg += _ttrL.over;
     try { svg += _turnLinesSvg(W, padL, padR, padT, H - padB); } catch (_) {}
     try { svg += _emaCrossSvg(t => padL + (slotOf(t) + 0.5) / slots * (W - padL - padR), padT, H - padB); } catch (_) {}
@@ -31038,6 +31608,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         </span>` : ''}
         <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts, yahoo = Yahoo Finance backfill used only where the others left gaps">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
         ${/(fyers|zerodha)\(/.test(_chart.src || '') ? `<span style="color:var(--pos,#26a69a);" title="Real OHLC with traded volume from the broker feed — not reconstructed from spot samples">⚡ broker feed${_chart.hasVolume ? ' · real volume' : ''}</span>` : ''}
+        ${_pdTag()}
         ${_warmNote() ? `<span title="Indicators (EMAs, RSI, Bollinger, Heikin Ashi, EMA cross, Trend Target Ribbon) run over these previous trading sessions first - weekends and NSE holidays skipped - so they are already settled at 09:15. Only today is drawn. Fetched once a day and cached on the server.">🔥 ${escapeHtml(_warmNote())}</span>` : ''}
         ${/yahoo\(/.test(_chart.src || '') ? `<span style="color:var(--gold,#d4af37);" title="Part of this chart was filled from Yahoo Finance because NSE data was unavailable for those minutes. Yahoo is a derived feed: the shape is right, but prices will not match NSE tick for tick, so treat levels drawn from those minutes with that in mind.">⚠ partly Yahoo-filled</span>` : ''}
         ${_chart.coverage ? `<span title="Time span covered by the merged data">covers <b>${escapeHtml(_chart.coverage)}</b></span>` : ''}
@@ -31689,6 +32260,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'ctxChartCfg',         // which context series are drawn
     'ctxClockOpacity',     // context-pane clock watermark strength (default 30)
     'ctxSignals',          // Buy/Sell lines in the context pane (default on)
+    'pdPrepCollapsed',     // PD prep card collapsed for the day
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
     'levelVoiceCfg',       // spoken wording for level touches
@@ -31851,14 +32423,24 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr',
+                     'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       // new overlays default ON: a saved config predates them, and its
       // missing key must not read as a deliberate "off"
-      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr'].includes(k)) _chart.show[k] = true;
+      // (PD: zones, gaps, liquidity and the prep card on; OTE, order blocks
+      // and the signal filter are opt-in)
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
+    }
+    {
+      const pr = document.getElementById('pdRange');
+      if (pr) {
+        pr.value = _chart.show.pdRange || 'pd';
+        pr.addEventListener('change', () => { _chart.show.pdRange = pr.value; _pd.cache.key = ''; _chartCfgSave(); renderPriceChart(); });
+      }
     }
     // ── zoom controls: slider (log 0.4x..40x), +/- buttons, pan, fit ──
     const Z_MIN = 0.4, Z_MAX = 40;
@@ -38590,7 +39172,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
     'diag-tab':          '<strong>Diagnostics</strong>Shows only the source named in DATA_SOURCE (nse, fyers or zerodha): its login and token, the live stream (last ticks, subscriptions, reconnects, watchdog actions), API calls made today against that broker\'s limits, the caches that keep those calls down, and the recent stream events. Everything is read from the server\'s memory, so opening this tab costs no broker call. The data audit below runs the same checks as FEED CHECK for the index selected at the top. Green = fine, amber = worth a look, red = something is broken.',
-    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources; context-pane clock watermark at 30.',
+    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources; context-pane clock watermark at 30; PD zones, FVG, liquidity and the prep card ON with the previous-day range, OTE / order blocks / signal filter OFF. The daily prep log (bias history and checklists) is kept.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',
