@@ -58,9 +58,13 @@
          anyway, and the fix is the dashboard's own zoom control rather than
          more width. Most 4K users run 150-200% scaling, which reports a
          1920-2560px viewport, and at those sizes this fills the screen. */
-      max-width: min(2560px, 96vw);
-      margin: 0 auto;
-      padding: 18px clamp(12px, 2vw, 28px) 60px;
+      /* Full browser width, as asked: no ceiling and a thin 8px gutter. The
+         floating ★ WATCHLIST tab on the right edge is deliberately NOT given
+         room - it overlays the page edge, the content runs underneath it. */
+      max-width: none;
+      width: 100%;
+      margin: 0;
+      padding: 12px 8px 60px;
     }
 
 

@@ -2649,11 +2649,24 @@ console.log(JSON.stringify(R));
           and "structure <b style=" in d and "mood <b style=" in d and "Date.now() - _pdSlow.at > 10000" in d)
 
 
+def test_full_width_layout():
+    """The page uses the whole browser width: no max-width ceiling on .app,
+    a thin gutter, and no room reserved for the floating WATCHLIST tab."""
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    i = d.index("  .app {"); j = d.index("}", i)
+    app = d[i:j]
+    check("layout: .app spans the full browser width with an 8px gutter",
+          "max-width: none;" in app and "width: 100%;" in app and "padding: 12px 8px 60px;" in app
+          and "min(2560px" not in app)
+    check("layout: the WATCHLIST tab floats over the right edge (fixed), the page reserves no space for it",
+          'id="tvWlToggle"' in d and "position:fixed;right:0;top:120px" in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
