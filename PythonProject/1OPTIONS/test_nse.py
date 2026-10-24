@@ -2081,7 +2081,8 @@ def test_true_black_widgets():
           "--wash: transparent;" in root and "--box: #000000;" in root and "--wash:rgba(15,23,42,0.03)" in d)
     check("theme: chart, RSI pane, Trade entries and the tiles sit on --wash",
           'id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:var(--wash);' in d
-          and d.count('style="fill:var(--wash)"') == 2 and '"d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:var(--wash);"' in d)
+          and d.count('style="fill:var(--wash)"') == 4 and   # RSI pane x2 + SMI-MFI pane x2
+          '"d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:var(--wash);"' in d)
     faint = [m.group(0) for m in _re.finditer(r'background:rgba\(255,255,255,0\.0(1[0-9]?|2[0-9]?)\)', d)]
     check("theme: no panel carries a faint white wash any more", not faint, str(faint[:3]))
     check("theme: no near-black overlay colours left",
@@ -2554,7 +2555,7 @@ console.log(JSON.stringify(R));
     check("PD: status tag names the zone", "ABOVE RANGE" in R["tag"] and "PDH–PDL" in R["tag"], R["tag"][:120])
     check("dashboard: PD toggles (zones, gaps, liquidity, prep on; OTE, OB, filter opt-in), range picker, prep card, reset key",
           all(f'id="chk_{k}"' in d for k in ("pdZones", "pdOte", "pdFvg", "pdOb", "pdLiq", "pdFilter", "pdPrep"))
-          and "'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;" in d
+          and "'pdZones', 'pdFvg', 'pdLiq', 'pdPrep', 'smiMfi'].includes(k)) _chart.show[k] = true;" in d
           and 'id="pdRange"' in d and '<div id="pdPrepBody"></div>' in d and "'pdPrepCollapsed'," in d
           and "_pdEnsure();            // 5 previous sessions" in d and "/api/warm-candles?symbol=${encodeURIComponent(sym)}&interval=60&days=5" in d)
     check("dashboard: filtered signals are faded (ribbon, EMA cross, context pane), and every ribbon signal is scored with/against the zone",
@@ -2662,11 +2663,107 @@ def test_full_width_layout():
           'id="tvWlToggle"' in d and "position:fixed;right:0;top:120px" in d)
 
 
+def _smimfi_reference(bars, mfi_len=13, k=13, d=5, sig_len=5, dz=50):
+    """Independent Pine-semantics reference: ta.mfi, the TradingView SMI on it
+    (x200, EMA(EMA(.,D),D)), EMA signal, histogram, percentile_nearest_rank."""
+    import math
+    n = len(bars)
+    mfi = [None] * n
+    for i in range(mfi_len, n):
+        up = dn = 0.0
+        for j in range(i - mfi_len + 1, i + 1):
+            ch = bars[j]["c"] - bars[j - 1]["c"]
+            if ch > 0: up += bars[j]["v"] * bars[j]["c"]
+            elif ch < 0: dn += bars[j]["v"] * bars[j]["c"]
+        mfi[i] = None if (dn == 0 and up == 0) else (100.0 if dn == 0 else 100 - 100 / (1 + up / dn))
+    def ema(a, L):
+        al, out, s = 2 / (L + 1), [], None
+        for v in a:
+            if v is not None:
+                s = v if s is None else al * v + (1 - al) * s
+            out.append(s)
+        return out
+    rel, rng = [None] * n, [None] * n
+    for i in range(k - 1, n):
+        w = mfi[i - k + 1:i + 1]
+        if any(v is None for v in w): continue
+        rel[i] = mfi[i] - (max(w) + min(w)) / 2; rng[i] = max(w) - min(w)
+    num, den = ema(ema(rel, d), d), ema(ema(rng, d), d)
+    smi = [None if (num[i] is None or not den[i]) else 200 * num[i] / den[i] for i in range(n)]
+    sr = ema(smi, sig_len)
+    sig = [None if smi[i] is None else sr[i] for i in range(n)]
+    hist = [None if smi[i] is None or sig[i] is None else smi[i] - sig[i] for i in range(n)]
+    def pr(w, p):
+        s = sorted(w); r = max(1, math.ceil(p / 100 * len(s))); return s[min(len(s), r) - 1]
+    dzT = [None] * n
+    for i in range(dz - 1, n):
+        w = [v for v in smi[i - dz + 1:i + 1] if v is not None]
+        if len(w) == dz: dzT[i] = pr(w, 90)
+    return {"smi": smi, "sig": sig, "hist": hist, "dzT": dzT}
+
+
+def test_smi_mfi():
+    """SMI of MFI port: matches an independent Pine-semantics reference on
+    random bars; pane sits between the chart and RSI at RSI's height; no
+    candle colouring; toggle on by default; crosshair shared."""
+    import subprocess, json as _json, random as _r, tempfile
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    _r.seed(7)
+    bars, p = [], 25000.0
+    for i in range(320):
+        o = p; p += _r.gauss(0, 6) + (3 if (i // 60) % 2 else -3)
+        bars.append({"t": 1000 + 60 * i, "o": o, "h": max(o, p) + 2, "l": min(o, p) - 2, "c": p, "v": _r.randint(500, 5000)})
+    i0 = d.index("  const SMIMFI = {"); j0 = d.index("  const _smiCache")
+    harness = d[i0:j0] + "\n" + "\n".join(grab(f) for f in ("_pineEma", "_mfiSeries", "_pctRank", "_smiMfiCompute")) + f"""
+const r = _smiMfiCompute({_json.dumps(bars)});
+console.log(JSON.stringify({{ smi: r.smi, sig: r.sig, hist: r.hist, dzT: r.dzT, cross: r.cross, useVol: r.useVol }}));
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(harness); hp = fh.name
+    try:
+        res = subprocess.run(["node", hp], capture_output=True, text=True)
+    finally:
+        os.unlink(hp)
+    try:
+        js = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("SMI-MFI: harness ran", False, (res.stderr or res.stdout)[:400]); return
+    ref = _smimfi_reference(bars)
+    def same(a, b):
+        return len(a) == len(b) and all((x is None and y is None) or (x is not None and y is not None and abs(x - y) < 1e-6) for x, y in zip(a, b))
+    check("SMI-MFI: SMI, signal and histogram match the independent reference bar for bar",
+          same(js["smi"], ref["smi"]) and same(js["sig"], ref["sig"]) and same(js["hist"], ref["hist"]) and js["useVol"],
+          str([(a, b) for a, b in zip(js["smi"], ref["smi"]) if (a is None) != (b is None) or (a is not None and abs(a - b) > 1e-6)][:3]))
+    check("SMI-MFI: dynamic zone (90th percentile of 50 bars, nearest rank) matches", same(js["dzT"], ref["dzT"]))
+    sm, sg = ref["smi"], ref["sig"]
+    want = [i for i in range(1, len(sm)) if None not in (sm[i], sg[i], sm[i - 1], sg[i - 1])
+            and ((sm[i] > sg[i] and sm[i - 1] <= sg[i - 1]) or (sm[i] < sg[i] and sm[i - 1] >= sg[i - 1])) and ref["dzT"][i - 1] is not None]
+    check("SMI-MFI: every SMI/signal cross (once the zone exists) is marked, as inside or outside the zone",
+          [c["i"] for c in js["cross"]] == want and all(c["kind"] in ("in", "out") for c in js["cross"]) and len(want) >= 5,
+          f'{[c["i"] for c in js["cross"]][:8]} vs {want[:8]}')
+    check("SMI-MFI: pane between the chart and RSI, same height as RSI, crosshair shared, toggle on by default",
+          d.index('<div id="smiPaneBody"') < d.index('<div id="rsiPaneBody"')
+          and "_smiMfiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10)" in d
+          and "_rsiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10)" in d
+          and "['smiXM', 'smi']" in d and "#smiPaneBody svg" in d and 'id="chk_smiMfi"' in d
+          and "'pdPrep', 'smiMfi'].includes(k)) _chart.show[k] = true;" in d)
+    seg = d[d.index("  // ══ SMI of MFI"):d.index("  function _rsiPaneSvg(")]
+    check("SMI-MFI: no candle colouring (barcolor) ported", "barcolor" not in seg.lower().replace("not ported: candle colouring", "")
+          and "candle colouring (as asked)" in seg)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

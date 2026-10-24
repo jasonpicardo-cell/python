@@ -2337,6 +2337,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   slow <input type="number" id="emaXSlow" class="ohlc-inp" value="13" min="2" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
                 </span>
                 <label><input type="checkbox" id="chk_vwap"> VWAP</label>
+                <label title="SMI of MFI (andre_007): the Stochastic Momentum Index of the Money Flow Index, with dynamic zones, histogram and signal crosses - a pane between the chart and RSI"><input type="checkbox" id="chk_smiMfi"> SMI·MFI</label>
               </span>
               <span style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;" title="PDA / PDMP - premium, discount and market preparation (ICT). The dealing range's 50% line splits it into PREMIUM (look for shorts) and DISCOUNT (look for longs).">
                 <b style="color:var(--gold,#d4af37);">PD</b>
@@ -2422,6 +2423,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   <input type="checkbox" id="renkoWeis" style="margin:0;" checked>Weis</label>
               </span>
             </div>
+            <!-- SMI of MFI: between the chart and RSI, the same height as RSI -->
+            <div id="smiPaneBody" style="padding:0 6px 2px;"></div>
             <div id="rsiPaneBody" style="padding:0 6px 4px;"></div>
             <!-- Announced-alert tally. Sits under the chart because it is a
                  read on the SESSION rather than on any one signal. -->
@@ -20825,7 +20828,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _chart._xm = on ? { px, W, src } : null;
     const ren = _isRenkoView();
     const G = _chart._geo || { padL: 8, padR: 72 };
-    for (const [id, pane] of [['ctxXM', 'ctx'], ['rsiXM', 'rsi'], ['mainXM', 'main']]) {
+    for (const [id, pane] of [['ctxXM', 'ctx'], ['rsiXM', 'rsi'], ['smiXM', 'smi'], ['mainXM', 'main']]) {
       const el = document.getElementById(id);
       if (!el) continue;
       // every pane but the one already drawing its own crosshair
@@ -20846,7 +20849,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   // hovering the context or RSI pane drives the same crosshair
   document.addEventListener('mousemove', ev => {
-    const sv = ev.target && ev.target.closest ? ev.target.closest('#ctxChartBody svg, #rsiPaneBody svg') : null;
+    const sv = ev.target && ev.target.closest ? ev.target.closest('#ctxChartBody svg, #rsiPaneBody svg, #smiPaneBody svg') : null;
     if (!sv) {
       if (_chart._xm && _chart._xm.src !== 'main') _mirrorCrosshair(0, false);
       return;
@@ -20856,10 +20859,229 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const r = sv.getBoundingClientRect();
     const px = (ev.clientX - r.left) / r.width * vb.width;
     const G = _chart._geo || { padL: 8, padR: 72 };
-    const src = sv.closest('#ctxChartBody') ? 'ctx' : 'rsi';
+    const src = sv.closest('#ctxChartBody') ? 'ctx' : sv.closest('#smiPaneBody') ? 'smi' : 'rsi';
     if (px < G.padL || px > vb.width - G.padR) { _mirrorCrosshair(0, false); return; }
     _mirrorCrosshair(px, true, vb.width, src);
   }, { passive: true });
+
+  // ══ SMI of MFI (port of "Stochastic Momentum Index (SMI) of Money Flow
+  //    Index (MFI)" by andre_007, TradingView) ═══════════════════════════
+  // A pane between the price chart and RSI, the same height as RSI, with the
+  // script's defaults:
+  //   MFI(close, 13) -> SMI over it: K 13 (highest/lowest window), D 5 (both
+  //   EMA smoothings), Signal = EMA 5 of SMI, Histogram = SMI - Signal.
+  //   SMI = 200 x EMA(EMA(mfi - mid, D), D) / EMA(EMA(range, D), D), the
+  //   TradingView SMI formula the library documents (x200, %D smoothing).
+  //   Dynamic Zones: 90th / 10th / 50th percentile (nearest rank) of SMI
+  //   over 50 bars; background filled blue / red when SMI is outside them.
+  //   Fixed lines at 0 and +/-40.
+  //   Cross marks: circle = SMI crossed its signal OUTSIDE the dynamic zone,
+  //   diamond = crossed INSIDE it (green/blue up, red/orange down).
+  // Not ported: candle colouring (as asked), trend lines and divergence
+  // labels (both off in the script's defaults), and the higher-timeframe
+  // request (its default is the chart's own timeframe). The library's exact
+  // colour themes are not public, so its spectrum is approximated: the SMI
+  // line runs blue (strong up) -> green -> yellow -> red (strong down) by
+  // level (5/10/15/20/30), histogram blue above 0 / red below, deeper with
+  // size; the signal is blue while rising, red while falling.
+  // Computed over the warm-up sessions + today, so it is settled at 09:15.
+  const SMIMFI = { mfiLen: 13, kLen: 13, dLen: 5, sigLen: 5, dzLen: 50, dzHi: 90, dzLo: 90, band: 40 };
+  const _smiCache = { key: '', v: null };
+  function _pineEma(arr, len) {               // ta.ema: seeded with the first value, nulls skipped
+    const a = 2 / (len + 1), out = new Array(arr.length).fill(null);
+    let s = null;
+    for (let i = 0; i < arr.length; i++) {
+      const v = arr[i];
+      if (v == null || !isFinite(v)) { out[i] = s; continue; }
+      s = s == null ? v : a * v + (1 - a) * s;
+      out[i] = s;
+    }
+    return out;
+  }
+  function _mfiSeries(bars, len, useVol) {     // ta.mfi(close, len)
+    const n = bars.length, up = new Array(n).fill(0), dn = new Array(n).fill(0), out = new Array(n).fill(null);
+    for (let i = 1; i < n; i++) {
+      const v = useVol ? (bars[i].v || 0) : 1, ch = bars[i].c - bars[i - 1].c;
+      up[i] = ch > 0 ? v * bars[i].c : 0;
+      dn[i] = ch < 0 ? v * bars[i].c : 0;
+    }
+    let su = 0, sd = 0;
+    for (let i = 1; i < n; i++) {
+      su += up[i]; sd += dn[i];
+      if (i - len >= 1) { su -= up[i - len]; sd -= dn[i - len]; }
+      // as Pine: no down-flow -> 100; no flow at all -> na
+      if (i >= len) out[i] = sd === 0 ? (su === 0 ? null : 100) : 100 - 100 / (1 + su / sd);
+    }
+    return out;
+  }
+  function _pctRank(win, p) {                  // ta.percentile_nearest_rank
+    const s = win.slice().sort((a, b) => a - b);
+    const r = Math.max(1, Math.ceil(p / 100 * s.length));
+    return s[Math.min(s.length, r) - 1];
+  }
+  function _smiMfiCompute(bars) {
+    const P = SMIMFI, n = bars.length;
+    const useVol = bars.filter(b => (b.v || 0) > 0).length >= n * 0.5;
+    const mfi = _mfiSeries(bars, P.mfiLen, useVol);
+    const rel = new Array(n).fill(null), rng = new Array(n).fill(null);
+    for (let i = 0; i < n; i++) {
+      if (i < P.kLen - 1) continue;
+      let hh = -Infinity, ll = Infinity, ok = true;
+      for (let j = i - P.kLen + 1; j <= i; j++) { const v = mfi[j]; if (v == null) { ok = false; break; } hh = Math.max(hh, v); ll = Math.min(ll, v); }
+      if (!ok) continue;
+      rel[i] = mfi[i] - (hh + ll) / 2; rng[i] = hh - ll;
+    }
+    const num = _pineEma(_pineEma(rel, P.dLen), P.dLen), den = _pineEma(_pineEma(rng, P.dLen), P.dLen);
+    const smi = num.map((v, i) => (v == null || !den[i]) ? null : 200 * v / den[i]);
+    // the signal starts with the SMI (an EMA of nothing is nothing)
+    const sigRaw = _pineEma(smi, P.sigLen);
+    const sig = smi.map((v, i) => v == null ? null : sigRaw[i]);
+    const hist = smi.map((v, i) => v == null || sig[i] == null ? null : v - sig[i]);
+    const dzT = new Array(n).fill(null), dzB = new Array(n).fill(null), dzC = new Array(n).fill(null);
+    for (let i = 0; i < n; i++) {
+      if (i < P.dzLen - 1) continue;
+      const win = [];
+      for (let j = i - P.dzLen + 1; j <= i; j++) if (smi[j] != null) win.push(smi[j]);
+      if (win.length < P.dzLen) continue;
+      dzT[i] = _pctRank(win, P.dzHi); dzB[i] = _pctRank(win, 100 - P.dzLo); dzC[i] = _pctRank(win, 50);
+    }
+    // ta.crossover / crossunder of SMI and signal, classed by the dynamic zone on the previous bar
+    const cross = [];
+    for (let i = 1; i < n; i++) {
+      if ([smi[i], sig[i], smi[i - 1], sig[i - 1]].some(v => v == null)) continue;
+      const up = smi[i] > sig[i] && smi[i - 1] <= sig[i - 1], dn = smi[i] < sig[i] && smi[i - 1] >= sig[i - 1];
+      if (!up && !dn) continue;
+      const out = dzT[i - 1] != null && (smi[i - 1] < dzB[i - 1] || smi[i - 1] > dzT[i - 1]);
+      const ins = dzT[i - 1] != null && smi[i - 1] >= dzB[i - 1] && smi[i - 1] <= dzT[i - 1];
+      if (out) cross.push({ i, dir: up ? 1 : -1, kind: 'out' });
+      else if (ins) cross.push({ i, dir: up ? 1 : -1, kind: 'in' });
+    }
+    return { mfi, smi, sig, hist, dzT, dzB, dzC, cross, useVol };
+  }
+  function _smiState(bars) {
+    const w = _warmOf(bars), off = w.length, lb = bars[bars.length - 1];
+    const key = `${bars.length}|${bars[0].t}|${lb.t}|${lb.c}|${lb.v}|${off}|${_chart.interval}`;
+    if (_smiCache.key !== key) {
+      const r = _smiMfiCompute(off ? w.concat(bars) : bars);
+      const cut = a => a.slice(off);
+      _smiCache.key = key;
+      _smiCache.v = { smi: cut(r.smi), sig: cut(r.sig), hist: cut(r.hist), dzT: cut(r.dzT), dzB: cut(r.dzB), dzC: cut(r.dzC),
+                      cross: r.cross.filter(c => c.i >= off).map(c => ({ ...c, i: c.i - off })), useVol: r.useVol, n: bars.length };
+    }
+    return _smiCache.v;
+  }
+  function _smiColor(v) {                      // spectrum blue -> green -> red by level 5/10/15/20/30
+    if (v >= 30) return '#1e3cff'; if (v >= 20) return '#2979ff'; if (v >= 15) return '#00b0ff';
+    if (v >= 10) return '#00e5ff'; if (v >= 5) return '#00e676'; if (v > -5) return '#c6ff00';
+    if (v > -10) return '#ffea00'; if (v > -15) return '#ffab00'; if (v > -20) return '#ff6d00';
+    if (v > -30) return '#ff3d00'; return '#ff0000';
+  }
+  function _smiHistColor(v) {
+    const a = Math.abs(v);
+    const lvl = a >= 30 ? 4 : a >= 15 ? 3 : a >= 10 ? 2 : a >= 5 ? 1 : 0;
+    return v >= 0 ? ['#72b6fc', '#5b9bf9', '#4078fe', '#346ffd', '#1c3bfb'][lvl]
+                  : ['#ff9696', '#ff7878', '#ff5a5a', '#ff3c3c', '#ff0000'][lvl];
+  }
+  function _smiMfiPaneSvg(csIn, xOf, W, padL, padR, H) {
+    if (_chart.show?.smiMfi === false) return '';
+    // MFI needs real closes and volume: on Heikin Ashi use the real candles
+    const real = _chart.candles || [];
+    const cs = (csIn && real.length === csIn.length) ? real : csIn;
+    const P = SMIMFI;
+    const need = P.mfiLen + P.kLen + 2 * P.dLen;
+    const wOff = cs?.length ? _warmLen(cs) : 0;
+    if (!cs || !cs.length || cs.length + wOff < need) {
+      const have = cs ? cs.length : 0;
+      return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
+        <rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}" style="fill:var(--wash)"/>
+        <text x="${padL + 6}" y="${(H / 2 + 3).toFixed(1)}" style="font-size:10px;fill:var(--muted,#789);">SMI of MFI warming up — ${have + wOff}/${need} bars</text></svg>`;
+    }
+    const S = _smiState(cs), n = cs.length;
+    const padT = 15, padB = 16, right = W - padR, bot = H - padB;   // top row for the legend
+    let m = P.band + 5;
+    for (const arr of [S.smi, S.sig, S.hist, S.dzT, S.dzB]) for (const v of arr) if (v != null && isFinite(v)) m = Math.max(m, Math.abs(v));
+    m *= 1.08;
+    const y = v => padT + (1 - (v + m) / (2 * m)) * (bot - padT);
+    let s = `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${(bot + 2).toFixed(1)}" style="fill:var(--wash)"/>`;
+    s += _timeGridSvg(W, padL, padR, 0, bot + 2, H - 3, cs, xOf);
+    const groups = new Map(), add = (k, d) => { const g = groups.get(k); if (g) g.push(d); else groups.set(k, [d]); };
+    const f1 = v => v.toFixed(1);
+    // background when SMI is outside the dynamic zone (between the zone lines, as the script fills it)
+    for (let i = 1; i < n; i++) {
+      const a = S.smi[i], t0 = S.dzT[i - 1], t1 = S.dzT[i], b0 = S.dzB[i - 1], b1 = S.dzB[i];
+      if (a == null || t1 == null || t0 == null) continue;
+      const col = a > t1 ? 'up' : a < b1 ? 'dn' : null;
+      if (!col) continue;
+      const x0 = xOf(i - 1), x1 = xOf(i);
+      add(`bg|${col}`, `M${f1(x0)} ${f1(y(t0))}L${f1(x1)} ${f1(y(t1))}L${f1(x1)} ${f1(y(b1))}L${f1(x0)} ${f1(y(b0))}Z`);
+    }
+    // fill between SMI and its signal: blue while SMI is above it, red below (transparency 60)
+    for (let i = 1; i < n; i++) {
+      const a0 = S.smi[i - 1], a1 = S.smi[i], g0 = S.sig[i - 1], g1 = S.sig[i];
+      if ([a0, a1, g0, g1].some(v => v == null)) continue;
+      const x0 = xOf(i - 1), x1 = xOf(i);
+      add(`fill|${a1 >= g1 ? 'up' : 'dn'}`, `M${f1(x0)} ${f1(y(a0))}L${f1(x1)} ${f1(y(a1))}L${f1(x1)} ${f1(y(g1))}L${f1(x0)} ${f1(y(g0))}Z`);
+    }
+    // histogram columns from zero
+    const bw = Math.max(1.2, Math.min(4, (right - padL) / Math.max(1, Math.ceil(385 / (_chart.interval || 1))) * 0.55));
+    const y0 = y(0);
+    for (let i = 0; i < n; i++) {
+      const h = S.hist[i];
+      if (h == null) continue;
+      const yy = y(h), x = xOf(i);
+      add(`hist|${_smiHistColor(h)}`, `M${f1(x - bw / 2)} ${f1(Math.min(yy, y0))}h${bw.toFixed(1)}V${f1(Math.max(yy, y0))}h${(-bw).toFixed(1)}Z`);
+    }
+    // the dynamic-zone lines, the SMI (coloured by level) and the signal (by slope)
+    const seg = (k, arr, i) => add(k, `M${f1(xOf(i - 1))} ${f1(y(arr[i - 1]))}L${f1(xOf(i))} ${f1(y(arr[i]))}`);
+    for (let i = 1; i < n; i++) {
+      if (S.dzT[i - 1] != null && S.dzT[i] != null) { seg('dzT', S.dzT, i); seg('dzB', S.dzB, i); seg('dzC', S.dzC, i); }
+      if (S.sig[i - 1] != null && S.sig[i] != null) seg(`sig|${S.sig[i] >= S.sig[i - 1] ? '#2196f3' : '#ff0000'}`, S.sig, i);
+      if (S.smi[i - 1] != null && S.smi[i] != null) seg(`smi|${_smiColor(S.smi[i])}`, S.smi, i);
+    }
+    const order = ['bg', 'fill', 'hist', 'dzT', 'dzB', 'dzC', 'sig', 'smi'];
+    const sty = (k, paint) => ({
+      bg: `fill="${paint === 'up' ? 'rgba(48,100,252,0.30)' : 'rgba(240,52,73,0.30)'}"`,
+      fill: `fill="${paint === 'up' ? 'rgba(33,150,243,0.40)' : 'rgba(255,0,0,0.40)'}"`,
+      hist: `fill="${paint}"`,
+      dzT: 'fill="none" stroke="#3064fc" stroke-width="1"', dzB: 'fill="none" stroke="#f23645" stroke-width="1"',
+      dzC: 'fill="none" stroke="#b2b5be" stroke-width="1" opacity="0.7"',
+      sig: `fill="none" stroke="${paint}" stroke-width="1"`,
+      smi: `fill="none" stroke="${paint}" stroke-width="2" stroke-linecap="round"`,
+    })[k];
+    // fixed levels first (under everything but the background)
+    let lv = '';
+    for (const [v, col] of [[P.band, 'rgba(33,150,243,0.75)'], [0, 'rgba(178,181,190,0.75)'], [-P.band, 'rgba(242,54,69,0.75)']]) {
+      lv += `<line x1="${padL}" y1="${f1(y(v))}" x2="${f1(right)}" y2="${f1(y(v))}" stroke="${col}" stroke-width="1" stroke-dasharray="2,3"/>`;
+      lv += `<text x="${f1(right + 3)}" y="${f1(y(v) + 3)}" style="font-size:8px;fill:var(--muted,#789);">${v}</text>`;
+    }
+    const keys = [...groups.keys()].sort((a, b) => order.indexOf(a.split('|')[0]) - order.indexOf(b.split('|')[0]));
+    let body = '';
+    for (const k of keys) {
+      const [kind, paint] = k.includes('|') ? [k.slice(0, k.indexOf('|')), k.slice(k.indexOf('|') + 1)] : [k, ''];
+      if (kind === 'hist' && !body.includes('data-lv')) body += `<g data-lv="1">${lv}</g>`;
+      body += `<path class="smi-${kind}" d="${groups.get(k).join('')}" ${sty(kind, paint)} pointer-events="none"/>`;
+    }
+    if (!body.includes('data-lv')) body = `<g data-lv="1">${lv}</g>` + body;
+    s += body;
+    // cross marks: circle outside the zone, diamond inside; up at the bottom, down at the top
+    for (const c of S.cross.slice(-40)) {
+      const x = xOf(c.i), up = c.dir > 0, yy = up ? bot - 4 : padT + 3;
+      const col = c.kind === 'out' ? (up ? '#14e024' : '#ff0000') : (up ? '#2962ff' : '#ff9800');
+      const tip = `${_hm(cs[c.i].t)} — SMI crossed ${up ? 'ABOVE' : 'BELOW'} its signal ${c.kind === 'out' ? 'OUTSIDE' : 'inside'} the dynamic zone (SMI ${S.smi[c.i].toFixed(1)})`;
+      s += c.kind === 'out'
+        ? `<circle class="smi-x" cx="${f1(x)}" cy="${f1(yy)}" r="2.6" fill="${col}"><title>${escapeHtml(tip)}</title></circle>`
+        : `<path class="smi-x" d="M${f1(x)} ${f1(yy - 3.2)}L${f1(x + 3)} ${f1(yy)}L${f1(x)} ${f1(yy + 3.2)}L${f1(x - 3)} ${f1(yy)}Z" fill="${col}"><title>${escapeHtml(tip)}</title></path>`;
+    }
+    // legend
+    const li = (() => { for (let i = n - 1; i >= 0; i--) if (S.smi[i] != null) return i; return -1; })();
+    if (li >= 0) {
+      const sv = S.smi[li], gv = S.sig[li], hv = S.hist[li];
+      const zone = S.dzT[li] == null ? '' : sv > S.dzT[li] ? ' · above zone' : sv < S.dzB[li] ? ' · below zone' : ' · inside zone';
+      s += `<text x="${padL + 4}" y="10" style="font-size:8.5px;fill:var(--muted,#789);">SMI·MFI 13,13,5,5 <tspan style="fill:${_smiColor(sv)};font-weight:700;">${sv.toFixed(1)}</tspan> sig <tspan style="fill:${gv >= (S.sig[li - 1] ?? gv) ? '#2196f3' : '#ff0000'};">${gv.toFixed(1)}</tspan> hist <tspan style="fill:${_smiHistColor(hv)};">${hv.toFixed(1)}</tspan>${zone}${S.useVol ? '' : ' · no volume: price-only MFI'}</text>`;
+    }
+    s += _xmSvg('smiXM', 0, bot + 2, H - 4);
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
+  }
 
   function _rsiPaneSvg(cs, xOf, W, padL, padR, H) {
     const cfg = (() => {
@@ -31061,6 +31283,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (box2 && k)
         box2.innerHTML = _rsiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10);
     } catch (_) {}
+    try {
+      // SMI of MFI: same geometry and the SAME height as the RSI pane
+      const box3 = document.getElementById('smiPaneBody');
+      const k = _chart._rsiCtx;
+      if (box3) box3.innerHTML = k && !_chart.optionMeta ? _smiMfiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10) : '';
+    } catch (e) { console.warn('[smi-mfi]', e.message); }
     // the panes were just rebuilt: put a hovering crosshair back
     try { const xm = _chart._xm; if (xm) _mirrorCrosshair(xm.px, true, xm.W, xm.src); } catch (_) {}
     // The series array holds exactly one VWAP, so if more than one is on
@@ -32695,14 +32923,14 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       });
     });
     for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr',
-                     'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep']) {
+                     'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep', 'smiMfi']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       // new overlays default ON: a saved config predates them, and its
       // missing key must not read as a deliberate "off"
       // (PD: zones, gaps, liquidity and the prep card on; OTE, order blocks
       // and the signal filter are opt-in)
-      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep', 'smiMfi'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
     }
