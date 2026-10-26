@@ -188,6 +188,12 @@
   .token-banner.warn { background:rgba(245,179,1,0.14); border:1px solid #f5b301; color:var(--text); }
   .token-banner.bad { background:rgba(239,83,80,0.16); border:1px solid #ef5350; color:var(--text); }
   .token-banner code { font-size:11px; padding:1px 5px; border-radius:4px; background:rgba(127,127,127,0.18); }
+  /* ── Desk ▸ Post-Market participant OI tables: not the option-chain cell style ── */
+  #postMktBody td { font-family:inherit; padding:2px 6px; border-bottom:1px solid rgba(127,127,127,0.12); }
+  #postMktBody td:first-child { text-align:left; }
+  #postMktBody table.poi-h { width:auto; }
+  #postMktBody table.poi-h td { border-bottom:none; }
+  #postMktBody table.poi-h td:last-child { text-align:left; }
   /* ── indicator settings dialog ── */
   .ind-gear { background:none; border:none; color:var(--gold,#d4af37); cursor:pointer; font-size:11px; padding:0 3px; line-height:1; }
   .ind-gear:hover { color:#fff; }
@@ -18612,6 +18618,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (ph?.at != null && pl?.at == null) { s--; why.push([-1, `PDH ${ph.state} — buy-side taken, PDL is the remaining draw`]); }
       else if (pl?.at != null && ph?.at == null) { s++; why.push([1, `PDL ${pl.state} — sell-side taken, PDH is the remaining draw`]); }
     }
+    // participant OI (Desk ▸ Post-Market ▸ Fetch): the previous session's
+    // FII / Client lean, only when it is from the session right before this one
+    try {
+      const pl = JSON.parse(localStorage.getItem('poiLast') || 'null');
+      const dayK = window._histDate || _istDayKey();
+      if (pl && pl.date === _tradingDayShift(dayK, -1)) {
+        const e = pl.lean === 'BULLISH' ? 1 : pl.lean === 'BEARISH' ? -1 : 0;
+        s += e;
+        why.push([e, `participant OI (${pl.date.slice(5)}): FII / Client lean ${pl.lean}${pl.why?.[0] ? ' — ' + pl.why[0] : ''}`]);
+      }
+    } catch (_) {}
     const md = window._mdLast;
     if (!atOpen && md && Date.now() - md.at < 120000 && !_pdHist()) {
       if (/UP/.test(md.label)) { s++; why.push([1, `Market Direction ${md.label}`]); }
@@ -24551,6 +24568,125 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       <div class="oc-sub" style="margin-top:3px;">There is no secret feed here, and anything sold as one is inference from the same public data. What this does have is the footprint large buying leaves: a fund taking two percent of a company does it across many sessions, not in one print, and those sessions show <b>heavy volume closing in the upper part of the day's range</b>. Distribution is the mirror — heavy volume closing low. <b>Everything is measured against the stock's own history</b>, never a fixed cutoff: a stock that normally closes at 0.70 of its range sitting at 0.70 is nothing, while one that normally closes at 0.40 sitting at 0.70 is a footprint, and a fixed threshold cannot tell those apart. <b>The ◆ marks the valuable case</b> — volume and closes have shifted but price has NOT yet run. Once price has moved, the information is already in the price and you are late. <b>The universe is the Nifty 500.</b> If a <code>nifty500.txt</code> sits in the cache folder, one symbol per line, that list is used directly. Otherwise the top 500 by median daily turnover stands in for it — a close proxy, since the index is built on free-float market cap and turnover tracks that well, and one that maintains itself, which a pasted list does not: membership changes twice a year and a stale list quietly scans the wrong universe. <b>The honest limit:</b> the cache carries no delivery percentage, which is the strongest accumulation signal available, so this is inference from volume and range rather than a direct read. It will flag operator activity, index-rebalance buying and genuine institutional accumulation alike, and it cannot tell you which is which.</div>`;
   }
 
+  // ── PARTICIPANT OI READER ─────────────────────────────────────────
+  // From the session series (oldest first): positions and day-on-day change
+  // per participant, who did what today in plain words, 20-session history
+  // with where today sits in it, FII against Client (smart money against
+  // retail), and a lean for the next session with its reasons.
+  const _poiK = n => { const a = Math.abs(n), sg = n < 0 ? '−' : ''; return a >= 1e5 ? `${sg}${(a / 1e5).toFixed(2)}L` : a >= 1e3 ? `${sg}${(a / 1e3).toFixed(1)}k` : `${sg}${Math.round(a)}`; };
+  const _poiSgn = n => (n > 0 ? '+' : '') + _poiK(n);
+  function _poiMetrics(r) {
+    if (!r) return null;
+    const fl = r.fut_idx_long || 0, fs = r.fut_idx_short || 0;
+    const cN = (r.opt_idx_call_long || 0) - (r.opt_idx_call_short || 0), pN = (r.opt_idx_put_long || 0) - (r.opt_idx_put_short || 0);
+    return { futNet: fl - fs, longPct: fl + fs > 0 ? fl / (fl + fs) * 100 : null, callNet: cN, putNet: pN, optBias: cN - pN,
+             stkNet: (r.fut_stk_long || 0) - (r.fut_stk_short || 0) };
+  }
+  function _poiPctRank(arr, v) {            // share of the window at or below v
+    const a = arr.filter(x => x != null && isFinite(x));
+    return a.length ? Math.round(a.filter(x => x <= v).length / a.length * 100) : null;
+  }
+  function _poiSpark(vals, col) {
+    const a = vals.map(v => (v == null || !isFinite(v)) ? null : v), ok = a.filter(v => v != null);
+    if (ok.length < 2) return '';
+    const lo = Math.min(...ok), hi = Math.max(...ok), W = 130, H = 26, sp = hi - lo || 1;
+    const pts = a.map((v, i) => v == null ? null : [i / (a.length - 1) * (W - 4) + 2, H - 3 - (v - lo) / sp * (H - 6)]).filter(Boolean);
+    const lp = pts[pts.length - 1];
+    return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="vertical-align:middle;"><polyline points="${pts.map(p => p.map(x => x.toFixed(1)).join(',')).join(' ')}" fill="none" stroke="${col}" stroke-width="1.4"/><circle cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="2.2" fill="${col}"/></svg>`;
+  }
+  function _poiRead(poi) {
+    const S = poi.series || [{ date: poi.date, rows: Object.fromEntries((poi.rows || []).map(r => [r.who, r])) }];
+    const last = S[S.length - 1], prev = S[S.length - 2] || null;
+    const WHO = ['FII', 'DII', 'Pro', 'Client'];
+    const M = w => _poiMetrics(last.rows[w]), M0 = w => prev ? _poiMetrics(prev.rows[w]) : null;
+    const col = v => v > 0 ? 'var(--pos,#26a69a)' : v < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)';
+    const d = (a, b) => (a == null || b == null) ? null : a - b;
+    const cell = (v, dv, pct) => `<td style="padding:2px 6px;text-align:right;white-space:nowrap;"><b style="color:${col(v)};">${pct ? (v == null ? '—' : v.toFixed(1) + '%') : _poiSgn(v)}</b>${dv == null ? '' : ` <span style="font-size:9px;color:${col(dv)};">${pct ? (dv >= 0 ? '+' : '') + dv.toFixed(1) + 'pp' : _poiSgn(dv)}</span>`}</td>`;
+    const table = `<table style="width:100%;border-collapse:collapse;font-size:10px;margin-top:3px;">
+      <tr style="color:var(--muted);font-size:9px;"><th style="text-align:left;padding:2px 6px;">who</th>
+        <th style="text-align:right;padding:2px 6px;" title="index futures long − short (contracts), change since the previous session">idx fut net (Δ)</th>
+        <th style="text-align:right;padding:2px 6px;" title="index futures longs as a share of longs + shorts">long % (Δ)</th>
+        <th style="text-align:right;padding:2px 6px;" title="index calls bought − written">idx calls net (Δ)</th>
+        <th style="text-align:right;padding:2px 6px;" title="index puts bought − written">idx puts net (Δ)</th>
+        <th style="text-align:right;padding:2px 6px;" title="calls net − puts net: + = bullish option exposure (contract counts, not delta-weighted)">options bias (Δ)</th>
+        <th style="text-align:right;padding:2px 6px;" title="stock futures long − short">stock fut net (Δ)</th></tr>
+      ${WHO.map(w => { const m = M(w), m0 = M0(w); if (!m) return ''; return `<tr><td style="padding:2px 6px;"><b>${w}</b></td>
+        ${cell(m.futNet, d(m.futNet, m0?.futNet))}${cell(m.longPct, d(m.longPct, m0?.longPct), true)}${cell(m.callNet, d(m.callNet, m0?.callNet))}${cell(m.putNet, d(m.putNet, m0?.putNet))}${cell(m.optBias, d(m.optBias, m0?.optBias))}${cell(m.stkNet, d(m.stkNet, m0?.stkNet))}</tr>`; }).join('')}
+    </table>`;
+    // who did what today: the largest leg changes, in words
+    const acts = [];
+    if (prev) {
+      const LEG = [['fut_idx_long', 'index-futures longs', 'L'], ['fut_idx_short', 'index-futures shorts', 'S'],
+                   ['opt_idx_call_long', 'index calls (bought)', 'L'], ['opt_idx_call_short', 'index calls (written)', 'S'],
+                   ['opt_idx_put_long', 'index puts (bought)', 'L'], ['opt_idx_put_short', 'index puts (written)', 'S']];
+      for (const w of WHO) {
+        const a = last.rows[w], b = prev.rows[w];
+        if (!a || !b) continue;
+        for (const [k, lab, side] of LEG) {
+          const dv = (a[k] || 0) - (b[k] || 0);
+          if (!dv) continue;
+          const verb = side === 'L' ? (dv > 0 ? 'added' : 'closed') : (dv > 0 ? 'added' : 'covered');
+          // bullish legs: longs/calls bought, puts written; bearish the mirror
+          const bull = (k === 'fut_idx_long' || k === 'opt_idx_call_long' || k === 'opt_idx_put_short') ? 1 : -1;
+          acts.push({ w, mag: Math.abs(dv), dir: Math.sign(dv) * bull, txt: `${w === 'Client' ? 'Clients' : w} ${verb} ${_poiK(Math.abs(dv))} ${lab}` });
+        }
+      }
+      acts.sort((x, y) => y.mag - x.mag);
+    }
+    // history (oldest first)
+    const ser = w => S.map(x => _poiMetrics(x.rows[w]));
+    const fiiL = ser('FII').map(m => m?.longPct ?? null), cliL = ser('Client').map(m => m?.longPct ?? null);
+    const proN = ser('Pro').map(m => m?.futNet ?? null), fiiO = ser('FII').map(m => m?.optBias ?? null);
+    const n = S.length;
+    const fNow = fiiL[n - 1], cNow = cliL[n - 1];
+    const fRank = _poiPctRank(fiiL, fNow), cRank = _poiPctRank(cliL, cNow);
+    const rankTxt = r => r == null ? '' : r >= 90 ? 'highest in the window' : r <= 10 ? 'lowest in the window' : r >= 70 ? 'high for the window' : r <= 30 ? 'low for the window' : 'mid-window';
+    const hrow = (lab, vals, colr, fmt, note) => `<tr><td style="padding:2px 6px;color:var(--muted);">${lab}</td><td style="padding:2px 6px;">${_poiSpark(vals, colr)}</td>
+      <td style="padding:2px 6px;text-align:right;"><b>${vals[n - 1] == null ? '—' : fmt(vals[n - 1])}</b></td><td style="padding:2px 6px;color:var(--muted);font-size:9.5px;">${note || ''}</td></tr>`;
+    const hist = n >= 3 ? `<div style="margin-top:6px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.07);">
+      <div style="font-size:9.5px;color:var(--muted);">Last ${n} sessions (${escapeHtml(S[0].date.slice(5))} → ${escapeHtml(S[n - 1].date.slice(5))})</div>
+      <table class="poi-h" style="border-collapse:collapse;font-size:10px;">
+        ${hrow('FII index-futures long %', fiiL, '#2196f3', v => v.toFixed(1) + '%', `${fRank != null ? fRank + 'th percentile · ' : ''}${rankTxt(fRank)}`)}
+        ${hrow('Client index-futures long %', cliL, '#ff9800', v => v.toFixed(1) + '%', `${cRank != null ? cRank + 'th percentile · ' : ''}${rankTxt(cRank)}`)}
+        ${hrow('FII options bias', fiiO, '#26a69a', _poiSgn, 'calls net − puts net')}
+        ${hrow('Pro index-futures net', proN, '#ab47bc', _poiSgn, 'prop desks turn first')}
+      </table></div>` : '';
+    // smart money vs retail, and the lean for the next session
+    const why = []; let sc = 0;
+    const avg = a => { const v = a.filter(x => x != null); return v.length ? v.reduce((p, q) => p + q, 0) / v.length : null; };
+    const f5 = avg(fiiL.slice(-6, -1));
+    if (fNow != null && f5 != null && Math.abs(fNow - f5) >= 3) { const e = Math.sign(fNow - f5); sc += e; why.push([e, `FII long % ${fNow.toFixed(1)}% vs ${f5.toFixed(1)}% over the previous 5 sessions — ${e > 0 ? 'FIIs leaning longer' : 'FIIs leaning shorter'}`]); }
+    const fm = M('FII'), fm0 = M0('FII');
+    if (fm && fm0) {
+      const dF = fm.futNet - fm0.futNet;
+      if (Math.abs(dF) >= 2000) { const e = Math.sign(dF); sc += e; why.push([e, `FIIs ${dF > 0 ? 'added net longs' : 'added net shorts'} in index futures today (${_poiSgn(dF)})`]); }
+      const dO = fm.optBias - fm0.optBias;
+      if (Math.abs(dO) >= 5000) { const e = Math.sign(dO); sc += e; why.push([e, `FII index options turned ${dO > 0 ? 'more bullish' : 'more bearish'} today (${_poiSgn(dO)} calls net − puts net)`]); }
+    }
+    if (cRank != null && n >= 10) {
+      if (cRank >= 85) { sc--; why.push([-1, `Clients' futures long % is ${rankTxt(cRank)} (${cRank}th percentile) — retail crowded long, the classic contrarian warning`]); }
+      else if (cRank <= 15) { sc++; why.push([1, `Clients' futures long % is ${rankTxt(cRank)} (${cRank}th percentile) — retail crowded short, the classic contrarian tell`]); }
+    }
+    const pm = M('Pro'), pm0 = M0('Pro');
+    if (pm && pm0 && fm && fm0) {
+      const dP = pm.futNet - pm0.futNet, dF = fm.futNet - fm0.futNet;
+      if (Math.abs(dP) >= 2000 && Math.abs(dF) >= 2000) why.push([0, Math.sign(dP) === Math.sign(dF) ? 'Pro desks moved the same way as FIIs today — the move has both behind it' : 'Pro desks moved AGAINST FIIs today — fast money disagreeing with slow money, often near a turn']);
+    }
+    const div = (fRank != null && cRank != null) ? fRank - cRank : null;
+    const gauge = div == null ? '' : `<div style="margin-top:6px;padding:4px;border-top:1px solid rgba(255,255,255,0.07);font-size:10.5px;">
+      <b>FII vs retail:</b> FII long % at the ${fRank}th percentile of ${n} sessions, Clients at the ${cRank}th —
+      ${Math.abs(div) < 30 ? 'both leaning the same way; no smart-money / retail split' : div > 0 ? '<span style="color:var(--pos,#26a69a);">FIIs relatively long, retail relatively short</span> — institutions on the long side of retail' : '<span style="color:var(--neg,#ef5350);">FIIs relatively short, retail relatively long</span> — institutions on the short side of retail'}</div>`;
+    const lean = sc >= 2 ? 'BULLISH' : sc <= -2 ? 'BEARISH' : 'MIXED';
+    const lcol = lean === 'BULLISH' ? 'var(--pos,#26a69a)' : lean === 'BEARISH' ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)';
+    const leanHtml = `<div style="margin-top:6px;padding:5px;border:1px solid ${lcol};border-left:4px solid ${lcol};border-radius:5px;font-size:10.5px;">
+      <b>Lean for the next session: <span style="color:${lcol};">${lean}</span></b> <span style="color:var(--muted);">(${sc >= 0 ? '+' : ''}${sc}) — also shown in the Market Prep card</span>
+      <div style="margin-top:2px;">${why.map(w => `<div style="color:${col(w[0])};">${w[0] > 0 ? '▲' : w[0] < 0 ? '▼' : '◆'} ${escapeHtml(w[1])}</div>`).join('') || '<span style="color:var(--muted);">no clear change in positioning</span>'}</div></div>`;
+    const actHtml = acts.length ? `<div style="margin-top:6px;padding-top:4px;border-top:1px solid rgba(255,255,255,0.07);font-size:10.5px;">
+      <div style="font-size:9.5px;color:var(--muted);">Who did what since ${escapeHtml(prev.date)}</div>
+      ${acts.slice(0, 6).map(a => `<div style="color:${col(a.dir)};">${a.dir > 0 ? '▲' : '▼'} ${escapeHtml(a.txt)}</div>`).join('')}</div>` : '';
+    return { html: table + actHtml + leanHtml + gauge + hist, lean, score: sc, why, n };
+  }
+
   // ── POST-MARKET (after 8pm) ───────────────────────────────────────
   // Participant-wise OI is the closest thing to seeing the institutional
   // book: it names WHO holds what, not merely how much exists. That single
@@ -24562,32 +24698,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     box.innerHTML = '<div class="movers-loading">Fetching participant OI and cash flows…</div>';
     const base = _deskBase();
     let poi = null, flows = null;
-    try { poi = await (await fetch(`${base}/api/participant-oi`)).json(); } catch (e) { poi = { error: String(e) }; }
+    try { poi = await (await fetch(`${base}/api/participant-oi?days=20`)).json(); } catch (e) { poi = { error: String(e) }; }
     try { flows = await (await fetch(`${base}/api/fii-dii`)).json(); } catch (_) {}
+    if (flows && (flows.error || (flows.fii_net == null && flows.fiiNet == null))) flows = null;   // an error is not "cash flows included"
     if (!poi || poi.error) {
       box.innerHTML = `<div class="movers-loading">${escapeHtml(poi?.error || 'Participant OI unavailable.')}
         <br><span style="font-size:9px;">NSE publishes this after the close on trading days, usually by about 7:30pm IST.</span></div>`;
       return;
     }
     const by = {}; for (const r of poi.rows) by[r.who] = r;
-    const fmtL = n => (Math.abs(n) >= 1e5 ? (n / 1e5).toFixed(2) + 'L' : fmtInt(Math.round(n)));
-    const line = who => {
-      const r = by[who]; if (!r) return '';
-      const fNet = r.fut_idx_long - r.fut_idx_short;
-      const fRatio = r.fut_idx_short > 0 ? r.fut_idx_long / r.fut_idx_short : null;
-      // Option legs: long calls and short puts are bullish exposure; long
-      // puts and short calls are bearish or protective.
-      const oBull = r.opt_idx_call_long + r.opt_idx_put_short;
-      const oBear = r.opt_idx_put_long + r.opt_idx_call_short;
-      const oNet = oBull - oBear;
-      const col = v => v > 0 ? 'var(--pos,#26a69a)' : v < 0 ? 'var(--neg,#ef5350)' : 'var(--muted)';
-      return `<tr>
-        <td style="padding:3px 6px;"><b>${who}</b></td>
-        <td style="padding:3px 6px;text-align:right;color:${col(fNet)};">${fNet >= 0 ? '+' : ''}${fmtL(fNet)}</td>
-        <td style="padding:3px 6px;text-align:right;color:var(--muted);">${fRatio ? fRatio.toFixed(2) : '—'}</td>
-        <td style="padding:3px 6px;text-align:right;color:${col(oNet)};">${oNet >= 0 ? '+' : ''}${fmtL(oNet)}</td>
-      </tr>`;
-    };
     // the reading that matters: FII futures stance against their cash flow
     const fii = by.FII;
     let verdict = '';
@@ -24608,41 +24727,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                            : 'FIIs are net long index futures.';
       }
     }
+    const P = _poiRead(poi);
+    try { localStorage.setItem('poiLast', JSON.stringify({ date: poi.date, lean: P.lean, score: P.score, why: P.why.map(w => w[1]) })); } catch (_) {}
     box.innerHTML = `
-      <div style="font-size:10px;color:var(--muted);padding:2px 4px;">Participant open interest for <b>${escapeHtml(poi.date)}</b>${flows ? ' · cash flows included' : ''}</div>
-      <table style="width:100%;border-collapse:collapse;font-size:10px;margin-top:3px;">
-        <tr style="color:var(--muted);font-size:9px;">
-          <th style="text-align:left;padding:2px 6px;">who</th>
-          <th style="text-align:right;padding:2px 6px;">index futures net</th>
-          <th style="text-align:right;padding:2px 6px;">long/short</th>
-          <th style="text-align:right;padding:2px 6px;">index options net</th>
-        </tr>
-        ${['FII', 'DII', 'Pro', 'Client'].map(line).join('')}
-      </table>
-      ${verdict ? `<div style="padding:5px 4px;font-size:10.5px;"><b>Read:</b> ${escapeHtml(verdict)}</div>` : ''}
-      ${(() => {
-        // The five-day trend, not the snapshot. One day's ratio is noise; the
-        // direction across a week is the institutional signal, and a ratio
-        // falling from 0.9 to 0.4 says something a single 0.4 cannot.
-        const h = poi.fii_history || [];
-        if (h.length < 2) return '';
-        const first = h[0], last = h[h.length - 1];
-        const dR = (last.ratio != null && first.ratio != null) ? last.ratio - first.ratio : null;
-        const dir = dR == null ? '' : dR > 0.08 ? 'FIIs have been REDUCING shorts across the week'
-                  : dR < -0.08 ? 'FIIs have been ADDING shorts across the week'
-                  : 'FII positioning is broadly unchanged across the week';
-        const cells = h.map(x =>
-          `<td style="padding:2px 6px;text-align:right;">
-             <div style="font-size:9px;color:var(--muted);">${x.date.slice(5)}</div>
-             <b style="color:${x.ratio == null ? 'var(--muted)' : x.ratio >= 1 ? 'var(--pos,#26a69a)' : 'var(--neg,#ef5350)'};">
-               ${x.ratio == null ? '—' : x.ratio.toFixed(2)}</b>
-           </td>`).join('');
-        return `<div style="margin-top:5px;padding:4px;border-top:1px solid rgba(255,255,255,0.07);">
-          <div style="font-size:9.5px;color:var(--muted);margin-bottom:2px;">FII index-futures long/short, last ${h.length} sessions</div>
-          <table style="border-collapse:collapse;font-size:10px;"><tr>${cells}</tr></table>
-          ${dir ? `<div style="font-size:10.5px;margin-top:3px;">${escapeHtml(dir)}${dR != null ? ` (${dR >= 0 ? '+' : ''}${dR.toFixed(2)})` : ''}</div>` : ''}
-        </div>`;
-      })()}
+      <div style="font-size:10px;color:var(--muted);padding:2px 4px;">Participant open interest for <b>${escapeHtml(poi.date)}</b>
+        · ${P.n} session${P.n === 1 ? '' : 's'} of history${poi.downloaded != null ? ` (${poi.downloaded} downloaded now, ${poi.from_cache} from cache)` : ''}${flows ? ' · cash flows included' : ''}</div>
+      ${P.html}
+      ${verdict ? `<div style="padding:5px 4px;font-size:10.5px;"><b>FII futures vs cash:</b> ${escapeHtml(verdict)}</div>` : ''}
       ${(() => {
         // ── DECEPTION CHECK ────────────────────────────────────────
         // The surface read against the participant-level truth. The chain
@@ -40120,6 +40211,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'scen-matrix':       '<strong>P&amp;L Scenario Matrix</strong>Position P&amp;L across spot levels (rows, ±5 strikes) and dates (columns, today → expiry) — the whole what-if surface in one grid. Read horizontally to see how time decay reshapes the same spot level; vertically for directional exposure on a given day. The ▶ row is the current spot.',
     'cmp-tray':          '<strong>Strategy Comparison</strong>Pin the current Builder position (up to 3) and compare POP, max profit/loss, EV and breakevens side-by-side before committing. "Load" restores a pinned strategy into the Builder. Pins live in memory only — they clear on page reload.',
     'ev-lot':            '<strong>Expected Value per Lot</strong>Probability-weighted P&amp;L at expiry: the payoff integrated over a lognormal terminal-price distribution (σ from ATM IV × √DTE). POP alone misleads — a 90% POP condor can still be negative-EV if the rare loss dwarfs the frequent win. Positive EV = statistical edge <em>if</em> the IV assumption holds; real edge also needs IV to be overpriced vs realized.',
+    'post-market':       '<strong>Post-Market — participant open interest</strong>NSE publishes, after every session (usually by 7:30pm), how many index and stock futures and options contracts each participant group holds, long and short separately: <b>FII</b> (foreign institutions), <b>DII</b> (domestic institutions), <b>Pro</b> (brokers\' own proprietary desks) and <b>Client</b> (everyone else - overwhelmingly retail). It is the only public data that says WHO holds the open interest. <b>Fetch</b> runs it on demand: 20 sessions of history, each file downloaded once and then kept on disk, weekends and NSE holidays skipped. <b>The table</b>: index futures net and long %, index calls and puts net (bought − written), an options bias (calls net − puts net; contract counts, not delta-weighted) and stock futures net, each with its change since the previous session. <b>Who did what</b>: the largest leg changes in words. <b>Lean for the next session</b>: FII long % against its last 5 sessions, FII futures and options changes today, and Client crowding at the extremes of the window read contrarian; it is also added to the Market Prep card\'s bias for the next session. <b>FII vs retail</b>: where FII and Client long % sit in their own 20-session range. <b>Limits</b>: end-of-day only, contract counts ignore strike and delta, and a FII short future is often a hedge on stock they own - which is what the futures-vs-cash line checks.',
     'desk-cockpit':      '<strong>Desk Cockpit</strong>The screen a prop desk trades from. <b>Risk governor</b>: today\'s paper trades against your rules - daily loss (₹, or the Builder\'s loss limit), maximum trades, a losing streak that locks the day, and a cooldown after a loss one short of it. LOCKED and COOLDOWN are announced once and shown on every tab in the header pill. <b>Premium tape</b>: rupees of premium bought minus sold by takers in calls and puts over 5 and 15 minutes, from prints classified tick by tick on the server - bullish premium is calls bought minus puts bought. <b>Execution</b>: spread in ticks and as a share of premium, and lots printed in 15 minutes, for the seven strikes round the money - A trade freely, B use limit orders, C the spread costs more than the edge. <b>Vol &amp; range</b>: how much of today\'s implied 1σ move is used, what is left for the rest of the session, implied against realised. <b>Clock</b>: session phase, the next window, expiry and the pin strike on expiry day.',
     'loss-guard':        '<strong>Daily Loss Limit</strong>Set a ₹ amount; when the Builder\'s live P&amp;L breaches it, a persistent red banner locks to the top of the page. The single most valuable risk rule for a full-time trader: the limit decided calmly in the morning beats any decision made mid-drawdown. Leave blank to disable.',
     'trail-dd':          '<strong>Trailing Drawdown Alert</strong>Tracks the peak live P&amp;L of your position this session and alerts when you\'ve given back more than this ₹ amount from the peak. Catches the classic "it was green an hour ago" failure — locking a partial win is a decision, and this makes sure you actively make it.',

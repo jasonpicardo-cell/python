@@ -1715,7 +1715,9 @@ def test_zerodha_adapter():
         check("zerodha: OI change measured from the recorded previous close", row["ce_oi_chg"] == 100, str(row["ce_oi_chg"]))
         check("zerodha: 51 strikes around spot, both sides priced", len(d["strikes"]) == 51 and row["ce_ltp"] > 0 and row["pe_ltp"] > 0,
               str(len(d["strikes"])))
-        check("zerodha: implied vol solved from prices", d["iv_source"] == "solved" and 10 < d["atm_iv"] < 16, f"{d['iv_source']} {d['atm_iv']}")
+        # the fake premiums are fixed while time to expiry shrinks with the
+        # real clock (16.5% the evening before expiry), so only sanity-bound it
+        check("zerodha: implied vol solved from prices", d["iv_source"] == "solved" and 5 < d["atm_iv"] < 40, f"{d['iv_source']} {d['atm_iv']}")
         check("zerodha: spot, VIX and previous close from the index", d["underlying_value"] == 25012.0 and d["india_vix"] == 12.85
               and d["spot_prev_close"], f"{d['underlying_value']} {d['india_vix']}")
         check("zerodha: near and next-month futures with OI in contracts",
@@ -2862,11 +2864,117 @@ console.log(JSON.stringify(R));
           and "Reset to defaults" in d and "closeIndSettings(true)" in d)
 
 
+_POI_SAMPLE = (
+    '"Participant wise Open Interest (no. of contracts) in Equity Derivatives as on Oct 23, 2026",,,,,,,,,,,,,,\n'
+    'Client Type,Future Index Long,Future Index Short,Future Stock Long,Future Stock Short\t,Option Index Call Long,'
+    'Option Index Put Long,Option Index Call Short,Option Index Put Short,Option Stock Call Long,Option Stock Put Long,'
+    'Option Stock Call Short,Option Stock Put Short,Total Long Contracts\t,Total Short Contracts\t\n'
+    'Client,231868,150442,2468530,247513,2410870,1966447,2017411,2268010,742431,358063,511906,363880,8178209,5559162\n'
+    'DII,90960,48963,140716,3159085,0,8,0,0,0,0,0,0,231684,3208048\n'
+    'FII,71204,211370,1650389,1258779,409617,512361,321890,328064,165364,116391,149023,121917,2925326,2391043\n'
+    'Pro,40536,23793,519624,513876,1500128,1235127,1981332,1125870,385025,179713,365943,187084,3860153,4197618\n'
+    'TOTAL,434568,434568,4779259,4779253,4320615,3713943,4320633,3721944,1292820,654167,1026872,672881,15195372,15195371\n')
+
+
+def test_participant_oi():
+    """Participant-wise OI (Desk ▸ Post-Market): the NSE file parsed by column
+    name, a 20-session series that skips weekends / holidays and downloads
+    each session once, and the reader's changes, history, retail-vs-FII and
+    next-session lean (also fed to the Market Prep bias)."""
+    import ast as _ast, tempfile, shutil, threading as _th, time as _t, json as _json, subprocess, random as _r
+    src = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    tree = _ast.parse(src)
+    want = {"_poi_parse", "_poi_get", "_poi_series", "_nse_holidays", "_is_trading_day", "_shift_day", "_prev_trading_days"}
+    nodes = [n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name in want]
+    consts = [n for n in tree.body if isinstance(n, _ast.Assign) and getattr(n.targets[0], "id", "") in ("_POI_COLS", "_NSE_HOLIDAYS_BUILTIN", "_POI_URLS")]
+    tmp = tempfile.mkdtemp(prefix="poi")
+    calls = []
+
+    class _Resp:
+        def __init__(self, code, text): self.status_code, self.text = code, text
+
+    class _Req:
+        @staticmethod
+        def get(url, timeout=0, headers=None):
+            calls.append(url)
+            return _Resp(200, _POI_SAMPLE) if "nsearchives" in url else _Resp(404, "")
+
+    class _Sess:
+        session = _Req
+    ns = {"_os": os, "json": _json, "time": _t, "threading": _th, "_POI_DIR": tmp, "_poi_miss": {}, "_poi_lock": _th.Lock(),
+          "_warm_nse_fetcher": lambda: _Sess, "_ctx_day": lambda: "2026-10-26"}
+    try:
+        exec(compile(_ast.Module(body=consts + nodes, type_ignores=[]), "srv", "exec"), ns)
+        rows = ns["_poi_parse"](_POI_SAMPLE)
+        check("participant OI: the NSE file parsed by column name (title line, tab-padded headers)",
+              rows and set(rows) == {"Client", "DII", "FII", "Pro", "TOTAL"} and rows["FII"]["fut_idx_short"] == 211370
+              and rows["Client"]["opt_idx_put_long"] == 1966447 and rows["Pro"]["total_short"] == 4197618
+              and rows["DII"]["fut_stk_short"] == 3159085, str(rows and rows.get("FII"))[:200])
+        check("participant OI: a page that is not the file (HTML error, empty) is rejected",
+              ns["_poi_parse"]("<html>Access Denied</html>") is None and ns["_poi_parse"]("") is None)
+        import calendar as _cal
+        ns["time"] = type("T", (), {"time": staticmethod(lambda: _cal.timegm((2026, 10, 26, 14, 0, 0, 0, 0, 0)) - 19800),   # 14:00 IST
+                                     "gmtime": staticmethod(_t.gmtime), "sleep": staticmethod(lambda x: None)})
+        r1 = ns["_poi_series"](5)
+        n1 = len(calls)
+        r2 = ns["_poi_series"](5)
+        check("participant OI: before 17:30 today is skipped; 5 sessions back skip the weekend and Dussehra (20 Oct); one download each",
+              [x["date"] for x in r1["series"]] == ["2026-10-16", "2026-10-19", "2026-10-21", "2026-10-22", "2026-10-23"]
+              and r1["downloaded"] == 5 and n1 == 5, str([x["date"] for x in r1["series"]]) + f" calls={n1}")
+        check("participant OI: asked again, every session comes from the disk cache (no NSE request)",
+              len(calls) == n1 and r2["cached"] == 5 and r2["downloaded"] == 0, f"{len(calls) - n1} new calls")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    check("server: /api/participant-oi serves the series (days, date) and keeps the old fields",
+          '"series": res["series"]' in src and '"fii_history": fh' in src and 'int(qs.get("days", ["20"])[0] or 20)' in src)
+
+    # ── the dashboard reader ──
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    _r.seed(5)
+    series, fl, fs, cl, cs = [], 100000, 200000, 220000, 150000
+    days = ["2026-09-%02d" % x for x in range(28, 31)] + ["2026-10-%02d" % x for x in (1, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 19, 21, 22, 23)]
+    for i, day in enumerate(days):
+        if i == len(days) - 1:
+            fl, fs, cl, cs = fl + 30000, fs - 10000, cl + 60000, cs - 5000      # last day: FII add longs, clients pile long
+        else:
+            fl += _r.randint(-3000, 3000); fs += _r.randint(-3000, 3000); cl += _r.randint(-3000, 3000); cs += _r.randint(-3000, 3000)
+        rows = {w: {"fut_idx_long": a, "fut_idx_short": b, "fut_stk_long": 1e6, "fut_stk_short": 9e5, "opt_idx_call_long": 4e5, "opt_idx_put_long": 5e5,
+                    "opt_idx_call_short": 3e5 + (60000 if (w == "FII" and i == len(days) - 1) else 0), "opt_idx_put_short": 3e5}
+                for w, a, b in (("FII", fl, fs), ("Client", cl, cs), ("Pro", 40000, 24000), ("DII", 90000, 49000))}
+        series.append({"date": day, "rows": rows})
+    harness = r"""
+const escapeHtml = s => String(s ?? '');
+""" + d[d.index("  const _poiK = n =>"):d.index("  function _poiMetrics(")] + "\n".join(grab(f) for f in ("_poiMetrics", "_poiPctRank", "_poiSpark", "_poiRead")) + f"""
+const P = _poiRead({{ date: '2026-10-23', series: {_json.dumps(series)} }});
+console.log(JSON.stringify({{ lean: P.lean, score: P.score, why: P.why, n: P.n, hasTable: /idx fut net/.test(P.html), acts: (P.html.match(/added|covered|closed/g) || []).length, spark: (P.html.match(/<polyline/g) || []).length, gauge: /FII vs retail/.test(P.html) }}));
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("participant OI reader: harness ran", False, (res.stderr or res.stdout)[:500]); return
+    whys = " | ".join(w[1] for w in R["why"])
+    check("participant OI reader: table, who-did-what, 20-session sparklines and the FII-vs-retail gauge",
+          R["hasTable"] and R["acts"] >= 3 and R["spark"] == 4 and R["gauge"] and R["n"] == 18, str(R)[:300])
+    check("participant OI reader: FIIs adding longs reads +, FII options turning bearish reads −, retail crowded long reads − (contrarian)",
+          "FIIs added net longs" in whys and "more bearish" in whys and "crowded long" in whys, whys[:400])
+    check("Market Prep: the previous session's participant lean joins the bias (only when it is the session right before)",
+          "pl.date === _tradingDayShift(dayK, -1)" in d and "participant OI (${pl.date.slice(5)})" in d
+          and "localStorage.setItem('poiLast'" in d and "/api/participant-oi?days=20" in d and "'post-market':       '<strong>Post-Market" in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_indicator_settings, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_indicator_settings, test_participant_oi, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

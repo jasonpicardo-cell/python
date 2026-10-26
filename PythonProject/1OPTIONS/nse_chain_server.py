@@ -856,6 +856,124 @@ def _warm_save_today(symbol: str, rows) -> None:
         print(f"[warm] could not save today's session: {e}")
 
 
+# ══════════════════════════════════════════════════════════════════════
+# PARTICIPANT-WISE OPEN INTEREST (NSE archives, published after the close)
+# ══════════════════════════════════════════════════════════════════════
+_POI_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "participant_oi")
+_POI_URLS = ("https://nsearchives.nseindia.com/content/nsccl/fao_participant_oi_{d}.csv",
+             "https://archives.nseindia.com/content/nsccl/fao_participant_oi_{d}.csv")
+_poi_miss: dict = {}            # day -> time a download found nothing (retried after 10 min)
+_poi_lock = threading.Lock()
+_POI_COLS = {                   # normalised header -> field
+    "futureindexlong": "fut_idx_long", "futureindexshort": "fut_idx_short",
+    "futurestocklong": "fut_stk_long", "futurestockshort": "fut_stk_short",
+    "optionindexcalllong": "opt_idx_call_long", "optionindexputlong": "opt_idx_put_long",
+    "optionindexcallshort": "opt_idx_call_short", "optionindexputshort": "opt_idx_put_short",
+    "optionstockcalllong": "opt_stk_call_long", "optionstockputlong": "opt_stk_put_long",
+    "optionstockcallshort": "opt_stk_call_short", "optionstockputshort": "opt_stk_put_short",
+    "totallongcontracts": "total_long", "totalshortcontracts": "total_short",
+}
+
+
+def _poi_parse(txt: str):
+    """Rows keyed Client / DII / FII / Pro / TOTAL, columns found by NAME (the
+    file has a title line above the header, and spacing that varies)."""
+    import re as _re
+    norm = lambda x: _re.sub(r"[^a-z]", "", str(x).lower())
+    hdr, out = None, {}
+    for line in (txt or "").splitlines():
+        parts = [p.strip().strip('"') for p in line.split(",")]
+        if hdr is None:
+            if parts and norm(parts[0]) == "clienttype":
+                hdr = [_POI_COLS.get(norm(h)) for h in parts]
+            continue
+        who = {"client": "Client", "dii": "DII", "fii": "FII", "pro": "Pro", "total": "TOTAL"}.get(norm(parts[0]))
+        if not who:
+            continue
+        row = {}
+        for k, v in zip(hdr[1:], parts[1:]):
+            if k:
+                try:
+                    row[k] = float(v.replace(",", "") or 0)
+                except ValueError:
+                    row[k] = 0.0
+        if "fut_idx_long" in row:
+            out[who] = row
+    return out if {"FII", "Client"} <= set(out) else None
+
+
+def _poi_get(day: str):
+    """One session's file: disk, else one NSE download (kept for good)."""
+    path = _os.path.join(_POI_DIR, f"{day}.json")
+    if _os.path.exists(path):
+        try:
+            with open(path) as fh:
+                return json.load(fh), False
+        except Exception:
+            pass
+    m = _poi_miss.get(day)
+    if m and time.time() - m < 600:
+        return None, False
+    d = f"{day[8:10]}{day[5:7]}{day[0:4]}"
+    sess = _warm_nse_fetcher()
+    got = None
+    for u in _POI_URLS:
+        try:
+            r = (sess.session if sess else __import__("requests")).get(
+                u.format(d=d), timeout=12,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+                         "Referer": "https://www.nseindia.com/all-reports-derivatives"})
+            if r.status_code == 200:
+                got = _poi_parse(r.text)
+                if got:
+                    break
+        except Exception:
+            continue
+    if not got:
+        _poi_miss[day] = time.time()
+        return None, True
+    try:
+        _os.makedirs(_POI_DIR, exist_ok=True)
+        tmp = f"{path}.{threading.get_ident()}.tmp"
+        with open(tmp, "w") as fh:
+            json.dump(got, fh)
+        _os.replace(tmp, path)
+    except Exception as e:  # noqa: BLE001
+        print(f"[participant-oi] could not cache {day}: {e}")
+    return got, True
+
+
+def _poi_series(n: int, want: str = None):
+    """The last `n` published sessions up to `want` (default: today if it is
+    out, else the session before), oldest first. Weekends and NSE holidays
+    are skipped without asking; a day not yet published is retried later."""
+    today = _ctx_day()
+    end = want or today
+    days = ([end] if _is_trading_day(end) else []) + _prev_trading_days(end, limit=n + 3, max_back=n * 2 + 20)
+    series, dl, cached = [], 0, 0
+    with _poi_lock:
+        for day in days:
+            if day > today:
+                continue
+            if day == today:
+                lt = time.gmtime(time.time() + 19800)
+                if lt.tm_hour * 60 + lt.tm_min < 17 * 60 + 30:      # not out before ~17:30
+                    continue
+            g, fresh = _poi_get(day)
+            if fresh:
+                dl += 1
+                time.sleep(0.25)                                     # gentle on the archive
+            elif g:
+                cached += 1
+            if g:
+                series.append({"date": day, "rows": g})
+            if len(series) >= n:
+                break
+    series.reverse()
+    return {"series": series, "downloaded": dl, "cached": cached,
+            "why": None if series else "No participant OI file could be fetched (NSE unreachable or not yet published)."}
+
+
 def _sse_broadcast_ticks(event: dict) -> None:
     """Fan price ticks out to every connected tab.
 
@@ -6881,116 +6999,36 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/participant-oi":
-            # Participant-wise open interest, published by NSE after the close.
-            # This is the closest thing to seeing the institutional book: FII,
-            # DII, Pro and Client, split across index futures and index
-            # options, long and short separately.
-            #
-            # It is the answer to "what are the big players doing" in a way no
-            # intraday feed is, because it names WHO holds what rather than
-            # only how much exists. FIIs net short index futures while buying
-            # cash are hedged long, not bearish - a distinction the option
-            # chain alone cannot make.
-            day = (qs.get("date", [""])[0] or "").strip()
+            # Participant-wise open interest (NSE, after the close): FII, DII,
+            # Pro and Client, long and short separately, across index and
+            # stock futures and options. It names WHO holds what - the one
+            # thing the option chain cannot. On demand only (Desk ▸ Fetch).
+            # Each session's file is downloaded once and kept on disk, so a
+            # 20-session history costs one NSE request per new day.
             try:
-                import datetime as _dd
-                if day:
-                    dt = _dd.datetime.strptime(day, "%Y-%m-%d")
-                else:
-                    dt = _dd.datetime.now() + _dd.timedelta(hours=5, minutes=30)
-                out, used = None, None
-                # walk back up to 5 days: holidays and weekends have no file
-                for back in range(0, 6):
-                    d2 = dt - _dd.timedelta(days=back)
-                    ds = d2.strftime("%d%m%Y")
-                    url = ("https://nsearchives.nseindia.com/content/nsccl/"
-                           f"fao_participant_oi_{ds}.csv")
-                    try:
-                        # reuse the warmed NSE session: these archive files
-                        # reject requests without the cookies the site sets
-                        _f2 = _shared_fetcher
-                        if not _f2:
-                            self._send_json({"error": "NSE session not warmed yet — "
-                                                      "try again in a few seconds."})
-                            return
-                        _r2 = _f2.session.get(url, timeout=12)
-                        txt = _r2.text if _r2.status_code == 200 else None
-                    except Exception:
-                        txt = None
-                    if not txt or "Client Type" not in txt:
-                        continue
-                    rows = []
-                    for line in txt.splitlines():
-                        parts = [p.strip() for p in line.split(",")]
-                        if len(parts) < 12 or parts[0] in ("", "Client Type"):
-                            continue
-                        if parts[0] not in ("Client", "DII", "FII", "Pro", "TOTAL"):
-                            continue
-                        def _n(x):
-                            try:
-                                return float(str(x).replace(",", "") or 0)
-                            except Exception:
-                                return 0.0
-                        rows.append({
-                            "who": parts[0],
-                            "fut_idx_long": _n(parts[1]), "fut_idx_short": _n(parts[2]),
-                            "fut_stk_long": _n(parts[3]), "fut_stk_short": _n(parts[4]),
-                            "opt_idx_call_long": _n(parts[5]), "opt_idx_put_long": _n(parts[6]),
-                            "opt_idx_call_short": _n(parts[7]), "opt_idx_put_short": _n(parts[8]),
-                        })
-                    if rows:
-                        out, used = rows, d2.strftime("%Y-%m-%d")
-                        break
-                if not out:
-                    self._send_json({"error": "No participant OI file found for the last 5 sessions. "
-                                              "NSE publishes it after the close on trading days."})
-                    return
-                # ── history ───────────────────────────────────────────
-                # A single day's long/short ratio is noise: 0.42 means nothing
-                # without knowing it was 0.61 on Monday. The DIRECTION of that
-                # ratio across a week is the institutional signal, and the
-                # walk-back loop above already proves these files are cheap to
-                # read, so collecting a few of them costs little.
-                hist = []
-                try:
-                    base_dt = _dd.datetime.strptime(used, "%Y-%m-%d")
-                    for back in range(0, 9):
-                        d3 = base_dt - _dd.timedelta(days=back)
-                        ds3 = d3.strftime("%d%m%Y")
-                        u3 = ("https://nsearchives.nseindia.com/content/nsccl/"
-                              f"fao_participant_oi_{ds3}.csv")
-                        try:
-                            r3 = _shared_fetcher.session.get(u3, timeout=10)
-                            t3 = r3.text if r3.status_code == 200 else None
-                        except Exception:
-                            t3 = None
-                        if not t3 or "Client Type" not in t3:
-                            continue
-                        for line in t3.splitlines():
-                            p3 = [x.strip() for x in line.split(",")]
-                            if len(p3) < 9 or p3[0] != "FII":
-                                continue
-                            def _n3(x):
-                                try:
-                                    return float(str(x).replace(",", "") or 0)
-                                except Exception:
-                                    return 0.0
-                            lg, sh = _n3(p3[1]), _n3(p3[2])
-                            hist.append({
-                                "date": d3.strftime("%Y-%m-%d"),
-                                "long": lg, "short": sh,
-                                "ratio": (lg / sh) if sh else None,
-                                "net": lg - sh,
-                            })
-                            break
-                        if len(hist) >= 5:
-                            break
-                except Exception:
-                    pass
-                hist.reverse()          # oldest first, so a trend reads left to right
-                self._send_json({"date": used, "rows": out, "fii_history": hist})
+                n = max(2, min(30, int(qs.get("days", ["20"])[0] or 20)))
+            except ValueError:
+                n = 20
+            want = (qs.get("date", [""])[0] or "").strip() or None
+            try:
+                res = _poi_series(n, want)
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"participant OI failed: {e}"}, status=500)
+                return
+            if not res["series"]:
+                self._send_json({"error": res.get("why") or "No participant OI file found. NSE publishes it after the close on trading days, usually by about 7:30pm IST."})
+                return
+            last = res["series"][-1]
+            rows = [dict(r, who=w) for w, r in last["rows"].items()]
+            # kept for older pages: the last five FII index-futures ratios
+            fh = []
+            for d_ in res["series"][-5:]:
+                f_ = d_["rows"].get("FII")
+                if f_:
+                    lg, sh = f_["fut_idx_long"], f_["fut_idx_short"]
+                    fh.append({"date": d_["date"], "long": lg, "short": sh, "ratio": (lg / sh) if sh else None, "net": lg - sh})
+            self._send_json({"date": last["date"], "rows": rows, "fii_history": fh, "series": res["series"],
+                             "downloaded": res["downloaded"], "from_cache": res["cached"]})
             return
 
         if parsed.path == "/api/fii-dii":
