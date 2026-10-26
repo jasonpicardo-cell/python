@@ -2721,7 +2721,7 @@ def test_smi_mfi():
         o = p; p += _r.gauss(0, 6) + (3 if (i // 60) % 2 else -3)
         bars.append({"t": 1000 + 60 * i, "o": o, "h": max(o, p) + 2, "l": min(o, p) - 2, "c": p, "v": _r.randint(500, 5000)})
     i0 = d.index("  const SMIMFI = {"); j0 = d.index("  const _smiCache")
-    harness = d[i0:j0] + "\n" + "\n".join(grab(f) for f in ("_pineEma", "_mfiSeries", "_pctRank", "_smiMfiCompute")) + f"""
+    harness = d[i0:j0] + "\n" + "\n".join(grab(f) for f in ("_pineEma", "_maPine", "_mfiSeries", "_pctRank", "_smiMfiCompute")) + f"""
 const r = _smiMfiCompute({_json.dumps(bars)});
 console.log(JSON.stringify({{ smi: r.smi, sig: r.sig, hist: r.hist, dzT: r.dzT, cross: r.cross, useVol: r.useVol }}));
 """
@@ -2759,11 +2759,114 @@ console.log(JSON.stringify({{ smi: r.smi, sig: r.sig, hist: r.hist, dzT: r.dzT, 
           and "candle colouring (as asked)" in seg)
 
 
+def test_indicator_settings():
+    """⚙ Settings for the ported TradingView indicators: moving-average types
+    match Pine, the histogram's own parameter set and the cross-alert limits
+    work, settings load / save / reset safely, and the dialog is wired."""
+    import subprocess, json as _json, random as _r, tempfile, math
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    _r.seed(3)
+    xs = [None] * 4 + [100 + _r.gauss(0, 5) for _ in range(80)]
+    bars, p = [], 25000.0
+    for i in range(300):
+        o = p; p += _r.gauss(0, 6) + (3 if (i // 50) % 2 else -3)
+        bars.append({"t": 1000 + 60 * i, "o": o, "h": max(o, p) + 2, "l": min(o, p) - 2, "c": p, "v": _r.randint(500, 5000)})
+    fw = d[d.index("  const _IND = {};"):d.index("  function _indFieldHtml(")]
+    i0 = d.index("  const SMIMFI = {"); j0 = d.index("  const _smiCache")
+    harness = r"""
+const store = {}; const localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
+const requestAnimationFrame = f => f();
+""" + fw + d[i0:j0] + "\n" + "\n".join(grab(f) for f in ("_pineEma", "_maPine", "_mfiSeries", "_pctRank", "_smiMfiCompute")) + r"""
+const R = {}, X = XS;
+for (const t of ['SMA', 'WMA', 'RMA', 'HMA', 'LSMA', 'EMA']) R[t] = _maPine(X, 10, t);
+const base = _smiMfiCompute(BARS);
+const P2 = JSON.parse(JSON.stringify(SMIMFI)); P2.hMult = 2;
+R.hist2 = _smiMfiCompute(BARS, P2).hist.every((v, i) => v == null ? base.hist[i] == null : Math.abs(v - 2 * base.hist[i]) < 1e-9);
+const P3 = JSON.parse(JSON.stringify(SMIMFI)); P3.hDLen = 9;
+R.histOwn = _smiMfiCompute(BARS, P3).hist.some((v, i) => v != null && base.hist[i] != null && Math.abs(v - base.hist[i]) > 1e-6)
+  && _smiMfiCompute(BARS, P3).smi.every((v, i) => v === base.smi[i]);
+const P4 = JSON.parse(JSON.stringify(SMIMFI)); P4.x1.below = -100; P4.x1.above = 100;
+const c4 = _smiMfiCompute(BARS, P4).cross;
+R.limits = { base1: base.cross.filter(c => c.kind === 'out').length, lim1: c4.filter(c => c.kind === 'out').length, in2: c4.filter(c => c.kind === 'in').length === base.cross.filter(c => c.kind === 'in').length };
+const P5 = JSON.parse(JSON.stringify(SMIMFI)); P5.x2.onlyInside = false;
+R.allCross = _smiMfiCompute(BARS, P5).cross.filter(c => c.kind === 'in').length >= base.cross.filter(c => c.kind === 'in').length;
+// settings framework: load ignores unknown keys and wrong types; save drops defaults; reset
+const cfg = { a: 1, b: 'x', n: { c: true } }, defs = Object.freeze(JSON.parse(JSON.stringify(cfg)));
+store.k1 = JSON.stringify({ a: 5, b: 7, zz: 9, n: { c: false, q: 1 } });
+let applied = 0;
+_indRegister('t', { title: 'T', key: 'k1', cfg, defaults: defs, apply: () => applied++, schema: [] });
+R.loaded = JSON.stringify(cfg);
+_cfgAssign(cfg, JSON.parse(JSON.stringify(defs))); _indSave('t');
+R.savedDefault = ('k1' in store);
+cfg.a = 3; _indSave('t'); R.savedChanged = JSON.parse(store.k1).a;
+R.colorEq = _indEq('#00FF00', '#00ff00');
+console.log(JSON.stringify(R));
+""".replace("XS", _json.dumps(xs)).replace("BARS", _json.dumps(bars))
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+        fh.write(harness); hp = fh.name
+    try:
+        res = subprocess.run(["node", hp], capture_output=True, text=True)
+    finally:
+        os.unlink(hp)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("settings: harness ran", False, (res.stderr or res.stdout)[:500]); return
+    # Pine references
+    L, n = 10, len(xs)
+    def win(i): return xs[i - L + 1:i + 1] if i >= L - 1 and None not in xs[i - L + 1:i + 1] else None
+    sma = [None if win(i) is None else sum(win(i)) / L for i in range(n)]
+    wma = [None if win(i) is None else sum(v * (k + 1) for k, v in enumerate(win(i))) / (L * (L + 1) / 2) for i in range(n)]
+    def lsma_at(w):
+        k = list(range(L)); mx, my = sum(k) / L, sum(w) / L
+        sl = sum((a - mx) * (b - my) for a, b in zip(k, w)) / sum((a - mx) ** 2 for a in k)
+        return my + sl * (L - 1 - mx)
+    lsma = [None if win(i) is None else lsma_at(win(i)) for i in range(n)]
+    rma, s_ = [None] * n, None
+    for i in range(n):
+        if s_ is None:
+            if win(i) is not None: s_ = sum(win(i)) / L
+        else: s_ = (xs[i] + (L - 1) * s_) / L
+        rma[i] = s_
+    def wma_of(a, ln):
+        out = [None] * len(a)
+        for i in range(ln - 1, len(a)):
+            w = a[i - ln + 1:i + 1]
+            if None not in w: out[i] = sum(v * (k + 1) for k, v in enumerate(w)) / (ln * (ln + 1) / 2)
+        return out
+    h1, h2 = wma_of(xs, 5), wma_of(xs, 10)
+    hma = wma_of([None if a is None or b is None else 2 * a - b for a, b in zip(h1, h2)], int(math.sqrt(10)))
+    same = lambda a, b: all((x is None and y is None) or (x is not None and y is not None and abs(x - y) < 1e-9) for x, y in zip(a, b))
+    check("settings: SMA / WMA / RMA / HMA / LSMA match Pine's ta.* definitions",
+          same(R["SMA"], sma) and same(R["WMA"], wma) and same(R["RMA"], rma) and same(R["HMA"], hma) and same(R["LSMA"], lsma),
+          str([k for k, ref in (("SMA", sma), ("WMA", wma), ("RMA", rma), ("HMA", hma), ("LSMA", lsma)) if not same(R[k], ref)]))
+    check("settings: histogram multiplier and its own parameter set change only the histogram",
+          R["hist2"] and R["histOwn"], f'{R["hist2"]} {R["histOwn"]}')
+    check("settings: cross-alert limits gate alert set 1 only; 'only inside' off widens set 2",
+          R["limits"]["base1"] > 0 and R["limits"]["lim1"] == 0 and R["limits"]["in2"] and R["allCross"], str(R["limits"]))
+    check("settings: saved values load by known key and matching type only (unknown keys and wrong types ignored)",
+          R["loaded"] == '{"a":5,"b":"x","n":{"c":false}}', R["loaded"])
+    check("settings: saving defaults removes the entry; a change is stored; colour case is not a change",
+          R["savedDefault"] is False and R["savedChanged"] == 3 and R["colorEq"], str(R))
+    check("dashboard: ⚙ beside both toggles and in the SMI legend; both registered with keys; Reset Defaults clears them",
+          'data-indset="ttr"' in d and 'data-indset="smiMfi" title=' in d and 'data-indset="smiMfi" style="cursor:pointer' in d
+          and "_indRegister('ttr'" in d and "_indRegister('smiMfi'" in d and "key: 'ttrCfgV1'" in d and "key: 'smiMfiCfgV1'" in d
+          and "'ttrCfgV1',            //" in d and "'smiMfiCfgV1',         //" in d
+          and "Reset to defaults" in d and "closeIndSettings(true)" in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_indicator_settings, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

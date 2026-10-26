@@ -188,6 +188,28 @@
   .token-banner.warn { background:rgba(245,179,1,0.14); border:1px solid #f5b301; color:var(--text); }
   .token-banner.bad { background:rgba(239,83,80,0.16); border:1px solid #ef5350; color:var(--text); }
   .token-banner code { font-size:11px; padding:1px 5px; border-radius:4px; background:rgba(127,127,127,0.18); }
+  /* ── indicator settings dialog ── */
+  .ind-gear { background:none; border:none; color:var(--gold,#d4af37); cursor:pointer; font-size:11px; padding:0 3px; line-height:1; }
+  .ind-gear:hover { color:#fff; }
+  .ind-back { position:fixed; inset:0; z-index:9500; background:rgba(0,0,0,0.55); display:flex; align-items:center; justify-content:center; }
+  .ind-dlg { width:min(500px, 94vw); max-height:86vh; display:flex; flex-direction:column; background:var(--box,#000); color:var(--text);
+    border:1px solid rgba(127,127,127,0.45); border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,0.6); font-size:11px; }
+  .ind-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 14px 6px; font-size:12px; }
+  .ind-x { background:none; border:none; color:var(--muted); font-size:14px; cursor:pointer; }
+  .ind-tabs { display:flex; gap:4px; padding:0 14px; border-bottom:1px solid rgba(127,127,127,0.3); }
+  .ind-tabs button { background:none; border:none; border-bottom:2px solid transparent; color:var(--muted); padding:6px 8px; cursor:pointer; font-size:11px; }
+  .ind-tabs button.on { color:var(--text); border-bottom-color:var(--gold,#d4af37); }
+  .ind-body { overflow:auto; padding:6px 14px 10px; }
+  .ind-grp { padding-top:8px; }
+  .ind-gh { font-size:9px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); padding-bottom:3px; }
+  .ind-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:3px 0 3px 8px; border-left:2px solid transparent; }
+  .ind-row.ind-changed { border-left-color:var(--gold,#d4af37); }
+  .ind-row input[type=number] { width:130px; font-size:11px; padding:2px 4px; }
+  .ind-row select { width:190px; font-size:11px; padding:2px 4px; }
+  .ind-row input[type=color] { width:44px; height:20px; padding:0; border:1px solid rgba(127,127,127,0.5); background:none; }
+  .ind-foot { display:flex; align-items:center; gap:8px; padding:8px 14px 10px; border-top:1px solid rgba(127,127,127,0.3); }
+  .ind-mod { margin-left:auto; color:var(--muted); font-size:10px; }
+  .ind-ok { border-color:var(--gold,#d4af37) !important; color:var(--gold,#d4af37) !important; }
   /* ── PDMP prep card ── */
   .pd-prep { margin:2px 6px 4px; padding:4px 8px; border:1px solid rgba(212,175,55,0.45); border-left:4px solid var(--gold,#d4af37); border-radius:6px; font-size:10px; }
   .pd-prep-head { display:flex; gap:12px; flex-wrap:wrap; align-items:center; cursor:pointer; user-select:none; }
@@ -2332,12 +2354,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_ema200"> EMA200</label>
                 <span style="display:inline-flex;gap:3px;align-items:center;border-left:1px solid rgba(255,255,255,0.12);padding-left:6px;" title="EMA crossover lines on the chart: a GREEN vertical line where the fast EMA closes above the slow one (bullish), a RED one where it closes below (bearish). Judged on closed candles of the chart interval, so a line never appears and then vanishes. Drawn on Candles, Heikin Ashi (real closes, not HA averages) and Renko (on the brick in force at that time). Defaults 5 / 13.">
                   <label><input type="checkbox" id="chk_emaX"> EMA cross</label>
-                  <label title="Trend Target Ribbon (BOSWaves port): ALMA trend ribbon, Trend Glow columns in the trend colour, flip diamonds, and the latest position's entry, stop and 1R-4R targets. Labels and candle colouring off."><input type="checkbox" id="chk_ttr"> Trend ribbon</label>
+                  <label title="Trend Target Ribbon (BOSWaves port): ALMA trend ribbon, Trend Glow columns in the trend colour, flip diamonds, and the latest position's entry, stop and 1R-4R targets. Labels and candle colouring off."><input type="checkbox" id="chk_ttr"> Trend ribbon</label><button class="ind-gear" data-indset="ttr" title="Trend Target Ribbon settings">⚙</button>
                   fast <input type="number" id="emaXFast" class="ohlc-inp" value="5" min="1" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
                   slow <input type="number" id="emaXSlow" class="ohlc-inp" value="13" min="2" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
                 </span>
                 <label><input type="checkbox" id="chk_vwap"> VWAP</label>
-                <label title="SMI of MFI (andre_007): the Stochastic Momentum Index of the Money Flow Index, with dynamic zones, histogram and signal crosses - a pane between the chart and RSI"><input type="checkbox" id="chk_smiMfi"> SMI·MFI</label>
+                <label title="SMI of MFI (andre_007): the Stochastic Momentum Index of the Money Flow Index, with dynamic zones, histogram and signal crosses - a pane between the chart and RSI"><input type="checkbox" id="chk_smiMfi"> SMI·MFI</label><button class="ind-gear" data-indset="smiMfi" title="SMI of MFI settings">⚙</button>
               </span>
               <span style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;" title="PDA / PDMP - premium, discount and market preparation (ICT). The dealing range's 50% line splits it into PREMIUM (look for shorts) and DISCOUNT (look for longs).">
                 <b style="color:var(--gold,#d4af37);">PD</b>
@@ -17727,6 +17749,133 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return `warm-up ${ds.map(f).join(' + ')} · ${w.length} bars`;
   }
 
+  // ══ INDICATOR SETTINGS (TradingView-style) ═════════════════════════
+  // Each ported indicator registers its live config object, a frozen copy of
+  // its defaults, a localStorage key and a field schema. The ⚙ button opens
+  // a dialog with Inputs / Style / Visibility tabs; edits preview live,
+  // OK saves (per browser), Cancel or Esc reverts, "Reset to defaults" puts
+  // every field back to the script's default (OK to keep). Only known keys
+  // are ever read back, so a stale or hand-edited entry cannot break a chart.
+  const _IND = {};
+  const _deepCopy = o => JSON.parse(JSON.stringify(o));
+  function _cfgGet(o, path) { return path.split('.').reduce((a, k) => (a == null ? a : a[k]), o); }
+  function _cfgSet(o, path, v) {
+    const ks = path.split('.'); let a = o;
+    for (let i = 0; i < ks.length - 1; i++) a = a[ks[i]];
+    a[ks[ks.length - 1]] = v;
+  }
+  function _cfgAssign(target, src) {            // deep, known keys only, types must match
+    for (const k of Object.keys(target)) {
+      if (!src || !(k in src)) continue;
+      const tv = target[k], sv = src[k];
+      if (tv && typeof tv === 'object' && !Array.isArray(tv)) { if (sv && typeof sv === 'object') _cfgAssign(tv, sv); }
+      else if (typeof sv === typeof tv) target[k] = Array.isArray(tv) ? sv.slice() : sv;
+    }
+  }
+  function _indRegister(id, def) {
+    const raw = def.apply; let raf = 0;
+    def.apply = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; raw(); }); };
+    _IND[id] = def;
+    try { const s = JSON.parse(localStorage.getItem(def.key) || 'null'); if (s) _cfgAssign(def.cfg, s); } catch (_) {}
+  }
+  const _indEq = (a, b) => JSON.stringify(a).toLowerCase() === JSON.stringify(b).toLowerCase();
+  function _indIsDefault(id) { const d = _IND[id]; return _indEq(d.cfg, d.defaults); }
+  function _indSave(id) {
+    const d = _IND[id];
+    try { if (_indIsDefault(id)) localStorage.removeItem(d.key); else localStorage.setItem(d.key, JSON.stringify(d.cfg)); } catch (_) {}
+  }
+  function _indFieldHtml(d, f) {
+    const v = _cfgGet(d.cfg, f.k), dv = _cfgGet(d.defaults, f.k);
+    const changed = !_indEq(v, dv);
+    const tip = `${f.tip ? f.tip + ' · ' : ''}default: ${f.type === 'bool' ? (dv ? 'on' : 'off') : (f.opts ? (f.opts.find(o => o[0] === dv) || [dv, dv])[1] : dv)}`;
+    let inp;
+    if (f.type === 'bool') inp = `<input type="checkbox" data-indk="${f.k}" ${v ? 'checked' : ''}>`;
+    else if (f.type === 'color') inp = `<input type="color" data-indk="${f.k}" value="${escapeHtml(v)}">`;
+    else if (f.type === 'select') inp = `<select class="ohlc-inp" data-indk="${f.k}">${f.opts.map(([ov, ol]) => `<option value="${escapeHtml(String(ov))}" ${String(ov) === String(v) ? 'selected' : ''}>${escapeHtml(ol)}</option>`).join('')}</select>`;
+    else inp = `<input type="number" class="ohlc-inp" data-indk="${f.k}" value="${v}" ${f.min != null ? `min="${f.min}"` : ''} ${f.max != null ? `max="${f.max}"` : ''} step="${f.step || (f.type === 'int' ? 1 : 0.01)}">`;
+    return `<label class="ind-row${changed ? ' ind-changed' : ''}" title="${escapeHtml(tip)}"><span>${escapeHtml(f.label)}</span>${inp}</label>`;
+  }
+  let _indOpen = null;
+  function _indRenderDlg() {
+    const o = _indOpen, d = _IND[o.id];
+    const tabs = [...new Set(d.schema.map(g => g.tab))];
+    const groups = d.schema.filter(g => g.tab === o.tab);
+    const n = d.schema.reduce((a, g) => a + g.fields.filter(f => !_indEq(_cfgGet(d.cfg, f.k), _cfgGet(d.defaults, f.k))).length, 0);
+    o.el.innerHTML = `<div class="ind-dlg" role="dialog" aria-label="${escapeHtml(d.title)} settings">
+      <div class="ind-head"><b>${escapeHtml(d.title)}</b><button class="ind-x" data-indact="cancel" title="Close without saving (Esc)">✕</button></div>
+      <div class="ind-tabs">${tabs.map(t => `<button data-indtab="${escapeHtml(t)}" class="${t === o.tab ? 'on' : ''}">${escapeHtml(t)}</button>`).join('')}</div>
+      <div class="ind-body">${groups.map(g => `<div class="ind-grp"><div class="ind-gh">${escapeHtml(g.group)}</div>${g.fields.map(f => _indFieldHtml(d, f)).join('')}</div>`).join('')}</div>
+      <div class="ind-foot">
+        <button class="btn" data-indact="reset" title="Put every field back to the script's default (click OK to keep)">↺ Reset to defaults</button>
+        <span class="ind-mod">${n ? `${n} changed from default` : 'all defaults'}</span>
+        <button class="btn" data-indact="cancel">Cancel</button>
+        <button class="btn ind-ok" data-indact="ok">OK</button>
+      </div></div>`;
+  }
+  function openIndSettings(id) {
+    const d = _IND[id];
+    if (!d) return;
+    closeIndSettings(false);
+    const el = document.createElement('div');
+    el.className = 'ind-back'; el.id = 'indSettings';
+    document.body.appendChild(el);
+    _indOpen = { id, el, tab: d.schema[0].tab, snap: _deepCopy(d.cfg) };
+    _indRenderDlg();
+  }
+  function closeIndSettings(revert) {
+    const o = _indOpen;
+    if (!o) return;
+    const d = _IND[o.id];
+    if (revert) { _cfgAssign(d.cfg, o.snap); d.apply(); }
+    o.el.remove();
+    _indOpen = null;
+  }
+  document.addEventListener('click', ev => {
+    const g = ev.target?.closest?.('[data-indset]');
+    if (g) { ev.preventDefault(); ev.stopPropagation(); openIndSettings(g.dataset.indset); return; }
+    const o = _indOpen;
+    if (!o || !o.el.contains(ev.target)) return;
+    if (ev.target === o.el) { closeIndSettings(true); return; }           // backdrop = cancel
+    const t = ev.target.closest('[data-indtab]');
+    if (t) { o.tab = t.dataset.indtab; _indRenderDlg(); return; }
+    const a = ev.target.closest('[data-indact]')?.dataset.indact;
+    if (!a) return;
+    const d = _IND[o.id];
+    if (a === 'cancel') closeIndSettings(true);
+    else if (a === 'ok') { _indSave(o.id); closeIndSettings(false); showToast?.(`${d.title}: settings saved${_indIsDefault(o.id) ? ' (defaults)' : ''}`); }
+    else if (a === 'reset') { _cfgAssign(d.cfg, _deepCopy(d.defaults)); d.apply(); _indRenderDlg(); }
+  }, true);
+  const _indOnInput = ev => {
+    const o = _indOpen, k = ev.target?.dataset?.indk;
+    if (!o || !k || !o.el.contains(ev.target)) return;
+    const d = _IND[o.id];
+    const f = d.schema.flatMap(g => g.fields).find(x => x.k === k);
+    let v;
+    if (f.type === 'bool') v = ev.target.checked;
+    else if (f.type === 'color' || f.type === 'select') {
+      v = ev.target.value;
+      if (f.type === 'select' && typeof _cfgGet(d.defaults, k) === 'number') v = +v;
+    } else {
+      v = f.type === 'int' ? parseInt(ev.target.value, 10) : parseFloat(ev.target.value);
+      if (!isFinite(v)) return;                                          // half-typed: wait
+      if (f.min != null) v = Math.max(f.min, v);
+      if (f.max != null) v = Math.min(f.max, v);
+    }
+    _cfgSet(d.cfg, k, v);
+    d.apply();
+    const row = ev.target.closest('.ind-row');
+    if (row) row.classList.toggle('ind-changed', !_indEq(v, _cfgGet(d.defaults, k)));
+    const n = d.schema.reduce((a, g) => a + g.fields.filter(x => !_indEq(_cfgGet(d.cfg, x.k), _cfgGet(d.defaults, x.k))).length, 0);
+    const m = o.el.querySelector('.ind-mod'); if (m) m.textContent = n ? `${n} changed from default` : 'all defaults';
+  };
+  document.addEventListener('input', _indOnInput);
+  document.addEventListener('change', _indOnInput);
+  document.addEventListener('keydown', ev => {
+    if (!_indOpen) return;
+    if (ev.key === 'Escape') { ev.preventDefault(); closeIndSettings(true); }
+    else if (ev.key === 'Enter' && ev.target?.tagName !== 'BUTTON') { ev.preventDefault(); const id = _indOpen.id; _indSave(id); closeIndSettings(false); }
+  });
+
   // ══ TREND TARGET RIBBON (port of "Trend Target Ribbon [BOSWaves]", MPL-2.0) ══
   // Same calculation as the TradingView script, bar for bar:
   //   ALMA(close, 34, 0.85, 6) with +/- 0.65 x stdev(34) confirmation bands;
@@ -17744,6 +17893,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     stopLookback: 12, minStopAtr: 0.75, maxStopAtr: 3.0, targetCount: 4, zonePct: 0.06,
     approachR: 0.65, extendBars: 30, keepPositions: 1,
     showLabels: false, paintBars: false,
+    showRibbon: true, showGlow: true, showPositions: true, showFlips: true,
     // Trend Glow as columns, thickness 4, coloured by the trend - green in a
     // bull trend, pink-red in a bear trend, grey before the first one - at
     // the plot's own 86% transparency, as TradingView draws it
@@ -17751,6 +17901,49 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     buy: '#00FF00', sell: '#FF0066', tp: '#00FF00', sl: '#FF0066', white: '#FFFFFF', neutral: '#555555',
   };
   const _ttrCache = { key: '', v: null };
+  // ⚙ Settings: every input and style of the ribbon, saved per browser
+  {
+    const MAX = 500;
+    _indRegister('ttr', {
+      title: 'Trend Target Ribbon [BOSWaves]', key: 'ttrCfgV1', cfg: TTR, defaults: Object.freeze(_deepCopy(TTR)),
+      apply: () => { _ttrCache.key = ''; _safe(() => renderPriceChart(), 'renderPriceChart'); },
+      schema: [
+        { tab: 'Inputs', group: 'Trend (ALMA ribbon)', fields: [
+          { k: 'almaLen', label: 'ALMA length', type: 'int', min: 2, max: MAX },
+          { k: 'almaOffset', label: 'ALMA offset', type: 'float', min: 0, max: 1, step: 0.01 },
+          { k: 'almaSigma', label: 'ALMA sigma', type: 'float', min: 0.5, max: 20, step: 0.5 },
+          { k: 'devLen', label: 'Deviation length', type: 'int', min: 2, max: MAX },
+          { k: 'devMult', label: 'Deviation multiplier', type: 'float', min: 0, max: 5, step: 0.05, tip: 'confirmation band = ALMA ± this × stdev' },
+          { k: 'slopeLen', label: 'Slope lookback (bars)', type: 'int', min: 1, max: 50 },
+          { k: 'slopeMin', label: 'Min slope (× ATR)', type: 'float', min: 0, max: 2, step: 0.01 },
+          { k: 'atrLen', label: 'ATR length', type: 'int', min: 1, max: 200 } ] },
+        { tab: 'Inputs', group: 'Positions', fields: [
+          { k: 'keepPositions', label: 'Positions on chart', type: 'int', min: 0, max: 10 },
+          { k: 'stopLookback', label: 'Structure stop lookback', type: 'int', min: 1, max: 100 },
+          { k: 'minStopAtr', label: 'Min stop (× ATR)', type: 'float', min: 0.1, max: 10, step: 0.05 },
+          { k: 'maxStopAtr', label: 'Max stop (× ATR)', type: 'float', min: 0.1, max: 20, step: 0.05 },
+          { k: 'targetCount', label: 'Targets (1R … nR)', type: 'int', min: 1, max: 6 },
+          { k: 'extendBars', label: 'Projection length (bars)', type: 'int', min: 1, max: 300 },
+          { k: 'zonePct', label: 'Target zone (× R)', type: 'float', min: 0, max: 0.5, step: 0.01 },
+          { k: 'approachR', label: 'Approach highlight (× R)', type: 'float', min: 0.05, max: 3, step: 0.05 } ] },
+        { tab: 'Style', group: 'Trend Glow', fields: [
+          { k: 'glow.style', label: 'Style', type: 'select', opts: [['columns', 'Columns'], ['line', 'Line']] },
+          { k: 'glow.width', label: 'Line thickness', type: 'int', min: 1, max: 20 },
+          { k: 'glow.color', label: 'Colour', type: 'select', opts: [['trend', 'Trend (green / red)'], ['#ffffff', 'White'], ['#9e9e9e', 'Grey'], ['#d4af37', 'Gold']] },
+          { k: 'glow.opacity', label: 'Opacity', type: 'float', min: 0, max: 1, step: 0.02 } ] },
+        { tab: 'Style', group: 'Colours', fields: [
+          { k: 'buy', label: 'Bull', type: 'color' }, { k: 'sell', label: 'Bear', type: 'color' },
+          { k: 'tp', label: 'Targets', type: 'color' }, { k: 'sl', label: 'Stop', type: 'color' },
+          { k: 'white', label: 'Core line', type: 'color' }, { k: 'neutral', label: 'Neutral', type: 'color' } ] },
+        { tab: 'Visibility', group: 'Show', fields: [
+          { k: 'showRibbon', label: 'Ribbon (fills, edge, ALMA core)', type: 'bool' },
+          { k: 'showGlow', label: 'Trend Glow', type: 'bool' },
+          { k: 'showPositions', label: 'Positions (entry, stop, targets)', type: 'bool' },
+          { k: 'showLabels', label: 'Position labels', type: 'bool' },
+          { k: 'showFlips', label: 'Flip diamonds', type: 'bool' } ] },
+      ],
+    });
+  }
   const _rgba = (hex, transp) => {
     const h = hex.replace('#', ''); const n = parseInt(h, 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${(1 - Math.max(0, Math.min(100, transp)) / 100).toFixed(3)})`;
@@ -17871,19 +18064,23 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const addD = (k, d) => { const g = groups.get(k); if (g) g.push(d); else groups.set(k, [d]); };
     // Trend Glow as COLUMNS: from the ribbon edge down to the bottom of the pane
     const cwid = P.glow.width;
-    for (let t = 0; t < n; t++) {
+    if (P.showGlow !== false) for (let t = 0; t < n; t++) {
       const e = r.edge[t];
       if (e == null || e < lo) continue;
       const yy = clampY(e), xx = xOfBar(t);
       const gc = P.glow.color === 'trend' ? col(t) : P.glow.color;
-      addD(`glow|${gc}`, `M${(xx - cwid / 2).toFixed(1)} ${yy.toFixed(1)}h${cwid}V${bottom.toFixed(1)}h${-cwid}Z`);
+      if (P.glow.style === 'line') {
+        // Trend Glow as a LINE: a wide translucent stroke along the ribbon edge
+        const e0 = t > 0 ? r.edge[t - 1] : null;
+        if (e0 != null && e0 >= lo) addD(`glowl|${gc}`, `M${xOfBar(t - 1).toFixed(1)} ${clampY(e0).toFixed(1)}L${xx.toFixed(1)} ${yy.toFixed(1)}`);
+      } else addD(`glow|${gc}`, `M${(xx - cwid / 2).toFixed(1)} ${yy.toFixed(1)}h${cwid}V${bottom.toFixed(1)}h${-cwid}Z`);
     }
     // ribbon fills: edge<->mid (84% transparent), mid<->alma (93%)
     // Trend Edge (width 3) and the ALMA core (width 1) follow the conviction
     // bar by bar; their transparency is stepped in 4% increments so segments
     // can share a path - a difference the eye cannot see at these alphas.
     const q4 = v => Math.round(v / 4) * 4;
-    for (let t = 1; t < n; t++) {
+    if (P.showRibbon !== false) for (let t = 1; t < n; t++) {
       const ok = k => r.edge[k] != null && r.mid[k] != null && r.almaDraw[k] != null;
       if (!ok(t) || !ok(t - 1)) continue;
       if (![r.edge[t], r.edge[t - 1], r.almaDraw[t], r.almaDraw[t - 1]].every(inY)) continue;
@@ -17899,12 +18096,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     for (const [k, ds] of groups) {
       const [kind, paint] = [k.slice(0, k.indexOf('|')), k.slice(k.indexOf('|') + 1)], dd = ds.join('');
       if (kind === 'glow') under += `<path class="ttr-glow" d="${dd}" fill="${paint}" opacity="${P.glow.opacity}"/>`;
+      else if (kind === 'glowl') under += `<path class="ttr-glow" d="${dd}" fill="none" stroke="${paint}" stroke-width="${cwid * 2}" stroke-linecap="round" opacity="${P.glow.opacity}"/>`;
       else if (kind === 'fill') under += `<path d="${dd}" fill="${paint}"/>`;
       else if (kind === 'edge') over += `<path d="${dd}" fill="none" stroke="${paint}" stroke-width="3" stroke-linecap="round"/>`;
       else over += `<path d="${dd}" fill="none" stroke="${paint}" stroke-width="1"/>`;
     }
     // positions (only the latest - "Positions On Chart" = 1)
-    for (const pos of r.positions) {
+    for (const pos of (P.showPositions !== false ? r.positions : [])) {
       const x0 = xOfBar(pos.entryBar);
       const live = !pos.ended;
       const x1 = Math.min(right, live ? xAhead(P.extendBars - (n - 1 - (pos.ext0 ?? pos.entryBar))) : xOfBar(pos.endBar));
@@ -17937,9 +18135,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       over += hl(pos.entry, _rgba(P.white, live ? 10 : 50), 1, `${pos.dir === 1 ? 'LONG' : 'SHORT'} entry ${fmtPrice(pos.entry)} · risk ${pos.risk.toFixed(1)} pts (1R)`);
       over += hl(pos.stop, _rgba(P.sl, live ? 74 : stopped ? 48 : 88), 8);
       over += hl(pos.stop, stopped ? _rgba(P.white, 5) : _rgba(P.sl, live ? 2 : 48), 2, `SL -1R ${fmtPrice(pos.stop)}${stopped ? ' - stopped' : ''}`);
+      if (P.showLabels) {
+        const lab = (v, txt, c) => inY(v) ? `<text x="${(x1 + 3).toFixed(1)}" y="${(y(v) + 3).toFixed(1)}" style="font-size:8.5px;font-weight:700;fill:${c};">${escapeHtml(txt)}</text>` : '';
+        over += lab(pos.entry, `${pos.dir === 1 ? 'LONG' : 'SHORT'} ${fmtPrice(pos.entry)}`, act);
+        over += lab(pos.stop, `SL ${fmtPrice(pos.stop)}${stopped ? ' ✕' : ''}`, P.sl);
+        for (let i = 0; i < P.targetCount; i++) {
+          const tp = pos.entry + pos.dir * pos.risk * (i + 1);
+          over += lab(tp, `T${i + 1} ${fmtPrice(tp)}${pos.hits[i] ? ' ✓' : ''}`, P.tp);
+        }
+      }
     }
     // flip diamonds: bull below the bar, bear above
-    for (let t = 0; t < n; t++) {
+    for (let t = 0; t < n && P.showFlips !== false; t++) {
       const f = r.flip[t];
       if (!f) continue;
       const b = bars[t], xx = xOfBar(t);
@@ -20885,8 +21092,71 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // level (5/10/15/20/30), histogram blue above 0 / red below, deeper with
   // size; the signal is blue while rising, red while falling.
   // Computed over the warm-up sessions + today, so it is settled at 09:15.
-  const SMIMFI = { mfiLen: 13, kLen: 13, dLen: 5, sigLen: 5, dzLen: 50, dzHi: 90, dzLo: 90, band: 40 };
+  const SMIMFI = { mfiLen: 13, kLen: 13, dLen: 5, sigLen: 5, dzLen: 50, dzHi: 90, dzLo: 90, band: 40,
+    maSmi: 'EMA', maSig: 'EMA',
+    // the script's separate Histogram parameter set (same defaults)
+    hMult: 1, hMfiLen: 13, hKLen: 13, hDLen: 5, hSigLen: 5, hMaSmi: 'EMA', hMaSig: 'EMA',
+    x1: { show: true, onlyOutside: true, above: -100, below: 100, bull: '#14e024', bear: '#ff0000' },
+    x2: { show: true, onlyInside: true, above: -100, below: 100, bull: '#2962ff', bear: '#ff9800' },
+    smiTheme: 'spectrum', smiUp: '#2196f3', smiDown: '#ff0000', smiWidth: 2,
+    sigUp: '#2196f3', sigDown: '#ff0000', fillTransp: 60,
+    histUp: '#1c3bfb', histDown: '#ff0000',
+    dzTop: '#3064fc', dzBottom: '#f23645', dzCenter: '#b2b5be', bgAbove: '#3064fc', bgBelow: '#f03449', bgOpacity: 30,
+    showSmi: true, showSig: true, showFill: true, showHist: true, showDz: true, showDzCenter: true, showBg: true, showBand: true };
   const _smiCache = { key: '', v: null };
+  {
+    const MA = [['EMA', 'Exponential (EMA)'], ['SMA', 'Simple (SMA)'], ['WMA', 'Weighted (WMA)'], ['RMA', 'Wilder / smoothed (RMA)'], ['HMA', 'Hull (HMA)'], ['LSMA', 'Least squares (LSMA)']];
+    const L = (k, label, max = 500) => ({ k, label, type: 'int', min: 1, max });
+    _indRegister('smiMfi', {
+      title: 'Stochastic Momentum Index (SMI) of Money Flow Index (MFI)', key: 'smiMfiCfgV1', cfg: SMIMFI, defaults: Object.freeze(_deepCopy(SMIMFI)),
+      apply: () => { _smiCache.key = ''; _safe(() => renderPriceChart(), 'renderPriceChart'); },
+      schema: [
+        { tab: 'Inputs', group: 'Stochastic Momentum Index', fields: [
+          L('mfiLen', 'MFI length'), L('kLen', 'SMI K% length (high/low window)'), L('dLen', 'SMI D% length (both smoothings)'), L('sigLen', 'Signal length'),
+          { k: 'maSmi', label: 'Type of smoothing (SMI)', type: 'select', opts: MA },
+          { k: 'maSig', label: 'Type of smoothing (Signal)', type: 'select', opts: MA } ] },
+        { tab: 'Inputs', group: 'Histogram', fields: [
+          { k: 'hMult', label: 'Multiplier', type: 'float', min: 1, max: 10, step: 0.1 },
+          L('hMfiLen', 'MFI length'), L('hKLen', 'SMI K% length'), L('hDLen', 'SMI D% length'), L('hSigLen', 'Signal length'),
+          { k: 'hMaSmi', label: 'Type of smoothing (SMI)', type: 'select', opts: MA },
+          { k: 'hMaSig', label: 'Type of smoothing (Signal)', type: 'select', opts: MA } ] },
+        { tab: 'Inputs', group: 'Dynamic Zones', fields: [
+          { k: 'dzLen', label: 'Sample length', type: 'int', min: 2, max: 500 },
+          { k: 'dzHi', label: 'High is above X% of sample', type: 'float', min: 0, max: 100, step: 1 },
+          { k: 'dzLo', label: 'Low is below X% of sample', type: 'float', min: 0, max: 100, step: 1 },
+          { k: 'band', label: 'Fixed top / bottom lines (±)', type: 'int', min: 0, max: 100 } ] },
+        { tab: 'Inputs', group: 'Cross alerts 1 (circles)', fields: [
+          { k: 'x1.show', label: 'Show', type: 'bool' }, { k: 'x1.onlyOutside', label: 'Only outside the dynamic zone', type: 'bool' },
+          { k: 'x1.above', label: 'Cross down only when SMI above', type: 'float', min: -100, max: 100, step: 1 },
+          { k: 'x1.below', label: 'Cross up only when SMI below', type: 'float', min: -100, max: 100, step: 1 } ] },
+        { tab: 'Inputs', group: 'Cross alerts 2 (diamonds)', fields: [
+          { k: 'x2.show', label: 'Show', type: 'bool' }, { k: 'x2.onlyInside', label: 'Only inside the dynamic zone', type: 'bool' },
+          { k: 'x2.above', label: 'Cross down only when SMI above', type: 'float', min: -100, max: 100, step: 1 },
+          { k: 'x2.below', label: 'Cross up only when SMI below', type: 'float', min: -100, max: 100, step: 1 } ] },
+        { tab: 'Style', group: 'SMI line', fields: [
+          { k: 'smiTheme', label: 'Theme', type: 'select', opts: [['spectrum', 'Spectrum blue-green-red (by level)'], ['two', 'Two colours (by slope)']] },
+          { k: 'smiUp', label: 'Bull (two-colour theme)', type: 'color' }, { k: 'smiDown', label: 'Bear (two-colour theme)', type: 'color' },
+          { k: 'smiWidth', label: 'Line width', type: 'int', min: 1, max: 5 } ] },
+        { tab: 'Style', group: 'Signal', fields: [
+          { k: 'sigUp', label: 'Rising', type: 'color' }, { k: 'sigDown', label: 'Falling', type: 'color' },
+          { k: 'fillTransp', label: 'Fill transparency (100 = off)', type: 'int', min: 0, max: 100 } ] },
+        { tab: 'Style', group: 'Histogram', fields: [
+          { k: 'histUp', label: 'Above 0', type: 'color' }, { k: 'histDown', label: 'Below 0', type: 'color' } ] },
+        { tab: 'Style', group: 'Dynamic zones', fields: [
+          { k: 'dzTop', label: 'Upper line', type: 'color' }, { k: 'dzBottom', label: 'Lower line', type: 'color' }, { k: 'dzCenter', label: 'Centre line', type: 'color' },
+          { k: 'bgAbove', label: 'Background when above', type: 'color' }, { k: 'bgBelow', label: 'Background when below', type: 'color' },
+          { k: 'bgOpacity', label: 'Background opacity %', type: 'int', min: 0, max: 100 } ] },
+        { tab: 'Style', group: 'Cross marks', fields: [
+          { k: 'x1.bull', label: 'Circle up', type: 'color' }, { k: 'x1.bear', label: 'Circle down', type: 'color' },
+          { k: 'x2.bull', label: 'Diamond up', type: 'color' }, { k: 'x2.bear', label: 'Diamond down', type: 'color' } ] },
+        { tab: 'Visibility', group: 'Show', fields: [
+          { k: 'showSmi', label: 'SMI', type: 'bool' }, { k: 'showSig', label: 'Signal', type: 'bool' },
+          { k: 'showFill', label: 'Fill between SMI and signal', type: 'bool' }, { k: 'showHist', label: 'Histogram', type: 'bool' },
+          { k: 'showDz', label: 'Dynamic zone lines', type: 'bool' }, { k: 'showDzCenter', label: 'Dynamic zone centre', type: 'bool' },
+          { k: 'showBg', label: 'Background outside the zone', type: 'bool' }, { k: 'showBand', label: 'Fixed 0 / ± lines', type: 'bool' } ] },
+      ],
+    });
+  }
   function _pineEma(arr, len) {               // ta.ema: seeded with the first value, nulls skipped
     const a = 2 / (len + 1), out = new Array(arr.length).fill(null);
     let s = null;
@@ -20895,6 +21165,43 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (v == null || !isFinite(v)) { out[i] = s; continue; }
       s = s == null ? v : a * v + (1 - a) * s;
       out[i] = s;
+    }
+    return out;
+  }
+  // ta.sma / wma / rma / hma / linreg, as Pine: a value once `len` real inputs exist
+  function _maPine(arr, len, type) {
+    len = Math.max(1, Math.round(len));
+    if (!type || type === 'EMA') return _pineEma(arr, len);
+    const n = arr.length, out = new Array(n).fill(null);
+    if (type === 'HMA') {
+      const h = Math.max(1, Math.floor(len / 2)), q = Math.max(1, Math.floor(Math.sqrt(len)));
+      const a = _maPine(arr, h, 'WMA'), b = _maPine(arr, len, 'WMA');
+      return _maPine(a.map((v, i) => v == null || b[i] == null ? null : 2 * v - b[i]), q, 'WMA');
+    }
+    if (type === 'RMA') {                      // ta.rma: seeded with the SMA of the first `len` values
+      let s = null, run = 0;
+      for (let i = 0; i < n; i++) {
+        const v = arr[i];
+        if (v == null || !isFinite(v)) { if (s == null) run = 0; out[i] = s; continue; }
+        if (s == null) {
+          if (++run >= len) { let t = 0; for (let j = i - len + 1; j <= i; j++) t += arr[j]; s = t / len; }
+        } else s = (v + (len - 1) * s) / len;
+        out[i] = s;
+      }
+      return out;
+    }
+    for (let i = len - 1; i < n; i++) {
+      let ok = true;
+      for (let j = i - len + 1; j <= i; j++) if (arr[j] == null || !isFinite(arr[j])) { ok = false; break; }
+      if (!ok) continue;
+      if (type === 'SMA') { let t = 0; for (let j = i - len + 1; j <= i; j++) t += arr[j]; out[i] = t / len; }
+      else if (type === 'WMA') { let t = 0, w = 0; for (let k = 1; k <= len; k++) { t += arr[i - len + k] * k; w += k; } out[i] = t / w; }
+      else if (type === 'LSMA') {
+        let sx = 0, sy = 0, sxy = 0, sxx = 0;
+        for (let k = 0; k < len; k++) { const v = arr[i - len + 1 + k]; sx += k; sy += v; sxy += k * v; sxx += k * k; }
+        const den = len * sxx - sx * sx, slope = den ? (len * sxy - sx * sy) / den : 0;
+        out[i] = (sy - slope * sx) / len + slope * (len - 1);
+      }
     }
     return out;
   }
@@ -20919,24 +21226,31 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const r = Math.max(1, Math.ceil(p / 100 * s.length));
     return s[Math.min(s.length, r) - 1];
   }
-  function _smiMfiCompute(bars) {
-    const P = SMIMFI, n = bars.length;
+  function _smiMfiCompute(bars, Pin) {
+    const P = Pin || SMIMFI, n = bars.length;
     const useVol = bars.filter(b => (b.v || 0) > 0).length >= n * 0.5;
-    const mfi = _mfiSeries(bars, P.mfiLen, useVol);
-    const rel = new Array(n).fill(null), rng = new Array(n).fill(null);
-    for (let i = 0; i < n; i++) {
-      if (i < P.kLen - 1) continue;
-      let hh = -Infinity, ll = Infinity, ok = true;
-      for (let j = i - P.kLen + 1; j <= i; j++) { const v = mfi[j]; if (v == null) { ok = false; break; } hh = Math.max(hh, v); ll = Math.min(ll, v); }
-      if (!ok) continue;
-      rel[i] = mfi[i] - (hh + ll) / 2; rng[i] = hh - ll;
-    }
-    const num = _pineEma(_pineEma(rel, P.dLen), P.dLen), den = _pineEma(_pineEma(rng, P.dLen), P.dLen);
-    const smi = num.map((v, i) => (v == null || !den[i]) ? null : 200 * v / den[i]);
-    // the signal starts with the SMI (an EMA of nothing is nothing)
-    const sigRaw = _pineEma(smi, P.sigLen);
-    const sig = smi.map((v, i) => v == null ? null : sigRaw[i]);
-    const hist = smi.map((v, i) => v == null || sig[i] == null ? null : v - sig[i]);
+    const one = (mfiLen, kLen, dLen, sigLen, maS, maG) => {
+      const mfi = _mfiSeries(bars, mfiLen, useVol);
+      const rel = new Array(n).fill(null), rng = new Array(n).fill(null);
+      for (let i = kLen - 1; i < n; i++) {
+        let hh = -Infinity, ll = Infinity, ok = true;
+        for (let j = i - kLen + 1; j <= i; j++) { const v = mfi[j]; if (v == null) { ok = false; break; } hh = Math.max(hh, v); ll = Math.min(ll, v); }
+        if (!ok) continue;
+        rel[i] = mfi[i] - (hh + ll) / 2; rng[i] = hh - ll;
+      }
+      const num = _maPine(_maPine(rel, dLen, maS), dLen, maS), den = _maPine(_maPine(rng, dLen, maS), dLen, maS);
+      const smi = num.map((v, i) => (v == null || !den[i]) ? null : 200 * v / den[i]);
+      // the signal starts with the SMI (an average of nothing is nothing)
+      const sigRaw = _maPine(smi, sigLen, maG);
+      return { mfi, smi, sig: smi.map((v, i) => v == null ? null : sigRaw[i]) };
+    };
+    const A = one(P.mfiLen, P.kLen, P.dLen, P.sigLen, P.maSmi, P.maSig);
+    const smi = A.smi, sig = A.sig;
+    // histogram from its own parameter set (identical by default, so reused)
+    const same = P.hMfiLen === P.mfiLen && P.hKLen === P.kLen && P.hDLen === P.dLen && P.hSigLen === P.sigLen && P.hMaSmi === P.maSmi && P.hMaSig === P.maSig;
+    const B = same ? A : one(P.hMfiLen, P.hKLen, P.hDLen, P.hSigLen, P.hMaSmi, P.hMaSig);
+    const hm = P.hMult || 1;
+    const hist = B.smi.map((v, i) => v == null || B.sig[i] == null ? null : (v - B.sig[i]) * hm);
     const dzT = new Array(n).fill(null), dzB = new Array(n).fill(null), dzC = new Array(n).fill(null);
     for (let i = 0; i < n; i++) {
       if (i < P.dzLen - 1) continue;
@@ -20945,7 +21259,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (win.length < P.dzLen) continue;
       dzT[i] = _pctRank(win, P.dzHi); dzB[i] = _pctRank(win, 100 - P.dzLo); dzC[i] = _pctRank(win, 50);
     }
-    // ta.crossover / crossunder of SMI and signal, classed by the dynamic zone on the previous bar
+    // ta.crossover / crossunder of SMI and signal, as the script's two alert sets:
+    // 1 (circles) outside the dynamic zone, 2 (diamonds) inside it, each with
+    // its "only when SMI above / below" limits
     const cross = [];
     for (let i = 1; i < n; i++) {
       if ([smi[i], sig[i], smi[i - 1], sig[i - 1]].some(v => v == null)) continue;
@@ -20953,10 +21269,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (!up && !dn) continue;
       const out = dzT[i - 1] != null && (smi[i - 1] < dzB[i - 1] || smi[i - 1] > dzT[i - 1]);
       const ins = dzT[i - 1] != null && smi[i - 1] >= dzB[i - 1] && smi[i - 1] <= dzT[i - 1];
-      if (out) cross.push({ i, dir: up ? 1 : -1, kind: 'out' });
-      else if (ins) cross.push({ i, dir: up ? 1 : -1, kind: 'in' });
+      const lim = X => up ? smi[i - 1] <= X.below : smi[i - 1] >= X.above;
+      if ((P.x1.onlyOutside ? out : true) && lim(P.x1)) cross.push({ i, dir: up ? 1 : -1, kind: 'out' });
+      if ((P.x2.onlyInside ? ins : true) && lim(P.x2)) cross.push({ i, dir: up ? 1 : -1, kind: 'in' });
     }
-    return { mfi, smi, sig, hist, dzT, dzB, dzC, cross, useVol };
+    return { mfi: A.mfi, smi, sig, hist, dzT, dzB, dzC, cross, useVol };
   }
   function _smiState(bars) {
     const w = _warmOf(bars), off = w.length, lb = bars[bars.length - 1];
@@ -20979,8 +21296,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   function _smiHistColor(v) {
     const a = Math.abs(v);
     const lvl = a >= 30 ? 4 : a >= 15 ? 3 : a >= 10 ? 2 : a >= 5 ? 1 : 0;
-    return v >= 0 ? ['#72b6fc', '#5b9bf9', '#4078fe', '#346ffd', '#1c3bfb'][lvl]
-                  : ['#ff9696', '#ff7878', '#ff5a5a', '#ff3c3c', '#ff0000'][lvl];
+    // the base colour at the largest size, mixed toward white for smaller bars
+    const h = (v >= 0 ? SMIMFI.histUp : SMIMFI.histDown).replace('#', ''), mix = (4 - lvl) * 0.11;
+    const c = [0, 2, 4].map(o => parseInt(h.slice(o, o + 2), 16)).map(x => Math.round(x + (255 - x) * mix));
+    return '#' + c.map(x => x.toString(16).padStart(2, '0')).join('');
   }
   function _smiMfiPaneSvg(csIn, xOf, W, padL, padR, H) {
     if (_chart.show?.smiMfi === false) return '';
@@ -20988,7 +21307,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const real = _chart.candles || [];
     const cs = (csIn && real.length === csIn.length) ? real : csIn;
     const P = SMIMFI;
-    const need = P.mfiLen + P.kLen + 2 * P.dLen;
+    const need = Math.max(P.mfiLen + P.kLen + 2 * P.dLen, P.dzLen);
     const wOff = cs?.length ? _warmLen(cs) : 0;
     if (!cs || !cs.length || cs.length + wOff < need) {
       const have = cs ? cs.length : 0;
@@ -21011,12 +21330,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const a = S.smi[i], t0 = S.dzT[i - 1], t1 = S.dzT[i], b0 = S.dzB[i - 1], b1 = S.dzB[i];
       if (a == null || t1 == null || t0 == null) continue;
       const col = a > t1 ? 'up' : a < b1 ? 'dn' : null;
-      if (!col) continue;
+      if (!col || !P.showBg || !P.bgOpacity) continue;
       const x0 = xOf(i - 1), x1 = xOf(i);
       add(`bg|${col}`, `M${f1(x0)} ${f1(y(t0))}L${f1(x1)} ${f1(y(t1))}L${f1(x1)} ${f1(y(b1))}L${f1(x0)} ${f1(y(b0))}Z`);
     }
     // fill between SMI and its signal: blue while SMI is above it, red below (transparency 60)
-    for (let i = 1; i < n; i++) {
+    for (let i = 1; i < n && P.showFill && P.fillTransp < 100; i++) {
       const a0 = S.smi[i - 1], a1 = S.smi[i], g0 = S.sig[i - 1], g1 = S.sig[i];
       if ([a0, a1, g0, g1].some(v => v == null)) continue;
       const x0 = xOf(i - 1), x1 = xOf(i);
@@ -21025,7 +21344,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // histogram columns from zero
     const bw = Math.max(1.2, Math.min(4, (right - padL) / Math.max(1, Math.ceil(385 / (_chart.interval || 1))) * 0.55));
     const y0 = y(0);
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < n && P.showHist; i++) {
       const h = S.hist[i];
       if (h == null) continue;
       const yy = y(h), x = xOf(i);
@@ -21034,23 +21353,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // the dynamic-zone lines, the SMI (coloured by level) and the signal (by slope)
     const seg = (k, arr, i) => add(k, `M${f1(xOf(i - 1))} ${f1(y(arr[i - 1]))}L${f1(xOf(i))} ${f1(y(arr[i]))}`);
     for (let i = 1; i < n; i++) {
-      if (S.dzT[i - 1] != null && S.dzT[i] != null) { seg('dzT', S.dzT, i); seg('dzB', S.dzB, i); seg('dzC', S.dzC, i); }
-      if (S.sig[i - 1] != null && S.sig[i] != null) seg(`sig|${S.sig[i] >= S.sig[i - 1] ? '#2196f3' : '#ff0000'}`, S.sig, i);
-      if (S.smi[i - 1] != null && S.smi[i] != null) seg(`smi|${_smiColor(S.smi[i])}`, S.smi, i);
+      if (S.dzT[i - 1] != null && S.dzT[i] != null) {
+        if (P.showDz) { seg('dzT', S.dzT, i); seg('dzB', S.dzB, i); }
+        if (P.showDzCenter) seg('dzC', S.dzC, i);
+      }
+      if (P.showSig && S.sig[i - 1] != null && S.sig[i] != null) seg(`sig|${S.sig[i] >= S.sig[i - 1] ? P.sigUp : P.sigDown}`, S.sig, i);
+      if (P.showSmi && S.smi[i - 1] != null && S.smi[i] != null)
+        seg(`smi|${P.smiTheme === 'two' ? (S.smi[i] >= S.smi[i - 1] ? P.smiUp : P.smiDown) : _smiColor(S.smi[i])}`, S.smi, i);
     }
     const order = ['bg', 'fill', 'hist', 'dzT', 'dzB', 'dzC', 'sig', 'smi'];
     const sty = (k, paint) => ({
-      bg: `fill="${paint === 'up' ? 'rgba(48,100,252,0.30)' : 'rgba(240,52,73,0.30)'}"`,
-      fill: `fill="${paint === 'up' ? 'rgba(33,150,243,0.40)' : 'rgba(255,0,0,0.40)'}"`,
+      bg: `fill="${paint === 'up' ? P.bgAbove : P.bgBelow}" fill-opacity="${(P.bgOpacity / 100).toFixed(2)}"`,
+      fill: `fill="${paint === 'up' ? P.sigUp : P.sigDown}" fill-opacity="${((100 - P.fillTransp) / 100).toFixed(2)}"`,
       hist: `fill="${paint}"`,
-      dzT: 'fill="none" stroke="#3064fc" stroke-width="1"', dzB: 'fill="none" stroke="#f23645" stroke-width="1"',
-      dzC: 'fill="none" stroke="#b2b5be" stroke-width="1" opacity="0.7"',
+      dzT: `fill="none" stroke="${P.dzTop}" stroke-width="1"`, dzB: `fill="none" stroke="${P.dzBottom}" stroke-width="1"`,
+      dzC: `fill="none" stroke="${P.dzCenter}" stroke-width="1" opacity="0.7"`,
       sig: `fill="none" stroke="${paint}" stroke-width="1"`,
-      smi: `fill="none" stroke="${paint}" stroke-width="2" stroke-linecap="round"`,
+      smi: `fill="none" stroke="${paint}" stroke-width="${P.smiWidth}" stroke-linecap="round"`,
     })[k];
     // fixed levels first (under everything but the background)
     let lv = '';
-    for (const [v, col] of [[P.band, 'rgba(33,150,243,0.75)'], [0, 'rgba(178,181,190,0.75)'], [-P.band, 'rgba(242,54,69,0.75)']]) {
+    for (const [v, col] of (P.showBand ? [[P.band, 'rgba(33,150,243,0.75)'], [0, 'rgba(178,181,190,0.75)'], [-P.band, 'rgba(242,54,69,0.75)']] : [])) {
       lv += `<line x1="${padL}" y1="${f1(y(v))}" x2="${f1(right)}" y2="${f1(y(v))}" stroke="${col}" stroke-width="1" stroke-dasharray="2,3"/>`;
       lv += `<text x="${f1(right + 3)}" y="${f1(y(v) + 3)}" style="font-size:8px;fill:var(--muted,#789);">${v}</text>`;
     }
@@ -21064,9 +21387,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!body.includes('data-lv')) body = `<g data-lv="1">${lv}</g>` + body;
     s += body;
     // cross marks: circle outside the zone, diamond inside; up at the bottom, down at the top
-    for (const c of S.cross.slice(-40)) {
+    for (const c of S.cross.filter(c => (c.kind === 'out' ? P.x1.show : P.x2.show)).slice(-40)) {
       const x = xOf(c.i), up = c.dir > 0, yy = up ? bot - 4 : padT + 3;
-      const col = c.kind === 'out' ? (up ? '#14e024' : '#ff0000') : (up ? '#2962ff' : '#ff9800');
+      const col = c.kind === 'out' ? (up ? P.x1.bull : P.x1.bear) : (up ? P.x2.bull : P.x2.bear);
       const tip = `${_hm(cs[c.i].t)} — SMI crossed ${up ? 'ABOVE' : 'BELOW'} its signal ${c.kind === 'out' ? 'OUTSIDE' : 'inside'} the dynamic zone (SMI ${S.smi[c.i].toFixed(1)})`;
       s += c.kind === 'out'
         ? `<circle class="smi-x" cx="${f1(x)}" cy="${f1(yy)}" r="2.6" fill="${col}"><title>${escapeHtml(tip)}</title></circle>`
@@ -21077,7 +21400,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (li >= 0) {
       const sv = S.smi[li], gv = S.sig[li], hv = S.hist[li];
       const zone = S.dzT[li] == null ? '' : sv > S.dzT[li] ? ' · above zone' : sv < S.dzB[li] ? ' · below zone' : ' · inside zone';
-      s += `<text x="${padL + 4}" y="10" style="font-size:8.5px;fill:var(--muted,#789);">SMI·MFI 13,13,5,5 <tspan style="fill:${_smiColor(sv)};font-weight:700;">${sv.toFixed(1)}</tspan> sig <tspan style="fill:${gv >= (S.sig[li - 1] ?? gv) ? '#2196f3' : '#ff0000'};">${gv.toFixed(1)}</tspan> hist <tspan style="fill:${_smiHistColor(hv)};">${hv.toFixed(1)}</tspan>${zone}${S.useVol ? '' : ' · no volume: price-only MFI'}</text>`;
+      s += `<text x="${padL + 4}" y="10" style="font-size:8.5px;fill:var(--muted,#789);"><tspan data-indset="smiMfi" style="cursor:pointer;fill:var(--gold,#d4af37);">⚙</tspan> SMI·MFI ${P.mfiLen},${P.kLen},${P.dLen},${P.sigLen} <tspan style="fill:${_smiColor(sv)};font-weight:700;">${sv.toFixed(1)}</tspan> sig <tspan style="fill:${gv >= (S.sig[li - 1] ?? gv) ? P.sigUp : P.sigDown};">${gv.toFixed(1)}</tspan> hist <tspan style="fill:${_smiHistColor(hv)};">${hv.toFixed(1)}</tspan>${zone}${S.useVol ? '' : ' · no volume: price-only MFI'}</text>`;
     }
     s += _xmSvg('smiXM', 0, bot + 2, H - 4);
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
@@ -32760,6 +33083,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'ctxClockOpacity',     // context-pane clock watermark strength (default 30)
     'ctxSignals',          // Buy/Sell lines in the context pane (default on)
     'pdPrepCollapsed',     // PD prep card collapsed for the day
+    'ttrCfgV1',            // Trend Target Ribbon ⚙ settings
+    'smiMfiCfgV1',         // SMI of MFI ⚙ settings
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
     'levelVoiceCfg',       // spoken wording for level touches
