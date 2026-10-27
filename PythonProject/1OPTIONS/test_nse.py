@@ -2970,11 +2970,26 @@ console.log(JSON.stringify({{ lean: P.lean, score: P.score, why: P.why, n: P.n, 
           and "localStorage.setItem('poiLast'" in d and "/api/participant-oi?days=20" in d and "'post-market':       '<strong>Post-Market" in d)
 
 
+def test_chart_ctx_interval():
+    """Right-click on the chart offers the 1/2/3/5/10/15-minute intervals
+    (current one highlighted), switching through the toolbar's own button;
+    the alert items stay; the menu is kept on screen."""
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    i = d.index("const onCtx = ev => {"); j = d.index("document.addEventListener('contextmenu', onCtx, true);")
+    seg = d[i:j]
+    check("chart right-click: interval row 1/2/3/5/10/15m above the alert items, pressing the toolbar button",
+          "for (const iv of [1, 2, 3, 5, 10, 15])" in seg and "document.querySelector(`.chart-iv[data-iv=\"${iv}\"]`)?.click()" in seg
+          and seg.index("ctx-iv-row") < seg.index("Alert when spot touches") and "(_chart.interval || 1) === iv" in seg
+          and "innerWidth - mr.width - 4" in seg)
+    check("chart right-click: every interval it offers exists as a toolbar button",
+          all(f'class="btn chart-iv{" active" if iv == 1 else ""}" data-iv="{iv}"' in d for iv in (1, 2, 3, 5, 10, 15)))
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_indicator_settings, test_participant_oi, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_indicator_settings, test_participant_oi, test_chart_ctx_interval, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

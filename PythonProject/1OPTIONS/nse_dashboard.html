@@ -22389,6 +22389,40 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         b.onmousedown = e2 => { e2.preventDefault(); e2.stopPropagation(); _chartMenuClose(); fn(); };
         menu.appendChild(b);
       };
+      // ── chart interval, TradingView-style: one click switches the chart.
+      // It presses the toolbar's own 1m…15m button, so saving, re-fetching
+      // and the warm-up all follow exactly as if that button were clicked.
+      {
+        const hd = document.createElement('div');
+        hd.textContent = 'Interval';
+        hd.style.cssText = 'padding:3px 9px 2px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--muted,#789);';
+        menu.appendChild(hd);
+        const row = document.createElement('div');
+        row.className = 'ctx-iv-row';
+        row.style.cssText = 'display:flex;gap:3px;padding:2px 6px 5px;';
+        for (const iv of [1, 2, 3, 5, 10, 15]) {
+          const b = document.createElement('div');
+          const on = (_chart.interval || 1) === iv;
+          b.textContent = `${iv}m`;
+          b.dataset.iv = iv;
+          b.title = `${iv}-minute candles`;
+          b.style.cssText = 'flex:1;text-align:center;padding:4px 0;min-width:30px;cursor:pointer;border-radius:4px;font-weight:700;' +
+            (on ? 'background:var(--accent,#5b8cff);color:#fff;' : 'border:1px solid rgba(255,255,255,0.15);');
+          if (!on) {
+            b.onmouseenter = () => b.style.background = 'rgba(255,255,255,0.08)';
+            b.onmouseleave = () => b.style.background = '';
+          }
+          b.onmousedown = e2 => {
+            e2.preventDefault(); e2.stopPropagation(); _chartMenuClose();
+            if (!on) document.querySelector(`.chart-iv[data-iv="${iv}"]`)?.click();
+          };
+          row.appendChild(b);
+        }
+        menu.appendChild(row);
+        const sep0 = document.createElement('div');
+        sep0.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:1px 0 3px;';
+        menu.appendChild(sep0);
+      }
       item(`🔔 Alert when spot touches ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'touch'));
       item(`📍 Alert within 10 pts of ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'near'));
       if (hit) {
@@ -22402,6 +22436,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         });
       }
       document.body.appendChild(menu);
+      // keep the whole menu on screen near the right and bottom edges
+      try {
+        const mr = menu.getBoundingClientRect();
+        if (mr.right > innerWidth - 4) menu.style.left = `${Math.max(4, innerWidth - mr.width - 4)}px`;
+        if (mr.bottom > innerHeight - 4) menu.style.top = `${Math.max(4, innerHeight - mr.height - 4)}px`;
+      } catch (_) {}
       // If the menu has zero size it is in the DOM but not painted — a
       // stacking or CSS problem rather than a logic one, and the numbers
       // above say which.
