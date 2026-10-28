@@ -27281,13 +27281,21 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // passes its walk-forward test (python nse_turns.py fit); the light says
   // which it is using. Every closed bar's families are logged to the server
   // (turn_log/) for that fit - local files, no broker call.
-  const _TURN_FAM = ['loc', 'sweep', 'mom', 'flow', 'absorb', 'pos', 'gamma', 'breadth', 'smt', 'vix', 'time'];
+  const _TURN_FAM = ['loc', 'sweep', 'mom', 'flow', 'absorb', 'pos', 'gamma', 'breadth', 'smt', 'vix', 'time', 'reg'];
   const _TURN_LAB = { loc: 'At a level', sweep: 'Liquidity sweep', mom: 'Momentum exhaustion', flow: 'Order flow turning',
     absorb: 'Futures absorption', pos: 'Option writers at the wall', gamma: 'Dealer gamma', breadth: 'Breadth',
-    smt: 'Nifty / BankNifty divergence', vix: 'VIX spike-reversal', time: 'Turn-time window' };
-  const _TURN_PRIOR = { b: -3.0, w: { loc: 1.4, sweep: 1.1, mom: 0.9, flow: 1.0, absorb: 0.8, pos: 0.6, gamma: 0.4,
-                                      breadth: 0.5, smt: 0.8, vix: 0.5, time: 0.4 } };
-  const _TURN_RULE = { watch: 40, keep: 30, locMin: 0.5, watchMin: 12, holdMin: 15, endMin: 2, openQuiet: 565, closeQuiet: 915 };
+    smt: 'Nifty / BankNifty divergence', vix: 'VIX spike-reversal', time: 'Turn-time window', reg: 'Not a one-way trend' };
+  // reg is 1 when price is NOT running one way against the call; its 0.8 comes
+  // out of the intercept (-3.8 = -3.0 - 0.8), so a normal market scores exactly
+  // as it did and only a one-way trend takes points off
+  const _TURN_PRIOR = { b: -3.8, w: { loc: 1.4, sweep: 1.1, mom: 0.9, flow: 1.0, absorb: 0.8, pos: 0.6, gamma: 0.4,
+                                      breadth: 0.5, smt: 0.8, vix: 0.5, time: 0.4, reg: 0.8 } };
+  // maxRiskX: a trigger is refused when the stop would sit further than this
+  // many X (the target distance) from the entry - the trade the labels and the
+  // fit measure is +X before -0.4X, and a late entry is a different, worse trade.
+  // cool: two failed calls in a row (within coolMin) raise the bar by coolAdd.
+  const _TURN_RULE = { watch: 40, keep: 30, locMin: 0.5, watchMin: 12, holdMin: 15, endMin: 2, openQuiet: 565, closeQuiet: 915,
+                       maxRiskX: 0.6, coolAdd: 8, coolMin: 45 };
   // scheduled market-moving announcements inside NSE hours (IST minutes)
   const _TURN_EVENTS = [
     { day: '2026-12-04', from: 595, to: 645, lab: 'RBI policy 10:00' },
@@ -27309,9 +27317,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     for (const k of _TURN_FAM) z += (W.w[k] || 0) * (f[k] || 0);
     return 1 / (1 + Math.exp(-z));
   }
+  // today's calls and how they ended (kept per day in this browser only)
+  const _turnRes = { day: '', list: [] };
+  function _turnResLoad() {
+    const day = _istDayKey();
+    if (_turnRes.day === day) return;
+    _turnRes.day = day; _turnRes.list = [];
+    try { const j = JSON.parse(localStorage.getItem('turnResV1') || 'null'); if (j && j.day === day && Array.isArray(j.list)) _turnRes.list = j.list; } catch (_) {}
+  }
+  function _turnResAdd(dir, out) {
+    _turnResLoad();
+    _turnRes.list.push({ t: Date.now(), dir, out });
+    try { localStorage.setItem('turnResV1', JSON.stringify({ day: _turnRes.day, list: _turnRes.list.slice(-40) })); } catch (_) {}
+  }
+  function _turnTally() {
+    _turnResLoad();
+    const L = _turnRes.list;
+    return { win: L.filter(x => x.out === 'DONE').length, loss: L.filter(x => x.out === 'FAILED').length, to: L.filter(x => x.out === 'TIMEOUT').length };
+  }
+  // two stops in a row means the market is not behaving like the model expects
+  // (usually a trend day): ask for more evidence for a while
+  function _turnCool() {
+    _turnResLoad();
+    const L = _turnRes.list, n = L.length;
+    return n >= 2 && L[n - 1].out === 'FAILED' && L[n - 2].out === 'FAILED' && Date.now() - L[n - 1].t < _TURN_RULE.coolMin * 60000 ? _TURN_RULE.coolAdd : 0;
+  }
   function _turnThr(dir) {
     const W = _turnWeights(_turnSide(dir));
-    return W.fitted && W.watchP ? Math.round(W.watchP * 100) : _TURN_RULE.watch;
+    return (W.fitted && W.watchP ? Math.round(W.watchP * 100) : _TURN_RULE.watch) + _turnCool();
   }
   async function _turnModelFetch(force) {
     if (!force && Date.now() - _turn.modelAt < 1800000) return;
@@ -27408,6 +27441,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const P = _turn.peer, peerFresh = P.sym === _turnPeerSym(state.symbol || 'NIFTY') && Date.now() - P.at < 90000 && P.pts.length > 20;
     const vh = _ctxHist.filter(p => p.vix != null && p.sym === state.symbol && p.ts >= Date.now() - 1800000);
     const { m: nowMin } = _istNowMin();
+    // TREND: how straight the last 30 minutes ran (Kaufman efficiency: net
+    // move / distance travelled, 1 = a straight line) and how far it went
+    const Nw = Math.max(6, Math.min(n - 1, Math.ceil(30 / iv)));
+    let tpath = 0;
+    for (let i = n - Nw; i < n; i++) tpath += Math.abs(done[i].c - done[i - 1].c);
+    const tdrift = done[n - 1].c - done[n - 1 - Nw].c;
+    const ter = tpath > 0 ? Math.abs(tdrift) / tpath : 0;
+    const tmag = Math.min(1, Math.abs(tdrift) / (1.5 * s15));
     const side = {};
     for (const dir of [1, -1]) {
       const f = {}, why = {};
@@ -27554,6 +27595,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           }
         }
       } catch (_) {}
+      // REGIME: a call against a straight one-way run (a trend day) fails far
+      // more often than one in a ranging market. 1 = not trending against it.
+      const adv = tdrift * dir < 0 ? Math.min(1, Math.max(0, (ter - 0.35) / 0.40)) * tmag : 0;
+      f.reg = +(1 - adv).toFixed(3);
+      why.reg = adv > 0 ? `one-way ${tdrift < 0 ? 'fall' : 'rise'}: ${Math.round(Math.abs(tdrift))} pts in ${Nw * iv} min, efficiency ${ter.toFixed(2)} — ${dir > 0 ? 'bottoms' : 'tops'} fail more often in a trend`
+                          : `not a straight run against it (efficiency ${ter.toFixed(2)})`;
       side[dir] = { f, why, lvl: best ? best.L : null, lvlLab: best ? best.lab : '' };
     }
     const v = { spot, D, s15, vix, n, iv, side, flowOn, lastT: lastB.t, bar: lastB, prevBar: prevB, recentLo, recentHi };
@@ -27569,9 +27616,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     T.lastBarT = F.lastT;
     if (T.st === 'BUY' || T.st === 'SELL') {
       const g = T.trig, dir = T.dir;
-      if ((spot - g.stop) * dir <= 0) { set('FAILED', dir, `stop ${fmtInt(Math.round(g.stop))} hit — the turn failed`); T.end = now; return; }
-      if ((spot - g.target) * dir >= 0) { set('DONE', dir, `target ${fmtInt(Math.round(g.target))} reached`); T.end = now; return; }
-      if (now - T.since >= R.holdMin * 60000) { set('WAIT', 0, 'turn window over'); T.trig = null; T.w = null; }
+      if ((spot - g.stop) * dir <= 0) { set('FAILED', dir, `stop ${fmtInt(Math.round(g.stop))} hit — the turn failed`); T.end = now; _turnResAdd(dir, 'FAILED'); return; }
+      if ((spot - g.target) * dir >= 0) { set('DONE', dir, `target ${fmtInt(Math.round(g.target))} reached`); T.end = now; _turnResAdd(dir, 'DONE'); return; }
+      if (now - T.since >= R.holdMin * 60000) { set('WAIT', 0, 'turn window over'); T.trig = null; T.w = null; _turnResAdd(dir, 'TIMEOUT'); }
       return;
     }
     if (T.st === 'FAILED' || T.st === 'DONE') {
@@ -27592,9 +27639,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const turned = (b.c - b.o) * dir > 0;
         const reclaim = (w.lvl != null && (b.c - w.lvl) * dir > 0) || (pb && (b.c - (dir > 0 ? pb.h : pb.l)) * dir > 0);
         const confirm = F.flowOn ? ((s.f.flow || 0) >= 0.5 || (s.f.absorb || 0) >= 0.6) : sc[dir] >= _turnThr(dir) + 10;
-        w.lastCheck = { turned, reclaim, confirm };
-        if (turned && reclaim && confirm) {
-          const buf = Math.max(0.1 * F.s15, 2), X = Math.max(0.3 * F.D, 0.0006 * spot);
+        const buf = Math.max(0.1 * F.s15, 2), X = Math.max(0.3 * F.D, 0.0006 * spot);
+        // how far the entry is from the stop it would need (beyond the extreme)
+        const risk = (b.c - (w.ext - dir * buf)) * dir, late = risk > R.maxRiskX * X;
+        w.lastCheck = { turned, reclaim, confirm, late, risk, maxRisk: R.maxRiskX * X };
+        if (turned && reclaim && confirm && !late) {
           T.trig = { entry: b.c, stop: w.ext - dir * buf, target: b.c + dir * X, lab: w.lab, sc: sc[dir], at: now };
           set(dir > 0 ? 'BUY' : 'SELL', dir, `turn ${dir > 0 ? 'up' : 'down'} from ${w.lab}`);
           try { _scoreRecord('Turn trigger', dir, spot, sym, `score ${sc[dir]} · ${w.lab}`); } catch (_) {}
@@ -27700,8 +27749,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let sub;
     if (!open) sub = 'market closed';
     else if (!F) sub = 'needs index candles on the chart';
-    else if (st === 'WAIT') sub = `bottom ${sc[1]} · top ${sc[-1]} · watch at ${_turnThr(1)}${fitted ? '' : ' · hand-set'}`;
-    else if (st === 'WATCH') sub = `${T.note} · score ${sc[dir]}${T.w?.lastCheck ? ` · ${T.w.lastCheck.turned ? '' : `waiting for a ${dir > 0 ? 'green' : 'red'} close`}${T.w.lastCheck.turned && !T.w.lastCheck.reclaim ? 'waiting for a close back through the level' : ''}${T.w.lastCheck.turned && T.w.lastCheck.reclaim && !T.w.lastCheck.confirm ? 'waiting for the flow to confirm' : ''}` : ''}`;
+    else if (st === 'WAIT') {
+      const ty = _turnTally(), cool = _turnCool();
+      sub = `bottom ${sc[1]} · top ${sc[-1]} · watch at ${_turnThr(1)}${fitted ? '' : ' · hand-set'}${cool ? ` · +${cool} after 2 stops` : ''}${ty.win + ty.loss ? ` · today ${ty.win}✓ ${ty.loss}✗` : ''}`;
+    }
+    else if (st === 'WATCH') sub = `${T.note} · score ${sc[dir]}${T.w?.lastCheck ? ` · ${T.w.lastCheck.turned ? '' : `waiting for a ${dir > 0 ? 'green' : 'red'} close`}${T.w.lastCheck.turned && !T.w.lastCheck.reclaim ? 'waiting for a close back through the level' : ''}${T.w.lastCheck.turned && T.w.lastCheck.reclaim && !T.w.lastCheck.confirm ? 'waiting for the flow to confirm' : ''}${T.w.lastCheck.turned && T.w.lastCheck.reclaim && T.w.lastCheck.confirm && T.w.lastCheck.late ? `too late — entry ${Math.round(T.w.lastCheck.risk)} pts from the stop (max ${Math.round(T.w.lastCheck.maxRisk)})` : ''}` : ''}`;
     else if (st === 'BUY' || st === 'SELL') sub = `${T.note} · entry ${fmtInt(Math.round(T.trig.entry))} · stop ${fmtInt(Math.round(T.trig.stop))} · ${mins}m`;
     else sub = T.note;
     // tooltip: every family for both sides, the model in use, the rules
@@ -27722,6 +27774,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         tip += `${dd > 0 ? 'BOTTOM' : 'TOP'} score ${sc[dd]} (watch at ${_turnThr(dd)})\n` +
           _TURN_FAM.map(k => `  ${S.f[k] == null ? '–' : S.f[k] >= 0.5 ? '✓' : S.f[k] > 0 ? '·' : '✗'} ${_TURN_LAB[k]} ${S.f[k] == null ? 'n/a' : (+S.f[k]).toFixed(2)} × ${(+(Wt[k] || 0)).toFixed(2)} — ${S.why[k]}`).join('\n') + '\n\n';
       }
+    }
+    {
+      const ty = _turnTally(), sg = T.status && T.status.signals;
+      tip += `TODAY'S CALLS (this browser): ${ty.win} reached target, ${ty.loss} stopped, ${ty.to} timed out${_turnCool() ? ` — raised the bar by ${_turnCool()} after two stops in a row` : ''}.\n`;
+      if (sg && sg.n) tip += `LOGGED CALLS so far: ${sg.n} (${sg.win} won, ${sg.loss} lost, ${sg.timeout} timed out) — ${sg.win_rate == null ? 'none resolved yet' : `${Math.round(sg.win_rate * 100)}% of those that resolved won; break-even is ${Math.round(sg.breakeven * 100)}%`} (+X before −0.4X within 30 min).\n\n`;
+      else tip += '\n';
     }
     tip += `${ms}\nWATCH = at a level with a high enough score; BUY/SELL = a closed candle turns, closes back through the level or the previous candle, and the flow confirms (on the broker feed). Stop beyond the extreme, target ≈ 0.3 × the day's 1σ move. QUIET in the first 10 and last 15 minutes and around scheduled events. Not an order.`;
     el.innerHTML = `<div class="tl-box" title="${escapeHtml(tip)}">

@@ -46,12 +46,18 @@ WARM_DIR = os.path.join(HERE, "warm_cache")
 MODEL_PATH = os.path.join(HERE, "turn_model.json")
 REPORT_PATH = os.path.join(HERE, "turn_fit_report.json")
 
-FAMILIES = ["loc", "sweep", "mom", "flow", "absorb", "pos", "gamma", "breadth", "smt", "vix", "time"]
+FAMILIES = ["loc", "sweep", "mom", "flow", "absorb", "pos", "gamma", "breadth", "smt", "vix", "time", "reg"]
+# a family missing from an older log row means "not measured", which is NOT the
+# same as 0: "reg" (1 = not a one-way trend) is neutral when absent
+FAMILY_DEFAULT = {"reg": 1.0}
 SIDES = {"bottom": 1, "top": -1}
 LABEL = {"kX": 0.30, "minPct": 0.0006, "kS": 0.4, "H": 30, "PRE": 30, "NEAR": 15, "maxGap": 3}
 # the hand-set starting weights the dashboard uses until a model is accepted
-PRIOR = {"b": -3.0, "w": {"loc": 1.4, "sweep": 1.1, "mom": 0.9, "flow": 1.0, "absorb": 0.8, "pos": 0.6,
-                          "gamma": 0.4, "breadth": 0.5, "smt": 0.8, "vix": 0.5, "time": 0.4}}
+# "reg" = 1 when price is NOT running one way against the call; its +0.8 is
+# paid out of the intercept (-3.8 = -3.0 - 0.8), so a normal market scores
+# exactly as before and only a one-way trend takes points off
+PRIOR = {"b": -3.8, "w": {"loc": 1.4, "sweep": 1.1, "mom": 0.9, "flow": 1.0, "absorb": 0.8, "pos": 0.6,
+                          "gamma": 0.4, "breadth": 0.5, "smt": 0.8, "vix": 0.5, "time": 0.4, "reg": 0.8}}
 MIN_TURNS = int(os.environ.get("NSE_TURN_MIN_EVENTS", "100"))
 MIN_AUC = 0.55            # below this a "model" is noise, whatever the null says
 
@@ -209,7 +215,8 @@ def day_dataset(sym, day, rows=None):
                     continue
                 out.append({"day": day, "sym": sym, "t": t, "iv": iv, "side": side, "y": int(y),
                             "ev": evid.get((side, i)) if y else None,
-                            "x": [float(f.get(k) or 0.0) for k in FAMILIES]})
+                            "x": [float(FAMILY_DEFAULT.get(k, 0.0) if f.get(k) is None and k in FAMILY_DEFAULT
+                                        else (f.get(k) or 0.0)) for k in FAMILIES]})
     return out
 
 
@@ -512,6 +519,74 @@ def fit(sym=None, perms=None, min_turns=MIN_TURNS, min_train_days=5, step_days=5
     return model, report
 
 
+def signals(sym=None, rows_by_day=None):
+    """What the BUY / SELL calls the light actually made were worth, from the
+    logged bars - usable from the first day, long before a model can be fitted.
+
+    A call is a bar where the light's state became BUY or SELL (the entry is
+    that bar's close). It is scored by the SAME objective as the turn labels: a
+    win is +X reached before -S, within H minutes (X = max(0.3 x the day's 1-sigma
+    move, 0.06% of spot), S = 0.4 X). A bar that touches both counts as a loss
+    (no way to know the order). Neither reached = timeout. A call whose
+    following bars are not all logged is skipped, not guessed."""
+    out = {"n": 0, "win": 0, "loss": 0, "timeout": 0, "skipped": 0, "by_side": {}, "days": 0}
+    src = rows_by_day if rows_by_day is not None else {(s, d): read_rows(log_path(s, d)) for s, d in list_days(sym)}
+    H = LABEL["H"] * 60
+    for (s, d), rows in sorted(src.items()):
+        series = {}
+        for r in rows:
+            if r.get("t") is None or r.get("c") is None:
+                continue
+            series.setdefault(int(r.get("iv") or 1), {})[int(r["t"])] = r
+        had = False
+        for iv, rmap in series.items():
+            ts = sorted(rmap)
+            prev = None
+            for i, t in enumerate(ts):
+                r = rmap[t]
+                st, dr = r.get("st"), r.get("dir")
+                cur = (st, dr) if st in ("BUY", "SELL") and dr in (1, -1) else None
+                fired = cur is not None and cur != prev
+                prev = cur
+                if not fired:
+                    continue
+                D, spot, entry = float(r.get("D") or 0), float(r.get("spot") or r["c"]), float(r["c"])
+                if D <= 0:
+                    out["skipped"] += 1
+                    continue
+                X = max(LABEL["kX"] * D, LABEL["minPct"] * spot)
+                S = LABEL["kS"] * X
+                fut = [rmap[u] for u in ts[i + 1:] if u - t <= H]
+                need = max(1, int(H / 60 / iv * 0.8))
+                res = None
+                for b in fut:
+                    up = float(b.get("h", b["c"])) >= entry + X if dr > 0 else float(b.get("l", b["c"])) <= entry - X
+                    dn = float(b.get("l", b["c"])) <= entry - S if dr > 0 else float(b.get("h", b["c"])) >= entry + S
+                    if dn:
+                        res = "loss"
+                        break
+                    if up:
+                        res = "win"
+                        break
+                if res is None:
+                    if len(fut) < need:
+                        out["skipped"] += 1
+                        continue
+                    res = "timeout"
+                side = "bottom" if dr > 0 else "top"
+                bs = out["by_side"].setdefault(side, {"n": 0, "win": 0, "loss": 0, "timeout": 0})
+                bs["n"] += 1
+                bs[res] += 1
+                out["n"] += 1
+                out[res] += 1
+                had = True
+        out["days"] += 1 if had else 0
+    done = out["win"] + out["loss"]
+    out["win_rate"] = round(out["win"] / done, 3) if done else None      # of the calls that resolved
+    out["breakeven"] = round(LABEL["kS"] / (1 + LABEL["kS"]), 3)         # a 2.5 : 1 payoff needs 28.6%
+    return out
+
+
 def status(sym=None):
     """Progress toward a fit: days logged and turns labelled per side."""
     days = list_days(sym)
@@ -522,7 +597,13 @@ def status(sym=None):
             rows.add((r["sym"], r["iv"], r["t"]))
             if r["y"]:
                 ev[r["side"]].add(r["ev"])
-    return {"days": len(days), "rows": len(rows), "turns": {k: len(v) for k, v in ev.items()}, "min_turns": MIN_TURNS}
+    sg = None
+    try:
+        sg = signals(sym)
+    except Exception:
+        pass
+    return {"days": len(days), "rows": len(rows), "turns": {k: len(v) for k, v in ev.items()}, "min_turns": MIN_TURNS,
+            "signals": sg}
 
 
 def _main(argv):
@@ -539,6 +620,8 @@ def _main(argv):
     lb.add_argument("--date", required=True)
     st = sub.add_parser("status")
     st.add_argument("--symbol")
+    sg = sub.add_parser("signals", help="what the BUY/SELL calls made so far were worth (same +X before -S objective)")
+    sg.add_argument("--symbol")
     a = ap.parse_args(argv)
     if a.cmd == "fit":
         model, rep = fit(a.symbol, perms=a.perms, min_turns=a.min_turns, step_days=a.step_days)
@@ -555,6 +638,15 @@ def _main(argv):
         pos = [r for r in ds if r["y"]]
         print(f"{a.symbol} {a.date}: {len(ds)} labelled rows, {len(pos)} turns "
               f"({sum(1 for r in pos if r['side'] == 'bottom')} bottoms, {sum(1 for r in pos if r['side'] == 'top')} tops)")
+    elif a.cmd == "signals":
+        r = signals(a.symbol)
+        print(f"{r['n']} resolved-or-timed-out call(s) over {r['days']} day(s), {r['skipped']} skipped (bars missing)")
+        for side, v in r["by_side"].items():
+            print(f"  {side:6s} n {v['n']:3d}  win {v['win']:3d}  loss {v['loss']:3d}  timeout {v['timeout']:3d}")
+        if r["win_rate"] is not None:
+            print(f"win rate of the calls that resolved: {r['win_rate']:.0%}  (break-even at this payoff: {r['breakeven']:.0%})")
+        else:
+            print("no resolved calls yet")
     elif a.cmd == "status":
         print(json.dumps(status(a.symbol), indent=1))
     else:

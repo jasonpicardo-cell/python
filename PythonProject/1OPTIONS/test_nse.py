@@ -1266,14 +1266,15 @@ def test_traffic_light():
                 return dsrc[i:k + 1]
     consts = "\n".join(dsrc[dsrc.index(f"  const {c} = "):dsrc.index(";\n", dsrc.index(f"  const {c} = ")) + 2]
                        for c in ("_TURN_FAM", "_TURN_PRIOR", "_TURN_RULE", "_TURN_EVENTS"))
-    harness = consts + "\n" + "\n".join(grab(f) for f in ("_turnWeights", "_turnScore", "_turnThr", "_turnQuiet", "_turnStep")) + r"""
+    harness = consts + "\n" + "\n".join(grab(f) for f in ("_turnWeights", "_turnScore", "_turnThr", "_turnQuiet", "_turnStep", "_turnResLoad", "_turnResAdd", "_turnTally", "_turnCool")) + r"""
+const _turnRes = { day: '', list: [] };
 let NOW = 1e12; Date.now = () => NOW; let MIN = 600;
 const _turnSide = dir => dir > 0 ? 'bottom' : 'top';
 const _turn = { st: 'WAIT', dir: 0, since: 0, note: '', w: null, trig: null, end: 0, lastBarT: null, model: null, events: [] };
 const state = { symbol: 'NIFTY' }; const fmtInt = x => String(x);
 const _istNowMin = () => ({ m: MIN, wd: 3 }); let DAY = '2026-10-28'; const _istDayKey = () => DAY;
 const recs = []; const _scoreRecord = (src, dir) => recs.push([src, dir]);
-const fam = o => Object.assign({ loc: 0, sweep: 0, mom: 0, flow: 0, absorb: 0, pos: 0, gamma: 0, breadth: 0, smt: 0, vix: 0, time: 0 }, o);
+const fam = o => Object.assign({ loc: 0, sweep: 0, mom: 0, flow: 0, absorb: 0, pos: 0, gamma: 0, breadth: 0, smt: 0, vix: 0, time: 0, reg: 1 }, o);
 const F = (t, bar, prev, fb, ft, flowOn = true) => ({ spot: bar.c, D: 200, s15: 40, iv: 1, flowOn, lastT: t, bar, prevBar: prev,
   recentLo: Math.min(bar.l, prev.l), recentHi: Math.max(bar.h, prev.h),
   side: { 1: { f: fam(fb), why: {}, lvl: 24900, lvlLab: 'put wall 24900' }, '-1': { f: fam(ft), why: {}, lvl: 25200, lvlLab: 'call wall 25200' } } });
@@ -1291,7 +1292,7 @@ NOW += 60000;
 const b2 = { o: 24900, h: 24915, l: 24890, c: 24912 };            // green, closes back above the 24900 level
 R.s2 = step(F(2, b2, b1, Object.assign({ flow: 0 }, strong), {}));        // turned + reclaimed but no flow confirm: WATCH
 NOW += 60000;
-const b3 = { o: 24910, h: 24940, l: 24905, c: 24935 };
+const b3 = { o: 24910, h: 24925, l: 24905, c: 24920 };
 R.s3 = step(F(3, b3, b2, Object.assign({ flow: 0.6 }, strong), {}));      // flow confirms: BUY
 R.trig = _turn.trig && { stop: Math.round(_turn.trig.stop), target: Math.round(_turn.trig.target) };
 NOW += 30000; R.s4 = step(F(3, b3, b2, strong, {}), 24880);        // trades under the stop: FAILED
@@ -1302,9 +1303,9 @@ _turn.st = 'WAIT'; NOW += 60000;
 const t1 = { o: 25170, h: 25205, l: 25165, c: 25195 }, tp = { o: 25150, h: 25175, l: 25140, c: 25170 };
 R.t1 = step(F(10, t1, tp, {}, strong)); R.tdir = _turn.dir;        // WATCH down
 NOW += 60000;
-const t2 = { o: 25195, h: 25198, l: 25170, c: 25172 };            // red, closes under the previous low
+const t2 = { o: 25195, h: 25198, l: 25170, c: 25176 };            // red, closes back under the 25200 level
 R.t2 = step(F(11, t2, t1, {}, strong, false));                     // no flow feed: needs score >= watch + 10 -> 58 >= 50 -> SELL
-NOW += 60000; R.t3 = step(F(11, t2, t1, {}, strong), 25172 - 61);  // target (0.3 x 200 = 60) reached: DONE
+NOW += 60000; R.t3 = step(F(11, t2, t1, {}, strong), 25176 - 61);  // target (0.3 x 200 = 60) reached: DONE
 // QUIET: opening, an event window
 _turn.st = 'WAIT'; NOW += 5 * 60000; MIN = 560; R.q1 = step(F(20, b1, p1, strong, {}));
 MIN = 600; DAY = '2026-12-04'; R.q2 = [step(F(21, b1, p1, strong, {})), _turn.note];
@@ -1315,6 +1316,21 @@ _turn.model = { accepted: false, sides: { bottom: { b: -9, w: {}, watch_p: 0.2 }
 _turn.model = { accepted: true, sides: { bottom: { b: -1, w: { loc: 2 }, watch_p: 0.31, auc: 0.6 }, top: { b: -1, w: {}, watch_p: 0.3, auc: 0.6 } } };
 R.acc = [_turnThr(1), Math.round(100 * _turnScore(fam({ loc: 1 }), 'bottom'))];
 R.recs = recs.map(r => r.join(':'));
+// a one-way trend against the call takes points off (58 -> 38, under the watch line)
+_turn.model = null;
+R.reg = [Math.round(100 * _turnScore(fam(strong), 'bottom')), Math.round(100 * _turnScore(fam(Object.assign({ reg: 0 }, strong)), 'bottom'))];
+// a trigger whose stop would be too far from the entry is refused: stays WATCH, says why
+_turn.model = null; _turn.st = 'WAIT'; _turn.w = null; _turn.trig = null; NOW += 600000;
+const l1 = { o: 24930, h: 24935, l: 24895, c: 24900 }, lp = { o: 24960, h: 24965, l: 24925, c: 24930 };
+step(F(30, l1, lp, strong, {}));
+NOW += 60000;
+const l2 = { o: 24905, h: 24940, l: 24900, c: 24935 };             // a big green bar: 24935 is 44 pts above the stop (max 36), 40 above the low (not yet 'away')
+R.late = [step(F(31, l2, l1, Object.assign({ flow: 0.6 }, strong), {})), !!(_turn.w && _turn.w.lastCheck && _turn.w.lastCheck.late), _turn.trig == null];
+// two stops in a row raise the bar for a while, then it relaxes
+_turnRes.list = []; _turnRes.day = DAY;
+_turnResAdd(1, 'FAILED'); const c1 = _turnThr(1); _turnResAdd(-1, 'FAILED'); const c2 = _turnThr(1);
+NOW += 46 * 60000; const c3 = _turnThr(1);
+_turnResAdd(1, 'DONE'); R.cool = [c1, c2, c3, JSON.stringify(_turnTally())];
 console.log(JSON.stringify(R));
 """
     fn = os.path.join(HERE, "__tl_test.js")
@@ -1332,7 +1348,7 @@ console.log(JSON.stringify(R));
     check("turn light: no trigger without flow confirmation on the broker feed; BUY when the closed candle turns, reclaims and flow confirms",
           r["s2"] == "WATCH" and r["s3"] == "BUY", str(r))
     check("turn light: stop just beyond the watched extreme, target 0.3 × the day's σ",
-          r["trig"] and r["trig"]["stop"] == 24886 and r["trig"]["target"] == 24995, str(r["trig"]))
+          r["trig"] and r["trig"]["stop"] == 24886 and r["trig"]["target"] == 24980, str(r["trig"]))
     check("turn light: FAILED when the stop trades, held 2 minutes, then WAIT", r["s4"] == "FAILED" and r["s5"] == "FAILED" and r["s6"] == "WAIT", str(r))
     check("turn light: top side - WATCH ▼, SELL on the NSE feed by score + 10, DONE at the target",
           r["t1"] == "WATCH" and r["tdir"] == -1 and r["t2"] == "SELL" and r["t3"] == "DONE", str(r))
@@ -1342,7 +1358,16 @@ console.log(JSON.stringify(R));
           r["notAcc"] == 40 and r["acc"] == [31, 73], str(r))
     check("turn light: watch and trigger logged to the Signal Scorecard",
           "Turn watch:1" in r["recs"] and "Turn trigger:1" in r["recs"] and "Turn trigger:-1" in r["recs"], str(r["recs"]))
+    check("turn light: a one-way trend against the call takes points off (reg 1 -> 0 drops 58 to 38)",
+          r["reg"] == [58, 38], str(r["reg"]))
+    check("turn light: a trigger whose stop is too far from the entry is refused - stays WATCH and says so",
+          r["late"] == ["WATCH", True, True], str(r["late"]))
+    check("turn light: two stops in a row raise the watch line by 8 for 45 minutes; today's tally kept",
+          r["cool"] == [40, 48, 40, '{"win":1,"loss":2,"to":0}'], str(r["cool"]))
     feats = grab("_turnFeatures")
+    check("turn light: the trend regime is measured (efficiency over 30 min x distance) per side and logged with the other families",
+          "f.reg = +(1 - adv).toFixed(3)" in grab("_turnFeatures") and "const ter = tpath > 0" in grab("_turnFeatures")
+          and "for (const k of _TURN_FAM)" in grab("_turnLog"))
     check("turn light: oscillators are ONE momentum family (Squeeze, WaveTrend) and only regular divergences count",
           "f.mom = +mo.toFixed(3)" in feats and feats.count("f.mom =") == 1 and "!x.hidden && x.kind ===" in feats)
     check("turn light: new inputs - Nifty/BankNifty divergence, futures absorption, VIX spike-reversal, events",
@@ -1471,6 +1496,27 @@ def test_turn_model():
         lines = open(T.log_path("NIFTY", day)).read().strip().splitlines()
         check("turn log: one row per symbol/interval/bar (several browsers write once), today only, bad input refused",
               n1 == 5 and n2 == 1 and n3 == 0 and len(lines) == 6, f"{n1} {n2} {n3} {len(lines)}")
+        # an older log row has no "reg": that is "not measured" = neutral 1.0, not 0
+        old_row = {"t": tt + 600, "iv": 1, "o": 1, "h": 2, "l": 0.5, "c": 1.5, "D": 200,
+                   "f": {"b": {k: 0.5 for k in T.FAMILIES if k != "reg"}, "t": {}}}
+        dso = T.day_dataset("NIFTY", day, rows=[old_row])
+        check("turn dataset: a log row from before the 'reg' family counts as neutral (1.0), not as a trend",
+              "reg" in T.FAMILIES and all(r["x"][T.FAMILIES.index("reg")] == 1.0 for r in dso if r["side"] == "bottom"), str(dso)[:200])
+        # the realised value of the BUY/SELL calls, scored by the label objective (+X before -0.4X in 30 min)
+        def srow(i, st="WAIT", d=0, h=100.5, l=99.5):
+            return {"t": 1792208700 + 60 * i, "iv": 1, "o": 100, "h": h, "l": l, "c": 100.0, "D": 200, "spot": 25000, "st": st, "dir": d}
+        sr = [srow(i) for i in range(260)]
+        sr[0] = srow(0, "BUY", 1); sr[1] = srow(1, "BUY", 1)                   # one call (state held) ...
+        sr[10] = srow(10, h=165)                                                # ... reaches +X (60) first: win
+        sr[60] = srow(60, "SELL", 1 - 2)                                        # SELL; next bar goes +30 against it: loss
+        sr[61] = srow(61, h=130)
+        sr[100] = srow(100, "BUY", 1)                                           # BUY into 30 flat minutes: timeout
+        sr[200] = srow(200, "BUY", 1)
+        sr = sr[:204]                                                           # ... only 3 bars after it: skipped, not guessed
+        g = T.signals(rows_by_day={("NIFTY", "2026-10-28"): sr})
+        check("turn signals: a call is scored +X before -0.4X within 30 min (win / loss / timeout), incomplete data skipped",
+              (g["n"], g["win"], g["loss"], g["timeout"], g["skipped"]) == (3, 1, 1, 1, 1) and g["win_rate"] == 0.5
+              and g["breakeven"] == 0.286, str(g))
         ds = T.day_dataset("NIFTY", day)
         check("turn dataset: logged rows join their labels per side, unlabelled tail left out",
               isinstance(ds, list) and all(r["side"] in ("bottom", "top") for r in ds) and len(ds) == 0)
@@ -1486,7 +1532,7 @@ def test_turn_model():
                   {"day": "2027-01-02", "from": 780, "to": 810, "lab": "X"}], str(ev2))
     tm = S._turn_model()
     check("turn model endpoint: hand-set prior and families always served; not accepted until fitted",
-          tm["prior"]["b"] == -3.0 and tm["families"] == T.FAMILIES and "accepted" in tm["model"])
+          tm["prior"]["b"] == -3.8 and tm["prior"]["w"]["reg"] == 0.8 and tm["families"] == T.FAMILIES and "accepted" in tm["model"])
     ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
     check("server: turn endpoints wired (log POST; model, status, labels GET)",
           'parsed.path == "/api/turn-log"' in ssrc and 'parsed.path == "/api/turn-model"' in ssrc
