@@ -2389,6 +2389,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 </span>
                 <label><input type="checkbox" id="chk_vwap"> VWAP</label>
                 <label title="Squeeze Momentum [LazyBear] in the pane under the chart: momentum histogram, squeeze dots (white = coiling, grey = released, blue = none; ringed = the fire), and every regular and hidden divergence, drawn on the price too."><input type="checkbox" id="chk_sqz"> Squeeze</label><button class="ind-gear" data-indset="sqz" title="Squeeze Momentum settings">⚙</button>
+                <label title="WaveTrend Enhanced [LazyBear+] in the Squeeze pane: WT1 (coloured by slope), WT2 dots, overbought/oversold levels, zero-line crosses, regular and hidden divergence (R-Bu, H-Bu, R-Br, H-Br) and the HTF bias. No background colours and no Buy/Sell signals."><input type="checkbox" id="chk_wt"> WaveTrend</label><button class="ind-gear" data-indset="wt" title="WaveTrend settings">⚙</button>
               </span>
               <span style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;" title="PDA / PDMP - premium, discount and market preparation (ICT). The dealing range's 50% line splits it into PREMIUM (look for shorts) and DISCOUNT (look for longs).">
                 <b style="color:var(--gold,#d4af37);">PD</b>
@@ -17572,8 +17573,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true }, emaX: { fast: 5, slow: 13 } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show, emaX: _chart.emaX })); } catch (_) {} }
 
@@ -17748,7 +17749,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _chart.warmHa = _warmHaBuild(rows);
       const lh = _chart.warmHa[_chart.warmHa.length - 1];
       _chart._warmHaLast = lh ? { o: lh.o, c: lh.c, key } : null;
-      _emaXCache.key = ''; _ttrCache.key = ''; _sqzCache.key = ''; _sqzCache.dKey = '';
+      _emaXCache.key = ''; _ttrCache.key = ''; _sqzCache.key = ''; _sqzCache.dKey = ''; _wtCache.key = ''; _wtCache.dKey = '';
       console.log(`[warm] ${sym} ${iv}m: ${rows.length} warm-up bar(s) from ${(j.dates || []).join(', ')}`);
       try { _emaCrossCheck(); } catch (_) {}
       try { _priceMaCheck(); } catch (_) {}
@@ -21441,10 +21442,221 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return s;
   }
 
+  // ══ WAVETREND (port of "WaveTrend Enhanced [LazyBear+]", drawn in the SQZ pane) ══
+  //   ap = hlc3; esa = ema(ap, n1); d = ema(|ap − esa|, n1)
+  //   ci = (ap − esa) / (0.015 d); wt1 = ema(ci, n2); wt2 = sma(wt1, 4)
+  // Kept from the script: WT1 coloured by slope, WT2 dots, OB/OS levels,
+  // zero-line cross markers, the optional WT1 slope histogram, regular and
+  // hidden divergence (R-Bu, H-Bu, R-Br, H-Br) and the HTF bias label.
+  // Removed as asked: Local Trend BG, HTF Bias BG and the Buy / Sell
+  // signals - and with them the signal filters (zone, zero-line,
+  // divergence confluence, divergence memory), which only gated those.
+  // WaveTrend runs on its own scale (about ±100) in the same pane as the
+  // squeeze histogram (price units); both share the zero line.
+  // HTF: TradingView fetches the higher timeframe's own history. Here it is
+  // built from the warm-up + today bars already loaded (no extra broker
+  // calls), so a 240-minute bias needs a longer warm-up (NSE_WARM_DAYS) -
+  // the label says so rather than guessing.
+  const WT = {
+    n1: 10, n2: 21, ob1: 60, ob2: 53, os1: -60, os2: -53,
+    useHTF: true, htfTF: '240', slopeHisto: false,
+    lbL: 5, lbR: 5, showRegular: true, showHidden: true,
+    showWt1: true, showWt2: true, showLevels: true, showZeroX: true, divLabels: true, wt1Width: 2,
+    col: { up: '#00E676', dn: '#FF5252', wt2: '#FF5252', ob: '#FF5252', os: '#4CAF50',
+           regBull: '#00E676', regBear: '#FF5252', hidBull: '#00BCD4', hidBear: '#FF9800' },
+  };
+  const _wtCache = { key: '', v: null };
+  {
+    _indRegister('wt', {
+      title: 'WaveTrend Enhanced [LazyBear+]', key: 'wtCfgV1', cfg: WT, defaults: Object.freeze(_deepCopy(WT)),
+      apply: () => { _wtCache.key = ''; _wtCache.dKey = ''; _safe(() => renderPriceChart(), 'renderPriceChart'); },
+      schema: [
+        { tab: 'Inputs', group: 'WaveTrend', fields: [
+          { k: 'n1', label: 'Channel Length', type: 'int', min: 1, max: 500 },
+          { k: 'n2', label: 'Average Length', type: 'int', min: 1, max: 500 },
+          { k: 'ob1', label: 'Overbought Level 1', type: 'int', min: 0, max: 200 },
+          { k: 'ob2', label: 'Overbought Level 2', type: 'int', min: 0, max: 200 },
+          { k: 'os1', label: 'Oversold Level 1', type: 'int', min: -200, max: 0 },
+          { k: 'os2', label: 'Oversold Level 2', type: 'int', min: -200, max: 0 } ] },
+        { tab: 'Inputs', group: 'HTF & slope', fields: [
+          { k: 'useHTF', label: 'HTF bias label', type: 'bool' },
+          { k: 'htfTF', label: 'HTF Timeframe (minutes)', type: 'select',
+            opts: [['3', '3'], ['5', '5'], ['10', '10'], ['15', '15'], ['30', '30'], ['60', '60 (1h)'], ['75', '75'], ['125', '125'], ['240', '240 (4h)']] },
+          { k: 'slopeHisto', label: 'Show WT1 Slope Histogram', type: 'bool' } ] },
+        { tab: 'Inputs', group: 'Divergence', fields: [
+          { k: 'lbL', label: 'Pivot Lookback Left', type: 'int', min: 1, max: 50 },
+          { k: 'lbR', label: 'Pivot Lookback Right (confirmation delay)', type: 'int', min: 1, max: 50 },
+          { k: 'showRegular', label: 'Show Regular Divergence', type: 'bool' },
+          { k: 'showHidden', label: 'Show Hidden Divergence', type: 'bool' } ] },
+        { tab: 'Style', group: 'Lines', fields: [
+          { k: 'col.up', label: 'WT1 rising', type: 'color' }, { k: 'col.dn', label: 'WT1 falling', type: 'color' },
+          { k: 'wt1Width', label: 'WT1 thickness', type: 'int', min: 1, max: 6 },
+          { k: 'col.wt2', label: 'WT2 dots', type: 'color' },
+          { k: 'col.ob', label: 'Overbought levels', type: 'color' }, { k: 'col.os', label: 'Oversold levels', type: 'color' } ] },
+        { tab: 'Style', group: 'Divergence Colors', fields: [
+          { k: 'col.regBear', label: 'Regular Bearish', type: 'color' }, { k: 'col.regBull', label: 'Regular Bullish', type: 'color' },
+          { k: 'col.hidBear', label: 'Hidden Bearish', type: 'color' }, { k: 'col.hidBull', label: 'Hidden Bullish', type: 'color' } ] },
+        { tab: 'Visibility', group: 'Show', fields: [
+          { k: 'showWt1', label: 'WT1', type: 'bool' }, { k: 'showWt2', label: 'WT2', type: 'bool' },
+          { k: 'showLevels', label: 'OB / OS levels', type: 'bool' },
+          { k: 'showZeroX', label: 'Zero-line cross markers', type: 'bool' },
+          { k: 'divLabels', label: 'Divergence labels', type: 'bool' } ] },
+      ],
+    });
+  }
+  // ta.ema as Pine computes it: seeded with the SMA of the first `len`
+  // values, na before that; a leading na in the source delays the seed
+  function _emaPine(a, len) {
+    const out = new Array(a.length).fill(null), al = 2 / (len + 1);
+    let run = 0, prev = null;
+    for (let i = 0; i < a.length; i++) {
+      const v = a[i];
+      if (v == null) { run = 0; continue; }
+      if (prev != null) { prev = al * v + (1 - al) * prev; out[i] = prev; continue; }
+      if (++run >= len) { let s = 0; for (let k = i - len + 1; k <= i; k++) s += a[k]; prev = s / len; out[i] = prev; }
+    }
+    return out;
+  }
+  function _wtCompute(bars, P) {
+    P = P || WT;
+    const ap = bars.map(b => (b.h + b.l + b.c) / 3);
+    const esa = _emaPine(ap, P.n1);
+    const d = _emaPine(ap.map((v, i) => esa[i] == null ? null : Math.abs(v - esa[i])), P.n1);
+    const ci = ap.map((v, i) => d[i] == null ? null : d[i] === 0 ? 0 : (v - esa[i]) / (0.015 * d[i]));
+    const wt1 = _emaPine(ci, P.n2);
+    const wt2 = wt1.map((_, i) => {
+      if (i < 3) return null;
+      let s = 0; for (let k = i - 3; k <= i; k++) { if (wt1[k] == null) return null; s += wt1[k]; }
+      return s / 4;
+    });
+    return { wt1, wt2 };
+  }
+  // HTF WaveTrend from the loaded bars, bucketed per session from 09:15 as
+  // TradingView does for NSE (240 = 09:15-13:14 and 13:15-15:29)
+  function _wtHtf(bars, tf, P) {
+    const iv = _chart.interval || 1;
+    if (!(tf > iv)) return { state: 'same' };
+    const hb = []; let key = null;
+    for (const b of bars) {
+      const g = new Date((b.t + 19800) * 1000);
+      const day = Math.floor((b.t + 19800) / 86400), m = g.getUTCHours() * 60 + g.getUTCMinutes() - 555;
+      const k = `${day}|${Math.floor(Math.max(0, m) / tf)}`;
+      if (k !== key) { hb.push({ h: b.h, l: b.l, c: b.c }); key = k; }
+      else { const x = hb[hb.length - 1]; x.h = Math.max(x.h, b.h); x.l = Math.min(x.l, b.l); x.c = b.c; }
+    }
+    const need = 2 * (P.n1 - 1) + P.n2;
+    if (hb.length < need) return { state: 'short', have: hb.length, need };
+    const w = _wtCompute(hb, P).wt1, v = w[w.length - 1];
+    return v == null ? { state: 'short', have: hb.length, need } : { state: v > 0 ? 'bull' : v < 0 ? 'bear' : 'flat', v, bars: hb.length };
+  }
+  function _wtSeries(cs) {
+    const w = _warmOf(cs), off = w.length, last = cs[cs.length - 1] || {};
+    const tag = cs[0] === (_chart.candles || [])[0] ? 'r' : 'x', cfgK = JSON.stringify(WT);
+    const key = `${tag}|${cs.length}|${cs[0]?.t}|${last.t}|${last.c}|${last.h}|${last.l}|${off}|${_chart.interval}|${cfgK}`;
+    if (_wtCache.key === key) return _wtCache.v;
+    const all = off ? w.concat(cs) : cs;
+    const r = _wtCompute(all, WT);
+    const closedN = _chart.liveBar ? cs.length - 1 : cs.length;
+    const dKey = `${tag}|${closedN}|${cs[0]?.t}|${cs[closedN - 1]?.t}|${cs[closedN - 1]?.c}|${cs[closedN - 1]?.h}|${cs[closedN - 1]?.l}|${off}|${cfgK}`;
+    let divs = _wtCache.dKey === dKey ? _wtCache.divs : null;
+    if (!divs) {
+      const rc = closedN === cs.length ? r : _wtCompute(all.slice(0, off + closedN), WT);
+      divs = _oscDivergences(all.slice(0, off + closedN), rc.wt1, { left: WT.lbL, right: WT.lbR, rangeMin: 0, rangeMax: Infinity })
+        .filter(d => d.a >= off).map(d => ({ ...d, a: d.a - off, b: d.b - off, conf: d.conf - off }));
+      _wtCache.dKey = dKey; _wtCache.divs = divs;
+    }
+    const v = { wt1: r.wt1.slice(off), wt2: r.wt2.slice(off), divs,
+                htf: WT.useHTF ? _wtHtf(all, +WT.htfTF, WT) : null, need: 2 * (WT.n1 - 1) + WT.n2 + 4 };
+    _wtCache.key = key; _wtCache.v = v;
+    return v;
+  }
+  // WaveTrend layers for the shared pane. yW maps WT values; returns the
+  // under / over SVG and the legend tail.
+  function _wtPaneParts(cs, xOf, yW, padL, right, padT, bottom, step) {
+    const P = WT, C = P.col, { wt1, wt2, divs, htf } = _wtSeries(cs), n = cs.length;
+    let under = '', over = '';
+    const hl = (v, col, dash, op) => `<line x1="${padL}" y1="${yW(v).toFixed(1)}" x2="${right.toFixed(1)}" y2="${yW(v).toFixed(1)}" stroke="${col}" stroke-opacity="${op}" stroke-width="1" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
+    if (P.showLevels) {
+      under += hl(P.ob1, C.ob, '', 0.7) + hl(P.os1, C.os, '', 0.7) + hl(P.ob2, C.ob, '1,3', 0.4) + hl(P.os2, C.os, '1,3', 0.4);
+      for (const [v, col] of [[P.ob1, C.ob], [P.os1, C.os]])
+        under += `<text x="${(padL + 2).toFixed(1)}" y="${(yW(v) + (v > 0 ? -2 : 8)).toFixed(1)}" style="font-size:7.5px;fill:${col};opacity:.75;">${v}</text>`;
+    }
+    if (P.slopeHisto) {
+      const bw = Math.max(1, Math.min(9, step * 0.72)), g = { up: [], dn: [] };
+      for (let i = 3; i < n; i++) {
+        if (wt1[i] == null || wt1[i - 3] == null) continue;
+        const v = wt1[i] - wt1[i - 3], x0 = xOf(i) - bw / 2, y0 = Math.min(yW(0), yW(v));
+        g[wt1[i] > wt1[i - 3] ? 'up' : 'dn'].push(`M${x0.toFixed(1)},${y0.toFixed(1)}h${bw.toFixed(1)}v${Math.max(0.6, Math.abs(yW(v) - yW(0))).toFixed(1)}h${(-bw).toFixed(1)}Z`);
+      }
+      if (g.up.length) under += `<path d="${g.up.join('')}" fill="${C.up}" fill-opacity="0.45"/>`;
+      if (g.dn.length) under += `<path d="${g.dn.join('')}" fill="${C.dn}" fill-opacity="0.45"/>`;
+    }
+    // WT1, segment-coloured by slope (one path per colour)
+    if (P.showWt1) {
+      const seg = { up: [], dn: [] };
+      for (let i = 1; i < n; i++) {
+        if (wt1[i] == null || wt1[i - 1] == null) continue;
+        seg[wt1[i] > wt1[i - 1] ? 'up' : 'dn'].push(`M${xOf(i - 1).toFixed(1)},${yW(wt1[i - 1]).toFixed(1)}L${xOf(i).toFixed(1)},${yW(wt1[i]).toFixed(1)}`);
+      }
+      for (const [k, col] of [['up', C.up], ['dn', C.dn]])
+        if (seg[k].length) over += `<path d="${seg[k].join('')}" fill="none" stroke="${col}" stroke-width="${P.wt1Width}" stroke-linecap="round"/>`;
+    }
+    if (P.showWt2) {
+      const r = Math.max(0.7, Math.min(1.6, step * 0.28)), ds = [];
+      for (let i = 0; i < n; i++) if (wt2[i] != null) { const x = xOf(i), y = yW(wt2[i]); ds.push(`M${(x - r).toFixed(1)},${y.toFixed(1)}a${r.toFixed(1)},${r.toFixed(1)} 0 1,0 ${(2 * r).toFixed(1)},0a${r.toFixed(1)},${r.toFixed(1)} 0 1,0 ${(-2 * r).toFixed(1)},0`); }
+      if (ds.length) over += `<path d="${ds.join('')}" fill="${C.wt2}" fill-opacity="0.8"/>`;
+    }
+    if (P.showZeroX) {
+      for (let i = 1; i < n; i++) {
+        if (wt1[i] == null || wt1[i - 1] == null) continue;
+        const up = wt1[i] > 0 && wt1[i - 1] <= 0, dn = wt1[i] < 0 && wt1[i - 1] >= 0;
+        if (up || dn) over += `<circle cx="${xOf(i).toFixed(1)}" cy="${yW(0).toFixed(1)}" r="2.4" fill="#ffffff" fill-opacity="0.9" stroke="#000" stroke-width="0.7"><title>WaveTrend crossed ${up ? 'above' : 'below'} zero at ${_sqzHm(cs[i].t)}</title></circle>`;
+      }
+    }
+    let shown = 0;
+    for (const d of divs) {
+      if (d.hidden ? !P.showHidden : !P.showRegular) continue;
+      shown++;
+      const bull = d.kind === 'bullish', col = bull ? (d.hidden ? C.hidBull : C.regBull) : (d.hidden ? C.hidBear : C.regBear);
+      const lab = `${d.hidden ? 'H' : 'R'}-${bull ? 'Bu' : 'Br'}`;
+      const tip = escapeHtml(`WaveTrend ${d.hidden ? 'HIDDEN ' : 'regular '}${d.kind} divergence (${_sqzHm(cs[d.a].t)} → ${_sqzHm(cs[d.b].t)}): price ${bull ? (d.hidden ? 'higher low' : 'lower low') : (d.hidden ? 'lower high' : 'higher high')}, WT1 ${bull ? (d.hidden ? 'lower low' : 'higher low') : (d.hidden ? 'higher high' : 'lower high')} - ${d.hidden ? 'trend continuation' : 'reversal warning'}. Confirmed ${P.lbR} bar${P.lbR > 1 ? 's' : ''} after the pivot${cs[d.conf] ? ` (${_sqzHm(cs[d.conf].t)})` : ''}.`);
+      over += `<line x1="${xOf(d.a).toFixed(1)}" y1="${yW(d.oa).toFixed(1)}" x2="${xOf(d.b).toFixed(1)}" y2="${yW(d.ob).toFixed(1)}" stroke="${col}" stroke-width="2"><title>${tip}</title></line>`;
+      if (P.divLabels) {
+        const ly = bull ? Math.min(bottom - 2, yW(d.ob) + 10) : Math.max(padT + 7, yW(d.ob) - 4);
+        over += `<text x="${xOf(d.b).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" style="font-size:8px;font-weight:700;fill:${col};"><title>${tip}</title>${lab}</text>`;
+      }
+    }
+    // legend
+    let li = n - 1; while (li >= 0 && wt1[li] == null) li--;
+    let leg = `WT ${P.n1} ${P.n2}`;
+    let tail = '';
+    if (li >= 0) {
+      const w1 = wt1[li], w2 = wt2[li];
+      const c1 = li && wt1[li - 1] != null && w1 > wt1[li - 1] ? C.up : C.dn;
+      tail += ` <tspan fill="${c1}" font-weight="700">${w1.toFixed(1)}</tspan>${w2 != null ? ` <tspan fill="${C.wt2}">${w2.toFixed(1)}</tspan>` : ''}`;
+      const zone = w2 != null && w2 >= P.ob1 ? ' · overbought' : w2 != null && w2 <= P.os1 ? ' · oversold' : '';
+      if (zone) tail += `<tspan fill="${zone === ' · overbought' ? C.ob : C.os}">${zone}</tspan>`;
+    }
+    if (shown) tail += ` · ${shown} div`;
+    if (htf) {
+      if (htf.state === 'bull' || htf.state === 'bear' || htf.state === 'flat')
+        tail += ` · <tspan fill="${htf.state === 'bull' ? C.up : htf.state === 'bear' ? C.dn : '#787b86'}" font-weight="700">HTF ${P.htfTF} ${htf.state.toUpperCase()}</tspan>`;
+      else if (htf.state === 'short')
+        tail += ` · <tspan fill="#787b86">HTF ${P.htfTF} needs ${htf.need} bars, have ${htf.have}<title>The HTF WaveTrend is built from the warm-up + today bars already loaded (no extra broker calls). Raise NSE_WARM_DAYS, or pick a shorter HTF in ⚙.</title></tspan>`;
+    }
+    return { under, over, legend: leg + tail, wt1Last: li >= 0 ? wt1[li] : null, wt1Col: li > 0 && wt1[li - 1] != null && wt1[li] > wt1[li - 1] ? C.up : C.dn };
+  }
+
+  // The pane under the chart: Squeeze Momentum and WaveTrend together, each
+  // with its own toggle, legend line and ⚙ (TradingView-style), sharing the
+  // zero line; squeeze in price units, WaveTrend on its own ±scale.
+  const _gear = id => `<tspan data-indset="${id}" style="cursor:pointer;font-size:11px;" fill="#9aa4b2" dx="5"><title>Settings</title>⚙</tspan>`;
   function _sqzPaneSvg(cs, xOf, W, padL, padR, H) {
-    if (!_chart.show.sqz) return '';
+    const onS = !!_chart.show.sqz, onW = !!_chart.show.wt;
+    if (!onS && !onW) return '';
     const P = SQZ;
-    const need = Math.max(P.bbLen, 2 * P.kcLen - 1) + 1;
+    const needS = Math.max(P.bbLen, 2 * P.kcLen - 1) + 1, needW = 2 * (WT.n1 - 1) + WT.n2 + 4;
+    const need = Math.max(onS ? needS : 0, onW ? needW : 0);
     const wOff = cs ? _warmLen(cs) : 0;
     if (!cs || !cs.length || cs.length + wOff < need) {
       const have = cs ? cs.length : 0;
@@ -21452,30 +21664,38 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
         <rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}" style="fill:var(--wash)"/>
         <text x="${(padL + 6)}" y="${(H / 2 + 3).toFixed(1)}" style="font-size:10px;fill:var(--muted,#789);">
-          Squeeze Momentum warming up — ${have}/${need} bars${mins ? ` · about ${mins} more minute${mins > 1 ? 's' : ''} at ${_chart.interval}m` : ''}</text>
+          ${onS ? 'Squeeze Momentum' : ''}${onS && onW ? ' + ' : ''}${onW ? 'WaveTrend' : ''} warming up — ${have}/${need} bars${mins ? ` · about ${mins} more minute${mins > 1 ? 's' : ''} at ${_chart.interval}m` : ''}</text>
       </svg>`;
     }
-    const { val, state, divs } = _sqzSeries(cs);
-    const padT = 6, padB = 16, right = W - padR, n = cs.length;
-    // scale: symmetric about zero, fitted to the bars on screen (time zoom)
-    let mx = 0, step = Infinity;
+    const sq = onS ? _sqzSeries(cs) : null;
+    const val = sq ? sq.val : [], state = sq ? sq.state : [], divs = sq ? sq.divs : [];
+    const wtS = onW ? _wtSeries(cs) : null;
+    const legendH = onS && onW ? 24 : 13;
+    const padT = legendH + 2, padB = 16, right = W - padR, n = cs.length;
+    // scales: symmetric about zero, fitted to the bars on screen (time zoom)
+    let mx = 0, mw = Math.max(Math.abs(WT.ob1), Math.abs(WT.os1)), step = Infinity;
     for (let i = 0; i < n; i++) {
       const xi = xOf(i);
       if (i && xi - xOf(i - 1) > 0.01) step = Math.min(step, xi - xOf(i - 1));
-      if (xi < padL - 2 || xi > right + 2 || val[i] == null) continue;
-      mx = Math.max(mx, Math.abs(val[i]));
+      if (xi < padL - 2 || xi > right + 2) continue;
+      if (val[i] != null) mx = Math.max(mx, Math.abs(val[i]));
+      if (wtS) for (const v of [wtS.wt1[i], wtS.wt2[i]]) if (v != null) mw = Math.max(mw, Math.abs(v));
     }
     if (!(mx > 0)) mx = 1;
+    mw *= 1.06;
     if (!isFinite(step)) step = 4;
     const mid = padT + (H - padT - padB) / 2, half = (H - padT - padB) / 2 - 3;
     const y = v => mid - v / mx * half;
+    const yW = v => mid - v / mw * half;
     const bw = Math.max(1, Math.min(9, step * 0.72));
+    const wp = onW ? _wtPaneParts(cs, xOf, yW, padL, right, padT, H - padB, step) : null;
     let s = '';
     s += `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${(H - padB + 2).toFixed(1)}" style="fill:var(--wash)"/>`;
     s += _timeGridSvg(W, padL, padR, 0, H - padB + 2, H - 3, cs, xOf);
+    if (wp) s += wp.under;
     s += `<line x1="${padL}" y1="${mid.toFixed(1)}" x2="${right.toFixed(1)}" y2="${mid.toFixed(1)}" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>`;
     // histogram, coloured by sign and by whether momentum is growing
-    if (P.showHist) {
+    if (onS && P.showHist) {
       const groups = {};
       for (let i = 0; i < n; i++) {
         const v = val[i]; if (v == null) continue;
@@ -21484,9 +21704,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const x0 = xOf(i) - bw / 2, y0 = Math.min(mid, y(v)), hh = Math.max(0.6, Math.abs(y(v) - mid));
         (groups[col] = groups[col] || []).push(`M${x0.toFixed(1)},${y0.toFixed(1)}h${bw.toFixed(1)}v${hh.toFixed(1)}h${(-bw).toFixed(1)}Z`);
       }
-      for (const [col, ds] of Object.entries(groups)) s += `<path d="${ds.join('')}" fill="${col}" opacity="0.9"/>`;
+      for (const [col, ds] of Object.entries(groups)) s += `<path d="${ds.join('')}" fill="${col}" opacity="${onW ? 0.7 : 0.9}"/>`;
     }
-    // divergence: lines between the two momentum pivots, label at the second
+    // squeeze divergence: lines between the two momentum pivots, label at the second
     let shown = 0;
     for (const d of divs) {
       if (!_sqzDivShown(d)) continue;
@@ -21506,10 +21726,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <text x="${xb.toFixed(1)}" y="${(ly + 1.5).toFixed(1)}" text-anchor="middle" style="font-size:7.5px;font-weight:700;fill:${d.hidden ? col : '#000'};">${lab}</text></g>`;
       }
     }
+    if (wp) s += wp.over;
     // squeeze dots on the zero line; the fire (first release after a
     // squeeze) is the event traders wait for, drawn larger
     let runOn = 0, lastFire = -1, onLen = 0;
-    if (P.showDots) {
+    if (onS && P.showDots) {
       const dots = {};
       for (let i = 0; i < n; i++) {
         const st = state[i]; if (!st) continue;
@@ -21528,30 +21749,43 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const r = Math.max(0.9, Math.min(1.9, step * 0.32));
       for (const [col, xs] of Object.entries(dots))
         s += `<path d="${xs.map(x => `M${(x - r).toFixed(1)},${mid.toFixed(1)}a${r.toFixed(1)},${r.toFixed(1)} 0 1,0 ${(2 * r).toFixed(1)},0a${r.toFixed(1)},${r.toFixed(1)} 0 1,0 ${(-2 * r).toFixed(1)},0`).join('')}" fill="${col}"/>`;
-    } else {
+    } else if (onS) {
       for (let i = 0; i < n; i++) { const st = state[i]; if (!st) continue; if (st !== 'on' && runOn >= 3) lastFire = i; runOn = st === 'on' ? runOn + 1 : 0; }
       onLen = runOn;
     }
-    // current value at the right edge
-    let li = n - 1; while (li >= 0 && val[li] == null) li--;
+    // current values at the right edge, nudged apart if they collide
+    const tags = [];
     let stTxt = '', stCol = 'var(--muted,#789)';
-    if (li >= 0) {
-      const v = val[li], pv = li ? (val[li - 1] ?? 0) : 0;
-      const col = v > 0 ? (v > pv ? P.col.upUp : P.col.upDn) : (v < pv ? P.col.dnDn : P.col.dnUp);
-      s += `<text x="${(right + 3).toFixed(1)}" y="${(y(v) + 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${v >= 0 ? '+' : ''}${v.toFixed(1)}</text>`;
-      const growing = v > 0 ? v > pv : v < pv;
-      const st = state[li];
-      if (st === 'on') { stTxt = ` · SQUEEZE ON ${onLen} bar${onLen > 1 ? 's' : ''} — coiling`; stCol = P.col.sqzOn; }
-      else if (lastFire >= 0 && li - lastFire <= 10) { const up = (val[lastFire] ?? 0) >= 0; stTxt = ` · FIRED ${up ? '▲' : '▼'} ${li - lastFire} bar${li - lastFire === 1 ? '' : 's'} ago`; stCol = up ? P.col.upUp : P.col.dnDn; }
-      stTxt += ` · momentum ${v >= 0 ? 'bullish' : 'bearish'}, ${growing ? 'building' : 'fading'}`;
-      if (st !== 'on' && !(lastFire >= 0 && li - lastFire <= 10)) stCol = v >= 0 ? (growing ? P.col.upUp : P.col.upDn) : (growing ? P.col.dnDn : P.col.dnUp);
+    if (onS) {
+      let li = n - 1; while (li >= 0 && val[li] == null) li--;
+      if (li >= 0) {
+        const v = val[li], pv = li ? (val[li - 1] ?? 0) : 0;
+        const col = v > 0 ? (v > pv ? P.col.upUp : P.col.upDn) : (v < pv ? P.col.dnDn : P.col.dnUp);
+        tags.push({ y: y(v), col, txt: `${v >= 0 ? '+' : ''}${v.toFixed(1)}` });
+        const growing = v > 0 ? v > pv : v < pv;
+        const st = state[li];
+        if (st === 'on') { stTxt = ` · SQUEEZE ON ${onLen} bar${onLen > 1 ? 's' : ''} — coiling`; stCol = P.col.sqzOn; }
+        else if (lastFire >= 0 && li - lastFire <= 10) { const up = (val[lastFire] ?? 0) >= 0; stTxt = ` · FIRED ${up ? '▲' : '▼'} ${li - lastFire} bar${li - lastFire === 1 ? '' : 's'} ago`; stCol = up ? P.col.upUp : P.col.dnDn; }
+        stTxt += ` · momentum ${v >= 0 ? 'bullish' : 'bearish'}, ${growing ? 'building' : 'fading'}`;
+        if (st !== 'on' && !(lastFire >= 0 && li - lastFire <= 10)) stCol = v >= 0 ? (growing ? P.col.upUp : P.col.upDn) : (growing ? P.col.dnDn : P.col.dnUp);
+      }
     }
-    s += `<text x="${right + 3}" y="${(mid + 3).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">0</text>`;
-    const ld = [...divs].reverse().find(_sqzDivShown);
-    s += `<text x="${(padL + 3)}" y="11" style="font-size:8.5px;fill:var(--muted,#789);">SQZ MOM ${P.bbLen}·${P.lbQuirk ? P.kcMult : P.bbMult} / ${P.kcLen}·${P.kcMult}` +
-         `<tspan fill="${stCol}" font-weight="700">${escapeHtml(stTxt)}</tspan>` +
-         `${shown ? ` · ${shown} divergence${shown > 1 ? 's' : ''}` : ''}` +
-         `${ld ? `<tspan fill="${ld.kind === 'bullish' ? P.col.bull : P.col.bear}"> · last: ${ld.hidden ? 'hidden ' : ''}${ld.kind} ${_sqzHm(cs[ld.b].t)}</tspan>` : ''}</text>`;
+    if (wp && wp.wt1Last != null) tags.push({ y: yW(wp.wt1Last), col: wp.wt1Col, txt: `WT ${wp.wt1Last.toFixed(0)}` });
+    tags.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < tags.length; i++) if (tags[i].y - tags[i - 1].y < 9) tags[i].y = tags[i - 1].y + 9;
+    for (const t of tags) s += `<text x="${(right + 3).toFixed(1)}" y="${(t.y + 3).toFixed(1)}" style="font-size:9px;fill:${t.col};font-weight:700;">${t.txt}</text>`;
+    if (!tags.some(t => Math.abs(t.y - mid) < 8)) s += `<text x="${right + 3}" y="${(mid + 3).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">0</text>`;
+    // legend lines, each with its own ⚙
+    let ly = 11;
+    if (onS) {
+      const ld = [...divs].reverse().find(_sqzDivShown);
+      s += `<text x="${(padL + 3)}" y="${ly}" style="font-size:8.5px;fill:var(--muted,#789);">SQZ MOM ${P.bbLen}·${P.lbQuirk ? P.kcMult : P.bbMult} / ${P.kcLen}·${P.kcMult}` +
+           `<tspan fill="${stCol}" font-weight="700">${escapeHtml(stTxt)}</tspan>` +
+           `${shown ? ` · ${shown} divergence${shown > 1 ? 's' : ''}` : ''}` +
+           `${ld ? `<tspan fill="${ld.kind === 'bullish' ? P.col.bull : P.col.bear}"> · last: ${ld.hidden ? 'hidden ' : ''}${ld.kind} ${_sqzHm(cs[ld.b].t)}</tspan>` : ''}${_gear('sqz')}</text>`;
+      ly += 11;
+    }
+    if (wp) s += `<text x="${(padL + 3)}" y="${ly}" style="font-size:8.5px;fill:var(--muted,#789);">${wp.legend}${_gear('wt')}</text>`;
     s += _xmSvg('sqzXM', 0, H - padB + 2, H - padB - 1);
     return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${_xClip('xclipQ', W, padL, padR, H)}<g class="xzc">${s}</g></svg>`;
   }
@@ -22388,7 +22622,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const cx = ev.clientX, cy = ev.clientY;
       item(`📅 History calendar…${window._histDate ? `  (${window._histDate})` : ''}`, () => _histCalendarOpen(cx, cy));
       item('⤢ Fit (reset zoom)', () => document.getElementById('zoomFitBtn')?.click());
-      item('↺ Reset Defaults…', () => _resetSettings());
       {
         const sep1 = document.createElement('div');
         sep1.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:3px 0;';
@@ -22406,6 +22639,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           try { renderPriceChart(); } catch (_) {}
         });
       }
+      // Reset last, behind its own separator: it wipes settings, so it
+      // should never sit where a quick click meant for something else lands
+      {
+        const sepR = document.createElement('div');
+        sepR.className = 'ctx-sep-reset';
+        sepR.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:3px 0;';
+        menu.appendChild(sepR);
+      }
+      item('↺ Reset Defaults…', () => _resetSettings());
       document.body.appendChild(menu);
       // keep the whole menu on screen near the right and bottom edges
       try {
@@ -26684,13 +26926,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   setTimeout(_turnsFetch, 6000);
   setInterval(_turnsFetch, 300000);
   function _turnLinesSvg(W, padL, padR, top, bottom) {
-    const v = _turns.v;
-    if (!v || v.symbol !== (state.symbol || 'NIFTY') || _chart.show.turnTimes === false) return '';
+    if (_chart.show.turnTimes === false) return '';
     if (_isRenkoView && _isRenkoView()) return '';
+    const v0 = _turns.v, v = v0 && v0.symbol === (state.symbol || 'NIFTY') ? v0 : { days: 0 };
     const lines = [
       ...(v.marked || []).map(b => ({ ...b, tier: 'major' })),
       ...(v.midday || []).map(b => ({ ...b, tier: b.marked ? 'mid' : 'lean' })),
-    ].sort((x, y) => x.min - y.min);
+    ];
+    // fixed 13:00 marker, drawn like a lean line (amber dash) every session
+    // whether or not the turn statistics have loaded; skipped if a measured
+    // turn line already sits at 13:00
+    if (!lines.some(b => b.min === 780)) lines.push({ min: 780, time: '13:00', tier: 'fixed', bias: 'both' });
+    lines.sort((x, y) => x.min - y.min);
     if (!lines.length) return '';
     const iv = _chart.interval || 1, slots = Math.max(1, Math.ceil(385 / iv));
     const hhmm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -26723,12 +26970,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (isNext) { sty.w += 0.8; sty.op = 1; }
       const lab = b.tier === 'major' ? `${tag} ${b.time} · ${b.turns}/${v.days}d`
                 : b.tier === 'mid'   ? `${tag} ${b.time} · ${b.ratio}×`
+                : b.tier === 'fixed' ? `${tag} 1 pm`
                 :                      `${tag} ${b.time} lean`;
       const head = b.tier === 'major'
         ? `${b.turns} major turns in ${v.days} sessions (an even spread over the session would give ${b.expected})`
         : `${b.turns} midday swing turns in ${v.days} sessions, ${b.ratio}× the average midday slot (${b.expected})` +
           (b.tier === 'lean' ? ' — the busiest slot of this hour, NOT clearly above chance' : '');
-      const tip = `${b.time}-${hhmm(b.min + 15)}: ${head} — ${b.lows} lows (rallies started), ${b.highs} highs (falls started). Average move in the next 30 min: ${b.follow30 ?? '—'} pts. p=${b.p}. Past sessions, not a forecast.`;
+      const tip = b.tier === 'fixed'
+        ? '13:00 — fixed 1 pm time marker, drawn every session (not a measured turn time; the turn-time lines carry the statistics).'
+        : `${b.time}-${hhmm(b.min + 15)}: ${head} — ${b.lows} lows (rallies started), ${b.highs} highs (falls started). Average move in the next 30 min: ${b.follow30 ?? '—'} pts. p=${b.p}. Past sessions, not a forecast.`;
       s += `<g opacity="${sty.op}"${isNext ? ` class="turn-next" style="animation-delay:${phase}s"` : ''}><line x1="${sx.toFixed(1)}" y1="${top}" x2="${sx.toFixed(1)}" y2="${bottom}" stroke="${col}" stroke-width="${sty.w}" stroke-dasharray="${sty.dash}"/>
         <text x="${(sx + 3).toFixed(1)}" y="${ly.toFixed(1)}" style="font-size:8.5px;font-weight:700;fill:${col};">${lab}${isNext ? ' ← next' : ''}</text>
         <title>${escapeHtml(tip)}</title></g>`;
@@ -31699,7 +31949,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       const box2 = document.getElementById('sqzPaneBody');
       const k = _chart._oscCtx;
-      if (box2) box2.innerHTML = k ? _sqzPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10) : '';
+      if (box2) box2.innerHTML = k ? _sqzPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * (_chart.show.wt ? 0.34 : 0.25)) + 10) : '';
     } catch (_) {}
     // the panes were just rebuilt: put a hovering crosshair back
     try { const xm = _chart._xm; if (xm) _mirrorCrosshair(xm.px, true, xm.W, xm.src); } catch (_) {}
@@ -33174,6 +33424,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'pdPrepCollapsed',     // PD prep card collapsed for the day
     'ttrCfgV1',            // Trend Target Ribbon ⚙ settings
     'sqzCfgV1',            // Squeeze Momentum ⚙ settings
+    'wtCfgV1',             // WaveTrend ⚙ settings
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
     'levelVoiceCfg',       // spoken wording for level touches
@@ -33336,7 +33587,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz',
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz', 'wt',
                      'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
@@ -33344,7 +33595,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // missing key must not read as a deliberate "off"
       // (PD: zones, gaps, liquidity and the prep card on; OTE, order blocks
       // and the signal filter are opt-in)
-      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz', 'wt', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
     }

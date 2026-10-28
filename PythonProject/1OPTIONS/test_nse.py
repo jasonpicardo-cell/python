@@ -1340,7 +1340,7 @@ console.log(JSON.stringify({ a, b, one: (svg.match(/emax-line/g) || []).length =
           'id="emaXFast" class="ohlc-inp" value="5"' in dsrc and 'id="emaXSlow" class="ohlc-inp" value="13"' in dsrc
           and dsrc.index('id="chk_ema200"') < dsrc.index('id="emaXFast"') < dsrc.index('id="chk_vwap"'))
     check("ema cross: defaults 5/13 in the chart config, which Reset clears",
-          dsrc.count("emaX: true, ttr: true, sqz: true }, emaX: { fast: 5, slow: 13 } }") == 2 and "'chartCfg'," in dsrc)
+          dsrc.count("emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }") == 2 and "'chartCfg'," in dsrc)
     check("ema cross: drawn by the candle/Heikin Ashi renderer and by Renko", dsrc.count("svg += _emaCrossSvg(") == 2)
 
 
@@ -1371,8 +1371,16 @@ NOW = 800; const d = _turnLinesSvg(1000, 0, 0, 0, 100);
 HIST = true; NOW = 600; const e = _turnLinesSvg(1000, 0, 0, 0, 100);
 const styles = [...b.matchAll(/<g opacity="([\d.]+)"><line[^>]*stroke="([^"]+)" stroke-width="([\d.]+)" stroke-dasharray="([^"]+)"/g)].map(m => [m[1], m[3], m[4]].join('|'));
 const leanCols = [...b.matchAll(/stroke="([^"]+)"[^>]*\/>\s*<text[^>]*>[^<]*lean/g)].map(m => m[1]);
+HIST = false; NOW = 600;
+const sv = _turns.v;
+_turns.v = { symbol: 'NIFTY', days: 60, marked: [], midday: [mk(660, 'lean', 'rally')] }; const f1 = _turnLinesSvg(1000, 0, 0, 0, 100);
+_turns.v = null; const f2 = _turnLinesSvg(1000, 0, 0, 0, 100);
+_chart.show.turnTimes = false; const f3 = _turnLinesSvg(1000, 0, 0, 0, 100); _chart.show.turnTimes = undefined;
+_turns.v = sv;
+const pm = svg => { const m = svg.match(/<line x1="([\d.]+)"[^>]*stroke="([^"]+)" stroke-width="([\d.]+)" stroke-dasharray="([^"]+)"\/>\s*<text[^>]*>[^<]*1 pm/); return m ? [+m[1], m[2], m[4]] : null; };
 console.log(JSON.stringify({ a: nextOf(a) === xs(a)[0], b: nextOf(b) === xs(b)[1], c: nextOf(c) === xs(c)[2],
-  d: nextOf(d), e: nextOf(e), nBlink: (b.match(/turn-next/g) || []).length, uniform: new Set(styles).size === 1 && styles.length === 3, leanCols }));
+  d: nextOf(d), e: nextOf(e), nBlink: (b.match(/turn-next/g) || []).length, uniform: new Set(styles).size === 1 && styles.length === 3, leanCols,
+  pmDup: (b.match(/1 pm/g) || []).length, pm1: pm(f1), pm2: pm(f2), n2: xs(f2).length, f3 }));
 """
     r = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
     try:
@@ -1384,6 +1392,11 @@ console.log(JSON.stringify({ a: nextOf(a) === xs(a)[0], b: nextOf(b) === xs(b)[1
     check("turn blink: nothing blinks after the last line or on a past date", o["d"] is None and o["e"] is None, str(o))
     check("turn lines: lean lines drawn the same as the others (one dash, width, transparency)", o["uniform"], str(o))
     check("turn lines: a lean line takes the same colour rule (rally lean green, crash lean red)", o["leanCols"] == ["#1fd17a", "#ff3b4e"], str(o["leanCols"]))
+    x13 = round((780 - 555 + 0.5) / 385 * 1000, 1)
+    check("turn lines: fixed 1 pm line - amber, same dash as the lean lines, at 13:00, drawn even before the turn statistics load",
+          o["pm1"] == [x13, "#f5b301", "6,4"] and o["pm2"] == [x13, "#f5b301", "6,4"] and o["n2"] == 1, str({k: o[k] for k in ("pm1", "pm2", "n2")}))
+    check("turn lines: no duplicate 1 pm when a measured turn line already sits at 13:00; hidden with the turn-times toggle",
+          o["pmDup"] == 0 and o["f3"] == "", str({k: o[k] for k in ("pmDup", "f3")}))
 
 
 def test_defaults_pvsra_pivots():
@@ -2192,7 +2205,7 @@ console.log(JSON.stringify({{alma: r.alma, dev: r.dev, atr: r.atr,
           and T["glow"]["width"] == 4 and T["glow"]["color"] == "trend" and T["keepPositions"] == 1 and len(js["pos"]) == 1)
     check("trend ribbon: drawn on the candle chart with a toggle (on by default)",
           'id="chk_ttr"' in d and "if (_ttrL) svg += _ttrL.under;" in d and "if (_ttrL) svg += _ttrL.over;" in d
-          and d.count("emaX: true, ttr: true, sqz: true }") == 2)
+          and d.count("emaX: true, ttr: true, sqz: true, wt: true }") == 2)
 
 
 def test_ctx_clock():
@@ -2811,13 +2824,112 @@ console.log(JSON.stringify(R));
           'id="sqzPaneBody"' in d and 'id="chk_sqz"' in d and 'data-indset="sqz"' in d and "_indRegister('sqz'" in d
           and "key: 'sqzCfgV1'" in d and "'sqzCfgV1',            //" in d and "['sqzXM', 'sqz']" in d
           and "#sqzPaneBody g.xzc" in d and "${_xClip('xclipQ', W, padL, padR, H)}<g class=\"xzc\">" in d
-          and "'turnTimes', 'emaX', 'ttr', 'sqz', 'pdZones'" in d and "ttr: true, sqz: true }" in d)
+          and "'turnTimes', 'emaX', 'ttr', 'sqz', 'wt', 'pdZones'" in d and "ttr: true, sqz: true, wt: true }" in d)
     check("dashboard: divergences on closed bars, drawn in the pane and on the price (candles and Renko)",
           "const closedN = _chart.liveBar ? cs.length - 1 : cs.length;" in d
           and d.count("_sqzPriceDivSvg(cs, ") == 3 and "if (!_chart.show.sqz || !SQZ.div.onPrice" in d)
     check("RSI pane removed: no pane, renderer or settings left; its saved settings are cleared",
           all(x not in d for x in ("rsiPaneBody", "_rsiPaneSvg", "rsiXM", "xclipR", "_rsiCtx", "_divRes"))
           and "localStorage.removeItem('rsiCfg')" in d)
+
+
+def _wt_reference(bars, n1=10, n2=21):
+    """Independent Python port of the WaveTrend maths (Pine ta.ema seeded by
+    the SMA of its first `len` values; ta.sma(wt1, 4))."""
+    def ema(src, ln):
+        out, prev, run, al = [None] * len(src), None, [], 2.0 / (ln + 1)
+        for i, v in enumerate(src):
+            if v is None:
+                run = []; continue
+            if prev is not None:
+                prev = al * v + (1 - al) * prev; out[i] = prev; continue
+            run.append(v)
+            if len(run) >= ln:
+                prev = sum(run[-ln:]) / ln; out[i] = prev
+        return out
+    ap = [(b["h"] + b["l"] + b["c"]) / 3 for b in bars]
+    esa = ema(ap, n1)
+    d = ema([None if e is None else abs(a - e) for a, e in zip(ap, esa)], n1)
+    ci = [None if dd is None else (0 if dd == 0 else (a - e) / (0.015 * dd)) for a, e, dd in zip(ap, esa, d)]
+    wt1 = ema(ci, n2)
+    wt2 = [None if i < 3 or any(x is None for x in wt1[i - 3:i + 1]) else sum(wt1[i - 3:i + 1]) / 4 for i in range(len(wt1))]
+    return wt1, wt2
+
+
+def test_wavetrend():
+    """WaveTrend Enhanced [LazyBear+] inside the Squeeze pane: WT1/WT2 match an
+    independent port bar for bar; HTF built from the loaded bars per session
+    from 09:15 (and says when history is short); divergence uses the script's
+    rule (previous pivot, any distance); Local Trend BG, HTF Bias BG and
+    Buy/Sell signals are not ported; two ⚙ icons in the pane; right-click
+    Reset Defaults moved to the end."""
+    import subprocess, json as _json, random, math, tempfile
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    rnd = random.Random(11)
+    bars, p, t0 = [], 24500.0, 1792208700        # 2026-10-23 09:15 IST
+    for day in range(3):
+        for m in range(375):
+            o = p; p += rnd.gauss(0.4 * math.sin((day * 375 + m) / 30), 9)
+            bars.append({"t": t0 + day * 86400 + m * 60, "o": o, "c": p, "h": max(o, p) + abs(rnd.gauss(0, 4)), "l": min(o, p) - abs(rnd.gauss(0, 4))})
+    harness = "const WT = { n1: 10, n2: 21 }; const _chart = { interval: 1 };\n" + "\n".join(grab(f) for f in ("_emaPine", "_wtCompute", "_wtHtf")) \
+        + "\nconst bars = " + _json.dumps(bars) + ";\n" + r"""
+const R = {};
+R.w = _wtCompute(bars, WT);
+R.h240 = _wtHtf(bars, 240, WT);
+R.h15 = _wtHtf(bars, 15, WT);
+R.same = _wtHtf(bars, 1, WT).state;
+// reference: build 15-minute buckets the same way and compare the last value
+console.log(JSON.stringify(R));
+"""
+    hf = os.path.join(tempfile.gettempdir(), "wt_harness.js")
+    open(hf, "w").write(harness)
+    res = subprocess.run(["node", hf], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("wavetrend: harness ran", False, (res.stderr or res.stdout)[:500]); return
+    r1, r2 = _wt_reference(bars)
+    j1, j2 = R["w"]["wt1"], R["w"]["wt2"]
+    bad = [i for i in range(len(bars)) if (r1[i] is None) != (j1[i] is None) or (r2[i] is None) != (j2[i] is None)
+           or (r1[i] is not None and abs(r1[i] - j1[i]) > 1e-6) or (r2[i] is not None and abs(r2[i] - j2[i]) > 1e-6)]
+    check("wavetrend: WT1 / WT2 match the Pine port bar for bar (SMA-seeded EMAs, first value at bar 2(n1-1)+n2-1)",
+          not bad and r1[37] is None and r1[38] is not None and r2[41] is not None and r2[40] is None, str(bad[:5]))
+    # HTF reference: 15-minute buckets from 09:15
+    hb = []
+    for b in bars:
+        k = ((b["t"] + 19800) // 86400, ((b["t"] + 19800) % 86400 // 60 - 555) // 15)
+        if hb and hb[-1][0] == k:
+            x = hb[-1][1]; x["h"] = max(x["h"], b["h"]); x["l"] = min(x["l"], b["l"]); x["c"] = b["c"]
+        else:
+            hb.append((k, {"h": b["h"], "l": b["l"], "c": b["c"]}))
+    hr = _wt_reference([x for _, x in hb])[0][-1]
+    check("wavetrend: HTF 15 built from the loaded bars in 09:15-anchored buckets; 240 says the history is too short; HTF ≤ chart TF is skipped",
+          len(hb) == 75 and abs(R["h15"]["v"] - hr) < 1e-6 and R["h15"]["state"] == ("bull" if hr > 0 else "bear")
+          and R["h240"] == {"state": "short", "have": 6, "need": 39} and R["same"] == "same", str({k: R[k] for k in ("h240", "h15", "same")}))
+    ws = grab("_wtSeries")
+    check("wavetrend: divergence = the script's rule (pivots on WT1, previous pivot at any distance), on closed bars",
+          "_oscDivergences(all.slice(0, off + closedN), rc.wt1, { left: WT.lbL, right: WT.lbR, rangeMin: 0, rangeMax: Infinity })" in ws
+          and "const closedN = _chart.liveBar ? cs.length - 1 : cs.length;" in ws)
+    parts = grab("_wtPaneParts")
+    check("wavetrend: no background colours and no Buy/Sell signals ported; the rest is drawn",
+          all(x not in parts for x in ("bgcolor", "localBg", "htfBg", "Buy", "Sell", "triangle"))
+          and all(x in parts for x in ("P.ob1", "P.ob2", "P.os1", "P.os2", "C.wt2", "WaveTrend crossed", "'R' : 'H'" if False else "${d.hidden ? 'H' : 'R'}-${bull ? 'Bu' : 'Br'}", "HTF ${P.htfTF}", "P.slopeHisto")))
+    pane = grab("_sqzPaneSvg")
+    check("wavetrend: drawn inside the SQZ MOM pane on its own scale, two legend lines each with its own ⚙ (sqz and wt)",
+          "const yW = v => mid - v / mw * half;" in pane and "_wtPaneParts(cs, xOf, yW," in pane
+          and "${_gear('sqz')}" in pane and "${_gear('wt')}" in pane and 'data-indset="${id}"' in d
+          and "if (!onS && !onW) return '';" in pane)
+    check("dashboard: WaveTrend toggle (default on) + ⚙, registered with its key, Reset Defaults clears it; pane grows when it is on",
+          'id="chk_wt"' in d and 'data-indset="wt"' in d and "_indRegister('wt'" in d and "key: 'wtCfgV1'" in d
+          and "'wtCfgV1',             //" in d and "'ttr', 'sqz', 'wt', 'pdZones'" in d and d.count("sqz: true, wt: true }") == 2
+          and "Math.round(k.H * (_chart.show.wt ? 0.34 : 0.25)) + 10" in d)
 
 
 _POI_SAMPLE = (
@@ -2949,10 +3061,12 @@ def test_chart_ctx_actions():
     d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
     i = d.index("const onCtx = ev => {"); j = d.index("document.addEventListener('contextmenu', onCtx, true);")
     seg = d[i:j]
-    check("chart right-click: calendar, Fit and Reset Defaults items, above the alerts",
+    check("chart right-click: calendar and Fit above the alerts; Reset Defaults LAST, behind its own separator",
           "_histCalendarOpen(cx, cy)" in seg and "document.getElementById('zoomFitBtn')?.click()" in seg
           and "item('↺ Reset Defaults…', () => _resetSettings());" in seg
-          and seg.index("History calendar") < seg.index("Alert when spot touches"))
+          and seg.index("History calendar") < seg.index("Alert when spot touches")
+          and seg.index("Delete alert at") < seg.index("ctx-sep-reset") < seg.index("item('↺ Reset Defaults…'") < seg.index("document.body.appendChild(menu);")
+          and seg.count("Reset Defaults…") == 1)
     check("chart right-click: Reset Defaults is the same function the Alerts tab button runs",
           "if (ev.target && ev.target.id === 'alertResetBtn') { ev.preventDefault(); _resetSettings(); }" in d)
     names = d[d.index("const _NSE_HOLIDAY_NAMES = {"):d.index("};", d.index("const _NSE_HOLIDAY_NAMES = {"))]
@@ -3033,7 +3147,7 @@ def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
