@@ -17,7 +17,7 @@
     --panel-3: #101114;
     /* Widget surfaces. --wash is the faint tint some panels carry so they
        read as cards in LIGHT mode; in dark mode it is nothing at all, so the
-       chart, the RSI pane, Trade entries and the tiles sit on true black.
+       chart, the Squeeze pane, Trade entries and the tiles sit on true black.
        --box is for floating containers (toasts, tooltips, result rows). */
     --wash: transparent;
     --box: #000000;
@@ -227,6 +227,29 @@
   .pd-sec { border-top:1px solid rgba(127,127,127,0.18); padding-top:3px; }
   .pd-two { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:4px 18px; }
   .pd-checks label { cursor:pointer; white-space:nowrap; }
+  /* ── history calendar (chart right-click) ── */
+  .hcal { position:fixed; z-index:99999; width:236px; padding:8px; background:var(--box,#000); color:var(--text);
+    border:1px solid rgba(127,127,127,0.45); border-radius:8px; box-shadow:0 8px 28px rgba(0,0,0,0.55); font-size:11px; user-select:none; }
+  .hc-head { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  .hc-head b { flex:1; text-align:center; }
+  .hc-head button, .hc-foot button { background:none; border:1px solid rgba(127,127,127,0.35); color:var(--text); border-radius:4px; cursor:pointer; padding:1px 6px; font-size:10px; }
+  .hc-head button:disabled { opacity:.3; cursor:default; }
+  .hc-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; text-align:center; }
+  .hc-grid i { font-style:normal; font-size:9px; color:var(--muted); padding-bottom:2px; }
+  .hc-d { padding:4px 0; border-radius:4px; }
+  .hc-d.ok { cursor:pointer; }
+  .hc-d.ok:hover { background:rgba(127,127,127,0.25); }
+  .hc-d.off { color:var(--muted); opacity:.45; }
+  .hc-d.hol { color:var(--neg,#ef5350); opacity:.75; text-decoration:line-through; }
+  .hc-d.today { box-shadow:inset 0 0 0 1px var(--gold,#d4af37); }
+  .hc-d.sel { background:var(--accent,#5b8cff); color:#fff; opacity:1; }
+  .hc-foot { display:flex; flex-wrap:wrap; align-items:center; gap:5px; margin-top:7px; }
+  .hc-foot button.on { border-color:var(--accent,#5b8cff); color:var(--accent,#5b8cff); }
+  .hc-foot span { flex-basis:100%; color:var(--muted); font-size:9.5px; }
+  /* ── time zoom: shapes outside the visible window are clipped to the plot ── */
+  #chartSvg g.xzc :is(path,line,rect,polygon,polyline,circle,ellipse) { clip-path:url(#xclipM); }
+  #ctxChartBody g.xzc :is(path,line,rect,polygon,polyline,circle,ellipse) { clip-path:url(#xclipC); }
+  #sqzPaneBody g.xzc :is(path,line,rect,polygon,polyline,circle,ellipse) { clip-path:url(#xclipQ); }
   /* ── drag sideways to change day ── */
   #chartBody.day-swiping { transition:none; cursor:grabbing; will-change:transform; }
   #chartBody { transition:transform .18s ease-out, opacity .18s ease-out; }
@@ -2365,7 +2388,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   slow <input type="number" id="emaXSlow" class="ohlc-inp" value="13" min="2" max="500" step="1" style="width:38px;font-size:9px;padding:0 2px;">
                 </span>
                 <label><input type="checkbox" id="chk_vwap"> VWAP</label>
-                <label title="SMI of MFI (andre_007): the Stochastic Momentum Index of the Money Flow Index, with dynamic zones, histogram and signal crosses - a pane between the chart and RSI"><input type="checkbox" id="chk_smiMfi"> SMI·MFI</label><button class="ind-gear" data-indset="smiMfi" title="SMI of MFI settings">⚙</button>
+                <label title="Squeeze Momentum [LazyBear] in the pane under the chart: momentum histogram, squeeze dots (white = coiling, grey = released, blue = none; ringed = the fire), and every regular and hidden divergence, drawn on the price too."><input type="checkbox" id="chk_sqz"> Squeeze</label><button class="ind-gear" data-indset="sqz" title="Squeeze Momentum settings">⚙</button>
               </span>
               <span style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;font-size:9px;color:var(--muted,#789);border-left:1px solid rgba(255,255,255,0.12);padding-left:8px;" title="PDA / PDMP - premium, discount and market preparation (ICT). The dealing range's 50% line splits it into PREMIUM (look for shorts) and DISCOUNT (look for longs).">
                 <b style="color:var(--gold,#d4af37);">PD</b>
@@ -2410,9 +2433,6 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <div class="movers-loading">Loading candles…</div>
               </div>
             </div>
-            <!-- RSI pane. A SIBLING of chartBody rather than a child, because
-                 chartBody's innerHTML is replaced on every render and anything
-                 inside it is destroyed several times a second. -->
             <!-- Chart type, under the chart rather than buried in the header
                  dropdown: switching between candles and Renko is a thing you
                  do often while reading, not a setting you configure once. -->
@@ -2451,9 +2471,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   <input type="checkbox" id="renkoWeis" style="margin:0;" checked>Weis</label>
               </span>
             </div>
-            <!-- SMI of MFI: between the chart and RSI, the same height as RSI -->
-            <div id="smiPaneBody" style="padding:0 6px 2px;"></div>
-            <div id="rsiPaneBody" style="padding:0 6px 4px;"></div>
+            <!-- Squeeze Momentum pane. A SIBLING of chartBody rather than a
+                 child, because chartBody's innerHTML is replaced on every
+                 render and anything inside it is destroyed several times a second. -->
+            <div id="sqzPaneBody" style="padding:0 6px 4px;"></div>
             <!-- Announced-alert tally. Sits under the chart because it is a
                  read on the SESSION rather than on any one signal. -->
             <!-- 0.90-delta book, directly above the tally as asked -->
@@ -4699,7 +4720,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // glance. A 1.8 MB file is exactly the kind a browser caches hard, and
   // without a marker a stale copy is indistinguishable from a broken feature.
   console.log('%c[build] NSE dashboard 2026-09-18 03:18', 'color:#d4af37;font-weight:700');
-  console.log('[build] features: RSI pane + divergence + 80/20 markers · crosshair mirroring · ' +
+  console.log('[build] features: Squeeze Momentum pane + regular/hidden divergence · crosshair mirroring · ' +
               'strike ladder · regime map · slow grind · daily context · scorecard · memoised render');
 
 (function () {
@@ -17551,8 +17572,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true }, emaX: { fast: 5, slow: 13 } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true }, emaX: { fast: 5, slow: 13 } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show, emaX: _chart.emaX })); } catch (_) {} }
 
@@ -17727,7 +17748,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _chart.warmHa = _warmHaBuild(rows);
       const lh = _chart.warmHa[_chart.warmHa.length - 1];
       _chart._warmHaLast = lh ? { o: lh.o, c: lh.c, key } : null;
-      _emaXCache.key = ''; _ttrCache.key = ''; _chart._divKey = null;
+      _emaXCache.key = ''; _ttrCache.key = ''; _sqzCache.key = ''; _sqzCache.dKey = '';
       console.log(`[warm] ${sym} ${iv}m: ${rows.length} warm-up bar(s) from ${(j.dates || []).join(', ')}`);
       try { _emaCrossCheck(); } catch (_) {}
       try { _priceMaCheck(); } catch (_) {}
@@ -17743,6 +17764,83 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _NSE_HOLIDAYS = new Set(['2026-01-15', '2026-01-26', '2026-03-03', '2026-03-26', '2026-03-31',
     '2026-04-03', '2026-04-14', '2026-05-01', '2026-05-28', '2026-06-26',
     '2026-09-14', '2026-10-02', '2026-10-20', '2026-11-10', '2026-11-24', '2026-12-25']);
+  // ── History calendar (chart right-click ▸ 📅) ─────────────────────
+  // Pick any past session to replay through the same chart and indicators.
+  // Weekends and NSE holidays are greyed (hover names the holiday), future
+  // days are disabled, today means Live. Choosing a day drives the same
+  // Live / Historical controls the toolbar uses.
+  const _NSE_HOLIDAY_NAMES = {
+    '2026-01-15': 'Maharashtra municipal elections', '2026-01-26': 'Republic Day', '2026-03-03': 'Holi', '2026-03-26': 'Shri Ram Navami',
+    '2026-03-31': 'Shri Mahavir Jayanti', '2026-04-03': 'Good Friday', '2026-04-14': 'Dr. Baba Saheb Ambedkar Jayanti', '2026-05-01': 'Maharashtra Day',
+    '2026-05-28': 'Bakri Id', '2026-06-26': 'Muharram', '2026-09-14': 'Ganesh Chaturthi', '2026-10-02': 'Mahatma Gandhi Jayanti',
+    '2026-10-20': 'Dussehra', '2026-11-10': 'Diwali - Balipratipada', '2026-11-24': 'Prakash Gurpurb Sri Guru Nanak Dev', '2026-12-25': 'Christmas',
+  };
+  let _hcal = null;
+  function _histCalendarClose() {
+    if (!_hcal) return;
+    document.removeEventListener('mousedown', _hcal.out, true);
+    document.removeEventListener('keydown', _hcal.key, true);
+    _hcal.el.remove(); _hcal = null;
+  }
+  function _histGo(day) {
+    const modeSel = document.getElementById('chartDataMode'), histInp = document.getElementById('chartHistDate');
+    if (!modeSel || !histInp) return;
+    if (!day || day >= _istDayKey()) modeSel.value = 'live';
+    else { histInp.value = day; modeSel.value = 'hist'; }
+    modeSel.dispatchEvent(new Event('change'));
+    showToast?.(modeSel.value === 'live' ? '▶ Live — today' : `📅 ${_dayLabel(day)} ${day.slice(0, 4)}`);
+  }
+  function _histCalendarRender() {
+    const c = _hcal, y = c.y, m = c.m;
+    const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const today = _istDayKey(), sel = window._histDate || today;
+    const first = new Date(y, m, 1), lead = (first.getDay() + 6) % 7;          // Monday first
+    const dim = new Date(y, m + 1, 0).getDate();
+    let cells = '';
+    for (let i = 0; i < lead; i++) cells += '<span></span>';
+    for (let d = 1; d <= dim; d++) {
+      const dt = new Date(y, m, d), k = ymd(dt), wk = dt.getDay() === 0 || dt.getDay() === 6;
+      const hol = _NSE_HOLIDAY_NAMES[k] || (_NSE_HOLIDAYS.has(k) ? 'NSE holiday' : '');
+      const fut = k > today, ok = !wk && !hol && !fut;
+      const cls = ['hc-d', ok ? 'ok' : 'off', k === sel ? 'sel' : '', k === today ? 'today' : '', hol ? 'hol' : ''].filter(Boolean).join(' ');
+      const tip = hol ? `${hol} — NSE closed` : wk ? 'weekend' : fut ? 'not yet' : k === today ? 'today — Live' : `replay ${_dayLabel(k)}`;
+      cells += `<span class="${cls}" ${ok ? `data-hday="${k}"` : ''} title="${escapeHtml(tip)}">${d}</span>`;
+    }
+    const mon = first.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+    const nextOk = new Date(y, m + 1, 1) <= new Date(today + 'T12:00:00');
+    const prevSess = _tradingDayShift(today, -1);
+    c.el.innerHTML = `<div class="hc-head"><button data-hnav="-1" title="previous month">◀</button><b>${escapeHtml(mon)}</b>
+        <button data-hnav="1" ${nextOk ? '' : 'disabled'} title="next month">▶</button><button data-hclose="1" title="close (Esc)">✕</button></div>
+      <div class="hc-grid"><i>Mo</i><i>Tu</i><i>We</i><i>Th</i><i>Fr</i><i>Sa</i><i>Su</i>${cells}</div>
+      <div class="hc-foot"><button data-hday="${today}" class="${window._histDate ? '' : 'on'}">● Live (today)</button>
+        ${prevSess ? `<button data-hday="${prevSess}">◀ ${escapeHtml(_dayLabel(prevSess))}</button>` : ''}
+        <span>${window._histDate ? `showing ${escapeHtml(_dayLabel(window._histDate))}` : 'showing Live'}</span></div>`;
+  }
+  function _histCalendarOpen(x, y) {
+    _histCalendarClose();
+    const el = document.createElement('div');
+    el.className = 'hcal'; el.id = 'histCalendar';
+    const base = new Date((window._histDate || _istDayKey()) + 'T12:00:00');
+    _hcal = { el, y: base.getFullYear(), m: base.getMonth() };
+    document.body.appendChild(el);
+    _histCalendarRender();
+    el.style.left = `${Math.max(4, Math.min(x, innerWidth - el.offsetWidth - 4))}px`;
+    el.style.top = `${Math.max(4, Math.min(y, innerHeight - el.offsetHeight - 4))}px`;
+    el.addEventListener('mousedown', e => {
+      const t = e.target.closest('[data-hday],[data-hnav],[data-hclose]');
+      if (!t || t.disabled) return;
+      e.preventDefault(); e.stopPropagation();
+      if (t.dataset.hclose) return _histCalendarClose();
+      if (t.dataset.hnav) { const d = new Date(_hcal.y, _hcal.m + +t.dataset.hnav, 1); _hcal.y = d.getFullYear(); _hcal.m = d.getMonth(); return _histCalendarRender(); }
+      const day = t.dataset.hday;
+      _histCalendarClose();
+      _histGo(day);
+    });
+    _hcal.out = e => { if (_hcal && !_hcal.el.contains(e.target)) _histCalendarClose(); };
+    _hcal.key = e => { if (e.key === 'Escape') { e.preventDefault(); _histCalendarClose(); } };
+    setTimeout(() => { if (!_hcal) return; document.addEventListener('mousedown', _hcal.out, true); document.addEventListener('keydown', _hcal.key, true); }, 0);
+  }
+
   function _warmCurKey() { return `${state.symbol || 'NIFTY'}|${_chart.interval || 1}|${window._histDate || _istDayKey()}`; }
   function _istDayKey() {
     const d = new Date(Date.now() + (5.5 * 60 + new Date().getTimezoneOffset()) * 60000);
@@ -20998,11 +21096,63 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
 
   // ── one time axis for all three panes ────────────────────────────
-  // The context pane above the chart, the candles and the RSI pane below
+  // The context pane above the chart, the candles and the Squeeze pane below
   // share a viewBox width and side margins, so the same x is the same
   // minute in each. These draw the half-hour grid and time labels the same
   // way everywhere, and mirror the crosshair across the panes.
   function _isRenkoView() { return (document.getElementById('chartType')?.value || 'candle') === 'renko'; }
+  // ══ HORIZONTAL (TIME) ZOOM ═══════════════════════════════════════
+  // One visible window [s0, s1] in session slots, shared by the candle
+  // chart, the CVD/PCR/VIX pane and Squeeze Momentum - every time-based x goes
+  // through _xs(), so they all zoom and pan together. Mouse wheel zooms time
+  // around the cursor (Shift+wheel or the right price axis zooms price);
+  // when zoomed in, drag pans the session; Fit / double-click shows the
+  // whole day again. Renko has no time axis and ignores it.
+  const _slotsNow = () => Math.max(1, Math.ceil(385 / (_chart.interval || 1)));
+  function _xWin(slots) {
+    const z = _chart.xZoom;
+    if (!z || z.slots !== slots || z.s1 - z.s0 >= slots - 1e-9 || _isRenkoView()) return [0, slots];
+    return [z.s0, z.s1];
+  }
+  function _xzActive() { const sl = _slotsNow(), w = _xWin(sl); return w[1] - w[0] < sl - 1e-9; }
+  function _xs(a, slots, W, padL, padR) {
+    const [s0, s1] = _xWin(slots);
+    return padL + (a - s0) / (s1 - s0) * (W - padL - padR);
+  }
+  function _xSlotAt(px, slots, W, padL, padR) {          // inverse: pixel -> fractional slot position
+    const [s0, s1] = _xWin(slots);
+    return s0 + (px - padL) / (W - padL - padR) * (s1 - s0);
+  }
+  function _xSetWin(s0, span, slots) {
+    const minSpan = Math.min(slots, Math.max(6, Math.round(12 / Math.max(1, (_chart.interval || 1) / 1))));
+    span = Math.max(minSpan, Math.min(slots, span));
+    if (span >= slots - 1e-9) { _chart.xZoom = null; return; }
+    s0 = Math.max(0, Math.min(slots - span, s0));
+    _chart.xZoom = { s0, s1: s0 + span, slots };
+  }
+  let _xzRaf = 0;
+  function _xRender() {
+    if (_xzRaf) return;
+    _xzRaf = requestAnimationFrame(() => { _xzRaf = 0; _safe(() => renderPriceChart(), 'renderPriceChart'); });
+  }
+  // wheel: zoom time around the pointer's time (factor > 1 = zoom out)
+  function _xZoomAt(px, W, padL, padR, factor) {
+    if (_isRenkoView()) return false;
+    const slots = _slotsNow(), [s0, s1] = _xWin(slots), span = s1 - s0;
+    const a = _xSlotAt(Math.max(padL, Math.min(W - padR, px)), slots, W, padL, padR);
+    const ns = span * factor;
+    _xSetWin(a - (a - s0) * ns / span, ns, slots);
+    _xRender();
+    return true;
+  }
+  // grid step that keeps time labels readable at any zoom
+  function _xGridStep(slots) {
+    const [s0, s1] = _xWin(slots), mins = (s1 - s0) * (_chart.interval || 1);
+    return mins > 240 ? 30 : mins > 120 ? 15 : mins > 60 ? 10 : 5;
+  }
+  const _xClip = (id, W, padL, padR, H) => _xzActive()
+    ? `<defs><clipPath id="${id}"><rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}"/></clipPath></defs>` : '';
+  const _xClipAttr = id => _xzActive() ? ` clip-path="url(#${id})"` : '';
   function _timeGridSvg(W, padL, padR, top, bottom, labelY, cs, xOf) {
     const SESSION_MIN = 385, iv = _chart.interval || 1;
     const slots = Math.max(1, Math.ceil(SESSION_MIN / iv));
@@ -21012,7 +21162,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // or after each half hour, wherever its brick landed
     const brickMode = _isRenkoView() && cs && xOf;
     let lastX = -1e9;
-    for (let m = 0; m <= SESSION_MIN; m += 30) {
+    const stepM = brickMode ? 30 : _xGridStep(slots);
+    for (let m = 0; m <= SESSION_MIN; m += stepM) {
       let sx;
       if (brickMode) {
         const k = cs.findIndex(c => {
@@ -21022,7 +21173,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         if (k < 0) break;
         sx = xOf(k);
         if (sx - lastX < 26) continue;          // compressed quiet stretch
-      } else sx = padL + (m / iv + 0.5) / slots * (W - padL - padR);
+      } else sx = _xs(m / iv + 0.5, slots, W, padL, padR);
+      if (sx < padL - 0.5) continue;
       if (sx > W - padR) break;
       lastX = sx;
       s += `<line x1="${sx.toFixed(1)}" y1="${top}" x2="${sx.toFixed(1)}" y2="${bottom}" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>`;
@@ -21038,13 +21190,13 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   }
   function _xmTime(px, W, padL, padR) {
     const iv = _chart.interval || 1, slots = Math.max(1, Math.ceil(385 / iv));
-    const sl = Math.max(0, Math.min(slots - 1, Math.round((px - padL) / (W - padL - padR) * slots - 0.5)));
+    const sl = Math.max(0, Math.min(slots - 1, Math.round(_xSlotAt(px, slots, W, padL, padR) - 0.5)));
     const t = 555 + sl * iv;
     return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
   }
   // Called by the candle pane's own crosshair (src 'main') and by hovering
-  // the context or RSI pane. Draws the vertical line in the OTHER panes, and
-  // a time tag in the context and RSI panes, which have no crosshair of
+  // the context or Squeeze pane. Draws the vertical line in the OTHER panes, and
+  // a time tag in the context and Squeeze panes, which have no crosshair of
   // their own. Renko spaces bricks, not minutes, so the time-scaled context
   // pane is left out there.
   function _mirrorCrosshair(px, on, W, src) {
@@ -21052,7 +21204,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _chart._xm = on ? { px, W, src } : null;
     const ren = _isRenkoView();
     const G = _chart._geo || { padL: 8, padR: 72 };
-    for (const [id, pane] of [['ctxXM', 'ctx'], ['rsiXM', 'rsi'], ['smiXM', 'smi'], ['mainXM', 'main']]) {
+    for (const [id, pane] of [['ctxXM', 'ctx'], ['sqzXM', 'sqz'], ['mainXM', 'main']]) {
       const el = document.getElementById(id);
       if (!el) continue;
       // every pane but the one already drawing its own crosshair
@@ -21071,9 +21223,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
     }
   }
-  // hovering the context or RSI pane drives the same crosshair
+  // hovering the context or Squeeze pane drives the same crosshair
   document.addEventListener('mousemove', ev => {
-    const sv = ev.target && ev.target.closest ? ev.target.closest('#ctxChartBody svg, #rsiPaneBody svg, #smiPaneBody svg') : null;
+    const sv = ev.target && ev.target.closest ? ev.target.closest('#ctxChartBody svg, #sqzPaneBody svg') : null;
     if (!sv) {
       if (_chart._xm && _chart._xm.src !== 'main') _mirrorCrosshair(0, false);
       return;
@@ -21083,360 +21235,216 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const r = sv.getBoundingClientRect();
     const px = (ev.clientX - r.left) / r.width * vb.width;
     const G = _chart._geo || { padL: 8, padR: 72 };
-    const src = sv.closest('#ctxChartBody') ? 'ctx' : sv.closest('#smiPaneBody') ? 'smi' : 'rsi';
+    const src = sv.closest('#ctxChartBody') ? 'ctx' : 'sqz';
     if (px < G.padL || px > vb.width - G.padR) { _mirrorCrosshair(0, false); return; }
     _mirrorCrosshair(px, true, vb.width, src);
   }, { passive: true });
 
-  // ══ SMI of MFI (port of "Stochastic Momentum Index (SMI) of Money Flow
-  //    Index (MFI)" by andre_007, TradingView) ═══════════════════════════
-  // A pane between the price chart and RSI, the same height as RSI, with the
-  // script's defaults:
-  //   MFI(close, 13) -> SMI over it: K 13 (highest/lowest window), D 5 (both
-  //   EMA smoothings), Signal = EMA 5 of SMI, Histogram = SMI - Signal.
-  //   SMI = 200 x EMA(EMA(mfi - mid, D), D) / EMA(EMA(range, D), D), the
-  //   TradingView SMI formula the library documents (x200, %D smoothing).
-  //   Dynamic Zones: 90th / 10th / 50th percentile (nearest rank) of SMI
-  //   over 50 bars; background filled blue / red when SMI is outside them.
-  //   Fixed lines at 0 and +/-40.
-  //   Cross marks: circle = SMI crossed its signal OUTSIDE the dynamic zone,
-  //   diamond = crossed INSIDE it (green/blue up, red/orange down).
-  // Not ported: candle colouring (as asked), trend lines and divergence
-  // labels (both off in the script's defaults), and the higher-timeframe
-  // request (its default is the chart's own timeframe). The library's exact
-  // colour themes are not public, so its spectrum is approximated: the SMI
-  // line runs blue (strong up) -> green -> yellow -> red (strong down) by
-  // level (5/10/15/20/30), histogram blue above 0 / red below, deeper with
-  // size; the signal is blue while rising, red while falling.
-  // Computed over the warm-up sessions + today, so it is settled at 09:15.
-  const SMIMFI = { mfiLen: 13, kLen: 13, dLen: 5, sigLen: 5, dzLen: 50, dzHi: 90, dzLo: 90, band: 40,
-    maSmi: 'EMA', maSig: 'EMA',
-    // the script's separate Histogram parameter set (same defaults)
-    hMult: 1, hMfiLen: 13, hKLen: 13, hDLen: 5, hSigLen: 5, hMaSmi: 'EMA', hMaSig: 'EMA',
-    x1: { show: true, onlyOutside: true, above: -100, below: 100, bull: '#14e024', bear: '#ff0000' },
-    x2: { show: true, onlyInside: true, above: -100, below: 100, bull: '#2962ff', bear: '#ff9800' },
-    smiTheme: 'spectrum', smiUp: '#2196f3', smiDown: '#ff0000', smiWidth: 2,
-    sigUp: '#2196f3', sigDown: '#ff0000', fillTransp: 60,
-    histUp: '#1c3bfb', histDown: '#ff0000',
-    dzTop: '#3064fc', dzBottom: '#f23645', dzCenter: '#b2b5be', bgAbove: '#3064fc', bgBelow: '#f03449', bgOpacity: 30,
-    showSmi: true, showSig: true, showFill: true, showHist: true, showDz: true, showDzCenter: true, showBg: true, showBand: true };
-  const _smiCache = { key: '', v: null };
+  // ══ SQUEEZE MOMENTUM (port of "Squeeze Momentum Indicator [LazyBear]") ══
+  // The pane under the chart. Same maths as the TradingView script:
+  //   BB: sma(close, 20) ± k × stdev(close, 20)
+  //   KC: sma(close, 20) ± 1.5 × sma(true range, 20)
+  //   squeeze ON  (coiling)  = BB entirely inside KC
+  //   squeeze OFF (released) = BB entirely outside KC, otherwise no squeeze
+  //   momentum = linreg(close − avg(avg(highest high, lowest low), sma close), 20, 0)
+  // LazyBear's script widens the BB with the KC multiplier (1.5) instead of
+  // its own 2.0 - the quirk everyone sees on TradingView. It is kept by
+  // default so the dots match; untick it in ⚙ for the textbook 2.0 BB.
+  // Histogram colours as in the script: bright = momentum growing, dark =
+  // fading. Zero-line dots: white = squeeze on, grey = released (the first
+  // grey after a white run is the "fire" and is drawn larger), blue = none.
+  //
+  // DIVERGENCE, all four kinds, on every confirmed pivot of the histogram
+  // (TradingView's divergence logic: pivots on the oscillator, compared with
+  // the previous pivot of the same kind within 5-60 bars):
+  //   regular bullish  price lower low,  momentum higher low  - reversal up
+  //   hidden  bullish  price higher low, momentum lower low   - uptrend continues
+  //   regular bearish  price higher high, momentum lower high - reversal down
+  //   hidden  bearish  price lower high, momentum higher high - downtrend continues
+  // A pivot needs `right` closed bars after it, so each one is confirmed
+  // that many bars late; the tooltip gives the confirmation time. Closed
+  // bars only, so a mark never appears and then vanishes.
+  const SQZ = {
+    bbLen: 20, bbMult: 2.0, kcLen: 20, kcMult: 1.5, useTR: true, lbQuirk: true,
+    div: { left: 5, right: 3, rangeMin: 5, rangeMax: 60, zeroSide: true, minPct: 10, regular: true, hidden: true, labels: true, onPrice: true },
+    showHist: true, showDots: true, showFire: true,
+    col: { upUp: '#00ff00', upDn: '#008000', dnDn: '#ff0000', dnUp: '#800000',
+           sqzOn: '#e8e8e8', sqzOff: '#787b86', noSqz: '#2962ff', bull: '#26de81', bear: '#ff6b81' },
+  };
+  const _sqzCache = { key: '', v: null };
   {
-    const MA = [['EMA', 'Exponential (EMA)'], ['SMA', 'Simple (SMA)'], ['WMA', 'Weighted (WMA)'], ['RMA', 'Wilder / smoothed (RMA)'], ['HMA', 'Hull (HMA)'], ['LSMA', 'Least squares (LSMA)']];
-    const L = (k, label, max = 500) => ({ k, label, type: 'int', min: 1, max });
-    _indRegister('smiMfi', {
-      title: 'Stochastic Momentum Index (SMI) of Money Flow Index (MFI)', key: 'smiMfiCfgV1', cfg: SMIMFI, defaults: Object.freeze(_deepCopy(SMIMFI)),
-      apply: () => { _smiCache.key = ''; _safe(() => renderPriceChart(), 'renderPriceChart'); },
+    _indRegister('sqz', {
+      title: 'Squeeze Momentum [LazyBear]', key: 'sqzCfgV1', cfg: SQZ, defaults: Object.freeze(_deepCopy(SQZ)),
+      apply: () => { _sqzCache.key = ''; _safe(() => renderPriceChart(), 'renderPriceChart'); },
       schema: [
-        { tab: 'Inputs', group: 'Stochastic Momentum Index', fields: [
-          L('mfiLen', 'MFI length'), L('kLen', 'SMI K% length (high/low window)'), L('dLen', 'SMI D% length (both smoothings)'), L('sigLen', 'Signal length'),
-          { k: 'maSmi', label: 'Type of smoothing (SMI)', type: 'select', opts: MA },
-          { k: 'maSig', label: 'Type of smoothing (Signal)', type: 'select', opts: MA } ] },
-        { tab: 'Inputs', group: 'Histogram', fields: [
-          { k: 'hMult', label: 'Multiplier', type: 'float', min: 1, max: 10, step: 0.1 },
-          L('hMfiLen', 'MFI length'), L('hKLen', 'SMI K% length'), L('hDLen', 'SMI D% length'), L('hSigLen', 'Signal length'),
-          { k: 'hMaSmi', label: 'Type of smoothing (SMI)', type: 'select', opts: MA },
-          { k: 'hMaSig', label: 'Type of smoothing (Signal)', type: 'select', opts: MA } ] },
-        { tab: 'Inputs', group: 'Dynamic Zones', fields: [
-          { k: 'dzLen', label: 'Sample length', type: 'int', min: 2, max: 500 },
-          { k: 'dzHi', label: 'High is above X% of sample', type: 'float', min: 0, max: 100, step: 1 },
-          { k: 'dzLo', label: 'Low is below X% of sample', type: 'float', min: 0, max: 100, step: 1 },
-          { k: 'band', label: 'Fixed top / bottom lines (±)', type: 'int', min: 0, max: 100 } ] },
-        { tab: 'Inputs', group: 'Cross alerts 1 (circles)', fields: [
-          { k: 'x1.show', label: 'Show', type: 'bool' }, { k: 'x1.onlyOutside', label: 'Only outside the dynamic zone', type: 'bool' },
-          { k: 'x1.above', label: 'Cross down only when SMI above', type: 'float', min: -100, max: 100, step: 1 },
-          { k: 'x1.below', label: 'Cross up only when SMI below', type: 'float', min: -100, max: 100, step: 1 } ] },
-        { tab: 'Inputs', group: 'Cross alerts 2 (diamonds)', fields: [
-          { k: 'x2.show', label: 'Show', type: 'bool' }, { k: 'x2.onlyInside', label: 'Only inside the dynamic zone', type: 'bool' },
-          { k: 'x2.above', label: 'Cross down only when SMI above', type: 'float', min: -100, max: 100, step: 1 },
-          { k: 'x2.below', label: 'Cross up only when SMI below', type: 'float', min: -100, max: 100, step: 1 } ] },
-        { tab: 'Style', group: 'SMI line', fields: [
-          { k: 'smiTheme', label: 'Theme', type: 'select', opts: [['spectrum', 'Spectrum blue-green-red (by level)'], ['two', 'Two colours (by slope)']] },
-          { k: 'smiUp', label: 'Bull (two-colour theme)', type: 'color' }, { k: 'smiDown', label: 'Bear (two-colour theme)', type: 'color' },
-          { k: 'smiWidth', label: 'Line width', type: 'int', min: 1, max: 5 } ] },
-        { tab: 'Style', group: 'Signal', fields: [
-          { k: 'sigUp', label: 'Rising', type: 'color' }, { k: 'sigDown', label: 'Falling', type: 'color' },
-          { k: 'fillTransp', label: 'Fill transparency (100 = off)', type: 'int', min: 0, max: 100 } ] },
+        { tab: 'Inputs', group: 'Squeeze', fields: [
+          { k: 'bbLen', label: 'BB length', type: 'int', min: 2, max: 500 },
+          { k: 'bbMult', label: 'BB mult factor', type: 'float', min: 0.1, max: 10, step: 0.1, tip: 'used only when the LazyBear quirk is off' },
+          { k: 'kcLen', label: 'KC length (also momentum length)', type: 'int', min: 2, max: 500 },
+          { k: 'kcMult', label: 'KC mult factor', type: 'float', min: 0.1, max: 10, step: 0.1 },
+          { k: 'useTR', label: 'Use true range (KC)', type: 'bool' },
+          { k: 'lbQuirk', label: 'LazyBear quirk: BB uses KC mult (matches TradingView)', type: 'bool' } ] },
+        { tab: 'Inputs', group: 'Divergence', fields: [
+          { k: 'div.left', label: 'Pivot lookback left', type: 'int', min: 1, max: 50 },
+          { k: 'div.right', label: 'Pivot lookback right (confirmation delay)', type: 'int', min: 1, max: 50 },
+          { k: 'div.rangeMin', label: 'Min bars between pivots', type: 'int', min: 1, max: 500 },
+          { k: 'div.rangeMax', label: 'Max bars between pivots', type: 'int', min: 2, max: 1000 },
+          { k: 'div.zeroSide', label: 'Pivots on the right side of zero only', type: 'bool', tip: 'bullish pivots below zero, bearish above - drops the wiggles along the zero line' },
+          { k: 'div.minPct', label: 'Min pivot size (% of largest swing)', type: 'int', min: 0, max: 100, tip: '0 = every pivot, as TradingView' } ] },
         { tab: 'Style', group: 'Histogram', fields: [
-          { k: 'histUp', label: 'Above 0', type: 'color' }, { k: 'histDown', label: 'Below 0', type: 'color' } ] },
-        { tab: 'Style', group: 'Dynamic zones', fields: [
-          { k: 'dzTop', label: 'Upper line', type: 'color' }, { k: 'dzBottom', label: 'Lower line', type: 'color' }, { k: 'dzCenter', label: 'Centre line', type: 'color' },
-          { k: 'bgAbove', label: 'Background when above', type: 'color' }, { k: 'bgBelow', label: 'Background when below', type: 'color' },
-          { k: 'bgOpacity', label: 'Background opacity %', type: 'int', min: 0, max: 100 } ] },
-        { tab: 'Style', group: 'Cross marks', fields: [
-          { k: 'x1.bull', label: 'Circle up', type: 'color' }, { k: 'x1.bear', label: 'Circle down', type: 'color' },
-          { k: 'x2.bull', label: 'Diamond up', type: 'color' }, { k: 'x2.bear', label: 'Diamond down', type: 'color' } ] },
+          { k: 'col.upUp', label: 'Above 0, rising', type: 'color' }, { k: 'col.upDn', label: 'Above 0, falling', type: 'color' },
+          { k: 'col.dnDn', label: 'Below 0, falling', type: 'color' }, { k: 'col.dnUp', label: 'Below 0, rising', type: 'color' } ] },
+        { tab: 'Style', group: 'Squeeze dots & divergence', fields: [
+          { k: 'col.sqzOn', label: 'Squeeze on', type: 'color' }, { k: 'col.sqzOff', label: 'Squeeze released', type: 'color' },
+          { k: 'col.noSqz', label: 'No squeeze', type: 'color' },
+          { k: 'col.bull', label: 'Bullish divergence', type: 'color' }, { k: 'col.bear', label: 'Bearish divergence', type: 'color' } ] },
         { tab: 'Visibility', group: 'Show', fields: [
-          { k: 'showSmi', label: 'SMI', type: 'bool' }, { k: 'showSig', label: 'Signal', type: 'bool' },
-          { k: 'showFill', label: 'Fill between SMI and signal', type: 'bool' }, { k: 'showHist', label: 'Histogram', type: 'bool' },
-          { k: 'showDz', label: 'Dynamic zone lines', type: 'bool' }, { k: 'showDzCenter', label: 'Dynamic zone centre', type: 'bool' },
-          { k: 'showBg', label: 'Background outside the zone', type: 'bool' }, { k: 'showBand', label: 'Fixed 0 / ± lines', type: 'bool' } ] },
+          { k: 'showHist', label: 'Momentum histogram', type: 'bool' },
+          { k: 'showDots', label: 'Squeeze dots', type: 'bool' },
+          { k: 'showFire', label: 'Mark the squeeze fire', type: 'bool' },
+          { k: 'div.regular', label: 'Regular divergence (reversal)', type: 'bool' },
+          { k: 'div.hidden', label: 'Hidden divergence (continuation)', type: 'bool' },
+          { k: 'div.labels', label: 'Divergence labels', type: 'bool' },
+          { k: 'div.onPrice', label: 'Divergence lines on the price chart too', type: 'bool' } ] },
       ],
     });
   }
-  function _pineEma(arr, len) {               // ta.ema: seeded with the first value, nulls skipped
-    const a = 2 / (len + 1), out = new Array(arr.length).fill(null);
-    let s = null;
-    for (let i = 0; i < arr.length; i++) {
-      const v = arr[i];
-      if (v == null || !isFinite(v)) { out[i] = s; continue; }
-      s = s == null ? v : a * v + (1 - a) * s;
-      out[i] = s;
-    }
-    return out;
-  }
-  // ta.sma / wma / rma / hma / linreg, as Pine: a value once `len` real inputs exist
-  function _maPine(arr, len, type) {
-    len = Math.max(1, Math.round(len));
-    if (!type || type === 'EMA') return _pineEma(arr, len);
-    const n = arr.length, out = new Array(n).fill(null);
-    if (type === 'HMA') {
-      const h = Math.max(1, Math.floor(len / 2)), q = Math.max(1, Math.floor(Math.sqrt(len)));
-      const a = _maPine(arr, h, 'WMA'), b = _maPine(arr, len, 'WMA');
-      return _maPine(a.map((v, i) => v == null || b[i] == null ? null : 2 * v - b[i]), q, 'WMA');
-    }
-    if (type === 'RMA') {                      // ta.rma: seeded with the SMA of the first `len` values
-      let s = null, run = 0;
-      for (let i = 0; i < n; i++) {
-        const v = arr[i];
-        if (v == null || !isFinite(v)) { if (s == null) run = 0; out[i] = s; continue; }
-        if (s == null) {
-          if (++run >= len) { let t = 0; for (let j = i - len + 1; j <= i; j++) t += arr[j]; s = t / len; }
-        } else s = (v + (len - 1) * s) / len;
-        out[i] = s;
+  // bars: {h, l, c}. Returns arrays aligned to bars.
+  function _sqzCompute(bars, P) {
+    P = P || SQZ;
+    const n = bars.length, c = bars.map(b => b.c), h = bars.map(b => b.h), l = bars.map(b => b.l);
+    const bbN = P.bbLen, kcN = P.kcLen, bbK = P.lbQuirk ? P.kcMult : P.bbMult;
+    const val = new Array(n).fill(null), state = new Array(n).fill(null);
+    const tr = c.map((_, i) => !P.useTR ? h[i] - l[i]
+      : i === 0 ? h[0] - l[0] : Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])));
+    const sma = (a, t, len) => { let s = 0; for (let i = t - len + 1; i <= t; i++) s += a[i]; return s / len; };
+    const dlt = new Array(n).fill(null);
+    for (let t = 0; t < n; t++) {
+      if (t >= bbN - 1 && t >= kcN - 1) {
+        const basis = sma(c, t, bbN);
+        let s2 = 0; for (let i = t - bbN + 1; i <= t; i++) s2 += (c[i] - basis) ** 2;
+        const dev = bbK * Math.sqrt(s2 / bbN);                  // ta.stdev: population
+        const ma = sma(c, t, kcN), rma = sma(tr, t, kcN);
+        const uBB = basis + dev, lBB = basis - dev, uKC = ma + rma * P.kcMult, lKC = ma - rma * P.kcMult;
+        state[t] = (lBB > lKC && uBB < uKC) ? 'on' : (lBB < lKC && uBB > uKC) ? 'off' : 'none';
       }
-      return out;
-    }
-    for (let i = len - 1; i < n; i++) {
-      let ok = true;
-      for (let j = i - len + 1; j <= i; j++) if (arr[j] == null || !isFinite(arr[j])) { ok = false; break; }
-      if (!ok) continue;
-      if (type === 'SMA') { let t = 0; for (let j = i - len + 1; j <= i; j++) t += arr[j]; out[i] = t / len; }
-      else if (type === 'WMA') { let t = 0, w = 0; for (let k = 1; k <= len; k++) { t += arr[i - len + k] * k; w += k; } out[i] = t / w; }
-      else if (type === 'LSMA') {
+      if (t >= kcN - 1) {
+        let hh = -Infinity, ll = Infinity;
+        for (let i = t - kcN + 1; i <= t; i++) { if (h[i] > hh) hh = h[i]; if (l[i] < ll) ll = l[i]; }
+        dlt[t] = c[t] - ((hh + ll) / 2 + sma(c, t, kcN)) / 2;
+      }
+      if (t >= 2 * kcN - 2) {                                    // ta.linreg(src, len, 0)
         let sx = 0, sy = 0, sxy = 0, sxx = 0;
-        for (let k = 0; k < len; k++) { const v = arr[i - len + 1 + k]; sx += k; sy += v; sxy += k * v; sxx += k * k; }
-        const den = len * sxx - sx * sx, slope = den ? (len * sxy - sx * sy) / den : 0;
-        out[i] = (sy - slope * sx) / len + slope * (len - 1);
+        for (let j = 0; j < kcN; j++) { const y = dlt[t - kcN + 1 + j]; sx += j; sy += y; sxy += j * y; sxx += j * j; }
+        const slope = (kcN * sxy - sx * sy) / (kcN * sxx - sx * sx), icpt = (sy - slope * sx) / kcN;
+        val[t] = icpt + slope * (kcN - 1);
       }
     }
-    return out;
+    return { val, state };
   }
-  function _mfiSeries(bars, len, useVol) {     // ta.mfi(close, len)
-    const n = bars.length, up = new Array(n).fill(0), dn = new Array(n).fill(0), out = new Array(n).fill(null);
-    for (let i = 1; i < n; i++) {
-      const v = useVol ? (bars[i].v || 0) : 1, ch = bars[i].c - bars[i - 1].c;
-      up[i] = ch > 0 ? v * bars[i].c : 0;
-      dn[i] = ch < 0 ? v * bars[i].c : 0;
-    }
-    let su = 0, sd = 0;
-    for (let i = 1; i < n; i++) {
-      su += up[i]; sd += dn[i];
-      if (i - len >= 1) { su -= up[i - len]; sd -= dn[i - len]; }
-      // as Pine: no down-flow -> 100; no flow at all -> na
-      if (i >= len) out[i] = sd === 0 ? (su === 0 ? null : 100) : 100 - 100 / (1 + su / sd);
-    }
-    return out;
-  }
-  function _pctRank(win, p) {                  // ta.percentile_nearest_rank
-    const s = win.slice().sort((a, b) => a - b);
-    const r = Math.max(1, Math.ceil(p / 100 * s.length));
-    return s[Math.min(s.length, r) - 1];
-  }
-  function _smiMfiCompute(bars, Pin) {
-    const P = Pin || SMIMFI, n = bars.length;
-    const useVol = bars.filter(b => (b.v || 0) > 0).length >= n * 0.5;
-    const one = (mfiLen, kLen, dLen, sigLen, maS, maG) => {
-      const mfi = _mfiSeries(bars, mfiLen, useVol);
-      const rel = new Array(n).fill(null), rng = new Array(n).fill(null);
-      for (let i = kLen - 1; i < n; i++) {
-        let hh = -Infinity, ll = Infinity, ok = true;
-        for (let j = i - kLen + 1; j <= i; j++) { const v = mfi[j]; if (v == null) { ok = false; break; } hh = Math.max(hh, v); ll = Math.min(ll, v); }
-        if (!ok) continue;
-        rel[i] = mfi[i] - (hh + ll) / 2; rng[i] = hh - ll;
-      }
-      const num = _maPine(_maPine(rel, dLen, maS), dLen, maS), den = _maPine(_maPine(rng, dLen, maS), dLen, maS);
-      const smi = num.map((v, i) => (v == null || !den[i]) ? null : 200 * v / den[i]);
-      // the signal starts with the SMI (an average of nothing is nothing)
-      const sigRaw = _maPine(smi, sigLen, maG);
-      return { mfi, smi, sig: smi.map((v, i) => v == null ? null : sigRaw[i]) };
+  // Divergences between price and an oscillator, TradingView-style: pivots
+  // are found on the OSCILLATOR (left/right lookback) and each is compared
+  // with the previous pivot of the same kind within [rangeMin, rangeMax].
+  // Optional filters: zeroSide (bullish pivots below zero, bearish above)
+  // and minAbs (ignore pivots smaller than this) - pivots they drop are not
+  // pivots at all, so the comparison is with the previous qualifying one.
+  // Returns every instance, oldest first: { kind, hidden, a, b, oa, ob, pa, pb, conf }.
+  function _oscDivergences(bars, osc, o) {
+    const L = o.left, R = o.right, n = Math.min(bars.length, osc.length), out = [];
+    const piv = (i, hi) => {
+      const v = osc[i];
+      if (v == null) return false;
+      if (o.zeroSide && (hi ? v <= 0 : v >= 0)) return false;
+      if (o.minAbs && Math.abs(v) < o.minAbs) return false;
+      for (let k = 1; k <= L; k++) { const w = osc[i - k]; if (w == null || (hi ? w >= v : w <= v)) return false; }
+      for (let k = 1; k <= R; k++) { const w = osc[i + k]; if (w == null || (hi ? w > v : w < v)) return false; }
+      return true;
     };
-    const A = one(P.mfiLen, P.kLen, P.dLen, P.sigLen, P.maSmi, P.maSig);
-    const smi = A.smi, sig = A.sig;
-    // histogram from its own parameter set (identical by default, so reused)
-    const same = P.hMfiLen === P.mfiLen && P.hKLen === P.kLen && P.hDLen === P.dLen && P.hSigLen === P.sigLen && P.hMaSmi === P.maSmi && P.hMaSig === P.maSig;
-    const B = same ? A : one(P.hMfiLen, P.hKLen, P.hDLen, P.hSigLen, P.hMaSmi, P.hMaSig);
-    const hm = P.hMult || 1;
-    const hist = B.smi.map((v, i) => v == null || B.sig[i] == null ? null : (v - B.sig[i]) * hm);
-    const dzT = new Array(n).fill(null), dzB = new Array(n).fill(null), dzC = new Array(n).fill(null);
-    for (let i = 0; i < n; i++) {
-      if (i < P.dzLen - 1) continue;
-      const win = [];
-      for (let j = i - P.dzLen + 1; j <= i; j++) if (smi[j] != null) win.push(smi[j]);
-      if (win.length < P.dzLen) continue;
-      dzT[i] = _pctRank(win, P.dzHi); dzB[i] = _pctRank(win, 100 - P.dzLo); dzC[i] = _pctRank(win, 50);
-    }
-    // ta.crossover / crossunder of SMI and signal, as the script's two alert sets:
-    // 1 (circles) outside the dynamic zone, 2 (diamonds) inside it, each with
-    // its "only when SMI above / below" limits
-    const cross = [];
-    for (let i = 1; i < n; i++) {
-      if ([smi[i], sig[i], smi[i - 1], sig[i - 1]].some(v => v == null)) continue;
-      const up = smi[i] > sig[i] && smi[i - 1] <= sig[i - 1], dn = smi[i] < sig[i] && smi[i - 1] >= sig[i - 1];
-      if (!up && !dn) continue;
-      const out = dzT[i - 1] != null && (smi[i - 1] < dzB[i - 1] || smi[i - 1] > dzT[i - 1]);
-      const ins = dzT[i - 1] != null && smi[i - 1] >= dzB[i - 1] && smi[i - 1] <= dzT[i - 1];
-      const lim = X => up ? smi[i - 1] <= X.below : smi[i - 1] >= X.above;
-      if ((P.x1.onlyOutside ? out : true) && lim(P.x1)) cross.push({ i, dir: up ? 1 : -1, kind: 'out' });
-      if ((P.x2.onlyInside ? ins : true) && lim(P.x2)) cross.push({ i, dir: up ? 1 : -1, kind: 'in' });
-    }
-    return { mfi: A.mfi, smi, sig, hist, dzT, dzB, dzC, cross, useVol };
-  }
-  function _smiState(bars) {
-    const w = _warmOf(bars), off = w.length, lb = bars[bars.length - 1];
-    const key = `${bars.length}|${bars[0].t}|${lb.t}|${lb.c}|${lb.v}|${off}|${_chart.interval}`;
-    if (_smiCache.key !== key) {
-      const r = _smiMfiCompute(off ? w.concat(bars) : bars);
-      const cut = a => a.slice(off);
-      _smiCache.key = key;
-      _smiCache.v = { smi: cut(r.smi), sig: cut(r.sig), hist: cut(r.hist), dzT: cut(r.dzT), dzB: cut(r.dzB), dzC: cut(r.dzC),
-                      cross: r.cross.filter(c => c.i >= off).map(c => ({ ...c, i: c.i - off })), useVol: r.useVol, n: bars.length };
-    }
-    return _smiCache.v;
-  }
-  function _smiColor(v) {                      // spectrum blue -> green -> red by level 5/10/15/20/30
-    if (v >= 30) return '#1e3cff'; if (v >= 20) return '#2979ff'; if (v >= 15) return '#00b0ff';
-    if (v >= 10) return '#00e5ff'; if (v >= 5) return '#00e676'; if (v > -5) return '#c6ff00';
-    if (v > -10) return '#ffea00'; if (v > -15) return '#ffab00'; if (v > -20) return '#ff6d00';
-    if (v > -30) return '#ff3d00'; return '#ff0000';
-  }
-  function _smiHistColor(v) {
-    const a = Math.abs(v);
-    const lvl = a >= 30 ? 4 : a >= 15 ? 3 : a >= 10 ? 2 : a >= 5 ? 1 : 0;
-    // the base colour at the largest size, mixed toward white for smaller bars
-    const h = (v >= 0 ? SMIMFI.histUp : SMIMFI.histDown).replace('#', ''), mix = (4 - lvl) * 0.11;
-    const c = [0, 2, 4].map(o => parseInt(h.slice(o, o + 2), 16)).map(x => Math.round(x + (255 - x) * mix));
-    return '#' + c.map(x => x.toString(16).padStart(2, '0')).join('');
-  }
-  function _smiMfiPaneSvg(csIn, xOf, W, padL, padR, H) {
-    if (_chart.show?.smiMfi === false) return '';
-    // MFI needs real closes and volume: on Heikin Ashi use the real candles
-    const real = _chart.candles || [];
-    const cs = (csIn && real.length === csIn.length) ? real : csIn;
-    const P = SMIMFI;
-    const need = Math.max(P.mfiLen + P.kLen + 2 * P.dLen, P.dzLen);
-    const wOff = cs?.length ? _warmLen(cs) : 0;
-    if (!cs || !cs.length || cs.length + wOff < need) {
-      const have = cs ? cs.length : 0;
-      return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
-        <rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}" style="fill:var(--wash)"/>
-        <text x="${padL + 6}" y="${(H / 2 + 3).toFixed(1)}" style="font-size:10px;fill:var(--muted,#789);">SMI of MFI warming up — ${have + wOff}/${need} bars</text></svg>`;
-    }
-    const S = _smiState(cs), n = cs.length;
-    const padT = 15, padB = 16, right = W - padR, bot = H - padB;   // top row for the legend
-    let m = P.band + 5;
-    for (const arr of [S.smi, S.sig, S.hist, S.dzT, S.dzB]) for (const v of arr) if (v != null && isFinite(v)) m = Math.max(m, Math.abs(v));
-    m *= 1.08;
-    const y = v => padT + (1 - (v + m) / (2 * m)) * (bot - padT);
-    let s = `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${(bot + 2).toFixed(1)}" style="fill:var(--wash)"/>`;
-    s += _timeGridSvg(W, padL, padR, 0, bot + 2, H - 3, cs, xOf);
-    const groups = new Map(), add = (k, d) => { const g = groups.get(k); if (g) g.push(d); else groups.set(k, [d]); };
-    const f1 = v => v.toFixed(1);
-    // background when SMI is outside the dynamic zone (between the zone lines, as the script fills it)
-    for (let i = 1; i < n; i++) {
-      const a = S.smi[i], t0 = S.dzT[i - 1], t1 = S.dzT[i], b0 = S.dzB[i - 1], b1 = S.dzB[i];
-      if (a == null || t1 == null || t0 == null) continue;
-      const col = a > t1 ? 'up' : a < b1 ? 'dn' : null;
-      if (!col || !P.showBg || !P.bgOpacity) continue;
-      const x0 = xOf(i - 1), x1 = xOf(i);
-      add(`bg|${col}`, `M${f1(x0)} ${f1(y(t0))}L${f1(x1)} ${f1(y(t1))}L${f1(x1)} ${f1(y(b1))}L${f1(x0)} ${f1(y(b0))}Z`);
-    }
-    // fill between SMI and its signal: blue while SMI is above it, red below (transparency 60)
-    for (let i = 1; i < n && P.showFill && P.fillTransp < 100; i++) {
-      const a0 = S.smi[i - 1], a1 = S.smi[i], g0 = S.sig[i - 1], g1 = S.sig[i];
-      if ([a0, a1, g0, g1].some(v => v == null)) continue;
-      const x0 = xOf(i - 1), x1 = xOf(i);
-      add(`fill|${a1 >= g1 ? 'up' : 'dn'}`, `M${f1(x0)} ${f1(y(a0))}L${f1(x1)} ${f1(y(a1))}L${f1(x1)} ${f1(y(g1))}L${f1(x0)} ${f1(y(g0))}Z`);
-    }
-    // histogram columns from zero
-    const bw = Math.max(1.2, Math.min(4, (right - padL) / Math.max(1, Math.ceil(385 / (_chart.interval || 1))) * 0.55));
-    const y0 = y(0);
-    for (let i = 0; i < n && P.showHist; i++) {
-      const h = S.hist[i];
-      if (h == null) continue;
-      const yy = y(h), x = xOf(i);
-      add(`hist|${_smiHistColor(h)}`, `M${f1(x - bw / 2)} ${f1(Math.min(yy, y0))}h${bw.toFixed(1)}V${f1(Math.max(yy, y0))}h${(-bw).toFixed(1)}Z`);
-    }
-    // the dynamic-zone lines, the SMI (coloured by level) and the signal (by slope)
-    const seg = (k, arr, i) => add(k, `M${f1(xOf(i - 1))} ${f1(y(arr[i - 1]))}L${f1(xOf(i))} ${f1(y(arr[i]))}`);
-    for (let i = 1; i < n; i++) {
-      if (S.dzT[i - 1] != null && S.dzT[i] != null) {
-        if (P.showDz) { seg('dzT', S.dzT, i); seg('dzB', S.dzB, i); }
-        if (P.showDzCenter) seg('dzC', S.dzC, i);
+    let pH = -1, pL = -1;
+    for (let i = L; i + R < n; i++) {
+      if (piv(i, false)) {
+        if (pL >= 0 && i - pL - 1 >= o.rangeMin && i - pL - 1 <= o.rangeMax) {
+          const pa = bars[pL].l, pb = bars[i].l, oa = osc[pL], ob = osc[i];
+          if (pb < pa && ob > oa) out.push({ kind: 'bullish', hidden: false, a: pL, b: i, oa, ob, pa, pb, conf: i + R });
+          else if (pb > pa && ob < oa) out.push({ kind: 'bullish', hidden: true, a: pL, b: i, oa, ob, pa, pb, conf: i + R });
+        }
+        pL = i;
       }
-      if (P.showSig && S.sig[i - 1] != null && S.sig[i] != null) seg(`sig|${S.sig[i] >= S.sig[i - 1] ? P.sigUp : P.sigDown}`, S.sig, i);
-      if (P.showSmi && S.smi[i - 1] != null && S.smi[i] != null)
-        seg(`smi|${P.smiTheme === 'two' ? (S.smi[i] >= S.smi[i - 1] ? P.smiUp : P.smiDown) : _smiColor(S.smi[i])}`, S.smi, i);
+      if (piv(i, true)) {
+        if (pH >= 0 && i - pH - 1 >= o.rangeMin && i - pH - 1 <= o.rangeMax) {
+          const pa = bars[pH].h, pb = bars[i].h, oa = osc[pH], ob = osc[i];
+          if (pb > pa && ob < oa) out.push({ kind: 'bearish', hidden: false, a: pH, b: i, oa, ob, pa, pb, conf: i + R });
+          else if (pb < pa && ob > oa) out.push({ kind: 'bearish', hidden: true, a: pH, b: i, oa, ob, pa, pb, conf: i + R });
+        }
+        pH = i;
+      }
     }
-    const order = ['bg', 'fill', 'hist', 'dzT', 'dzB', 'dzC', 'sig', 'smi'];
-    const sty = (k, paint) => ({
-      bg: `fill="${paint === 'up' ? P.bgAbove : P.bgBelow}" fill-opacity="${(P.bgOpacity / 100).toFixed(2)}"`,
-      fill: `fill="${paint === 'up' ? P.sigUp : P.sigDown}" fill-opacity="${((100 - P.fillTransp) / 100).toFixed(2)}"`,
-      hist: `fill="${paint}"`,
-      dzT: `fill="none" stroke="${P.dzTop}" stroke-width="1"`, dzB: `fill="none" stroke="${P.dzBottom}" stroke-width="1"`,
-      dzC: `fill="none" stroke="${P.dzCenter}" stroke-width="1" opacity="0.7"`,
-      sig: `fill="none" stroke="${paint}" stroke-width="1"`,
-      smi: `fill="none" stroke="${paint}" stroke-width="${P.smiWidth}" stroke-linecap="round"`,
-    })[k];
-    // fixed levels first (under everything but the background)
-    let lv = '';
-    for (const [v, col] of (P.showBand ? [[P.band, 'rgba(33,150,243,0.75)'], [0, 'rgba(178,181,190,0.75)'], [-P.band, 'rgba(242,54,69,0.75)']] : [])) {
-      lv += `<line x1="${padL}" y1="${f1(y(v))}" x2="${f1(right)}" y2="${f1(y(v))}" stroke="${col}" stroke-width="1" stroke-dasharray="2,3"/>`;
-      lv += `<text x="${f1(right + 3)}" y="${f1(y(v) + 3)}" style="font-size:8px;fill:var(--muted,#789);">${v}</text>`;
+    return out;
+  }
+  // Momentum + squeeze over warm-up + today (today's part returned), and the
+  // divergences of the CLOSED bars, both indexed to today's bars. Cached per
+  // series + settings, so a tick of the forming bar costs one recompute of
+  // the arrays and nothing for the pivots.
+  function _sqzSeries(cs) {
+    const w = _warmOf(cs), off = w.length;
+    const last = cs[cs.length - 1] || {};
+    const cfgK = JSON.stringify(SQZ);
+    const tag = cs[0] === (_chart.candles || [])[0] ? 'r' : 'x';
+    const key = `${tag}|${cs.length}|${cs[0]?.t}|${last.t}|${last.c}|${last.h}|${last.l}|${off}|${!!_chart.liveBar}|${cfgK}`;
+    if (_sqzCache.key === key) return _sqzCache.v;
+    const all = off ? w.concat(cs) : cs;
+    const r = _sqzCompute(all, SQZ);
+    const val = r.val.slice(off), state = r.state.slice(off);
+    // divergences on closed bars only, cached separately on the closed set
+    const closedN = _chart.liveBar ? cs.length - 1 : cs.length;
+    const dKey = `${tag}|${closedN}|${cs[0]?.t}|${cs[closedN - 1]?.t}|${cs[closedN - 1]?.c}|${cs[closedN - 1]?.h}|${cs[closedN - 1]?.l}|${off}|${cfgK}`;
+    let divs = _sqzCache.dKey === dKey ? _sqzCache.divs : null;
+    if (!divs) {
+      const rc = closedN === cs.length ? r : _sqzCompute(all.slice(0, off + closedN), SQZ);
+      let big = 0; for (const v of rc.val) if (v != null && Math.abs(v) > big) big = Math.abs(v);
+      divs = _oscDivergences(all.slice(0, off + closedN), rc.val, { ...SQZ.div, minAbs: big * (SQZ.div.minPct || 0) / 100 })
+        .filter(d => d.a >= off)
+        .map(d => ({ ...d, a: d.a - off, b: d.b - off, conf: d.conf - off }));
+      _sqzCache.dKey = dKey; _sqzCache.divs = divs;
     }
-    const keys = [...groups.keys()].sort((a, b) => order.indexOf(a.split('|')[0]) - order.indexOf(b.split('|')[0]));
-    let body = '';
-    for (const k of keys) {
-      const [kind, paint] = k.includes('|') ? [k.slice(0, k.indexOf('|')), k.slice(k.indexOf('|') + 1)] : [k, ''];
-      if (kind === 'hist' && !body.includes('data-lv')) body += `<g data-lv="1">${lv}</g>`;
-      body += `<path class="smi-${kind}" d="${groups.get(k).join('')}" ${sty(kind, paint)} pointer-events="none"/>`;
+    const v = { val, state, divs, need: Math.max(SQZ.bbLen, 2 * SQZ.kcLen - 1) };
+    _sqzCache.key = key; _sqzCache.v = v;
+    return v;
+  }
+  const _sqzDivShown = d => d.hidden ? SQZ.div.hidden : SQZ.div.regular;
+  const _sqzDivTip = (d, cs) => {
+    const hm = i => { const b = cs[Math.max(0, Math.min(cs.length - 1, i))]; return b ? _sqzHm(b.t) : '—'; };
+    const what = d.kind === 'bullish'
+      ? (d.hidden ? 'price made a HIGHER low while momentum made a LOWER low - sellers pushed harder and still could not take out the last low; the uptrend tends to CONTINUE'
+                  : 'price made a LOWER low while momentum made a HIGHER low - the second push down had less force; watch for a reversal UP')
+      : (d.hidden ? 'price made a LOWER high while momentum made a HIGHER high - buyers pushed harder and still could not reach the last high; the downtrend tends to CONTINUE'
+                  : 'price made a HIGHER high while momentum made a LOWER high - the second push up had less force; watch for a reversal DOWN');
+    return `${d.hidden ? 'HIDDEN ' : ''}${d.kind} divergence (${hm(d.a)} → ${hm(d.b)}): ${what}. Confirmed at ${hm(d.conf)}, ${SQZ.div.right} closed bar${SQZ.div.right > 1 ? 's' : ''} after the pivot.`;
+  };
+  function _sqzHm(t) {
+    const g = new Date((t + 19800) * 1000);
+    return `${String(g.getUTCHours()).padStart(2, '0')}:${String(g.getUTCMinutes()).padStart(2, '0')}`;
+  }
+  // Price-side half of each divergence: the two price pivots the claim is
+  // about, drawn on the candles (xOf maps a bar index to the chart's x).
+  function _sqzPriceDivSvg(cs, xOf, y, lo, hi) {
+    if (!_chart.show.sqz || !SQZ.div.onPrice || !cs || cs.length < 10) return '';
+    let s = '';
+    for (const d of _sqzSeries(cs).divs) {
+      if (!_sqzDivShown(d)) continue;
+      if (d.pa < lo || d.pa > hi || d.pb < lo || d.pb > hi) continue;
+      const col = d.kind === 'bullish' ? SQZ.col.bull : SQZ.col.bear;
+      s += `<line x1="${xOf(d.a).toFixed(1)}" y1="${y(d.pa).toFixed(1)}" x2="${xOf(d.b).toFixed(1)}" y2="${y(d.pb).toFixed(1)}"
+          stroke="${col}" stroke-width="${d.hidden ? 1.2 : 1.8}" stroke-dasharray="${d.hidden ? '2,3' : '5,3'}" opacity="0.9"><title>${escapeHtml(_sqzDivTip(d, cs))}</title></line>`;
+      s += `<circle cx="${xOf(d.b).toFixed(1)}" cy="${y(d.pb).toFixed(1)}" r="2.6" fill="${col}"/>`;
     }
-    if (!body.includes('data-lv')) body = `<g data-lv="1">${lv}</g>` + body;
-    s += body;
-    // cross marks: circle outside the zone, diamond inside; up at the bottom, down at the top
-    for (const c of S.cross.filter(c => (c.kind === 'out' ? P.x1.show : P.x2.show)).slice(-40)) {
-      const x = xOf(c.i), up = c.dir > 0, yy = up ? bot - 4 : padT + 3;
-      const col = c.kind === 'out' ? (up ? P.x1.bull : P.x1.bear) : (up ? P.x2.bull : P.x2.bear);
-      const tip = `${_hm(cs[c.i].t)} — SMI crossed ${up ? 'ABOVE' : 'BELOW'} its signal ${c.kind === 'out' ? 'OUTSIDE' : 'inside'} the dynamic zone (SMI ${S.smi[c.i].toFixed(1)})`;
-      s += c.kind === 'out'
-        ? `<circle class="smi-x" cx="${f1(x)}" cy="${f1(yy)}" r="2.6" fill="${col}"><title>${escapeHtml(tip)}</title></circle>`
-        : `<path class="smi-x" d="M${f1(x)} ${f1(yy - 3.2)}L${f1(x + 3)} ${f1(yy)}L${f1(x)} ${f1(yy + 3.2)}L${f1(x - 3)} ${f1(yy)}Z" fill="${col}"><title>${escapeHtml(tip)}</title></path>`;
-    }
-    // legend
-    const li = (() => { for (let i = n - 1; i >= 0; i--) if (S.smi[i] != null) return i; return -1; })();
-    if (li >= 0) {
-      const sv = S.smi[li], gv = S.sig[li], hv = S.hist[li];
-      const zone = S.dzT[li] == null ? '' : sv > S.dzT[li] ? ' · above zone' : sv < S.dzB[li] ? ' · below zone' : ' · inside zone';
-      s += `<text x="${padL + 4}" y="10" style="font-size:8.5px;fill:var(--muted,#789);"><tspan data-indset="smiMfi" style="cursor:pointer;fill:var(--gold,#d4af37);">⚙</tspan> SMI·MFI ${P.mfiLen},${P.kLen},${P.dLen},${P.sigLen} <tspan style="fill:${_smiColor(sv)};font-weight:700;">${sv.toFixed(1)}</tspan> sig <tspan style="fill:${gv >= (S.sig[li - 1] ?? gv) ? P.sigUp : P.sigDown};">${gv.toFixed(1)}</tspan> hist <tspan style="fill:${_smiHistColor(hv)};">${hv.toFixed(1)}</tspan>${zone}${S.useVol ? '' : ' · no volume: price-only MFI'}</text>`;
-    }
-    s += _xmSvg('smiXM', 0, bot + 2, H - 4);
-    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
+    return s;
   }
 
-  function _rsiPaneSvg(cs, xOf, W, padL, padR, H) {
-    const cfg = (() => {
-      try { return Object.assign({ on: true, period: 14, maLen: 14 },
-                                 JSON.parse(localStorage.getItem('rsiCfg') || '{}')); }
-      catch (_) { return { on: true, period: 14, maLen: 14 }; }
-    })();
-    if (!cfg.on) return '';
-    // An empty pane is indistinguishable from a broken one, which is exactly
-    // the confusion this caused. Show the warm-up instead of returning
-    // nothing: RSI(14) needs 14 bars plus a couple to smooth, and on a
-    // 5-minute chart that is ninety minutes rather than eighteen — worth
-    // stating, because waiting for something that is working looks identical
-    // to waiting for something that is not.
-    const need = (cfg.period || 14) + 4;
+  function _sqzPaneSvg(cs, xOf, W, padL, padR, H) {
+    if (!_chart.show.sqz) return '';
+    const P = SQZ;
+    const need = Math.max(P.bbLen, 2 * P.kcLen - 1) + 1;
     const wOff = cs ? _warmLen(cs) : 0;
     if (!cs || !cs.length || cs.length + wOff < need) {
       const have = cs ? cs.length : 0;
@@ -21444,155 +21452,108 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">
         <rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}" style="fill:var(--wash)"/>
         <text x="${(padL + 6)}" y="${(H / 2 + 3).toFixed(1)}" style="font-size:10px;fill:var(--muted,#789);">
-          RSI ${cfg.period} warming up — ${have}/${need} bars${mins ? ` · about ${mins} more minute${mins > 1 ? 's' : ''} at ${_chart.interval}m` : ''}</text>
+          Squeeze Momentum warming up — ${have}/${need} bars${mins ? ` · about ${mins} more minute${mins > 1 ? 's' : ''} at ${_chart.interval}m` : ''}</text>
       </svg>`;
     }
-    const closes = cs.map(c => c.c);
-    // RSI and its average over warm-up + today, today's part drawn
-    const wC = wOff ? _warmOf(cs).map(c => c.c) : [];
-    const rsiAll = _rsiSeries(wC.concat(closes), cfg.period);
-    const rsi = rsiAll.slice(wOff);
-    const ma = _smaOf(rsiAll, cfg.maLen).slice(wOff);
-    const padT = 6, padB = 16;          // room for the time labels
-    const y = v => padT + (1 - v / 100) * (H - padT - padB);
-    const right = W - padR;
+    const { val, state, divs } = _sqzSeries(cs);
+    const padT = 6, padB = 16, right = W - padR, n = cs.length;
+    // scale: symmetric about zero, fitted to the bars on screen (time zoom)
+    let mx = 0, step = Infinity;
+    for (let i = 0; i < n; i++) {
+      const xi = xOf(i);
+      if (i && xi - xOf(i - 1) > 0.01) step = Math.min(step, xi - xOf(i - 1));
+      if (xi < padL - 2 || xi > right + 2 || val[i] == null) continue;
+      mx = Math.max(mx, Math.abs(val[i]));
+    }
+    if (!(mx > 0)) mx = 1;
+    if (!isFinite(step)) step = 4;
+    const mid = padT + (H - padT - padB) / 2, half = (H - padT - padB) / 2 - 3;
+    const y = v => mid - v / mx * half;
+    const bw = Math.max(1, Math.min(9, step * 0.72));
     let s = '';
-
-    // background, so the pane reads as its own plane rather than floating
     s += `<rect x="${padL}" y="0" width="${(right - padL).toFixed(1)}" height="${(H - padB + 2).toFixed(1)}" style="fill:var(--wash)"/>`;
     s += _timeGridSvg(W, padL, padR, 0, H - padB + 2, H - 3, cs, xOf);
-
-    // Gradient fills for the extremes. Green above 80, red below 20 - the
-    // zones, not the line, because the line spends most of its life in the
-    // middle where neither colour should be shouting.
-    s += `<defs>
-      <linearGradient id="rsiOB" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#26a69a" stop-opacity="0.34"/>
-        <stop offset="100%" stop-color="#26a69a" stop-opacity="0.02"/>
-      </linearGradient>
-      <linearGradient id="rsiOS" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#ef5350" stop-opacity="0.02"/>
-        <stop offset="100%" stop-color="#ef5350" stop-opacity="0.34"/>
-      </linearGradient>
-    </defs>`;
-    s += `<rect x="${padL}" y="${y(100).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(80) - y(100)).toFixed(1)}" fill="url(#rsiOB)"/>`;
-    s += `<rect x="${padL}" y="${y(20).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(0) - y(20)).toFixed(1)}" fill="url(#rsiOS)"/>`;
-    // The 70-80 and 20-30 bands are a WARNING zone, not an extreme one: price
-    // is stretched but has not reached the level that historically matters on
-    // an index. Shaded lightly and flat rather than with a gradient, so they
-    // read as a separate state from the true extremes above and below them
-    // rather than as a continuation of the same colour.
-    s += `<rect x="${padL}" y="${y(80).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(70) - y(80)).toFixed(1)}" fill="rgba(38,166,154,0.10)"/>`;
-    s += `<rect x="${padL}" y="${y(30).toFixed(1)}" width="${(right - padL).toFixed(1)}" height="${(y(20) - y(30)).toFixed(1)}" fill="rgba(239,83,80,0.10)"/>`;
-
-    // bands
-    // 80 and 20 carry more weight than 70 and 30, so they are drawn stronger:
-    // on an index at this resolution 70 and 30 are touched constantly, and
-    // giving all four equal weight would make the two that matter disappear
-    // among the two that do not.
-    for (const [v, col, dash, lab] of [[80, 'rgba(38,166,154,0.55)', '4,3', '80'],
-                                       [70, 'rgba(38,166,154,0.30)', '2,4', '70'],
-                                       [50, 'rgba(255,255,255,0.28)', '', '50'],
-                                       [30, 'rgba(239,83,80,0.30)', '2,4', '30'],
-                                       [20, 'rgba(239,83,80,0.55)', '4,3', '20']]) {
-      s += `<line x1="${padL}" y1="${y(v).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${col}" stroke-width="1" ${dash ? `stroke-dasharray="${dash}"` : ''}/>`;
-      s += `<text x="${(right + 3).toFixed(1)}" y="${(y(v) + 3).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">${lab}</text>`;
+    s += `<line x1="${padL}" y1="${mid.toFixed(1)}" x2="${right.toFixed(1)}" y2="${mid.toFixed(1)}" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>`;
+    // histogram, coloured by sign and by whether momentum is growing
+    if (P.showHist) {
+      const groups = {};
+      for (let i = 0; i < n; i++) {
+        const v = val[i]; if (v == null) continue;
+        const pv = i ? (val[i - 1] ?? 0) : 0;
+        const col = v > 0 ? (v > pv ? P.col.upUp : P.col.upDn) : (v < pv ? P.col.dnDn : P.col.dnUp);
+        const x0 = xOf(i) - bw / 2, y0 = Math.min(mid, y(v)), hh = Math.max(0.6, Math.abs(y(v) - mid));
+        (groups[col] = groups[col] || []).push(`M${x0.toFixed(1)},${y0.toFixed(1)}h${bw.toFixed(1)}v${hh.toFixed(1)}h${(-bw).toFixed(1)}Z`);
+      }
+      for (const [col, ds] of Object.entries(groups)) s += `<path d="${ds.join('')}" fill="${col}" opacity="0.9"/>`;
     }
-
-    const line = (vals, col, wdt) => {
-      const pts = [];
-      vals.forEach((v, i) => { if (v != null) pts.push(`${xOf(i).toFixed(1)},${y(v).toFixed(1)}`); });
-      return pts.length > 1
-        ? `<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="${wdt}" stroke-linejoin="round" stroke-linecap="round"/>`
-        : '';
-    };
-    // divergence lines drawn first so the RSI line sits over them
-    let divs = [];
-    try { divs = _rsiDivergence(cs, rsi, 3); } catch (_) {}
+    // divergence: lines between the two momentum pivots, label at the second
+    let shown = 0;
     for (const d of divs) {
-      const col = d.kind === 'bullish' ? '#26de81' : '#ff6b81';
-      // Hidden divergence is a CONTINUATION signal, not a reversal one, and
-      // confusing the two is worse than missing both. Dotted and thinner so
-      // it cannot be mistaken for the regular kind at a glance.
-      const tip = d.hidden
-        ? `HIDDEN ${d.kind} divergence — a continuation signal: price made a ${d.kind === 'bullish' ? 'higher low' : 'lower high'} while RSI made a ${d.kind === 'bullish' ? 'lower low' : 'higher high'}, which typically resolves WITH the prevailing trend`
-        : `${d.kind} divergence — price made a ${d.kind === 'bearish' ? 'higher high' : 'lower low'} while RSI did not, so the second push had less force behind it`;
-      s += `<line x1="${xOf(d.a).toFixed(1)}" y1="${y(d.ra).toFixed(1)}" x2="${xOf(d.b).toFixed(1)}" y2="${y(d.rb).toFixed(1)}"
-        stroke="${col}" stroke-width="${d.hidden ? 1.1 : 1.8}" stroke-dasharray="${d.hidden ? '2,3' : '5,3'}" opacity="0.95">
-        <title>${tip}</title></line>`;
-      s += `<circle cx="${xOf(d.b).toFixed(1)}" cy="${y(d.rb).toFixed(1)}" r="2.6" fill="${col}"/>`;
-    }
-    // ── extreme crossings ────────────────────────────────────────
-    // Marked on the CROSSING bar, not on every bar spent beyond the level.
-    // RSI can sit above 80 for twenty bars, and stamping each one turns a
-    // signal into a smear - what carries information is the moment it got
-    // there, and the moment it came back.
-    //
-    // Entry and exit are marked differently on purpose: crossing INTO an
-    // extreme says momentum is stretched, while crossing back OUT is the one
-    // people actually trade, and they should not look alike.
-    const marks = [];
-    for (let i = 1; i < rsi.length; i++) {
-      const p0 = rsi[i - 1], p1 = rsi[i];
-      if (p0 == null || p1 == null) continue;
-      if (p0 <= 80 && p1 > 80) marks.push({ i, v: p1, kind: 'ob-in' });
-      else if (p0 >= 80 && p1 < 80) marks.push({ i, v: p1, kind: 'ob-out' });
-      if (p0 >= 20 && p1 < 20) marks.push({ i, v: p1, kind: 'os-in' });
-      else if (p0 <= 20 && p1 > 20) marks.push({ i, v: p1, kind: 'os-out' });
-    }
-    for (const m of marks.slice(-24)) {
-      const cx = xOf(m.i);
-      const ob = m.kind.startsWith('ob');
-      const entering = m.kind.endsWith('-in');
-      // above the line for overbought, below it for oversold, so the mark
-      // never sits on top of the line it refers to
-      const cy = ob ? Math.max(padT + 5, y(m.v) - 8) : Math.min(H - padB - 5, y(m.v) + 8);
-      const col = ob ? '#26a69a' : '#ef5350';
-      const tip = ob
-        ? (entering ? 'RSI crossed ABOVE 80 — momentum stretched to the upside'
-                    : 'RSI dropped back BELOW 80 — the stretch is unwinding')
-        : (entering ? 'RSI crossed BELOW 20 — momentum stretched to the downside'
-                    : 'RSI recovered back ABOVE 20 — the stretch is unwinding');
-      if (entering) {
-        // solid triangle pointing at the extreme
-        const d = ob
-          ? `M${(cx - 4).toFixed(1)},${(cy + 4).toFixed(1)} L${(cx + 4).toFixed(1)},${(cy + 4).toFixed(1)} L${cx.toFixed(1)},${(cy - 3).toFixed(1)} Z`
-          : `M${(cx - 4).toFixed(1)},${(cy - 4).toFixed(1)} L${(cx + 4).toFixed(1)},${(cy - 4).toFixed(1)} L${cx.toFixed(1)},${(cy + 3).toFixed(1)} Z`;
-        s += `<path d="${d}" fill="${col}"><title>${tip}</title></path>`;
-      } else {
-        // hollow circle: present, quieter, and unmistakably not the same event
-        s += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.2" fill="none" stroke="${col}" stroke-width="1.6"><title>${tip}</title></circle>`;
+      if (!_sqzDivShown(d)) continue;
+      shown++;
+      const col = d.kind === 'bullish' ? P.col.bull : P.col.bear;
+      const tip = escapeHtml(_sqzDivTip(d, cs));
+      const xa = xOf(d.a), xb = xOf(d.b), ya = y(d.oa), yb = y(d.ob);
+      s += `<line x1="${xa.toFixed(1)}" y1="${ya.toFixed(1)}" x2="${xb.toFixed(1)}" y2="${yb.toFixed(1)}" stroke="${col}"
+          stroke-width="${d.hidden ? 1.3 : 2}" stroke-dasharray="${d.hidden ? '2,3' : ''}" opacity="0.95"><title>${tip}</title></line>`;
+      s += `<circle cx="${xb.toFixed(1)}" cy="${yb.toFixed(1)}" r="2.6" fill="${col}"><title>${tip}</title></circle>`;
+      if (P.div.labels) {
+        const up = d.kind === 'bullish';
+        const lab = `${d.hidden ? 'H ' : ''}${up ? 'Bull' : 'Bear'}`, lw = lab.length * 4.6 + 6;
+        const ly = up ? Math.min(H - padB - 6, yb + 11) : Math.max(padT + 5, yb - 11);
+        s += `<g><title>${tip}</title><rect x="${(xb - lw / 2).toFixed(1)}" y="${(ly - 6).toFixed(1)}" width="${lw.toFixed(1)}" height="10" rx="2"
+            fill="${d.hidden ? 'rgba(0,0,0,0.85)' : col}" stroke="${col}" stroke-width="0.8"/>
+          <text x="${xb.toFixed(1)}" y="${(ly + 1.5).toFixed(1)}" text-anchor="middle" style="font-size:7.5px;font-weight:700;fill:${d.hidden ? col : '#000'};">${lab}</text></g>`;
       }
     }
-
-    // MA under the RSI line, both bold as asked
-    s += line(ma, '#f7b731', 2.2);
-    s += line(rsi, '#45aaf2', 2.6);
-
+    // squeeze dots on the zero line; the fire (first release after a
+    // squeeze) is the event traders wait for, drawn larger
+    let runOn = 0, lastFire = -1, onLen = 0;
+    if (P.showDots) {
+      const dots = {};
+      for (let i = 0; i < n; i++) {
+        const st = state[i]; if (!st) continue;
+        const col = st === 'on' ? P.col.sqzOn : st === 'off' ? P.col.sqzOff : P.col.noSqz;
+        const fire = st !== 'on' && runOn >= 3;
+        if (fire) lastFire = i;
+        runOn = st === 'on' ? runOn + 1 : 0;
+        (dots[col] = dots[col] || []).push(xOf(i));
+        if (fire && P.showFire) {
+          const dir = (val[i] ?? 0) >= 0;
+          s += `<circle cx="${xOf(i).toFixed(1)}" cy="${mid.toFixed(1)}" r="3.6" fill="none" stroke="${dir ? P.col.upUp : P.col.dnDn}" stroke-width="1.6">
+            <title>Squeeze FIRED ${dir ? 'UP' : 'DOWN'} at ${_sqzHm(cs[i].t)} — volatility released after the bands had been coiled inside the Keltner channel; momentum ${dir ? 'above' : 'below'} zero</title></circle>`;
+        }
+      }
+      onLen = runOn;
+      const r = Math.max(0.9, Math.min(1.9, step * 0.32));
+      for (const [col, xs] of Object.entries(dots))
+        s += `<path d="${xs.map(x => `M${(x - r).toFixed(1)},${mid.toFixed(1)}a${r.toFixed(1)},${r.toFixed(1)} 0 1,0 ${(2 * r).toFixed(1)},0a${r.toFixed(1)},${r.toFixed(1)} 0 1,0 ${(-2 * r).toFixed(1)},0`).join('')}" fill="${col}"/>`;
+    } else {
+      for (let i = 0; i < n; i++) { const st = state[i]; if (!st) continue; if (st !== 'on' && runOn >= 3) lastFire = i; runOn = st === 'on' ? runOn + 1 : 0; }
+      onLen = runOn;
+    }
     // current value at the right edge
-    const last = [...rsi].reverse().find(v => v != null);
-    if (last != null) {
-      const col = last >= 80 ? '#26a69a' : last <= 20 ? '#ef5350' : '#45aaf2';
-      s += `<text x="${(right + 3).toFixed(1)}" y="${(y(last) + 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${last.toFixed(0)}</text>`;
+    let li = n - 1; while (li >= 0 && val[li] == null) li--;
+    let stTxt = '', stCol = 'var(--muted,#789)';
+    if (li >= 0) {
+      const v = val[li], pv = li ? (val[li - 1] ?? 0) : 0;
+      const col = v > 0 ? (v > pv ? P.col.upUp : P.col.upDn) : (v < pv ? P.col.dnDn : P.col.dnUp);
+      s += `<text x="${(right + 3).toFixed(1)}" y="${(y(v) + 3).toFixed(1)}" style="font-size:9px;fill:${col};font-weight:700;">${v >= 0 ? '+' : ''}${v.toFixed(1)}</text>`;
+      const growing = v > 0 ? v > pv : v < pv;
+      const st = state[li];
+      if (st === 'on') { stTxt = ` · SQUEEZE ON ${onLen} bar${onLen > 1 ? 's' : ''} — coiling`; stCol = P.col.sqzOn; }
+      else if (lastFire >= 0 && li - lastFire <= 10) { const up = (val[lastFire] ?? 0) >= 0; stTxt = ` · FIRED ${up ? '▲' : '▼'} ${li - lastFire} bar${li - lastFire === 1 ? '' : 's'} ago`; stCol = up ? P.col.upUp : P.col.dnDn; }
+      stTxt += ` · momentum ${v >= 0 ? 'bullish' : 'bearish'}, ${growing ? 'building' : 'fading'}`;
+      if (st !== 'on' && !(lastFire >= 0 && li - lastFire <= 10)) stCol = v >= 0 ? (growing ? P.col.upUp : P.col.upDn) : (growing ? P.col.dnDn : P.col.dnUp);
     }
-    // Range regime in the header: the single most useful thing RSI says
-    // about trend, and the one nobody looks at.
-    let rangeTxt = '', rangeCol = 'var(--muted,#789)';
-    try {
-      const rr = _rsiRange(rsi, 60);
-      if (rr) {
-        rangeCol = rr.breaking ? '#d4af37'
-                 : rr.regime === 'bull range' ? '#26a69a'
-                 : rr.regime === 'bear range' ? '#ef5350' : 'var(--muted,#789)';
-        rangeTxt = ` · ${rr.regime}${rr.breaking ? ' — FLOOR BROKEN' : ''}`;
-        s += `<title>${escapeHtml(rr.breaking || rr.note)}</title>`;
-      }
-    } catch (_) {}
-    s += `<text x="${(padL + 3)}" y="11" style="font-size:8.5px;fill:var(--muted,#789);">RSI ${cfg.period}` +
-         `<tspan fill="${rangeCol}" font-weight="700">${escapeHtml(rangeTxt)}</tspan>` +
-         `${divs.length ? ` · ${divs.length} divergence${divs.length > 1 ? 's' : ''}` : ''}</text>`;
-    s += _xmSvg('rsiXM', 0, H - padB + 2, H - padB - 1);
-    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${s}</svg>`;
+    s += `<text x="${right + 3}" y="${(mid + 3).toFixed(1)}" style="font-size:8px;fill:var(--muted,#789);">0</text>`;
+    const ld = [...divs].reverse().find(_sqzDivShown);
+    s += `<text x="${(padL + 3)}" y="11" style="font-size:8.5px;fill:var(--muted,#789);">SQZ MOM ${P.bbLen}·${P.lbQuirk ? P.kcMult : P.bbMult} / ${P.kcLen}·${P.kcMult}` +
+         `<tspan fill="${stCol}" font-weight="700">${escapeHtml(stTxt)}</tspan>` +
+         `${shown ? ` · ${shown} divergence${shown > 1 ? 's' : ''}` : ''}` +
+         `${ld ? `<tspan fill="${ld.kind === 'bullish' ? P.col.bull : P.col.bear}"> · last: ${ld.hidden ? 'hidden ' : ''}${ld.kind} ${_sqzHm(cs[ld.b].t)}</tspan>` : ''}</text>`;
+    s += _xmSvg('sqzXM', 0, H - padB + 2, H - padB - 1);
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${_xClip('xclipQ', W, padL, padR, H)}<g class="xzc">${s}</g></svg>`;
   }
 
   // ══ STRIKE LADDER ═════════════════════════════════════════════════
@@ -22422,6 +22383,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const sep0 = document.createElement('div');
         sep0.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:1px 0 3px;';
         menu.appendChild(sep0);
+      }
+      // ── chart actions ──
+      const cx = ev.clientX, cy = ev.clientY;
+      item(`📅 History calendar…${window._histDate ? `  (${window._histDate})` : ''}`, () => _histCalendarOpen(cx, cy));
+      item('⤢ Fit (reset zoom)', () => document.getElementById('zoomFitBtn')?.click());
+      item('↺ Reset Defaults…', () => _resetSettings());
+      {
+        const sep1 = document.createElement('div');
+        sep1.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:3px 0;';
+        menu.appendChild(sep1);
       }
       item(`🔔 Alert when spot touches ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'touch'));
       item(`📍 Alert within 10 pts of ${fmtInt(Math.round(price))}`, () => _chartAddAlertAt(price, 'near'));
@@ -26683,6 +26654,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // (the numerology timing test was removed; clear its cached copy from
   // this browser so nothing of it stays on the laptop)
   try { localStorage.removeItem('numoCacheV1'); } catch (_) {}
+  // (the SMI of MFI pane was removed; drop its saved settings)
+  try { localStorage.removeItem('smiMfiCfgV1'); } catch (_) {}
+  // (the RSI pane was replaced by Squeeze Momentum; drop its old settings)
+  try { localStorage.removeItem('rsiCfg'); } catch (_) {}
   // ══ TURN TIMES on the chart ══════════════════════════════════════
   // Vertical lines at the times of day where Nifty has most often made a
   // major turn over the last ~60 sessions (server: /api/turn-times). Green
@@ -26733,8 +26708,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     let s = '', lastX = -1e9, row = 0;
     for (const b of lines) {
       const m = b.min - 555;
-      const sx = padL + (m / iv + 0.5) / slots * (W - padL - padR);
-      if (sx > W - padR) continue;
+      const sx = _xs(m / iv + 0.5, slots, W, padL, padR);
+      if (sx > W - padR || sx < padL) continue;
       // every turn line looks the same - one colour rule, one dash, one
       // transparency; the label ("lean", "1.4×", "12/60d") and the tooltip
       // say how strong each one is
@@ -27193,7 +27168,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const m = ist.getHours() * 60 + ist.getMinutes() - (9 * 60 + 15);
       return Math.max(0, Math.min(slots - 1, Math.floor(m / _chart.interval)));
     };
-    const x = ts => padL + (slotOf(ts) + 0.5) / slots * (W - padL - padR);
+    const x = ts => _xs(slotOf(ts) + 0.5, slots, W, padL, padR);
 
     let svg = '';
     const legend = [];
@@ -27232,7 +27207,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
       return out;
     };
-    const xs = sl => padL + (sl + 0.5) / slots * (W - padL - padR);
+    const xs = sl => _xs(sl + 0.5, slots, W, padL, padR);
     const niceTicks = (lo, hi, n) => {
       const span = hi - lo || 1;
       const raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
@@ -27362,7 +27337,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
 
     // half-hour gridlines and time labels, at the candle pane's positions
     svg = _timeGridSvg(W, padL, padR, padT, H - padB, H - 5) + _ctxSignalSvg(x, padT, H - padB) + svg + _xmSvg('ctxXM', padT, H - padB, H - padB - 1);
-    plotEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${svg}</svg>`;
+    plotEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;">${_xClip('xclipC', W, padL, padR, H)}<g class="xzc">${svg}</g></svg>`;
     legEl.innerHTML = legend.join('');
     try { const xm = _chart._xm; if (xm) _mirrorCrosshair(xm.px, true, xm.W, xm.src); } catch (_) {}
   }
@@ -29125,7 +29100,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   //   high / low = the extremes of the real bar and the two HA values
   //
   // Applied as a TRANSFORM on the candle array rather than as a third
-  // renderer, so every overlay, alert, crosshair and the RSI pane work
+  // renderer, so every overlay, alert, crosshair and the Squeeze pane work
   // unchanged - a separate renderer is how Renko ended up missing a dozen
   // features for days.
   //
@@ -30040,29 +30015,17 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       }
     } catch (_) {}
 
-    // ── RSI divergence, on the price side ──────────────────────────
-    // The RSI pane shows the momentum half of the claim; this is the half it
-    // makes ABOUT price. Computed over the same brick series the RSI pane
-    // uses, so the two panes mark the same two pivots and read as one claim.
+    // ── Squeeze divergence, on the price side ──────────────────────
+    // Momentum is a time-based measure, so it stays the CANDLE series (as in
+    // the pane); each candle pivot is placed on the brick in force then.
     try {
-      const dvBars = show.map(b => ({
-        t: b.t, o: b.o, c: b.c,
-        h: b.hi != null ? b.hi : Math.max(b.o, b.c),
-        l: b.lo != null ? b.lo : Math.min(b.o, b.c),
-      }));
-      const dvRsi = _rsiSeries(dvBars.map(b => b.c), 14);
-      for (const dv of (_rsiDivergence(dvBars, dvRsi, 5) || []).slice(0, 4)) {
-        const pa = dv.kind === 'bearish' ? dvBars[dv.a].h : dvBars[dv.a].l;
-        const pb = dv.kind === 'bearish' ? dvBars[dv.b].h : dvBars[dv.b].l;
-        if (pa < lo || pa > hi || pb < lo || pb > hi) continue;
-        const col = dv.kind === 'bullish' ? '#26de81' : '#ff6b81';
-        const xa = padL + dv.a * bw + bw / 2, xb = padL + dv.b * bw + bw / 2;
-        svg += `<line x1="${xa.toFixed(1)}" y1="${y(pa).toFixed(1)}" x2="${xb.toFixed(1)}" y2="${y(pb).toFixed(1)}"
-            stroke="${col}" stroke-width="${dv.hidden ? 1.1 : 1.8}"
-            stroke-dasharray="${dv.hidden ? '2,3' : '5,3'}" opacity="0.9">
-            <title>${dv.hidden ? 'HIDDEN ' : ''}${dv.kind} divergence — price ${dv.kind === 'bearish' ? (dv.hidden ? 'lower high' : 'higher high') : (dv.hidden ? 'higher low' : 'lower low')} while RSI went the other way${dv.hidden ? '; a continuation signal, not a reversal one' : ''}</title></line>`;
-        svg += `<circle cx="${xb.toFixed(1)}" cy="${y(pb).toFixed(1)}" r="2.6" fill="${col}"/>`;
+      const bx = [];
+      let bi = 0;
+      for (const cd of cs) {
+        while (bi + 1 < show.length && show[bi + 1].t <= cd.t) bi++;
+        bx.push(padL + bi * bw + bw / 2);
       }
+      svg += _sqzPriceDivSvg(cs, i2 => bx[Math.max(0, Math.min(bx.length - 1, i2))], y, lo, hi);
     } catch (_) {}
 
     // ── VWAP at each brick's close time ────────────────────────────
@@ -30289,30 +30252,14 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // interaction layer works identically here: place, drag, delete.
     _chart._geom = { lo, hi, W, H, padT, padB, padL, padR };
 
-    // ── RSI pane ───────────────────────────────────────────────────
-    // The pane is filled by the renderPriceChart WRAPPER from _chart._rsiCtx.
-    // Renko never set it, so switching chart type silently emptied the RSI
-    // pane - the feature was not removed, it was starved of its context.
-    //
-    // RSI is computed over BRICK CLOSES here, which is the only sequence
-    // Renko has, and the bricks are mapped to the OHLC shape the divergence
-    // engine expects: it reads .h and .l, while a brick carries .hi and .lo.
-    // Without that rename every divergence would silently find nothing.
+    // ── Squeeze Momentum pane ──────────────────────────────────────
+    // The pane is filled by the renderPriceChart WRAPPER from _chart._oscCtx.
+    // Momentum is a time-based measure, so it stays the CANDLE series here
+    // (the same numbers and divergences as on the candle chart); each candle
+    // is placed at the x of the brick in force at that moment, so a quiet
+    // stretch compresses to one column exactly as the bricks do and a turn
+    // in momentum sits under the brick it belongs to.
     try {
-      // VALUES from the candles, POSITIONS from the bricks.
-      //
-      // RSI is a time-based measure, so computing it over brick closes gives
-      // different numbers and different divergences from the candle chart -
-      // a pane that changes meaning when you switch chart type is worse than
-      // one that is approximate. So the series stays the candle series.
-      //
-      // But plotting it on a time axis under a brick axis is the problem you
-      // hit: the line runs smoothly through a quiet hour while the chart
-      // above it prints nothing, and the two no longer line up. Each candle
-      // is therefore placed at the x of the brick in force at that moment -
-      // so a quiet stretch compresses to a single column, exactly as it does
-      // on the Renko chart, and a turn in RSI sits under the brick it belongs
-      // to.
       const brickX = [];
       {
         let bi = 0;
@@ -30322,7 +30269,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         }
       }
       const xAligned = i2 => brickX[Math.max(0, Math.min(brickX.length - 1, i2))];
-      _chart._rsiCtx = { cs, x: xAligned, W, padL, padR, H };
+      _chart._oscCtx = { cs, x: xAligned, W, padL, padR, H };
       _chart._geo = { W, padL, padR };
     } catch (_) {}
     try {
@@ -31566,10 +31513,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     el.style.right = dir > 0 ? `${Math.round(window.innerWidth - r.right + 14)}px` : '';
     el.style.display = 'block';
   }
+  // Zoomed in on time, a sideways drag PANS the visible window; the
+  // day-change swipe only works with the whole day on screen.
+  let _xPan = null;
+  function _xPanMove(x) {
+    const p = _xPan;
+    if (!p) return;
+    const shift = -(x - p.x0) * p.k / p.plotW * p.span;
+    _xSetWin(p.s0 + shift, p.span, p.slots);
+    _xRender();
+  }
   function _daySwipeStart(x, y, target) {
     const body = document.getElementById('chartBody');
     if (!body || !target?.closest?.('#chartBody svg')) return;
     if (_chart.diagOpen) return;
+    if (_xzActive()) {
+      const sv = target.closest('svg'), r = sv.getBoundingClientRect(), G = _chart._geo || { W: 900, padL: 8, padR: 72 };
+      const slots = _slotsNow(), w = _xWin(slots);
+      _xPan = { x0: x, s0: w[0], span: w[1] - w[0], slots, k: G.W / r.width, plotW: G.W - G.padL - G.padR };
+      _daySwipe = null;
+      return;
+    }
     // grabbing a price-alert line drags the alert, never the day
     try { if (typeof _alertHitTest === 'function' && _alertHitTest({ clientX: x, clientY: y })) return; } catch (_) {}
     const rect = body.getBoundingClientRect();
@@ -31612,17 +31576,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (ev.button !== 0 || ev.shiftKey) return;
     _daySwipeStart(ev.clientX, ev.clientY, ev.target);
   }, true);
-  window.addEventListener('mousemove', ev => { if (_daySwipe) _daySwipeMove(ev.clientX, ev.clientY); });
-  window.addEventListener('mouseup', () => _daySwipeEnd());
-  window.addEventListener('blur', () => _daySwipeEnd());
+  window.addEventListener('mousemove', ev => { if (_xPan) _xPanMove(ev.clientX); else if (_daySwipe) _daySwipeMove(ev.clientX, ev.clientY); });
+  window.addEventListener('mouseup', () => { _xPan = null; _daySwipeEnd(); });
+  window.addEventListener('blur', () => { _xPan = null; _daySwipeEnd(); });
   document.addEventListener('touchstart', ev => {
     if (ev.touches.length !== 1) { _daySwipe = null; return; }
     _daySwipeStart(ev.touches[0].clientX, ev.touches[0].clientY, ev.target);
   }, { capture: true, passive: true });
   document.addEventListener('touchmove', ev => {
+    if (_xPan && ev.touches.length === 1) { _xPanMove(ev.touches[0].clientX); ev.preventDefault(); return; }
     if (_daySwipe && ev.touches.length === 1 && _daySwipeMove(ev.touches[0].clientX, ev.touches[0].clientY)) ev.preventDefault();
   }, { passive: false });
-  document.addEventListener('touchend', () => _daySwipeEnd());
+  document.addEventListener('touchend', () => { _xPan = null; _daySwipeEnd(); });
   document.addEventListener('touchcancel', () => { const sw = _daySwipe; if (sw) { sw.dx = 0; _daySwipeEnd(); } });
 
   function _dragEnd() {
@@ -31732,17 +31697,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     _pdScoreSignals();
     try { _tlPlace(); } catch (_) {}
     try {
-      const box2 = document.getElementById('rsiPaneBody');
-      const k = _chart._rsiCtx;
-      if (box2 && k)
-        box2.innerHTML = _rsiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10);
+      const box2 = document.getElementById('sqzPaneBody');
+      const k = _chart._oscCtx;
+      if (box2) box2.innerHTML = k ? _sqzPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10) : '';
     } catch (_) {}
-    try {
-      // SMI of MFI: same geometry and the SAME height as the RSI pane
-      const box3 = document.getElementById('smiPaneBody');
-      const k = _chart._rsiCtx;
-      if (box3) box3.innerHTML = k && !_chart.optionMeta ? _smiMfiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10) : '';
-    } catch (e) { console.warn('[smi-mfi]', e.message); }
     // the panes were just rebuilt: put a hovering crosshair back
     try { const xm = _chart._xm; if (xm) _mirrorCrosshair(xm.px, true, xm.W, xm.src); } catch (_) {}
     // The series array holds exactly one VWAP, so if more than one is on
@@ -31782,7 +31740,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!box) return;
     let cs = _chart.candles;
     // Heikin Ashi is the candle renderer with TRANSFORMED BARS, not a separate
-    // path - so every overlay, alert, crosshair and the RSI pane work
+    // path - so every overlay, alert, crosshair and the Squeeze pane work
     // unchanged. A separate renderer is how Renko ended up missing a dozen
     // features for days. Applied here, directly after the declaration,
     // because referencing cs before it exists is a dead-zone error.
@@ -31798,11 +31756,22 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const maxed = document.getElementById('chartPanel')?.classList.contains('chart-maxed');
     const W = maxed ? 1600 : 900, H = maxed ? 600 : 408;
     const padL = 8, padR = maxed ? 84 : 72, padT = 12, padB = 34;
-    let lo = Math.min(...cs.map(c => c.l)), hi = Math.max(...cs.map(c => c.h));
-    for (const L of levels) { if (L.v < lo * 0.985 || L.v > hi * 1.015) continue; lo = Math.min(lo, L.v); hi = Math.max(hi, L.v); }
-    if (spot) { lo = Math.min(lo, spot); hi = Math.max(hi, spot); }
+    // Zoomed in on time, the price axis fits the VISIBLE candles (as on
+    // TradingView); otherwise the whole day's range squashes them flat.
+    const _xzOn = _xzActive();
+    const _visMask = (() => {
+      if (!_xzOn) return null;
+      const sl0 = _slotsNow(), w0 = _xWin(sl0), ivm = _chart.interval || 1;
+      return cs.map(c => { const g = new Date((c.t + 19800) * 1000); const sl = Math.floor((g.getUTCHours() * 60 + g.getUTCMinutes() - 555) / ivm); return sl + 1 > w0[0] && sl < w0[1]; });
+    })();
+    const visCs = _visMask && _visMask.some(Boolean) ? cs.filter((_, i) => _visMask[i]) : cs;
+    let lo = Math.min(...visCs.map(c => c.l)), hi = Math.max(...visCs.map(c => c.h));
+    // levels widen the fit only at the full day; zoomed in, the candles decide
+    if (!_xzOn) for (const L of levels) { if (L.v < lo * 0.985 || L.v > hi * 1.015) continue; lo = Math.min(lo, L.v); hi = Math.max(hi, L.v); }
+    // live price only when the latest candle is on screen
+    if (spot && (!_visMask || (_visMask[_visMask.length - 1] && !(typeof _isHistorical === 'function' && _isHistorical())))) { lo = Math.min(lo, spot); hi = Math.max(hi, spot); }
     const series = _chartSeries(cs);
-    for (const s of series) for (const v of s.vals) { if (v == null) continue; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    for (const s of series) s.vals.forEach((v, i) => { if (v == null || (_visMask && !_visMask[i])) return; lo = Math.min(lo, v); hi = Math.max(hi, v); });
     const pad = (hi - lo) * 0.06 || 10; lo -= pad; hi += pad;
     // ── vertical zoom (TradingView-style): scroll over the chart scales the
     // price axis around the cursor; the auto-fit range above is the 1x base.
@@ -31830,7 +31799,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const mins = g.getUTCHours() * 60 + g.getUTCMinutes() - (9 * 60 + 15);
       return Math.max(0, Math.min(slots - 1, Math.floor(mins / _chart.interval)));
     };
-    const x = i => padL + (slotOf(cs[i].t) + 0.5) / slots * (W - padL - padR);
+    const x = i => _xs(slotOf(cs[i].t) + 0.5, slots, W, padL, padR);
     const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
     // ── shade recording gaps ─────────────────────────────────────────
     // A mid-session restart leaves minutes with no data. Drawing candles
@@ -31846,8 +31815,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         return Math.max(0, Math.min(nSlots - 1, Math.floor(m / _chart.interval)));
       };
       for (const g of _chart.gaps) {
-        const x1 = padL + slotOfTs(g.from) / nSlots * (W - padL - padR);
-        const x2 = padL + (slotOfTs(g.to) + 1) / nSlots * (W - padL - padR);
+        const x1 = _xs(slotOfTs(g.from), nSlots, W, padL, padR);
+        const x2 = _xs(slotOfTs(g.to) + 1, nSlots, W, padL, padR);
         if (x2 - x1 < 1) continue;
         gapSvg += `<rect x="${x1.toFixed(1)}" y="${padT}" width="${(x2 - x1).toFixed(1)}" height="${(H - padT - padB).toFixed(1)}" fill="rgba(255,255,255,0.05)"/>
           <line x1="${x1.toFixed(1)}" y1="${padT}" x2="${x1.toFixed(1)}" y2="${(H - padB).toFixed(1)}" stroke="rgba(255,255,255,0.18)" stroke-dasharray="3,3"/>
@@ -31859,8 +31828,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     // TradingView candle geometry: body width ~80% of slot with a 1px gap,
     // wick centred and scaled to the body width (never wider than 25% of it,
     // min 1px), body outlined in its own colour so doji bars stay visible.
-    const slotPx = (W - padL - padR) / slots;
-    const cw = Math.max(1, Math.min(24, Math.floor(slotPx * 0.8)));
+    const slotPx = (W - padL - padR) / (_xWin(slots)[1] - _xWin(slots)[0]);   // wider candles when zoomed in
+    const cw = Math.max(1, Math.min(48, Math.floor(slotPx * 0.8)));
     const wickW = Math.max(1, Math.min(3, Math.round(cw * 0.3)));
 
     // ── volume bars ──────────────────────────────────────────────────
@@ -31926,10 +31895,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           const lo = Math.min(...inOr.map(k => Math.min(k.o, k.c)));
           if (hi > lo || inOr.length) {
             const slotFor = m => Math.max(0, Math.min(slots - 1, Math.floor((m - OPEN) / _chart.interval)));
-            const x0 = padL + slotFor(OPEN) / slots * (W - padL - padR);
+            const x0 = _xs(slotFor(OPEN), slots, W, padL, padR);
             // right edge: the end of the slot containing 09:19, so a 1-minute
             // chart spans five candles and a 5-minute chart spans one
-            const x1 = padL + (slotFor(CLOSE_OR - 1) + 1) / slots * (W - padL - padR);
+            const x1 = _xs(slotFor(CLOSE_OR - 1) + 1, slots, W, padL, padR);
             const yTop = y(hi), yBot = y(lo);
             const done = istMin(cs[cs.length - 1].t) >= CLOSE_OR;
             const bw2 = Math.max(2, x1 - x0);
@@ -32020,7 +31989,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     let _ttrL = null;
     try {
       const _rawN = (_chart.candles || []).length;
-      const _slotX = sl => padL + (sl + 0.5) / slots * (W - padL - padR);
+      const _slotX = sl => _xs(sl + 0.5, slots, W, padL, padR);
       _ttrL = _ttrSvg(i => x(i),
         k => { const lastI = Math.max(0, (_chart.liveBar ? _rawN - 2 : _rawN - 1)); return _slotX(slotOf(cs[Math.min(lastI, cs.length - 1)].t) + k); },
         y, lo, hi, padT, H - padB, W - padR);
@@ -32280,7 +32249,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // red lines on one chart would need reading rather than seeing.
     let ladderSvg = '';
     try {
-      const xOf = sl => padL + (sl + 0.5) / slots * (W - padL - padR);
+      const xOf = sl => _xs(sl + 0.5, slots, W, padL, padR);
       const slotOfSec = t => {
         const g2 = new Date(t * 1000);
         const ist = new Date(g2.getTime() + (5.5 * 60 + g2.getTimezoneOffset()) * 60000);
@@ -32338,34 +32307,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
 
     svg += ladderSvg;
     // ── divergence, drawn on the PRICE side too ────────────────────
-    // It was only ever drawn in the RSI pane, which shows the momentum half
-    // of the claim and hides the half it is making ABOUT price. A divergence
-    // asserts that two price pivots moved one way while RSI moved the other;
-    // seeing only the RSI line means taking the price half on trust, and
-    // makes a correct reading look unsupported.
-    try {
-      const bars0 = _chart.liveBar ? cs.slice(0, -1) : cs;
-      // completed bars only, so the answer changes once a minute - cache it
-      // rather than rerunning RSI and the pivot search on every tick
-      const dk = `${bars0.length}|${bars0[0]?.t}|${bars0[bars0.length - 1]?.t}|${bars0[bars0.length - 1]?.c}|${bars0[bars0.length - 1]?.h}|${bars0[bars0.length - 1]?.l}|${_warmLen(bars0)}`;
-      if (_chart._divKey !== dk) {
-        const rsi0 = _warmSeries(bars0, cl => _rsiSeries(cl, 14));
-        _chart._divRes = (_rsiDivergence(bars0, rsi0, 5) || []).slice(0, 4);
-        _chart._divKey = dk;
-      }
-      for (const dv of _chart._divRes) {
-        const pa = dv.kind === 'bearish' ? bars0[dv.a].h : bars0[dv.a].l;
-        const pb = dv.kind === 'bearish' ? bars0[dv.b].h : bars0[dv.b].l;
-        if (pa < lo || pa > hi || pb < lo || pb > hi) continue;
-        const col = dv.kind === 'bullish' ? '#26de81' : '#ff6b81';
-        svg += `<line x1="${x(dv.a).toFixed(1)}" y1="${y(pa).toFixed(1)}"
-            x2="${x(dv.b).toFixed(1)}" y2="${y(pb).toFixed(1)}"
-            stroke="${col}" stroke-width="${dv.hidden ? 1.1 : 1.8}"
-            stroke-dasharray="${dv.hidden ? '2,3' : '5,3'}" opacity="0.9">
-            <title>${dv.hidden ? 'HIDDEN ' : ''}${dv.kind} divergence — price ${dv.kind === 'bearish' ? (dv.hidden ? 'lower high' : 'higher high') : (dv.hidden ? 'higher low' : 'lower low')} while RSI went the other way${dv.hidden ? '; a continuation signal, not a reversal one' : ''}</title></line>`;
-        svg += `<circle cx="${x(dv.b).toFixed(1)}" cy="${y(pb).toFixed(1)}" r="2.6" fill="${col}"/>`;
-      }
-    } catch (_) {}
+    // The Squeeze pane shows the momentum half of each divergence; this is
+    // the half it claims ABOUT price - the same two pivots, on the candles.
+    try { svg += _sqzPriceDivSvg(cs, x, y, lo, hi); } catch (_) {}
     // Desk signals replace the old vote-count markers here. They are judged
     // on the REAL candles - on Heikin Ashi too - and anchored outside both
     // the drawn bar and the real one so the arrow never sits on a wick.
@@ -32385,12 +32329,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     svg += _pdB.over + _pdA.over;
     if (_ttrL) svg += _ttrL.over;
     try { svg += _turnLinesSvg(W, padL, padR, padT, H - padB); } catch (_) {}
-    try { svg += _emaCrossSvg(t => padL + (slotOf(t) + 0.5) / slots * (W - padL - padR), padT, H - padB); } catch (_) {}
+    try { svg += _emaCrossSvg(t => _xs(slotOf(t) + 0.5, slots, W, padL, padR), padT, H - padB); } catch (_) {}
     // user alerts last, so they sit above the levels they were set against
     try { svg += _chartAlertLines(y, lo, hi, W, padL, padR); } catch (_) {}
     // hand the pane the same x-mapping and geometry the candles used, so the
     // two align exactly rather than approximately
-    _chart._rsiCtx = { cs, x, W, padL, padR, H };
+    _chart._oscCtx = { cs, x, W, padL, padR, H };
     _chart._geo = { W, padL, padR };
     // Geometry for the alert interaction layer. It lives on the CONTAINER,
     // not on the SVG, because the SVG is replaced on every render while
@@ -32444,14 +32388,15 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // auction from here while index options continue to 15:40.
     {
       const casM = (15 * 60 + 15) - (9 * 60 + 15);
-      const cx = padL + (casM / _chart.interval + 0.5) / slots * (W - padL - padR);
-      if (cx < W - padR) {
+      const cx = _xs(casM / _chart.interval + 0.5, slots, W, padL, padR);
+      if (cx < W - padR && cx > padL) {
         axis += `<line x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${(H - padB).toFixed(1)}" stroke="rgba(212,175,55,0.35)" stroke-width="1" stroke-dasharray="5,4"><title>15:15 — F&amp;O cash stocks enter the closing auction; index options trade on to 15:40</title></line>`;
         axis += `<text x="${(cx + 3).toFixed(1)}" y="${(padT + 9).toFixed(1)}" style="font-size:8px;fill:rgba(212,175,55,0.75);">CAS</text>`;
       }
     }
-    for (let m = 0; m <= SESSION_MIN; m += 30) {
-      const sx = padL + (m / _chart.interval + 0.5) / slots * (W - padL - padR);
+    for (let m = 0, stepM = _xGridStep(slots); m <= SESSION_MIN; m += stepM) {
+      const sx = _xs(m / _chart.interval + 0.5, slots, W, padL, padR);
+      if (sx < padL - 0.5) continue;
       if (sx > W - padR) break;
       const hh = Math.floor((9 * 60 + 15 + m) / 60), mm = (9 * 60 + 15 + m) % 60;
       axis += `<line x1="${sx.toFixed(1)}" y1="${padT}" x2="${sx.toFixed(1)}" y2="${(H - padB).toFixed(1)}" stroke="rgba(255,255,255,0.045)" stroke-width="1"/>`;
@@ -32495,7 +32440,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
           (dsl ? `<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:0 4px 5px;">${dsl}</div>` : '');
     } catch (_) {}
     box.innerHTML = regBar + dayBar +
-      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:var(--wash);border-radius:6px;cursor:crosshair;user-select:none;">${lvlSvg}${svg}${serSvg}${spotSvg}${axis}${_chart._mqBox || ''}${_xmSvg('mainXM', padT, H - padB)}
+      `<svg id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:var(--wash);border-radius:6px;cursor:crosshair;user-select:none;">${_xClip('xclipM', W, padL, padR, H)}${lvlSvg}<g class="xzc">${svg}${serSvg}</g>${spotSvg}${axis}${_chart._mqBox || ''}${_xmSvg('mainXM', padT, H - padB)}
       <g id="chartCross" style="display:none;">
         <line id="ccV" y1="${padT}" y2="${H - padB}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
         <line id="ccH" x1="${padL}" x2="${W - padR}" stroke="#fff" stroke-width="0.7" opacity="0.5" stroke-dasharray="3,3"/>
@@ -32553,7 +32498,14 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         })()}
         ${_chart.gapMins ? `<span style="color:var(--gold,#d4af37);" title="Shaded bands mark minutes with no recorded data — the server was not running then. NSE's own feed fills these when reachable; press ⤢ fill from 9:15 to retry.">⚠ ${_chart.gapMins} min not recorded</span>` : ''}
         ${!_chart.optionMeta && _chart.coverage && !/^09:1[0-9]/.test(_chart.coverage) ? `<span style="color:var(--gold,#d4af37);cursor:pointer;" id="chartFillHint" title="The chart does not reach back to the open — click to pull the morning from NSE's own feed">⤢ starts ${escapeHtml(String(_chart.coverage).split('-')[0])} — fill from 9:15</span>` : ''}
-        <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${_chart.yZoom !== 1 ? ` · <b style="color:var(--gold,#d4af37);">zoom ${_chart.yZoom.toFixed(1)}×</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : ' · drag to pan · scroll to zoom · double-click to reset'} · <span title="Click and hold on the chart, then drag RIGHT for the previous trading day or LEFT for the next one (weekends and NSE holidays skipped). Dragging left from the latest past day returns to Live.">drag sideways: ◀ prev / next ▶ day</span></span>
+        <span>range ${fmtInt(Math.round(lo))}–${fmtInt(Math.round(hi))}${(() => {
+          const xz = _xzActive(), w = _xWin(slots), tf = slots / (w[1] - w[0]);
+          const hm = a => { const t = 555 + Math.round(a) * (_chart.interval || 1); return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+          const zs = [_chart.yZoom !== 1 ? `price ${_chart.yZoom.toFixed(1)}×` : '', xz ? `time ${tf.toFixed(1)}× (${hm(w[0])}–${hm(w[1])})` : ''].filter(Boolean).join(' · ');
+          return zs ? ` · <b style="color:var(--gold,#d4af37);">zoom ${zs}</b> <a href="#" id="zoomReset" style="color:var(--gold,#d4af37);text-decoration:underline;">reset</a>` : '';
+        })()} · <span title="Mouse wheel over the chart zooms TIME around the pointer (the CVD/PCR/VIX and Squeeze panes follow). Shift+wheel, or the wheel over the right price axis, zooms PRICE. Double-click or Fit shows the whole day again.">scroll: time zoom · shift+scroll: price zoom</span> · ${_xzActive()
+          ? '<span title="Zoomed in on time: click and drag pans through the session. Fit or double-click to see the whole day - then dragging sideways changes the day again.">drag: pan</span>'
+          : '<span title="Click and hold on the chart, then drag RIGHT for the previous trading day or LEFT for the next one (weekends and NSE holidays skipped). Dragging left from the latest past day returns to Live. When zoomed in on time, drag pans instead.">drag sideways: ◀ prev / next ▶ day</span>'}</span>
         ${_pvsraOn() && cs.some(b => b.v > 0) ? `<span style="display:inline-flex;gap:7px;align-items:center;" title="PVSRA: candle colour by volume against the 10-bar average. Ordinary bars are dimmed so the exceptional ones stand out; climax bars carry a triangle above the wick.">
           <b style="color:#00E676;">▼200%</b><b style="color:#FF1744;">▼</b>
           <b style="color:#2979FF;">□150%</b><b style="color:#E040FB;">□</b>
@@ -32562,7 +32514,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         <span title="Which sources were merged for today: nse_chart = NSE's own intraday series, replay = chain snapshots recorded by this server, archive = on-disk tick history that survives restarts, yahoo = Yahoo Finance backfill used only where the others left gaps">src: <b>${escapeHtml(_chart.src || '—')}</b></span>
         ${/(fyers|zerodha)\(/.test(_chart.src || '') ? `<span style="color:var(--pos,#26a69a);" title="Real OHLC with traded volume from the broker feed — not reconstructed from spot samples">⚡ broker feed${_chart.hasVolume ? ' · real volume' : ''}</span>` : ''}
         ${_pdTag()}
-        ${_warmNote() ? `<span title="Indicators (EMAs, RSI, Bollinger, Heikin Ashi, EMA cross, Trend Target Ribbon) run over these previous trading sessions first - weekends and NSE holidays skipped - so they are already settled at 09:15. Only today is drawn. Fetched once a day and cached on the server.">🔥 ${escapeHtml(_warmNote())}</span>` : ''}
+        ${_warmNote() ? `<span title="Indicators (EMAs, Squeeze Momentum, Bollinger, Heikin Ashi, EMA cross, Trend Target Ribbon) run over these previous trading sessions first - weekends and NSE holidays skipped - so they are already settled at 09:15. Only today is drawn. Fetched once a day and cached on the server.">🔥 ${escapeHtml(_warmNote())}</span>` : ''}
         ${/yahoo\(/.test(_chart.src || '') ? `<span style="color:var(--gold,#d4af37);" title="Part of this chart was filled from Yahoo Finance because NSE data was unavailable for those minutes. Yahoo is a derived feed: the shape is right, but prices will not match NSE tick for tick, so treat levels drawn from those minutes with that in mind.">⚠ partly Yahoo-filled</span>` : ''}
         ${_chart.coverage ? `<span title="Time span covered by the merged data">covers <b>${escapeHtml(_chart.coverage)}</b></span>` : ''}
         <span>last bar O ${fmtInt(Math.round(last.o))} H ${fmtInt(Math.round(last.h))} L ${fmtInt(Math.round(last.l))} C ${fmtInt(Math.round(last.c))}</span>
@@ -32572,7 +32524,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       <div id="chartHover" style="font-size:10px;color:#cdd;padding:2px 4px;min-height:14px;"></div>`;
     document.getElementById('chartFillHint')?.addEventListener('click', () => _chartFillSession());
     document.getElementById('zoomReset')?.addEventListener('click', ev => {
-      ev.preventDefault(); _chart.yZoom = 1; _chart.yCenter = null; renderPriceChart();
+      ev.preventDefault(); _chart.yZoom = 1; _chart.yCenter = null; _chart.xZoom = null; renderPriceChart();
     });
     // crosshair: follows the pointer, prints timestamp below and price at right
     const svgEl = document.getElementById('chartSvg');
@@ -32622,7 +32574,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         // same x, same viewBox width — the panes line up by construction
         try { _mirrorCrosshair(px, true, W); } catch (_) {}
         // map pointer x -> slot -> nearest printed candle
-        const wantSlot = (px - padL) / (W - padL - padR) * slots - 0.5;
+        const wantSlot = _xSlotAt(px, slots, W, padL, padR) - 0.5;
         let i = 0, bestD = Infinity;
         for (let k = 0; k < cs.length; k++) { const d = Math.abs(slotOf(cs[k].t) - wantSlot); if (d < bestD) { bestD = d; i = k; } }
         const c2 = cs[i];
@@ -32677,8 +32629,14 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         const py = (ev.clientY - r.top) / r.height * H;
         const cursorVal = hi - (Math.max(padT, Math.min(H - padB, py)) - padT) / (H - padT - padB) * (hi - lo);
         const overAxis = px > W - padR;
-        // gentle by default; Shift or the price axis gives a coarser step
-        const step = (ev.shiftKey || overAxis) ? 1.08 : 1.03;
+        // plain wheel over the plot = TIME zoom (all panes follow);
+        // Shift+wheel or wheel over the right price axis = PRICE zoom
+        if (!ev.shiftKey && !overAxis) {
+          const f = Math.pow(1.0015, ev.deltaY || 0);            // ~1.15 per notch, smooth on trackpads
+          _xZoomAt(px, W, padL, padR, Math.max(0.5, Math.min(2, f)));
+          return;
+        }
+        const step = 1.06;
         const dir = ev.deltaY < 0 ? 1 : -1;                      // scroll up = zoom in
         const next = Math.max(0.4, Math.min(40, _chart.yZoom * (dir > 0 ? step : 1 / step)));
         if (next === _chart.yZoom) return;
@@ -32690,7 +32648,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         _safe(() => renderPriceChart(), 'renderPriceChart');
       }, { passive: false });
       // double-click anywhere = reset to auto-fit
-      svgEl.addEventListener('dblclick', () => { _chart.drag = null; _chart.yZoom = 1; _chart.yCenter = null; _zoomSync?.(); renderPriceChart(); });
+      svgEl.addEventListener('dblclick', () => { _chart.drag = null; _chart.yZoom = 1; _chart.yCenter = null; _chart.xZoom = null; _zoomSync?.(); renderPriceChart(); });
     }
   }
 
@@ -33215,7 +33173,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'ctxSignals',          // Buy/Sell lines in the context pane (default on)
     'pdPrepCollapsed',     // PD prep card collapsed for the day
     'ttrCfgV1',            // Trend Target Ribbon ⚙ settings
-    'smiMfiCfgV1',         // SMI of MFI ⚙ settings
+    'sqzCfgV1',            // Squeeze Momentum ⚙ settings
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
     'levelVoiceCfg',       // spoken wording for level touches
@@ -33373,20 +33331,20 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     document.querySelectorAll('.chart-iv').forEach(b => {
       b.classList.toggle('active', +b.dataset.iv === _chart.interval);
       b.addEventListener('click', () => {
-        _chart.interval = +b.dataset.iv; _chartCfgSave();
+        _chart.interval = +b.dataset.iv; _chart.xZoom = null; _chartCfgSave();
         document.querySelectorAll('.chart-iv').forEach(o => o.classList.toggle('active', o === b));
         fetchCandles();
       });
     });
-    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr',
-                     'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep', 'smiMfi']) {
+    for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz',
+                     'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       // new overlays default ON: a saved config predates them, and its
       // missing key must not read as a deliberate "off"
       // (PD: zones, gaps, liquidity and the prep card on; OTE, order blocks
       // and the signal filter are opt-in)
-      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep', 'smiMfi'].includes(k)) _chart.show[k] = true;
+      if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
       el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
     }
@@ -33420,7 +33378,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     document.getElementById('chartZoomInBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom * 1.25));
     document.getElementById('chartZoomOutBtn')?.addEventListener('click', () => applyZoom(_chart.yZoom / 1.25));
     document.getElementById('zoomFitBtn')?.addEventListener('click', () => {
-      _chart.yZoom = 1; _chart.yCenter = null; _zoomSync(); renderPriceChart();
+      _chart.yZoom = 1; _chart.yCenter = null; _chart.xZoom = null; _zoomSync(); renderPriceChart();
     });
     const panView = dir => {
       if (_chart.yCenter == null) _chart.yCenter = _chart._lastMid ?? null;
@@ -33496,7 +33454,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
         // A past session has no live ticks and no current option chain, so
         // streaming must stop: leaving it on would let today's spot extend a
         // candle belonging to another day.
-        _chart.candles = []; _chart.liveBar = false;
+        _chart.candles = []; _chart.liveBar = false; _chart.xZoom = null;
         _chart.yZoom = 1; _chart.yCenter = null;
         document.getElementById('histBadge')?.remove();
         if (hist) {

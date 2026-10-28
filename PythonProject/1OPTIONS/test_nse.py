@@ -1340,7 +1340,7 @@ console.log(JSON.stringify({ a, b, one: (svg.match(/emax-line/g) || []).length =
           'id="emaXFast" class="ohlc-inp" value="5"' in dsrc and 'id="emaXSlow" class="ohlc-inp" value="13"' in dsrc
           and dsrc.index('id="chk_ema200"') < dsrc.index('id="emaXFast"') < dsrc.index('id="chk_vwap"'))
     check("ema cross: defaults 5/13 in the chart config, which Reset clears",
-          dsrc.count("emaX: true, ttr: true }, emaX: { fast: 5, slow: 13 } }") == 2 and "'chartCfg'," in dsrc)
+          dsrc.count("emaX: true, ttr: true, sqz: true }, emaX: { fast: 5, slow: 13 } }") == 2 and "'chartCfg'," in dsrc)
     check("ema cross: drawn by the candle/Heikin Ashi renderer and by Renko", dsrc.count("svg += _emaCrossSvg(") == 2)
 
 
@@ -1355,7 +1355,7 @@ def test_turn_blink():
         depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
         if depth == 0:
             fn = dsrc[i:k + 1]; break
-    harness = fn + r"""
+    harness = "const _xs = (a, slots, W, padL, padR) => padL + a / slots * (W - padL - padR);\n" + fn + r"""
 const state = { symbol: 'NIFTY' }; const _chart = { interval: 1, show: {} }; const _isRenkoView = () => false;
 const escapeHtml = x => String(x); let NOW = 600, HIST = false;
 const _istNowMin = () => ({ m: NOW, wd: 3 }); const _isHistorical = () => HIST;
@@ -2081,10 +2081,9 @@ def test_true_black_widgets():
     root = d[d.index("  :root {"):d.index("  }", d.index("  :root {"))]
     check("theme: --wash is transparent and --box black in dark mode",
           "--wash: transparent;" in root and "--box: #000000;" in root and "--wash:rgba(15,23,42,0.03)" in d)
-    check("theme: chart, RSI pane, Trade entries and the tiles sit on --wash",
+    check("theme: chart, Squeeze pane, Trade entries and the tiles sit on --wash",
           'id="chartSvg" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;background:var(--wash);' in d
-          and d.count('style="fill:var(--wash)"') == 4 and   # RSI pane x2 + SMI-MFI pane x2
-          '"d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:var(--wash);"' in d)
+          and d.count('style="fill:var(--wash)"') == 2 and '"d90Body" style="margin:2px 6px 4px;padding:5px 8px;border:1px solid rgba(255,255,255,0.10);border-radius:6px;background:var(--wash);"' in d)
     faint = [m.group(0) for m in _re.finditer(r'background:rgba\(255,255,255,0\.0(1[0-9]?|2[0-9]?)\)', d)]
     check("theme: no panel carries a faint white wash any more", not faint, str(faint[:3]))
     check("theme: no near-black overlay colours left",
@@ -2193,7 +2192,7 @@ console.log(JSON.stringify({{alma: r.alma, dev: r.dev, atr: r.atr,
           and T["glow"]["width"] == 4 and T["glow"]["color"] == "trend" and T["keepPositions"] == 1 and len(js["pos"]) == 1)
     check("trend ribbon: drawn on the candle chart with a toggle (on by default)",
           'id="chk_ttr"' in d and "if (_ttrL) svg += _ttrL.under;" in d and "if (_ttrL) svg += _ttrL.over;" in d
-          and d.count("emaX: true, ttr: true }") == 2)
+          and d.count("emaX: true, ttr: true, sqz: true }") == 2)
 
 
 def test_ctx_clock():
@@ -2417,7 +2416,7 @@ console.log(JSON.stringify(R));
           "document.addEventListener('mousedown', ev => {\n    if (ev.button !== 0 || ev.shiftKey) return;\n    _daySwipeStart(" in d
           and "Math.hypot(dx, dy) < 24" in d and "if (!d2 || _dragPendY == null || _daySwipe?.active) return;" in d
           and "if (_daySwipe?.active) return;          // a sideways day-swipe owns this drag" in d
-          and "_alertHitTest({ clientX: x, clientY: y })" in d and "document.addEventListener('touchmove', ev => {\n    if (_daySwipe" in d)
+          and "_alertHitTest({ clientX: x, clientY: y })" in d and "document.addEventListener('touchmove', ev => {\n    if (_xPan && ev.touches.length === 1)" in d and "if (_daySwipe && ev.touches.length === 1 && _daySwipeMove(" in d)
     check("day swipe: switches through the same Live/Historical controls, swallows the click after a swipe",
           "modeSel.dispatchEvent(new Event('change'));" in d and "window.addEventListener('click', eat, { capture: true, once: true });" in d
           and "drag sideways: ◀ prev / next ▶ day" in d)
@@ -2557,7 +2556,7 @@ console.log(JSON.stringify(R));
     check("PD: status tag names the zone", "ABOVE RANGE" in R["tag"] and "PDH–PDL" in R["tag"], R["tag"][:120])
     check("dashboard: PD toggles (zones, gaps, liquidity, prep on; OTE, OB, filter opt-in), range picker, prep card, reset key",
           all(f'id="chk_{k}"' in d for k in ("pdZones", "pdOte", "pdFvg", "pdOb", "pdLiq", "pdFilter", "pdPrep"))
-          and "'pdZones', 'pdFvg', 'pdLiq', 'pdPrep', 'smiMfi'].includes(k)) _chart.show[k] = true;" in d
+          and "'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;" in d
           and 'id="pdRange"' in d and '<div id="pdPrepBody"></div>' in d and "'pdPrepCollapsed'," in d
           and "_pdEnsure();            // 5 previous sessions" in d and "/api/warm-candles?symbol=${encodeURIComponent(sym)}&interval=60&days=5" in d)
     check("dashboard: filtered signals are faded (ribbon, EMA cross, context pane), and every ribbon signal is scored with/against the zone",
@@ -2665,141 +2664,19 @@ def test_full_width_layout():
           'id="tvWlToggle"' in d and "position:fixed;right:0;top:120px" in d)
 
 
-def _smimfi_reference(bars, mfi_len=13, k=13, d=5, sig_len=5, dz=50):
-    """Independent Pine-semantics reference: ta.mfi, the TradingView SMI on it
-    (x200, EMA(EMA(.,D),D)), EMA signal, histogram, percentile_nearest_rank."""
-    import math
-    n = len(bars)
-    mfi = [None] * n
-    for i in range(mfi_len, n):
-        up = dn = 0.0
-        for j in range(i - mfi_len + 1, i + 1):
-            ch = bars[j]["c"] - bars[j - 1]["c"]
-            if ch > 0: up += bars[j]["v"] * bars[j]["c"]
-            elif ch < 0: dn += bars[j]["v"] * bars[j]["c"]
-        mfi[i] = None if (dn == 0 and up == 0) else (100.0 if dn == 0 else 100 - 100 / (1 + up / dn))
-    def ema(a, L):
-        al, out, s = 2 / (L + 1), [], None
-        for v in a:
-            if v is not None:
-                s = v if s is None else al * v + (1 - al) * s
-            out.append(s)
-        return out
-    rel, rng = [None] * n, [None] * n
-    for i in range(k - 1, n):
-        w = mfi[i - k + 1:i + 1]
-        if any(v is None for v in w): continue
-        rel[i] = mfi[i] - (max(w) + min(w)) / 2; rng[i] = max(w) - min(w)
-    num, den = ema(ema(rel, d), d), ema(ema(rng, d), d)
-    smi = [None if (num[i] is None or not den[i]) else 200 * num[i] / den[i] for i in range(n)]
-    sr = ema(smi, sig_len)
-    sig = [None if smi[i] is None else sr[i] for i in range(n)]
-    hist = [None if smi[i] is None or sig[i] is None else smi[i] - sig[i] for i in range(n)]
-    def pr(w, p):
-        s = sorted(w); r = max(1, math.ceil(p / 100 * len(s))); return s[min(len(s), r) - 1]
-    dzT = [None] * n
-    for i in range(dz - 1, n):
-        w = [v for v in smi[i - dz + 1:i + 1] if v is not None]
-        if len(w) == dz: dzT[i] = pr(w, 90)
-    return {"smi": smi, "sig": sig, "hist": hist, "dzT": dzT}
-
-
-def test_smi_mfi():
-    """SMI of MFI port: matches an independent Pine-semantics reference on
-    random bars; pane sits between the chart and RSI at RSI's height; no
-    candle colouring; toggle on by default; crosshair shared."""
-    import subprocess, json as _json, random as _r, tempfile
-    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
-    def grab(name):
-        i = d.index(f"function {name}(")
-        depth, j = 0, d.index("{", i)
-        for k in range(j, len(d)):
-            depth += d[k] == "{"; depth -= d[k] == "}"
-            if depth == 0:
-                return d[i:k + 1]
-    _r.seed(7)
-    bars, p = [], 25000.0
-    for i in range(320):
-        o = p; p += _r.gauss(0, 6) + (3 if (i // 60) % 2 else -3)
-        bars.append({"t": 1000 + 60 * i, "o": o, "h": max(o, p) + 2, "l": min(o, p) - 2, "c": p, "v": _r.randint(500, 5000)})
-    i0 = d.index("  const SMIMFI = {"); j0 = d.index("  const _smiCache")
-    harness = d[i0:j0] + "\n" + "\n".join(grab(f) for f in ("_pineEma", "_maPine", "_mfiSeries", "_pctRank", "_smiMfiCompute")) + f"""
-const r = _smiMfiCompute({_json.dumps(bars)});
-console.log(JSON.stringify({{ smi: r.smi, sig: r.sig, hist: r.hist, dzT: r.dzT, cross: r.cross, useVol: r.useVol }}));
-"""
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
-        fh.write(harness); hp = fh.name
-    try:
-        res = subprocess.run(["node", hp], capture_output=True, text=True)
-    finally:
-        os.unlink(hp)
-    try:
-        js = _json.loads(res.stdout.strip().splitlines()[-1])
-    except Exception:
-        check("SMI-MFI: harness ran", False, (res.stderr or res.stdout)[:400]); return
-    ref = _smimfi_reference(bars)
-    def same(a, b):
-        return len(a) == len(b) and all((x is None and y is None) or (x is not None and y is not None and abs(x - y) < 1e-6) for x, y in zip(a, b))
-    check("SMI-MFI: SMI, signal and histogram match the independent reference bar for bar",
-          same(js["smi"], ref["smi"]) and same(js["sig"], ref["sig"]) and same(js["hist"], ref["hist"]) and js["useVol"],
-          str([(a, b) for a, b in zip(js["smi"], ref["smi"]) if (a is None) != (b is None) or (a is not None and abs(a - b) > 1e-6)][:3]))
-    check("SMI-MFI: dynamic zone (90th percentile of 50 bars, nearest rank) matches", same(js["dzT"], ref["dzT"]))
-    sm, sg = ref["smi"], ref["sig"]
-    want = [i for i in range(1, len(sm)) if None not in (sm[i], sg[i], sm[i - 1], sg[i - 1])
-            and ((sm[i] > sg[i] and sm[i - 1] <= sg[i - 1]) or (sm[i] < sg[i] and sm[i - 1] >= sg[i - 1])) and ref["dzT"][i - 1] is not None]
-    check("SMI-MFI: every SMI/signal cross (once the zone exists) is marked, as inside or outside the zone",
-          [c["i"] for c in js["cross"]] == want and all(c["kind"] in ("in", "out") for c in js["cross"]) and len(want) >= 5,
-          f'{[c["i"] for c in js["cross"]][:8]} vs {want[:8]}')
-    check("SMI-MFI: pane between the chart and RSI, same height as RSI, crosshair shared, toggle on by default",
-          d.index('<div id="smiPaneBody"') < d.index('<div id="rsiPaneBody"')
-          and "_smiMfiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10)" in d
-          and "_rsiPaneSvg(k.cs, k.x, k.W, k.padL, k.padR, Math.round(k.H * 0.25) + 10)" in d
-          and "['smiXM', 'smi']" in d and "#smiPaneBody svg" in d and 'id="chk_smiMfi"' in d
-          and "'pdPrep', 'smiMfi'].includes(k)) _chart.show[k] = true;" in d)
-    seg = d[d.index("  // ══ SMI of MFI"):d.index("  function _rsiPaneSvg(")]
-    check("SMI-MFI: no candle colouring (barcolor) ported", "barcolor" not in seg.lower().replace("not ported: candle colouring", "")
-          and "candle colouring (as asked)" in seg)
-
-
 def test_indicator_settings():
-    """⚙ Settings for the ported TradingView indicators: moving-average types
-    match Pine, the histogram's own parameter set and the cross-alert limits
-    work, settings load / save / reset safely, and the dialog is wired."""
-    import subprocess, json as _json, random as _r, tempfile, math
+    """⚙ Settings for the Trend Target Ribbon: settings load / save / reset
+    safely (known keys and matching types only), defaults are not stored,
+    colour case is not a change, and the dialog is wired; the removed SMI of
+    MFI leaves nothing behind."""
+    import subprocess, json as _json
     d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
-    def grab(name):
-        i = d.index(f"function {name}(")
-        depth, j = 0, d.index("{", i)
-        for k in range(j, len(d)):
-            depth += d[k] == "{"; depth -= d[k] == "}"
-            if depth == 0:
-                return d[i:k + 1]
-    _r.seed(3)
-    xs = [None] * 4 + [100 + _r.gauss(0, 5) for _ in range(80)]
-    bars, p = [], 25000.0
-    for i in range(300):
-        o = p; p += _r.gauss(0, 6) + (3 if (i // 50) % 2 else -3)
-        bars.append({"t": 1000 + 60 * i, "o": o, "h": max(o, p) + 2, "l": min(o, p) - 2, "c": p, "v": _r.randint(500, 5000)})
     fw = d[d.index("  const _IND = {};"):d.index("  function _indFieldHtml(")]
-    i0 = d.index("  const SMIMFI = {"); j0 = d.index("  const _smiCache")
     harness = r"""
 const store = {}; const localStorage = { getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; } };
 const requestAnimationFrame = f => f();
-""" + fw + d[i0:j0] + "\n" + "\n".join(grab(f) for f in ("_pineEma", "_maPine", "_mfiSeries", "_pctRank", "_smiMfiCompute")) + r"""
-const R = {}, X = XS;
-for (const t of ['SMA', 'WMA', 'RMA', 'HMA', 'LSMA', 'EMA']) R[t] = _maPine(X, 10, t);
-const base = _smiMfiCompute(BARS);
-const P2 = JSON.parse(JSON.stringify(SMIMFI)); P2.hMult = 2;
-R.hist2 = _smiMfiCompute(BARS, P2).hist.every((v, i) => v == null ? base.hist[i] == null : Math.abs(v - 2 * base.hist[i]) < 1e-9);
-const P3 = JSON.parse(JSON.stringify(SMIMFI)); P3.hDLen = 9;
-R.histOwn = _smiMfiCompute(BARS, P3).hist.some((v, i) => v != null && base.hist[i] != null && Math.abs(v - base.hist[i]) > 1e-6)
-  && _smiMfiCompute(BARS, P3).smi.every((v, i) => v === base.smi[i]);
-const P4 = JSON.parse(JSON.stringify(SMIMFI)); P4.x1.below = -100; P4.x1.above = 100;
-const c4 = _smiMfiCompute(BARS, P4).cross;
-R.limits = { base1: base.cross.filter(c => c.kind === 'out').length, lim1: c4.filter(c => c.kind === 'out').length, in2: c4.filter(c => c.kind === 'in').length === base.cross.filter(c => c.kind === 'in').length };
-const P5 = JSON.parse(JSON.stringify(SMIMFI)); P5.x2.onlyInside = false;
-R.allCross = _smiMfiCompute(BARS, P5).cross.filter(c => c.kind === 'in').length >= base.cross.filter(c => c.kind === 'in').length;
-// settings framework: load ignores unknown keys and wrong types; save drops defaults; reset
+""" + fw + r"""
+const R = {};
 const cfg = { a: 1, b: 'x', n: { c: true } }, defs = Object.freeze(JSON.parse(JSON.stringify(cfg)));
 store.k1 = JSON.stringify({ a: 5, b: 7, zz: 9, n: { c: false, q: 1 } });
 let applied = 0;
@@ -2809,59 +2686,138 @@ _cfgAssign(cfg, JSON.parse(JSON.stringify(defs))); _indSave('t');
 R.savedDefault = ('k1' in store);
 cfg.a = 3; _indSave('t'); R.savedChanged = JSON.parse(store.k1).a;
 R.colorEq = _indEq('#00FF00', '#00ff00');
+_IND.t.apply(); R.applied = applied;
 console.log(JSON.stringify(R));
-""".replace("XS", _json.dumps(xs)).replace("BARS", _json.dumps(bars))
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
-        fh.write(harness); hp = fh.name
-    try:
-        res = subprocess.run(["node", hp], capture_output=True, text=True)
-    finally:
-        os.unlink(hp)
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
     try:
         R = _json.loads(res.stdout.strip().splitlines()[-1])
     except Exception:
         check("settings: harness ran", False, (res.stderr or res.stdout)[:500]); return
-    # Pine references
-    L, n = 10, len(xs)
-    def win(i): return xs[i - L + 1:i + 1] if i >= L - 1 and None not in xs[i - L + 1:i + 1] else None
-    sma = [None if win(i) is None else sum(win(i)) / L for i in range(n)]
-    wma = [None if win(i) is None else sum(v * (k + 1) for k, v in enumerate(win(i))) / (L * (L + 1) / 2) for i in range(n)]
-    def lsma_at(w):
-        k = list(range(L)); mx, my = sum(k) / L, sum(w) / L
-        sl = sum((a - mx) * (b - my) for a, b in zip(k, w)) / sum((a - mx) ** 2 for a in k)
-        return my + sl * (L - 1 - mx)
-    lsma = [None if win(i) is None else lsma_at(win(i)) for i in range(n)]
-    rma, s_ = [None] * n, None
-    for i in range(n):
-        if s_ is None:
-            if win(i) is not None: s_ = sum(win(i)) / L
-        else: s_ = (xs[i] + (L - 1) * s_) / L
-        rma[i] = s_
-    def wma_of(a, ln):
-        out = [None] * len(a)
-        for i in range(ln - 1, len(a)):
-            w = a[i - ln + 1:i + 1]
-            if None not in w: out[i] = sum(v * (k + 1) for k, v in enumerate(w)) / (ln * (ln + 1) / 2)
-        return out
-    h1, h2 = wma_of(xs, 5), wma_of(xs, 10)
-    hma = wma_of([None if a is None or b is None else 2 * a - b for a, b in zip(h1, h2)], int(math.sqrt(10)))
-    same = lambda a, b: all((x is None and y is None) or (x is not None and y is not None and abs(x - y) < 1e-9) for x, y in zip(a, b))
-    check("settings: SMA / WMA / RMA / HMA / LSMA match Pine's ta.* definitions",
-          same(R["SMA"], sma) and same(R["WMA"], wma) and same(R["RMA"], rma) and same(R["HMA"], hma) and same(R["LSMA"], lsma),
-          str([k for k, ref in (("SMA", sma), ("WMA", wma), ("RMA", rma), ("HMA", hma), ("LSMA", lsma)) if not same(R[k], ref)]))
-    check("settings: histogram multiplier and its own parameter set change only the histogram",
-          R["hist2"] and R["histOwn"], f'{R["hist2"]} {R["histOwn"]}')
-    check("settings: cross-alert limits gate alert set 1 only; 'only inside' off widens set 2",
-          R["limits"]["base1"] > 0 and R["limits"]["lim1"] == 0 and R["limits"]["in2"] and R["allCross"], str(R["limits"]))
     check("settings: saved values load by known key and matching type only (unknown keys and wrong types ignored)",
           R["loaded"] == '{"a":5,"b":"x","n":{"c":false}}', R["loaded"])
     check("settings: saving defaults removes the entry; a change is stored; colour case is not a change",
-          R["savedDefault"] is False and R["savedChanged"] == 3 and R["colorEq"], str(R))
-    check("dashboard: ⚙ beside both toggles and in the SMI legend; both registered with keys; Reset Defaults clears them",
-          'data-indset="ttr"' in d and 'data-indset="smiMfi" title=' in d and 'data-indset="smiMfi" style="cursor:pointer' in d
-          and "_indRegister('ttr'" in d and "_indRegister('smiMfi'" in d and "key: 'ttrCfgV1'" in d and "key: 'smiMfiCfgV1'" in d
-          and "'ttrCfgV1',            //" in d and "'smiMfiCfgV1',         //" in d
-          and "Reset to defaults" in d and "closeIndSettings(true)" in d)
+          R["savedDefault"] is False and R["savedChanged"] == 3 and R["colorEq"] and R["applied"] == 1, str(R))
+    check("dashboard: ⚙ beside the ribbon toggle, registered with its key, Reset Defaults clears it",
+          'data-indset="ttr"' in d and "_indRegister('ttr'" in d and "key: 'ttrCfgV1'" in d
+          and "'ttrCfgV1',            //" in d and "Reset to defaults" in d and "closeIndSettings(true)" in d)
+    check("SMI of MFI removed: no pane, toggle, settings or code left; its saved settings are cleared",
+          all(x not in d for x in ("smiPaneBody", "SMIMFI", "chk_smiMfi", "_smiMfiPaneSvg", "_indRegister('smiMfi'", "xclipS", "smiXM"))
+          and "localStorage.removeItem('smiMfiCfgV1')" in d)
+
+
+def _sqz_reference(bars, bbLen=20, bbMult=2.0, kcLen=20, kcMult=1.5, useTR=True, quirk=True):
+    """Independent Python port of LazyBear's Squeeze Momentum Pine script."""
+    import math
+    n = len(bars)
+    c = [b["c"] for b in bars]; h = [b["h"] for b in bars]; l = [b["l"] for b in bars]
+    def sma(a, t, k): return sum(a[t - k + 1:t + 1]) / k
+    def stdev(a, t, k):
+        m = sma(a, t, k); return math.sqrt(sum((x - m) ** 2 for x in a[t - k + 1:t + 1]) / k)
+    def tr(i):
+        if not useTR: return h[i] - l[i]
+        if i == 0: return h[0] - l[0]
+        return max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1]))
+    trs = [tr(i) for i in range(n)]
+    val, state, src2 = [None] * n, [None] * n, [None] * n
+    for t in range(n):
+        if t >= max(bbLen, kcLen) - 1:
+            basis = sma(c, t, bbLen); dev = (kcMult if quirk else bbMult) * stdev(c, t, bbLen)
+            ma = sma(c, t, kcLen); rng = sma(trs, t, kcLen)
+            uBB, lBB, uKC, lKC = basis + dev, basis - dev, ma + rng * kcMult, ma - rng * kcMult
+            state[t] = "on" if (lBB > lKC and uBB < uKC) else "off" if (lBB < lKC and uBB > uKC) else "none"
+        if t >= kcLen - 1:
+            hh = max(h[t - kcLen + 1:t + 1]); ll = min(l[t - kcLen + 1:t + 1])
+            src2[t] = c[t] - ((hh + ll) / 2 + sma(c, t, kcLen)) / 2
+        if t >= 2 * kcLen - 2:
+            ys = src2[t - kcLen + 1:t + 1]; xs = list(range(kcLen))
+            mx = sum(xs) / kcLen; my = sum(ys) / kcLen
+            slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sum((x - mx) ** 2 for x in xs)
+            val[t] = my + slope * (kcLen - 1 - mx)
+    return val, state
+
+
+def test_squeeze_momentum():
+    """Squeeze Momentum [LazyBear] replaces the RSI pane: momentum and squeeze
+    state match an independent port bar for bar (quirk on and off), all four
+    divergence kinds are found on oscillator pivots within range, and the
+    pane, toggle, ⚙ settings, crosshair, time-zoom clip and price-side
+    divergence are wired; the RSI pane is gone."""
+    import subprocess, json as _json, random, math, tempfile
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    rnd = random.Random(7)
+    bars, p = [], 24000.0
+    for i in range(400):
+        vol = 4 if 150 < i < 200 else 12                      # a quiet stretch -> squeeze
+        o = p; p += rnd.gauss(0.3 * math.sin(i / 25), vol)
+        bars.append({"o": round(o, 2), "c": round(p, 2), "h": round(max(o, p) + abs(rnd.gauss(0, vol / 2)), 2),
+                     "l": round(min(o, p) - abs(rnd.gauss(0, vol / 2)), 2)})
+    # divergence fixture: oscillator pivots and price at those bars
+    osc = [0.0] * 120; px = [{"h": 100.0, "l": 90.0} for _ in range(120)]
+    def dip(i, v, low):   # oscillator pivot low at i
+        for k in range(-4, 5): osc[i + k] = min(osc[i + k], v + abs(k) * 0.5)
+        px[i]["l"] = low
+    def peak(i, v, high):
+        for k in range(-4, 5): osc[i + k] = max(osc[i + k], v - abs(k) * 0.5)
+        px[i]["h"] = high
+    dip(10, -5, 80); dip(25, -3, 78)        # LL price, HL osc  -> regular bullish
+    dip(40, -2, 79)                         # HL price, HL osc  -> nothing
+    dip(55, -6, 82)                         # HL price, LL osc  -> hidden bullish
+    peak(70, 5, 120); peak(85, 3, 125)      # HH price, LH osc  -> regular bearish
+    peak(95, 2, 122)                        # LH price, LH osc  -> nothing
+    peak(110, 6, 121)                       # LH price, HH osc  -> hidden bearish
+    harness = "const SQZ = { bbLen: 20, bbMult: 2.0, kcLen: 20, kcMult: 1.5, useTR: true, lbQuirk: true };\n" \
+        + grab("_sqzCompute") + "\n" + grab("_oscDivergences") + "\n" \
+        + "const bars = " + _json.dumps(bars) + ";\nconst osc = " + _json.dumps(osc) + ";\nconst px = " + _json.dumps(px) + ";\n" + r"""
+const R = {};
+R.q = _sqzCompute(bars, SQZ);
+R.t = _sqzCompute(bars, Object.assign({}, SQZ, { lbQuirk: false, useTR: false }));
+R.d = _oscDivergences(px, osc, { left: 3, right: 3, rangeMin: 5, rangeMax: 60 });
+R.far = _oscDivergences(px, osc, { left: 3, right: 3, rangeMin: 5, rangeMax: 10 }).length;
+R.zs = _oscDivergences(px, osc.map(v => -v), { left: 3, right: 3, rangeMin: 5, rangeMax: 60, zeroSide: true }).length;
+R.big = _oscDivergences(px, osc, { left: 3, right: 3, rangeMin: 5, rangeMax: 60, minAbs: 4.5 }).map(x => [x.a, x.b]);
+console.log(JSON.stringify(R));
+"""
+    hf = os.path.join(tempfile.gettempdir(), "sqz_harness.js")
+    open(hf, "w").write(harness)
+    res = subprocess.run(["node", hf], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("squeeze: harness ran", False, (res.stderr or res.stdout)[:500]); return
+    for tag, kw in (("q", {}), ("t", {"quirk": False, "useTR": False})):
+        rv, rs = _sqz_reference(bars, **kw)
+        jv, js = R[tag]["val"], R[tag]["state"]
+        bad = [i for i in range(len(bars)) if (rv[i] is None) != (jv[i] is None) or (rv[i] is not None and abs(rv[i] - jv[i]) > 1e-6)]
+        bads = [i for i in range(len(bars)) if rs[i] != js[i]]
+        check(f"squeeze: momentum and squeeze state match the Pine port bar for bar ({'LazyBear quirk' if tag == 'q' else 'textbook BB, high-low range'})",
+              not bad and not bads and rv[37] is None and rv[38] is not None and "on" in rs and "off" in rs,
+              f"val mismatches {bad[:5]} state mismatches {bads[:5]}")
+    kinds = sorted((x["kind"], x["hidden"], x["a"], x["b"]) for x in R["d"])
+    check("squeeze: all four divergences found on oscillator pivots (regular/hidden, bull/bear), confirmed `right` bars later",
+          kinds == sorted([("bullish", False, 10, 25), ("bullish", True, 40, 55), ("bearish", False, 70, 85), ("bearish", True, 95, 110)])
+          and all(x["conf"] == x["b"] + 3 for x in R["d"]), str(kinds))
+    check("squeeze: pivots further apart than the max range are not paired", R["far"] == 0, str(R["far"]))
+    check("squeeze: filters - pivots on the wrong side of zero are ignored; small pivots drop out and the next qualifying pivot pairs instead",
+          R["zs"] == 0 and R["big"] == [[10, 55]], str({k: R[k] for k in ("zs", "big")}))
+    check("dashboard: Squeeze pane replaces RSI - pane, toggle (default on), ⚙ settings, reset key, crosshair, time-zoom clip",
+          'id="sqzPaneBody"' in d and 'id="chk_sqz"' in d and 'data-indset="sqz"' in d and "_indRegister('sqz'" in d
+          and "key: 'sqzCfgV1'" in d and "'sqzCfgV1',            //" in d and "['sqzXM', 'sqz']" in d
+          and "#sqzPaneBody g.xzc" in d and "${_xClip('xclipQ', W, padL, padR, H)}<g class=\"xzc\">" in d
+          and "'turnTimes', 'emaX', 'ttr', 'sqz', 'pdZones'" in d and "ttr: true, sqz: true }" in d)
+    check("dashboard: divergences on closed bars, drawn in the pane and on the price (candles and Renko)",
+          "const closedN = _chart.liveBar ? cs.length - 1 : cs.length;" in d
+          and d.count("_sqzPriceDivSvg(cs, ") == 3 and "if (!_chart.show.sqz || !SQZ.div.onPrice" in d)
+    check("RSI pane removed: no pane, renderer or settings left; its saved settings are cleared",
+          all(x not in d for x in ("rsiPaneBody", "_rsiPaneSvg", "rsiXM", "xclipR", "_rsiCtx", "_divRes"))
+          and "localStorage.removeItem('rsiCfg')" in d)
 
 
 _POI_SAMPLE = (
@@ -2985,11 +2941,99 @@ def test_chart_ctx_interval():
           all(f'class="btn chart-iv{" active" if iv == 1 else ""}" data-iv="{iv}"' in d for iv in (1, 2, 3, 5, 10, 15)))
 
 
+def test_chart_ctx_actions():
+    """Chart right-click: History calendar (weekends / NSE holidays greyed with
+    the holiday's name, future disabled, today = Live, a pick drives the same
+    Live / Historical controls), Fit (the toolbar's Fit) and Reset Defaults
+    (the very function behind Alerts ▸ Reset Defaults)."""
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    i = d.index("const onCtx = ev => {"); j = d.index("document.addEventListener('contextmenu', onCtx, true);")
+    seg = d[i:j]
+    check("chart right-click: calendar, Fit and Reset Defaults items, above the alerts",
+          "_histCalendarOpen(cx, cy)" in seg and "document.getElementById('zoomFitBtn')?.click()" in seg
+          and "item('↺ Reset Defaults…', () => _resetSettings());" in seg
+          and seg.index("History calendar") < seg.index("Alert when spot touches"))
+    check("chart right-click: Reset Defaults is the same function the Alerts tab button runs",
+          "if (ev.target && ev.target.id === 'alertResetBtn') { ev.preventDefault(); _resetSettings(); }" in d)
+    names = d[d.index("const _NSE_HOLIDAY_NAMES = {"):d.index("};", d.index("const _NSE_HOLIDAY_NAMES = {"))]
+    import re as _re
+    hn = set(_re.findall(r"'(\d{4}-\d{2}-\d{2})':", names))
+    hs = set(_re.findall(r"'(\d{4}-\d{2}-\d{2})'", d[d.index("const _NSE_HOLIDAYS = new Set("):d.index("]);", d.index("const _NSE_HOLIDAYS = new Set("))]))
+    check("history calendar: every NSE holiday has its name for the tooltip", hn == hs and len(hn) == 16)
+    cal = d[d.index("function _histCalendarRender()"):d.index("function _histCalendarOpen(")]
+    check("history calendar: weekends, holidays and future days are not selectable; today means Live; Monday-first grid",
+          "const fut = k > today, ok = !wk && !hol && !fut;" in cal and "${ok ? `data-hday=\"${k}\"` : ''}" in cal
+          and "(first.getDay() + 6) % 7" in cal and "● Live (today)" in cal
+          and "if (!day || day >= _istDayKey()) modeSel.value = 'live';" in d)
+
+
+def test_time_zoom():
+    """Horizontal (time) zoom: one shared window drives every time-based x
+    (chart, CVD/PCR/VIX pane, Squeeze Momentum, grid, crosshair); wheel = time,
+    Shift+wheel / price axis = price; zoomed in, drag pans and the day swipe
+    stands down; Fit / double-click / interval or day change reset it; the
+    price axis fits the visible candles."""
+    import subprocess, json as _json
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    harness = r"""
+const _chart = { interval: 1 }; let rendered = 0;
+const _isRenkoView = () => false; const requestAnimationFrame = f => f(); const _safe = f => f(); const renderPriceChart = () => rendered++;
+const _slotsNow = () => Math.max(1, Math.ceil(385 / (_chart.interval || 1)));
+""" + "\n".join(grab(f) for f in ("_xWin", "_xzActive", "_xs", "_xSlotAt", "_xSetWin", "_xRender", "_xZoomAt", "_xGridStep")) + r"""
+let _xzRaf = 0;
+const R = {};
+const W = 900, pL = 8, pR = 72, S = 385;
+R.full = [_xs(0.5, S, W, pL, pR), _xs(S - 0.5, S, W, pL, pR), _xzActive()];
+const px = 400, a0 = _xSlotAt(px, S, W, pL, pR);
+_xZoomAt(px, W, pL, pR, 0.5);                                   // zoom in 2x at the pointer
+R.zoom = { win: _chart.xZoom, anchor: Math.abs(_xSlotAt(px, S, W, pL, pR) - a0) < 1e-9, active: _xzActive(), rendered, step: _xGridStep(S) };
+_xSetWin(-50, 100, S); R.clampLo = _chart.xZoom.s0;
+_xSetWin(9999, 100, S); R.clampHi = _chart.xZoom.s1;
+_xSetWin(0, 2, S); R.minSpan = _chart.xZoom.s1 - _chart.xZoom.s0;
+_xZoomAt(px, W, pL, pR, 1e6); R.outToFull = _chart.xZoom;
+_chart.xZoom = { s0: 10, s1: 50, slots: S }; _chart.interval = 5; R.otherInterval = _xzActive();
+console.log(JSON.stringify(R));
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("time zoom: harness ran", False, (res.stderr or res.stdout)[:400]); return
+    full_ok = abs(R["full"][0] - (8 + 0.5 / 385 * 820)) < 1e-6 and abs(R["full"][1] - (8 + 384.5 / 385 * 820)) < 1e-6 and R["full"][2] is False
+    check("time zoom: at the full day the mapping is exactly the old one (nothing moves)", full_ok, str(R["full"]))
+    z = R["zoom"]
+    check("time zoom: wheel zooms around the pointer's time - the slot under the cursor stays put",
+          z["anchor"] and z["active"] and abs((z["win"]["s1"] - z["win"]["s0"]) - 192.5) < 1e-6 and z["rendered"] >= 1, str(z))
+    check("time zoom: the window is clamped to the session, has a minimum width, and zooming out past the day clears it",
+          R["clampLo"] == 0 and abs(R["clampHi"] - 385) < 1e-9 and R["minSpan"] >= 6 and R["outToFull"] is None, str(R))
+    check("time zoom: a window saved for another interval is ignored (no stale zoom after switching 1m → 5m)", R["otherInterval"] is False)
+    check("time zoom: every pane and the grid/crosshair use the shared window",
+          d.count("_xs(slotOf(cs[i].t) + 0.5, slots, W, padL, padR)") == 1 and "const x = ts => _xs(slotOf(ts) + 0.5, slots, W, padL, padR);" in d
+          and "else sx = _xs(m / iv + 0.5, slots, W, padL, padR);" in d and "_xSlotAt(px, slots, W, padL, padR) - 0.5" in d
+          and "${_xClip('xclipQ', W, padL, padR, H)}<g class=\"xzc\">" in d
+          and "${_xClip('xclipC', W, padL, padR, H)}<g class=\"xzc\">" in d and "${_xClip('xclipM', W, padL, padR, H)}${lvlSvg}<g class=\"xzc\">" in d
+          and "padL + (m / iv + 0.5) / slots * (W - padL - padR)" not in d and "/ slots * (W - padL - padR)" not in d)
+    check("time zoom: wheel = time, Shift+wheel or the price axis = price; drag pans when zoomed, swipe only at full day; resets",
+          "if (!ev.shiftKey && !overAxis) {" in d and "_xZoomAt(px, W, padL, padR" in d and "if (_xzActive()) {" in d
+          and "if (_xPan) _xPanMove(ev.clientX); else if (_daySwipe)" in d
+          and "_chart.yZoom = 1; _chart.yCenter = null; _chart.xZoom = null; _zoomSync(); renderPriceChart();" in d
+          and "_chart.interval = +b.dataset.iv; _chart.xZoom = null;" in d and "_chart.candles = []; _chart.liveBar = false; _chart.xZoom = null;" in d)
+    check("time zoom: price axis fits the visible candles; levels widen the fit only at the full day",
+          "const visCs = _visMask && _visMask.some(Boolean) ? cs.filter((_, i) => _visMask[i]) : cs;" in d and "if (!_xzOn) for (const L of levels)" in d)
+
+
 def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_smi_mfi, test_indicator_settings, test_participant_oi, test_chart_ctx_interval, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
