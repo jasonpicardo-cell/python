@@ -982,8 +982,73 @@ console.log(JSON.stringify({
     check("entry log: T1 then T2 scored half at each, net of costs",
           lg[0] == "T2" and lg[1] == round((0.5 * (115 - 100 - 1) + 0.5 * (130 - 100 - 1)) * 65) and lg[2] == 1 and lg[3] == 1 and lg[4] == 1, str(lg))
     check("entry alerts: banner, two-read hold, one per direction, cooldown",
-          "_seBanner(s)" in dsrc and "if (h.n < 2) continue;" in dsrc and "now - f < 300000" in dsrc)
+          "_seBanner(s)" in dsrc and "if (h.n < R.holdReads || now - h.since < R.holdMs) continue;" in dsrc and "cooldownMs: 300000" in dsrc)
     check("cost defaults: STT 0.1% and exchange 0.03503% on options", "sttPct: 0.1, exchPct: 0.03503" in dsrc)
+
+def test_entry_alert_discipline():
+    """Trade-entry popup: a setup must stay ready 20 s / 3 reads; one move is
+    announced once (re-arms only after a minute off, never while that
+    direction's last alert is still open); no about-turn within 3 minutes;
+    the banner lapses after 8 s off, by side/type/direction. Trend entries
+    need a real pullback that turned; supporting checks need 2 confirming."""
+    import subprocess, json as _json
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    def grab(name):
+        i = d.index(f"function {name}(")
+        depth, j = 0, d.index("{", i)
+        for k in range(j, len(d)):
+            depth += d[k] == "{"; depth -= d[k] == "}"
+            if depth == 0:
+                return d[i:k + 1]
+    rule = d[d.index("  const _SE_RULE = "):d.index("\n", d.index("  const _SE_RULE = "))]
+    harness = r"""
+let NOW = 1e12; const _realNow = Date.now; Date.now = () => NOW;
+const state = { symbol: 'NIFTY' }; const _isHistorical = () => false;
+const _istNowMin = () => ({ m: 600, wd: 3 }); const _seCfg = () => ({ on: true, voice: false, buy: true, sell: true });
+const _seState = { hold: {}, fired: {}, banner: null };
+let OPEN = []; const _seLog = () => OPEN;
+const fired = []; const _seFire = (d, s) => { fired.push([Math.round((NOW - 1e12) / 1000), s.dir]); _seState.banner = { id: s.id, side: s.side, typ: s.typ, dir: s.dir, off: null }; };
+let lapsedAt = null; const _seBannerLapsed = () => { lapsedAt = Math.round((NOW - 1e12) / 1000); _seState.banner = null; };
+""" + rule + "\n" + grab("_seEvaluate") + r"""
+const D = { symbol: 'NIFTY' };
+const up = ready => [{ id: 'NIFTY|BUY|CE|25000', side: 'BUY', typ: 'CE', dir: 1, ready, preferred: true }];
+const dn = ready => [{ id: 'NIFTY|BUY|PE|25000', side: 'BUY', typ: 'PE', dir: -1, ready, preferred: true }];
+const run = (secs, set, step = 2) => { for (let t = 0; t < secs; t += step) { _seEvaluate(D, set); NOW += step * 1000; } };
+const R = {};
+run(6, up(true)); run(4, up(false)); R.flicker = fired.length;          // 6 s ready then off: nothing
+run(30, up(true)); R.first = fired.slice();                            // fires once it has held 20 s
+run(600, up(true)); R.stillOne = fired.length;                         // ready for 10 more minutes: no repeat
+run(30, up(false)); run(30, up(true)); R.shortOff = fired.length;      // off 30 s: not re-armed
+run(70, up(false)); OPEN = [{ res: null, sym: 'NIFTY', dir: 1 }]; run(30, up(true)); R.openBlocks = fired.length;
+OPEN = []; run(70, up(false)); run(30, up(true)); R.rearmed = fired.length;   // off > 60 s, no open trade: alerts again
+const tUp = NOW; run(60, dn(true)); R.flipBlocked = fired.length;     // DOWN within 3 min of an UP alert: held
+run(150, dn(true)); R.flipLater = fired.slice(-1)[0];                  // allowed once 3 minutes have passed
+// banner lapse: 4 s off keeps it, 8 s off lapses it
+lapsedAt = null; run(4, dn(false)); R.keep = lapsedAt; run(10, dn(false)); R.lapse = lapsedAt != null;
+console.log(JSON.stringify(R));
+"""
+    res = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    try:
+        R = _json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        check("entry alerts: harness ran", False, (res.stderr or res.stdout)[:500]); return
+    check("entry alerts: a setup ready for only a few seconds does not fire; one held 20 s / 3 reads does",
+          R["flicker"] == 0 and len(R["first"]) == 1 and R["first"][0][1] == 1 and 28 <= R["first"][0][0] <= 32, str(R))
+    check("entry alerts: one move is announced once - no repeat while it stays ready, none after a short dip",
+          R["stillOne"] == 1 and R["shortOff"] == 1, str(R))
+    check("entry alerts: no new alert in a direction while its last alert is still open; re-arms after a minute off",
+          R["openBlocks"] == 1 and R["rearmed"] == 2, str(R))
+    check("entry alerts: no about-turn within 3 minutes of an alert; allowed after",
+          R["flipBlocked"] == 2 and R["flipLater"] and R["flipLater"][1] == -1, str(R))
+    check("entry alerts: banner lapses after 8 s off, not on a one-poll flicker", R["keep"] is None and R["lapse"], str(R))
+    sc = grab("_scalpSetups")
+    check("entry alerts: trend entries need a pullback to the 9 EMA / VWAP in the last 8 bars and a turn back with the trend",
+          "must(base, 'pulled back & turning', pbOk, pbTxt);" in sc and "for (let i = Math.max(0, n0 - 8); i < n0; i++)" in sc
+          and "const turned = le != null && (lc.c - lc.o) * dir > 0 && (lc.c - le) * dir >= 0;" in sc)
+    check("entry alerts: supporting checks need 2 confirming - room left, not the lull and breadth do not count as evidence",
+          "ready: mOk === musts.length && sOk >= 3 && eOk >= 2," in sc
+          and "pts of the day's move left`, false);" in sc and "'active hours', false);" in sc and "(${p.conf.restState})` : '—', false);" in sc)
+
 
 def test_ctx_and_intervals():
     """Context history kept server-side (same arithmetic as the dashboard),
@@ -1185,8 +1250,11 @@ console.log(JSON.stringify({ up: up.score, down: down.score, nervous: nervous.co
 
 
 def test_traffic_light():
-    """Traffic light: BUY when the readers agree, WAIT when they disagree,
-    hysteresis between 40 and 30; boxes removed from the chart."""
+    """Turn light (replaces the trend-summary traffic light): WAIT -> WATCH at
+    a level with a high enough score -> BUY/SELL on a closed candle that turns,
+    reclaims and (broker feed) is flow-confirmed -> FAILED/DONE -> WAIT; QUIET
+    at the open, the close and scheduled events; hand-set weights until a
+    fitted model is accepted; evidence in families counted once."""
     import subprocess, json as _json
     dsrc = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
     def grab(name):
@@ -1196,25 +1264,58 @@ def test_traffic_light():
             depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
             if depth == 0:
                 return dsrc[i:k + 1]
-    harness = grab("_trafficVotes") + grab("renderTrafficLight") + r"""
-const window = {}; const state = { symbol: 'NIFTY' }; const _tl = { state: 'WAIT', since: 0 };
-const el = { innerHTML: '' }; const document = { getElementById: () => el };
-const _isHistorical = () => false; const _istNowMin = () => ({ m: 600, wd: 3 });
-const _scoreRecord = () => {}; const escapeHtml = x => x;
-const set = (md, dr, te, cf, regime, dir, cons) => {
-  const at = Date.now();
-  window._mdLast = { score: md, label: 'x', at }; window._deskReadLast = { total: dr, t: at, have: true };
-  window._trendLast = { score: te, at }; window._confLast = { score: cf, confirmed: 0, book: 1, hw: 0, label: 'x' };
-  window._pickLast = { regime, trendDir: dir, at };
-  return { underlying_value: 25000, constituents: { available: true, score: cons } };
-};
-const _tlPlace = () => {}; const word = () => (el.innerHTML.match(/tl-word[^>]*>([A-Z]+)</) || [])[1];
-renderTrafficLight(set(50, 4, 55, 70, 'trend', 1, 60)); const a = word();
-renderTrafficLight(set(35, 2, 30, 30, 'range', 0, 20)); const b = word();      // eases to ~+33: holds BUY
-renderTrafficLight(set(10, -1, 5, 0, 'range', 0, 0)); const c = word();       // fades: WAIT
-renderTrafficLight(set(60, -4, 50, -60, 'trend', -1, 50)); const dd = word();  // readers disagree: WAIT
-renderTrafficLight(set(-55, -4, -60, -70, 'trend', -1, -50)); const e = word();
-console.log(JSON.stringify({ a, b, c, dd, e }));
+    consts = "\n".join(dsrc[dsrc.index(f"  const {c} = "):dsrc.index(";\n", dsrc.index(f"  const {c} = ")) + 2]
+                       for c in ("_TURN_FAM", "_TURN_PRIOR", "_TURN_RULE", "_TURN_EVENTS"))
+    harness = consts + "\n" + "\n".join(grab(f) for f in ("_turnWeights", "_turnScore", "_turnThr", "_turnQuiet", "_turnStep")) + r"""
+let NOW = 1e12; Date.now = () => NOW; let MIN = 600;
+const _turnSide = dir => dir > 0 ? 'bottom' : 'top';
+const _turn = { st: 'WAIT', dir: 0, since: 0, note: '', w: null, trig: null, end: 0, lastBarT: null, model: null, events: [] };
+const state = { symbol: 'NIFTY' }; const fmtInt = x => String(x);
+const _istNowMin = () => ({ m: MIN, wd: 3 }); let DAY = '2026-10-28'; const _istDayKey = () => DAY;
+const recs = []; const _scoreRecord = (src, dir) => recs.push([src, dir]);
+const fam = o => Object.assign({ loc: 0, sweep: 0, mom: 0, flow: 0, absorb: 0, pos: 0, gamma: 0, breadth: 0, smt: 0, vix: 0, time: 0 }, o);
+const F = (t, bar, prev, fb, ft, flowOn = true) => ({ spot: bar.c, D: 200, s15: 40, iv: 1, flowOn, lastT: t, bar, prevBar: prev,
+  recentLo: Math.min(bar.l, prev.l), recentHi: Math.max(bar.h, prev.h),
+  side: { 1: { f: fam(fb), why: {}, lvl: 24900, lvlLab: 'put wall 24900' }, '-1': { f: fam(ft), why: {}, lvl: 25200, lvlLab: 'call wall 25200' } } });
+const score = f => ({ 1: Math.round(100 * _turnScore(f.side[1].f, 'bottom')), '-1': Math.round(100 * _turnScore(f.side[-1].f, 'top')) });
+const step = (f, spot) => { const d = { underlying_value: spot ?? f.bar.c, symbol: 'NIFTY' }; _turnStep(d, f, score(f), _turnQuiet(), true); return _turn.st; };
+const R = {};
+const strong = { loc: 1, sweep: 1, mom: 0.9 };                  // -3 + 1.4 + 1.1 + 0.81 = 0.31 -> 58
+R.prior = Math.round(100 * _turnScore(fam(strong), 'bottom'));
+R.weak = Math.round(100 * _turnScore(fam({ loc: 1, mom: 0.5 }), 'bottom'));
+const b1 = { o: 24930, h: 24935, l: 24895, c: 24900 }, p1 = { o: 24960, h: 24965, l: 24925, c: 24930 };
+R.s0 = step(F(1, b1, p1, { loc: 1, mom: 0.5 }, {}));               // at a level but weak: WAIT
+R.s1 = step(F(1, b1, p1, strong, {}));                             // strong + at a level: WATCH up
+R.dir1 = _turn.dir;
+NOW += 60000;
+const b2 = { o: 24900, h: 24915, l: 24890, c: 24912 };            // green, closes back above the 24900 level
+R.s2 = step(F(2, b2, b1, Object.assign({ flow: 0 }, strong), {}));        // turned + reclaimed but no flow confirm: WATCH
+NOW += 60000;
+const b3 = { o: 24910, h: 24940, l: 24905, c: 24935 };
+R.s3 = step(F(3, b3, b2, Object.assign({ flow: 0.6 }, strong), {}));      // flow confirms: BUY
+R.trig = _turn.trig && { stop: Math.round(_turn.trig.stop), target: Math.round(_turn.trig.target) };
+NOW += 30000; R.s4 = step(F(3, b3, b2, strong, {}), 24880);        // trades under the stop: FAILED
+NOW += 60000; R.s5 = step(F(4, b3, b2, {}, {}));                   // still showing FAILED for 2 min
+NOW += 90000; R.s6 = step(F(5, b3, b2, {}, {}));                   // back to WAIT
+// target path + top side
+_turn.st = 'WAIT'; NOW += 60000;
+const t1 = { o: 25170, h: 25205, l: 25165, c: 25195 }, tp = { o: 25150, h: 25175, l: 25140, c: 25170 };
+R.t1 = step(F(10, t1, tp, {}, strong)); R.tdir = _turn.dir;        // WATCH down
+NOW += 60000;
+const t2 = { o: 25195, h: 25198, l: 25170, c: 25172 };            // red, closes under the previous low
+R.t2 = step(F(11, t2, t1, {}, strong, false));                     // no flow feed: needs score >= watch + 10 -> 58 >= 50 -> SELL
+NOW += 60000; R.t3 = step(F(11, t2, t1, {}, strong), 25172 - 61);  // target (0.3 x 200 = 60) reached: DONE
+// QUIET: opening, an event window
+_turn.st = 'WAIT'; NOW += 5 * 60000; MIN = 560; R.q1 = step(F(20, b1, p1, strong, {}));
+MIN = 600; DAY = '2026-12-04'; R.q2 = [step(F(21, b1, p1, strong, {})), _turn.note];
+DAY = '2026-10-28'; _turn.events = [{ day: '2026-10-28', from: 590, to: 620, lab: 'custom' }]; R.q3 = _turn.note && step(F(22, b1, p1, strong, {}));
+_turn.events = [];
+// a fitted model takes over only when accepted
+_turn.model = { accepted: false, sides: { bottom: { b: -9, w: {}, watch_p: 0.2 } } }; R.notAcc = _turnThr(1);
+_turn.model = { accepted: true, sides: { bottom: { b: -1, w: { loc: 2 }, watch_p: 0.31, auc: 0.6 }, top: { b: -1, w: {}, watch_p: 0.3, auc: 0.6 } } };
+R.acc = [_turnThr(1), Math.round(100 * _turnScore(fam({ loc: 1 }), 'bottom'))];
+R.recs = recs.map(r => r.join(':'));
+console.log(JSON.stringify(R));
 """
     fn = os.path.join(HERE, "__tl_test.js")
     open(fn, "w").write(harness)
@@ -1223,16 +1324,155 @@ console.log(JSON.stringify({ a, b, c, dd, e }));
     finally:
         os.remove(fn)
     if out.returncode:
-        check("traffic light runs", False, out.stderr[-300:]); return
+        check("turn light runs", False, out.stderr[-400:]); return
     r = _json.loads(out.stdout.strip().splitlines()[-1])
-    check("traffic light: readers agreeing long -> BUY", r["a"] == "BUY", str(r))
-    check("traffic light: holds BUY while the composite stays above 30", r["b"] == "BUY", str(r))
-    check("traffic light: fades to WAIT", r["c"] == "WAIT", str(r))
-    check("traffic light: readers disagreeing -> WAIT", r["dd"] == "WAIT", str(r))
-    check("traffic light: readers agreeing short -> SELL", r["e"] == "SELL", str(r))
-    check("traffic light sits top-left over the candles; Desk and Move-quality boxes removed",
-          'id="tlight"' in dsrc and "_chart._mqBox = '';" in dsrc and "renkoMqBox +=" not in dsrc
-          and 'id="chk_deskBox"' not in dsrc)
+    check("turn light: hand-set logistic score - strong evidence at a level 58, weak 24", r["prior"] == 58 and r["weak"] == 24, str(r))
+    check("turn light: WAIT when the score is low, WATCH ▲ when at a level with a high enough score",
+          r["s0"] == "WAIT" and r["s1"] == "WATCH" and r["dir1"] == 1, str(r))
+    check("turn light: no trigger without flow confirmation on the broker feed; BUY when the closed candle turns, reclaims and flow confirms",
+          r["s2"] == "WATCH" and r["s3"] == "BUY", str(r))
+    check("turn light: stop just beyond the watched extreme, target 0.3 × the day's σ",
+          r["trig"] and r["trig"]["stop"] == 24886 and r["trig"]["target"] == 24995, str(r["trig"]))
+    check("turn light: FAILED when the stop trades, held 2 minutes, then WAIT", r["s4"] == "FAILED" and r["s5"] == "FAILED" and r["s6"] == "WAIT", str(r))
+    check("turn light: top side - WATCH ▼, SELL on the NSE feed by score + 10, DONE at the target",
+          r["t1"] == "WATCH" and r["tdir"] == -1 and r["t2"] == "SELL" and r["t3"] == "DONE", str(r))
+    check("turn light: QUIET in the opening 10 minutes, on RBI policy day and in NSE_EVENTS windows",
+          r["q1"] == "QUIET" and r["q2"] == ["QUIET", "RBI policy 10:00"] and r["q3"] == "QUIET", str(r))
+    check("turn light: a fitted model is used only once accepted (its own watch line)",
+          r["notAcc"] == 40 and r["acc"] == [31, 73], str(r))
+    check("turn light: watch and trigger logged to the Signal Scorecard",
+          "Turn watch:1" in r["recs"] and "Turn trigger:1" in r["recs"] and "Turn trigger:-1" in r["recs"], str(r["recs"]))
+    feats = grab("_turnFeatures")
+    check("turn light: oscillators are ONE momentum family (Squeeze, WaveTrend) and only regular divergences count",
+          "f.mom = +mo.toFixed(3)" in feats and feats.count("f.mom =") == 1 and "!x.hidden && x.kind ===" in feats)
+    check("turn light: new inputs - Nifty/BankNifty divergence, futures absorption, VIX spike-reversal, events",
+          "f.smt = 1" in feats and "f.absorb = holds ?" in feats and "VIX spiked" in feats and "'RBI policy 10:00'" in dsrc
+          and "_turnPeerSym = s => s === 'NIFTY' ? 'BANKNIFTY' : 'NIFTY'" in dsrc and "/api/ctx-history?symbol=" in dsrc)
+    check("turn light: one row per closed bar logged to the server; drawn over the candles; past days show labelled turns",
+          "fetch(`${base}/api/turn-log`" in dsrc and "_turnChartSvg(y, lo, hi, padL, W - padR," in dsrc
+          and "/api/turn-labels?symbol=" in dsrc and 'id="tlight"' in dsrc and "_trafficVotes" not in dsrc)
+
+
+def test_server_reachability():
+    """"Can't reach the local server" while it was up: a listen backlog of 5
+    (refused connections under LAN bursts), the replay rebuild restarted on
+    every context request for an index with no history, and that index never
+    recorded by the poller; the page now retries once before the banner."""
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    check("server: listen backlog 128, not the default 5", "request_queue_size = 128" in ssrc)
+    check("server: the replay rebuild runs once per index and day, even when it finds nothing",
+          "(sym, day) in _ctx_backfill_tried:" in ssrc and "_ctx_backfill_tried.add((sym, day))" in ssrc)
+    check("server: the poller records context history for every polled index (no extra broker call)",
+          "data_, _meta = _cached_chain(sym, None, 12, client=\"poller\")" in ssrc and "_ctx_record(sym.upper(), data_)" in ssrc)
+    check("page: one quiet retry before the can't-reach banner; reset on success",
+          "if (err.isNetworkError && !state._netRetried) {" in d and "state._netRetried = false;" in d)
+    check("page: the peer-index request waits for the chain request, skips hidden tabs, every 30 s",
+          "if (state.inFlight || document.hidden) return;" in d and "setInterval(_turnPeerFetch, 30000);" in d)
+
+
+def test_turn_model():
+    """nse_turns: the objective label, events (not bars) counted, AUC, the
+    walk-forward fit with its acceptance guards, the per-bar log endpoint."""
+    import importlib, tempfile, random as _rnd, math as _m, shutil, time, calendar
+    sys.path.insert(0, HERE)
+    T = importlib.import_module("nse_turns")
+    t0 = 1792208700
+    bars, p = [], 25000.0
+    for i in range(120):
+        o = p
+        p += -3 if i < 40 else 3.5 if i < 80 else 0.0
+        bars.append({"t": t0 + 60 * i, "o": o, "c": p, "h": max(o, p) + 0.5, "l": min(o, p) - 0.5})
+    labs = T.label_bars(bars, D=200)
+    pos_b = [i for i, l in enumerate(labs) if l["bottom"] == 1]
+    ev = T.events(labs)
+    pts = T.turn_points(bars, labs)
+    check("turn label: a 120-pt fall then a rally - the bars near the low are bottoms, one EVENT, turning from the low",
+          pos_b and min(pos_b) >= 30 and max(pos_b) <= 47 and len(ev["bottom"]) == 1
+          and [q["side"] for q in pts].count("bottom") == 1 and abs(pts[0]["price"] - min(b["l"] for b in bars)) < 1e-9,
+          f"{pos_b} {ev} {pts[:1]}")
+    check("turn label: X = 0.3 × D (floored at 0.06% of spot), S = 0.4 × X; no label without 30 bars after",
+          abs(labs[0]["X"] - 60) < 1e-9 and abs(labs[0]["S"] - 24) < 1e-9 and labs[-1]["bottom"] is None and labs[89]["bottom"] is not None)
+    gap = [dict(b) for b in bars]
+    for b in gap[60:]:
+        b["t"] += 600                                        # a 10-minute hole at bar 60
+    lg = T.label_bars(gap, D=200)
+    check("turn label: a hole in the bars after t leaves t unlabelled (no guessing across it)",
+          lg[45]["bottom"] is None and lg[20]["bottom"] is not None)
+    check("AUC: perfect 1, reversed 0, ties 0.5, one class -> None",
+          T.auc([1, 2, 3, 4], [0, 0, 1, 1]) == 1 and T.auc([4, 3, 2, 1], [0, 0, 1, 1]) == 0
+          and T.auc([1, 1, 1, 1], [0, 1, 0, 1]) == 0.5 and T.auc([1, 2], [1, 1]) is None)
+    rng = _rnd.Random(3)
+    rows = []
+    for d in range(14):
+        for k in range(250):
+            x = [rng.random() for _ in T.FAMILIES]
+            y = 1 if rng.random() < 1 / (1 + _m.exp(-(-3 + 3 * x[0] + 2 * x[2]))) else 0
+            rows.append({"day": f"2026-09-{d + 1:02d}", "t": k, "side": "bottom", "y": y, "x": x, "ev": f"{d}|{k}" if y else None})
+            rows.append({"day": f"2026-09-{d + 1:02d}", "t": k, "side": "top", "y": 1 if rng.random() < 0.1 else 0, "x": x,
+                         "ev": f"{d}|{k}"})
+    model, rep = T.fit(rows=rows, perms=3, write=False, min_turns=50)
+    B, Tp = rep["sides"]["bottom"], rep["sides"]["top"]
+    check("turn fit: real signal - walk-forward AUC well above time-only and the shuffled null; location and momentum weighted",
+          B["auc"] > 0.7 and B["auc"] > B["null_auc_p95"] and B["accepted"] and B["weights"]["loc"] > 2 and B["weights"]["mom"] > 1.2, str(B)[:300])
+    check("turn fit: noise is NOT accepted (AUC under 0.55), so the whole model stays off",
+          not Tp["accepted"] and any("below 0.55" in w for w in Tp["why_not"]) and model["accepted"] is False, str(Tp["why_not"]))
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        sep = [[1.0 if i % 50 == 0 else 0.0] + [rng.random() for _ in range(10)] for i in range(2000)]
+        fits = [T.fit_logistic(sep, [1 if x[0] == 1.0 else 0 for x in sep]),            # perfectly separable
+                T.fit_logistic([[0.0] * 11 for _ in range(500)], [0] * 499 + [1]),       # constant features
+                T.fit_logistic([[rng.random() for _ in range(11)] for _ in range(300)], [0] * 300)]   # one class
+    check("turn fit: separable, constant and one-class data stay finite, with no numpy warnings (macOS Accelerate)",
+          all(all(math.isfinite(v) for v in [b_] + w_) for b_, w_ in fits) and fits[0][1][0] > 3
+          and not [c for c in caught if issubclass(c.category, RuntimeWarning)], str([str(c.message) for c in caught][:3]))
+    _, rep2 = T.fit(rows=rows, perms=1, write=False, min_turns=10 ** 6)
+    check("turn fit: too few turn events -> not accepted, says how many are needed",
+          not rep2["sides"]["bottom"]["accepted"] and any("needed" in w for w in rep2["sides"]["bottom"]["why_not"]))
+    # the server's log endpoint: dedupe, today only, validation; the dataset joins rows to labels
+    import ast as _ast, threading as _th, types as _ty
+    src = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    want = {"_ctx_day", "_turn_log_rows", "_turn_events", "_turn_model"}
+    nodes = [n for n in _ast.parse(src).body if isinstance(n, _ast.FunctionDef) and n.name in want]
+    ns = {"time": time, "json": json, "_os": os, "threading": _th, "_turn_lock": _th.Lock(), "_turn_seen": {},
+          "_turn_model_cache": {"mtime": None, "v": None}}
+    exec(compile(_ast.Module(body=nodes, type_ignores=[]), "srv", "exec"), ns)
+    S = _ty.SimpleNamespace(**{k: ns[k] for k in want})
+    tmp = tempfile.mkdtemp()
+    old = T.LOG_DIR
+    T.LOG_DIR = tmp
+    try:
+        day = S._ctx_day()
+        tt = calendar.timegm(time.strptime(day + " 10:00", "%Y-%m-%d %H:%M")) - 19800      # 10:00 IST today
+        fam = {k: 0.5 for k in T.FAMILIES}
+        rws = [{"t": tt + 60 * i, "iv": 1, "o": 1, "h": 2, "l": 0.5, "c": 1.5, "D": 200, "f": {"b": fam, "t": fam}} for i in range(5)]
+        n1 = S._turn_log_rows({"sym": "NIFTY", "rows": rws})
+        n2 = S._turn_log_rows({"sym": "NIFTY", "rows": rws[:3] + [{"t": tt - 86400, "c": 1}, {"t": "x"}, {"t": tt + 999, "iv": 2, "c": 1}]})
+        n3 = S._turn_log_rows({"sym": "../etc", "rows": rws})
+        lines = open(T.log_path("NIFTY", day)).read().strip().splitlines()
+        check("turn log: one row per symbol/interval/bar (several browsers write once), today only, bad input refused",
+              n1 == 5 and n2 == 1 and n3 == 0 and len(lines) == 6, f"{n1} {n2} {n3} {len(lines)}")
+        ds = T.day_dataset("NIFTY", day)
+        check("turn dataset: logged rows join their labels per side, unlabelled tail left out",
+              isinstance(ds, list) and all(r["side"] in ("bottom", "top") for r in ds) and len(ds) == 0)
+    finally:
+        T.LOG_DIR = old
+        shutil.rmtree(tmp, ignore_errors=True)
+    import os as _os
+    _os.environ["NSE_EVENTS"] = "2026-12-24 09:15-09:45 Election results; junk; 2027-01-02 13:00-13:30 X"
+    ev2 = S._turn_events()
+    _os.environ.pop("NSE_EVENTS", None)
+    check("turn events: NSE_EVENTS parsed into IST minute windows, junk ignored",
+          ev2 == [{"day": "2026-12-24", "from": 555, "to": 585, "lab": "Election results"},
+                  {"day": "2027-01-02", "from": 780, "to": 810, "lab": "X"}], str(ev2))
+    tm = S._turn_model()
+    check("turn model endpoint: hand-set prior and families always served; not accepted until fitted",
+          tm["prior"]["b"] == -3.0 and tm["families"] == T.FAMILIES and "accepted" in tm["model"])
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    check("server: turn endpoints wired (log POST; model, status, labels GET)",
+          'parsed.path == "/api/turn-log"' in ssrc and 'parsed.path == "/api/turn-model"' in ssrc
+          and 'parsed.path == "/api/turn-status"' in ssrc and 'parsed.path == "/api/turn-labels"' in ssrc)
 
 
 def test_turn_times():
@@ -3147,7 +3387,7 @@ def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

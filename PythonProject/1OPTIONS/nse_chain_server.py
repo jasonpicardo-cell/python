@@ -3369,7 +3369,15 @@ def _poller_loop(interval: float):
                 continue
             last_poll[sym] = now
             try:
-                _cached_chain(sym, None, 12, client="poller")
+                data_, _meta = _cached_chain(sym, None, 12, client="poller")
+                # record the context history (spot, PCR, VIX ...) for every
+                # polled index, not only the one a browser is viewing: the turn
+                # light compares Nifty with BankNifty, and an index nobody had
+                # opened had no history today. Uses the chain just fetched.
+                try:
+                    _ctx_record(sym.upper(), data_)
+                except Exception:
+                    pass
             except Exception as e:  # noqa: BLE001
                 print(f"[poller] {sym}: {e}")
         _poller_stop.wait(interval)
@@ -3495,6 +3503,99 @@ def _ctx_day() -> str:
     return time.strftime("%Y-%m-%d", time.gmtime(time.time() + 19800))
 
 
+# ── TURN LIGHT: per-bar feature log, fitted model, labels ─────────────
+# The dashboard's turn light logs one row per CLOSED bar (its evidence
+# families for a bottom and a top, plus the bar itself) so the turn model
+# can be fitted and checked later (python nse_turns.py fit). Rows are
+# deduplicated per symbol, interval and bar, so several open browsers write
+# each bar once. Local files only - no broker or NSE call.
+_turn_lock = threading.Lock()
+_turn_seen: dict = {}          # log path -> {(iv, t)}
+_turn_model_cache = {"mtime": None, "v": None}
+_turn_status_cache: dict = {}  # sym -> (ts, status)
+
+
+def _turn_log_rows(body: dict) -> int:
+    import nse_turns as _nt
+    import re as _re_t
+    sym = str(body.get("sym") or "").upper()
+    rows = body.get("rows") or ([body["row"]] if isinstance(body.get("row"), dict) else [])
+    if not _re_t.match(r"^[A-Z0-9&_-]{2,24}$", sym) or not isinstance(rows, list):
+        return 0
+    day = _ctx_day()
+    path = _nt.log_path(sym, day)
+    n = 0
+    with _turn_lock:
+        seen = _turn_seen.get(path)
+        if seen is None:
+            seen = {(int(r.get("iv") or 1), int(r["t"])) for r in _nt.read_rows(path) if r.get("t") is not None}
+            for k in [k for k in _turn_seen if not k.endswith(f"_{day}.jsonl")]:
+                _turn_seen.pop(k, None)               # yesterday's sets
+            _turn_seen[path] = seen
+        out = []
+        for r in rows[:50]:
+            try:
+                t, iv = int(r["t"]), int(r.get("iv") or 1)
+                float(r["c"])
+            except Exception:
+                continue
+            if time.strftime("%Y-%m-%d", time.gmtime(t + 19800)) != day or (iv, t) in seen:
+                continue
+            line = json.dumps(r, separators=(",", ":"))
+            if len(line) > 6000:
+                continue
+            seen.add((iv, t))
+            out.append(line)
+        if out:
+            _os.makedirs(_nt.LOG_DIR, exist_ok=True)
+            with open(path, "a") as f:
+                f.write("\n".join(out) + "\n")
+            n = len(out)
+    return n
+
+
+def _turn_events() -> list:
+    """Scheduled event windows from NSE_EVENTS, e.g.
+    NSE_EVENTS=2026-12-04 09:55-10:45 RBI policy; 2027-02-01 10:55-13:00 Budget"""
+    import re as _re_e
+    out = []
+    for part in (_os.environ.get("NSE_EVENTS") or "").split(";"):
+        m = _re_e.match(r"\s*(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*(.*)$", part)
+        if m:
+            out.append({"day": m.group(1), "from": int(m.group(2)) * 60 + int(m.group(3)),
+                        "to": int(m.group(4)) * 60 + int(m.group(5)), "lab": (m.group(6) or "event").strip()[:40]})
+    return out
+
+
+def _turn_model() -> dict:
+    import nse_turns as _nt
+    try:
+        mt = _os.path.getmtime(_nt.MODEL_PATH)
+    except OSError:
+        mt = None
+    if mt != _turn_model_cache["mtime"]:
+        v = None
+        if mt is not None:
+            try:
+                with open(_nt.MODEL_PATH) as f:
+                    v = json.load(f)
+            except Exception:
+                v = None
+        _turn_model_cache.update(mtime=mt, v=v)
+    m = _turn_model_cache["v"] or {"accepted": False, "why_not": ["not fitted yet - run: python nse_turns.py fit"]}
+    return {"model": m, "prior": _nt.PRIOR, "families": _nt.FAMILIES, "events": _turn_events()}
+
+
+def _turn_status(sym: str) -> dict:
+    import nse_turns as _nt
+    c = _turn_status_cache.get(sym)
+    if c and time.time() - c[0] < 600:
+        return c[1]
+    st = _nt.status(sym)
+    _turn_status_cache[sym] = (time.time(), st)
+    return st
+
+
 def _ctx_load(sym: str, day: str) -> list:
     key = (sym, day)
     with _ctx_lock:
@@ -3523,9 +3624,16 @@ def _ctx_load(sym: str, day: str) -> list:
     return out
 
 
+_ctx_backfill_tried: set = set()
+
+
 def _ctx_backfill_bg(sym: str, day: str) -> None:
-    if (sym, day) in _ctx_backfilling:
+    # ONCE per index and day. When the archive yielded nothing, every later
+    # request for that index started the whole rebuild again - parsing the
+    # day's full replay file each time, which starves the chain requests.
+    if (sym, day) in _ctx_backfilling or (sym, day) in _ctx_backfill_tried:
         return
+    _ctx_backfill_tried.add((sym, day))
     rp = _os.path.join(_REPLAY_DIR, f"{sym}_{day}.jsonl")
     if not _os.path.exists(rp):
         return
@@ -7200,6 +7308,33 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": str(e)}, status=500)
             return
+        if parsed.path == "/api/turn-model":
+            self._send_json(_turn_model())
+            return
+
+        if parsed.path == "/api/turn-status":
+            sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+            try:
+                self._send_json(_turn_status(sym_))
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"error": str(e)})
+            return
+
+        if parsed.path == "/api/turn-labels":
+            import nse_turns as _nt
+            import re as _re_tl
+            sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+            day_ = (qs.get("date", [""])[0] or _ctx_day()).strip()
+            if not _re_tl.match(r"^\d{4}-\d{2}-\d{2}$", day_) or not _re_tl.match(r"^[A-Z0-9&_-]{2,24}$", sym_):
+                self._send_json({"error": "symbol and date (YYYY-MM-DD) required"}, status=400)
+                return
+            try:
+                iv_ = max(1, min(15, int(qs.get("interval", ["1"])[0])))
+            except ValueError:
+                iv_ = 1
+            self._send_json(_nt.day_turns(sym_, day_, iv_))
+            return
+
         if parsed.path == "/api/ctx-history":
             sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
             try:
@@ -9483,6 +9618,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": f"Backtest failed: {e}"}, status=500)
             return
 
+        if parsed.path == "/api/turn-log":
+            try:
+                self._send_json({"logged": _turn_log_rows(body)})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"logged": 0, "error": str(e)})
+            return
+
         if parsed.path == "/api/log-alert":
             ok = log_alert_outcome(body)
             self._send_json({"logged": bool(ok)})
@@ -9819,6 +9961,11 @@ def main():
 
     class _QuietThreadingHTTPServer(ThreadingHTTPServer):
         daemon_threads = True
+        # The default listen backlog is 5. Several browsers on the LAN, each
+        # polling a dozen endpoints, burst past that and the extra connections
+        # are REFUSED - which a browser reports as "can't reach the server"
+        # although the server is up. Queued connections cost nothing.
+        request_queue_size = 128
         def handle_error(self, request, client_address):
             import sys as _s
             exc = _s.exc_info()[1]
