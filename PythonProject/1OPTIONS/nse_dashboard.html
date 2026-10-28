@@ -15314,8 +15314,15 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       try {
         resp = await fetch(url, { signal: AbortSignal.timeout(20000) });
       } catch (networkErr) {
-        const tagged = new Error('Could not reach the server');
-        tagged.isNetworkError = true;
+        // Two very different failures used to share one banner. A TIMEOUT
+        // means the server accepted the connection but did not answer in time
+        // (busy, or its data source is slow) - it IS running, so telling you
+        // to start it was wrong. Only a refused/dropped connection means down.
+        const slow = networkErr && (networkErr.name === 'TimeoutError' || networkErr.name === 'AbortError');
+        const tagged = new Error(slow ? 'Server is slow to respond' : 'Could not reach the server');
+        tagged.isNetworkError = !slow;
+        tagged.isSlow = slow;
+        tagged.cause0 = (networkErr && (networkErr.name + ': ' + networkErr.message)) || '';
         throw tagged;
       }
       const data = await resp.json();
@@ -15335,6 +15342,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       clearError();
       setStatus('ok');
       state._netRetried = false;
+      state._slowCount = 0;
       state.lastData = data;
       // Keep the on-screen index's tile in step with the main panel. Tiles now
       // refresh every two minutes, and the active one reuses this data rather
@@ -15364,10 +15372,24 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         setTimeout(fetchChain, 1500);
         return;
       }
+      if (err.isSlow) {
+        // keep the last data on screen, keep the dot amber, try again shortly
+        setStatus('pending');
+        state._slowCount = (state._slowCount || 0) + 1;
+        console.warn('[fetch] chain reply slow (>20s):', err.cause0);
+        if (state._slowCount >= 3) {
+          showError(`The server at <code>${escapeHtml(base)}</code> is running but not answering in time ` +
+                    `(${state._slowCount} slow replies in a row). Check its console for errors or a stuck data source.`);
+        }
+        setTimeout(fetchChain, 3000);
+        return;
+      }
       setStatus('bad');
       if (err.isNetworkError) {
+        console.warn('[fetch] chain unreachable:', err.cause0);
         showError(
-          `Can't reach the local server at <code>${escapeHtml(base)}</code>. ` +
+          `Can't reach the local server at <code>${escapeHtml(base)}</code> ` +
+          `<small>(${escapeHtml(err.cause0 || 'connection failed')})</small>. ` +
           `Make sure it's running: <code>python3 nse_chain_server.py</code> ` +
           `(and that nse_options_strategy.py is in the same folder).`
         );
@@ -37423,17 +37445,27 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     { key: 'pts',     label: 'Pts ±',      sort: 'pts_abs',         align: 'right' },
   ];
 
+  // ONE constituents request at a time. This one is the slowest call the page
+  // makes (when the broker feed returns only part of the list, the server
+  // falls back to scraping NSE stock by stock), and it was re-sent every 30 s
+  // with a 30 s timeout and no guard - so slow replies overlapped, each holding
+  // one of the browser's six connections to this server. Once those were used
+  // up the chain request waited in the queue behind them, ran past its own
+  // timeout and showed "Can't reach the local server" about two minutes in.
+  let _ncBusy = 0;
   async function fetchAndRenderNiftyConstituents() {
     const bodyEl = document.getElementById('niftyWidgetBody');
     const timeEl = document.getElementById('niftyWidgetTime');
     const noteEl = document.getElementById('niftyWidgetNote');
     if (!bodyEl) return;
+    if (_ncBusy && Date.now() - _ncBusy < 20000) return;
+    _ncBusy = Date.now();
 
     const base = els.serverUrl.value.replace(/\/+$/, '');
     try {
       const resp = await fetch(
         `${base}/api/nifty-constituents?symbol=${niftyState.indexSymbol}`,
-        { signal: AbortSignal.timeout(30000) }
+        { signal: AbortSignal.timeout(15000) }
       );
       const data = await resp.json();
       if (data.error && !data.stocks?.length) {
@@ -37476,10 +37508,15 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // what it actually said - guessing wastes the reader's time.
       const msg = String(e && e.message || e || '');
       const dead = /Failed to fetch|NetworkError|ERR_CONNECTION|Load failed/i.test(msg);
-      bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${
-        dead ? 'Server not reachable — start nse_chain_server.py first.'
-             : escapeHtml(msg || 'Constituent data unavailable.')
-      }</div>`;
+      // a slow refresh must not wipe a table that is already on screen
+      if (!(niftyState.stocks && niftyState.stocks.length && !dead)) {
+        bodyEl.innerHTML = `<div class="movers-loading" style="color:var(--neg);">${
+          dead ? 'Server not reachable — start nse_chain_server.py first.'
+               : escapeHtml(msg || 'Constituent data unavailable.')
+        }</div>`;
+      }
+    } finally {
+      _ncBusy = 0;
     }
   }
 

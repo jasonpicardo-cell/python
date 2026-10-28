@@ -1369,6 +1369,19 @@ def test_server_reachability():
           "if (err.isNetworkError && !state._netRetried) {" in d and "state._netRetried = false;" in d)
     check("page: the peer-index request waits for the chain request, skips hidden tabs, every 30 s",
           "if (state.inFlight || document.hidden) return;" in d and "setInterval(_turnPeerFetch, 30000);" in d)
+    check("page: a TIMEOUT is 'server slow', not 'server not running' (only a refused connection shows the can't-reach banner)",
+          "networkErr.name === 'TimeoutError'" in d and "tagged.isNetworkError = !slow;" in d
+          and "if (err.isSlow) {" in d and "is running but not answering in time" in d)
+    check("page: ONE constituents request at a time (it was re-sent every 30 s while slow ones were still open, using up the browser's 6 connections)",
+          "if (_ncBusy && Date.now() - _ncBusy < 20000) return;" in d and "_ncBusy = 0;" in d
+          and "{ signal: AbortSignal.timeout(15000) }" in d)
+    check("server: constituents are single-flight per index and a failed answer is remembered for 30 s",
+          "def _constituents_once(symbol: str)" in ssrc and "self._send_json(_constituents_once(symbol))" in ssrc
+          and "_const_once_bad[sym] = (time.time(), res)" in ssrc)
+    check("server: a failed previous-day OHLC lookup is remembered for 45 s (each miss walked every NSE fallback)",
+          "_prev_ohlc_bad[symbol] = (time.time(), res)" in ssrc and "time.time() - bad[0] < 45" in ssrc)
+    check("page: the can't-reach banner states the real browser error",
+          "err.cause0 || 'connection failed'" in d)
 
 
 def test_turn_model():
@@ -1377,6 +1390,9 @@ def test_turn_model():
     import importlib, tempfile, random as _rnd, math as _m, shutil, time, calendar
     sys.path.insert(0, HERE)
     T = importlib.import_module("nse_turns")
+    # hermetic: a real warm-up cache on this machine (today's 1-minute bars
+    # from the broker) would replace the synthetic bars and change the result
+    T._warm_bars = lambda sym_, day_: []
     t0 = 1792208700
     bars, p = [], 25000.0
     for i in range(120):
@@ -1442,6 +1458,8 @@ def test_turn_model():
     tmp = tempfile.mkdtemp()
     old = T.LOG_DIR
     T.LOG_DIR = tmp
+    # hermetic: a real warm-up cache on this machine (today's 1-minute bars
+    # from the broker) would replace the synthetic bars and change the result
     try:
         day = S._ctx_day()
         tt = calendar.timegm(time.strptime(day + " 10:00", "%Y-%m-%d %H:%M")) - 19800      # 10:00 IST today

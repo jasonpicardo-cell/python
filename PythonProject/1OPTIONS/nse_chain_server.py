@@ -5484,13 +5484,24 @@ def _fetch_prev_day_ohlc(symbol: str, verbose: bool = True) -> dict:
     hit = _prev_ohlc_cache.get(symbol)
     if hit and hit[0] == day:
         return hit[1]
+    # a recent FAILURE is remembered too: each miss walks every NSE fallback
+    # with retries (6-14 s), and the page asks again from several places
+    bad = _prev_ohlc_bad.get(symbol)
+    if bad and time.time() - bad[0] < 45:
+        return bad[1]
     res = _fetch_prev_day_ohlc_raw(symbol, verbose)
     try:
         if res and float(res.get("high") or 0) > 0 and float(res.get("close") or 0) > 0:
             _prev_ohlc_cache[symbol] = (day, res)
+            _prev_ohlc_bad.pop(symbol, None)
+        else:
+            _prev_ohlc_bad[symbol] = (time.time(), res)
     except Exception:
         pass
     return res
+
+
+_prev_ohlc_bad: dict = {}
 
 
 def _fetch_prev_day_ohlc_raw(symbol: str, verbose: bool = True) -> dict:
@@ -6241,6 +6252,35 @@ def _constituent_score(sym: str, rows: list, data: dict, ts: float) -> dict:
 
 
 _stock_symbols_cache: dict = {"ts": 0, "symbols": []}
+
+
+_const_once_locks: dict = {}
+_const_once_bad: dict = {}      # sym -> (ts, result) of a recent empty/failed answer
+
+
+def _constituents_once(symbol: str) -> dict:
+    """One constituents fetch per index at a time, and a failure is remembered
+    for 30 s. When the broker feed returns only part of the list, the fetch
+    falls back to scraping NSE stock by stock - slow, and every browser tab
+    re-asked every 30 s while the last attempt was still running, so those
+    attempts piled up (each holding a handler thread and a browser connection)
+    and starved the chain requests. Callers now queue behind the running fetch
+    and then read its cached result."""
+    sym = symbol.upper()
+    bad = _const_once_bad.get(sym)
+    if bad and time.time() - bad[0] < 30:
+        return bad[1]
+    lock = _const_once_locks.setdefault(sym, threading.Lock())
+    with lock:
+        bad = _const_once_bad.get(sym)
+        if bad and time.time() - bad[0] < 30:
+            return bad[1]
+        res = _fetch_nifty_constituents(symbol)
+        if not (res or {}).get("stocks"):
+            _const_once_bad[sym] = (time.time(), res)
+        else:
+            _const_once_bad.pop(sym, None)
+        return res
 
 
 def _fetch_nifty_constituents(symbol: str = "NIFTY", broker_only: bool = False) -> dict:
@@ -9555,7 +9595,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/nifty-constituents":
             symbol = (qs.get("symbol", ["NIFTY"])[0]).upper()
             try:
-                self._send_json(_fetch_nifty_constituents(symbol))
+                self._send_json(_constituents_once(symbol))
             except Exception as e:  # noqa: BLE001
                 self._send_json({"stocks": [], "error": str(e)})
             return
