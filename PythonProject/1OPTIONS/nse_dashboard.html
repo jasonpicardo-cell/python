@@ -2104,6 +2104,219 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Compact mode: hide decorative LORE-tier esoteric panels to reduce clutter */
 body.compact-esoteric .lore-decorative { display: none !important; }
+  /* ── Scalping terminal ────────────────────────────────────────────
+     One quiet frame; the chart carries the personality: the bracket
+     (entry, stop, target) is an object you drag. Numbers are set in Plex
+     Mono so columns stay put while prices move.                       */
+  #tab-scalp { --sc-up: var(--pos); --sc-dn: var(--neg); --sc-amber: #e8b339; --sc-blue: #7d9bff; --sc-line: #1b1f29; --sc-sunk: #06070a; font-size: 12px; }
+  #tab-scalp .sc-n, #tab-scalp .sc-ladder td, #tab-scalp .sc-tbl td, #tab-scalp .sc-depth, #tab-scalp .sc-tape, #tab-scalp input[type=number] { font-family: 'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .sc-note { margin: 6px 0; padding: 8px 12px; border-left: 3px solid var(--warm); background: rgba(255,157,77,.07); color: var(--warm); font-size: 11.5px; line-height: 1.5; }
+  .sc-note.sc-bad { border-color: var(--neg); color: var(--neg); background: rgba(255,93,108,.07); }
+  .sc-note code { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+  .sc-dim { color: var(--muted); font-size: 10.5px; }
+  .pos-t { color: var(--sc-up, var(--pos)); } .neg-t { color: var(--sc-dn, var(--neg)); }
+
+  /* status bar */
+  .sc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 2px 10px; border-bottom: 1px solid var(--sc-line); margin-bottom: 10px; }
+  .sc-id { display: flex; align-items: baseline; gap: 9px; min-width: 200px; }
+  .sc-id b { font-size: 15px; font-weight: 600; letter-spacing: .2px; }
+  .sc-spot { font-size: 19px; font-weight: 600; }
+  .sc-badge { padding: 3px 9px; border-radius: 4px; font-weight: 700; font-size: 11px; letter-spacing: .5px; border: 1px solid; cursor: help; }
+  .sc-paper { color: var(--pos); border-color: var(--pos); background: var(--pos-dim); }
+  .sc-live  { color: #fff; border-color: var(--neg); background: #b3202f; animation: scPulse 1.8s infinite; }
+  .sc-live.sc-disarmed { background: transparent; color: var(--neg); animation: none; }
+  @keyframes scPulse { 50% { box-shadow: 0 0 0 3px rgba(255,93,108,.22); } }
+  @media (prefers-reduced-motion: reduce) { .sc-live, .sc-go.confirm { animation: none !important; } }
+  .sc-btn { background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 5px; padding: 5px 11px; font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .sc-btn:hover { border-color: var(--accent); }
+  .sc-btn:focus-visible, .sc-go:focus-visible, .sc-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .sc-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .sc-btn.on { background: var(--pos-dim); border-color: var(--pos); color: var(--pos); }
+  .sc-danger { border-color: #5c2530; color: var(--neg); }
+  .sc-danger:hover { background: var(--neg-dim); border-color: var(--neg); }
+  .sc-danger.on { background: var(--neg); color: #fff; border-color: var(--neg); }
+  .sc-ghost { background: transparent; }
+  .sc-mini { padding: 2px 8px; font-size: 10.5px; }
+  .sc-day { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .sc-dayv { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
+  .sc-big { font-size: 20px; font-weight: 600; }
+  .sc-eq { width: 140px; height: 34px; display: block; }
+  .sc-chip { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+  .sc-chip.ok { color: var(--pos); border-color: var(--pos-dim); }
+  .sc-chip.bad { color: var(--neg); border-color: var(--neg); }
+  .sc-turn { font-size: 10.5px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 5px; cursor: pointer; line-height: 1.35; max-width: 280px; }
+  .sc-turn.up { border-color: var(--pos); color: var(--pos); } .sc-turn.dn { border-color: var(--neg); color: var(--neg); } .sc-turn.watch { border-color: var(--gold); color: var(--gold); }
+
+  /* three zones */
+  .sc-term { display: grid; grid-template-columns: 318px minmax(0, 1fr) 270px; gap: 0; border: 1px solid var(--sc-line); border-radius: 6px; overflow: hidden; }
+  .sc-left, .sc-right { min-width: 0; }
+  .sc-left { border-right: 1px solid var(--sc-line); } .sc-right { border-left: 1px solid var(--sc-line); }
+  .sc-center { min-width: 0; padding: 8px 10px 6px; }
+  @media (max-width: 1280px) { .sc-term { grid-template-columns: 318px minmax(0, 1fr); } .sc-right { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--sc-line); display: grid; grid-template-columns: repeat(3, 1fr); } .sc-right .sc-sec { border-bottom: 0; border-right: 1px solid var(--sc-line); } }
+  @media (max-width: 860px) { .sc-term { grid-template-columns: minmax(0, 1fr); } .sc-left { border-right: 0; border-bottom: 1px solid var(--sc-line); } .sc-right { grid-template-columns: minmax(0, 1fr); } }
+  .sc-sec { padding: 9px 11px 11px; border-bottom: 1px solid var(--sc-line); }
+  .sc-sec:last-child { border-bottom: 0; }
+  .sc-st { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 11.5px; font-weight: 600; color: var(--text); margin-bottom: 7px; }
+  .sc-st .sc-dim { font-weight: 400; text-align: right; }
+
+  .sc-seg { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 7px; }
+  .sc-seg button { flex: 1 0 auto; background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; font-size: 10.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .sc-seg button:hover { color: var(--text); }
+  .sc-seg button.on { background: var(--accent-dim); color: #fff; border-color: var(--accent); }
+  .sc-seg-s { margin: 0; flex-wrap: nowrap; } .sc-seg-s button { padding: 2px 8px; flex: 0 0 auto; }
+
+  /* strike ladder */
+  .sc-ladder { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .sc-ladder th { font-size: 10px; font-weight: 500; color: var(--muted); padding: 2px 4px 4px; text-align: center; }
+  .sc-ladder td { padding: 3px 5px; border-top: 1px solid var(--border-soft); white-space: nowrap; }
+  .sc-ladder td.k { text-align: center; font-weight: 600; width: 62px; color: var(--text); background: var(--sc-sunk); }
+  .sc-ladder tr.atm td.k { color: var(--sc-amber); box-shadow: inset 0 0 0 1px rgba(232,179,57,.45); }
+  .sc-ladder td.c, .sc-ladder td.p { cursor: pointer; position: relative; background-image: linear-gradient(var(--dir, 270deg), var(--heat, rgba(125,155,255,.22)) var(--h, 0%), transparent var(--h, 0%)); }
+  .sc-ladder td.c { --dir: 270deg; text-align: right; } .sc-ladder td.p { --dir: 90deg; text-align: left; }
+  .sc-ladder td.c:hover, .sc-ladder td.p:hover { background-color: var(--panel-3); }
+  .sc-ladder td.c.on { box-shadow: inset 0 0 0 1px var(--pos); background-color: var(--pos-dim); }
+  .sc-ladder td.p.on { box-shadow: inset 0 0 0 1px var(--neg); background-color: var(--neg-dim); }
+  .sc-ladder .dl { color: var(--muted); font-size: 10px; margin: 0 5px; }
+  .sc-ladder .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; margin: 0 4px; background: var(--muted-2); }
+  .sc-ladder .dot.ok { background: var(--pos); } .sc-ladder .dot.warn { background: var(--sc-amber); } .sc-ladder .dot.bad { background: var(--neg); }
+  .sc-ladder .itm { opacity: .62; }
+
+  /* order ticket */
+  .sc-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .sc-lots { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .sc-lots input[type=number] { width: 52px; background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 5px; font-size: 13px; font-weight: 600; text-align: center; }
+  .sc-lots input.sc-risk-in { width: 66px; font-size: 11.5px; } .sc-lots input:disabled { opacity: .55; }
+  .sc-step { width: 26px; height: 26px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel-3); color: var(--text); font-size: 14px; cursor: pointer; }
+  .sc-go { border: 0; border-radius: 6px; padding: 10px 6px 7px; font-size: 13px; font-weight: 700; cursor: pointer; color: #04130c; font-family: inherit; text-align: center; }
+  .sc-go small { display: block; font-size: 10.5px; font-weight: 500; opacity: .85; margin-top: 2px; }
+  .sc-go kbd { font-size: 9px; border: 1px solid rgba(0,0,0,.35); border-radius: 3px; padding: 0 4px; margin-left: 5px; font-family: 'IBM Plex Mono', monospace; }
+  .sc-buy { background: var(--pos); } .sc-sell { background: var(--neg); color: #1a0306; }
+  .sc-go:disabled { opacity: .3; cursor: not-allowed; }
+  .sc-go.confirm { outline: 3px solid #fff; animation: scPulse .9s infinite; }
+  .sc-plan { font-size: 10.5px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .sc-plan b { color: var(--text); font-weight: 500; }
+  .sc-presets { display: flex; gap: 4px; margin-bottom: 6px; }
+  .sc-presets button { flex: 1; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 4px; font-size: 10.5px; cursor: pointer; font-family: inherit; }
+  .sc-presets button:hover { border-color: var(--accent); }
+  .sc-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px 6px; margin-bottom: 6px; }
+  .sc-fields label { display: flex; flex-direction: column; font-size: 10px; color: var(--muted); gap: 2px; }
+  .sc-fields input, .sc-pin input, .sc-mod input { background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; font-size: 11.5px; width: 100%; }
+  .sc-chk { display: flex; gap: 6px; align-items: flex-start; font-size: 10.5px; color: var(--muted); margin: 3px 0; cursor: pointer; line-height: 1.3; }
+  .sc-chk.sc-inl { margin: 0 0 0 4px; align-items: center; }
+  .sc-pin { display: flex; align-items: center; gap: 8px; margin-top: 4px; } .sc-pin input { width: 130px; }
+  .sc-msg { min-height: 16px; margin-top: 6px; font-size: 11px; line-height: 1.4; }
+  .sc-msg.bad { color: var(--neg); } .sc-msg.ok { color: var(--pos); }
+
+  /* chart */
+  .sc-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+  .sc-tabs2 { display: flex; gap: 2px; }
+  .sc-tabs2 button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 3px 9px; font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .sc-tabs2 button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .sc-tabs2 button .hd { color: var(--sc-amber); margin-left: 3px; }
+  .sc-opts { display: flex; gap: 10px; margin-left: auto; }
+  .sc-opts label { font-size: 10.5px; color: var(--muted); display: flex; gap: 4px; align-items: center; cursor: pointer; }
+  .sc-readout { min-height: 16px; font-size: 11px; color: var(--muted); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sc-readout b { color: var(--text); font-weight: 500; }
+  .sc-chartwrap { height: 480px; background: var(--sc-sunk); border: 1px solid var(--border-soft); border-radius: 4px; }
+  .sc-chartwrap svg { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; }
+  .sc-chartwrap text { font-family: 'IBM Plex Mono', monospace; }
+  .sc-hint { font-size: 10px; color: var(--muted-2); margin-top: 5px; }
+  .sc-chartwrap svg * { pointer-events: none; }
+  .sc-chartwrap svg .sc-h, .sc-chartwrap svg .sc-h * { pointer-events: all; }
+  .sc-h { cursor: ns-resize; }
+
+  /* right column */
+  .sc-depth { font-size: 11px; }
+  .sc-depth .r { position: relative; display: grid; grid-template-columns: 1fr 64px 38px; padding: 1.5px 4px; line-height: 1.45; }
+  .sc-depth .r i { position: absolute; top: 1px; bottom: 1px; right: 0; opacity: .2; }
+  .sc-depth .r.a i { background: var(--neg); } .sc-depth .r.b i { background: var(--pos); }
+  .sc-depth .r span { position: relative; } .sc-depth .q { color: var(--muted); } .sc-depth .p { text-align: right; } .sc-depth .n { text-align: right; color: var(--muted-2); font-size: 10px; }
+  .sc-depth .r.a .p { color: var(--neg); } .sc-depth .r.b .p { color: var(--pos); }
+  .sc-depth .mid { display: flex; justify-content: space-between; padding: 3px 4px; margin: 2px 0; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); color: var(--muted); font-size: 10.5px; }
+  .sc-flow .fr { display: grid; grid-template-columns: 30px 1fr 54px; align-items: center; gap: 6px; margin: 5px 0; font-size: 10.5px; color: var(--muted); }
+  .sc-flow .bar { display: flex; height: 7px; border-radius: 2px; overflow: hidden; background: var(--border-soft); }
+  .sc-flow .bar i:first-child { background: var(--pos); } .sc-flow .bar i:last-child { background: var(--neg); }
+  .sc-flow .nt { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+  .sc-tape { font-size: 11px; max-height: 300px; overflow: hidden; }
+  .sc-tape .t { display: grid; grid-template-columns: 58px 1fr 52px; padding: 1px 3px; line-height: 1.5; }
+  .sc-tape .t.s1 { color: var(--pos); } .sc-tape .t.s-1 { color: var(--neg); }
+  .sc-tape .t.big { background: rgba(255,255,255,.07); font-weight: 600; } .sc-tape .t span:nth-child(3) { text-align: right; } .sc-tape .t span:first-child { color: var(--muted-2); }
+  .sc-empty { text-align: center !important; color: var(--muted); padding: 14px !important; font-family: 'IBM Plex Sans', sans-serif !important; }
+
+  /* dock */
+  .sc-dock { margin-top: 10px; border: 1px solid var(--sc-line); border-radius: 6px; }
+  .sc-dtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--sc-line); padding: 0 6px; }
+  .sc-dtabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 8px 11px 7px; font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .sc-dtabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .sc-dtabs button .ct { color: var(--sc-amber); margin-left: 4px; font-weight: 500; }
+  .sc-dbody { padding: 10px; min-height: 90px; }
+  .sc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; }
+  .sc-card { border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; }
+  .sc-card.sel { border-color: var(--accent); } .sc-card.stale { border-color: var(--neg); }
+  .sc-card .h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .sc-card .h b { font-size: 13px; font-weight: 600; }
+  .sc-card .pl { font-size: 20px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+  .sc-card .pl small { font-size: 11px; font-weight: 400; margin-left: 6px; }
+  .sc-tag { font-size: 10px; padding: 1px 6px; border-radius: 9px; border: 1px solid var(--border); color: var(--muted); margin-left: 5px; }
+  .sc-tag.bad { color: var(--neg); border-color: var(--neg); } .sc-tag.ok { color: var(--pos); border-color: var(--pos-dim); }
+  .sc-rail { position: relative; height: 22px; margin: 8px 0 6px; }
+  .sc-rail .tr { position: absolute; left: 0; right: 0; top: 9px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, rgba(255,93,108,.55) var(--e), rgba(46,204,143,.55) var(--e)); }
+  .sc-rail .mk { position: absolute; top: 3px; width: 2px; height: 16px; background: #fff; border-radius: 1px; }
+  .sc-rail .en { position: absolute; top: 5px; width: 1px; height: 12px; background: var(--muted); }
+  .sc-rail .lb { position: absolute; top: -3px; font-size: 9.5px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; transform: translateX(-50%); white-space: nowrap; }
+  .sc-card .m { display: flex; flex-wrap: wrap; gap: 3px 12px; font-size: 10.5px; color: var(--muted); margin-bottom: 7px; font-family: 'IBM Plex Mono', monospace; }
+  .sc-card .a { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sc-tblwrap { overflow-x: auto; }
+  .sc-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .sc-tbl th { text-align: right; font-size: 10.5px; font-weight: 500; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .sc-tbl td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--border-soft); white-space: nowrap; }
+  .sc-tbl th:first-child, .sc-tbl td:first-child { text-align: left; }
+  .sc-log { max-height: 260px; overflow: auto; font-size: 11px; line-height: 1.5; font-family: 'IBM Plex Mono', monospace; }
+  .sc-log div { padding: 2px 0; border-bottom: 1px solid var(--border-soft); }
+  .sc-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px 14px; margin-bottom: 12px; }
+  .sc-stats div { display: flex; flex-direction: column; } .sc-stats .v { font-size: 15px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; } .sc-stats .l { font-size: 10.5px; color: var(--muted); }
+  .sc-anl { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; } @media (max-width: 900px) { .sc-anl { grid-template-columns: minmax(0, 1fr); } }
+  .sc-bars .br { display: grid; grid-template-columns: 92px 1fr 118px; gap: 8px; align-items: center; font-size: 10.5px; margin: 4px 0; color: var(--muted); }
+  .sc-bars .br .b { height: 8px; background: var(--border-soft); border-radius: 2px; position: relative; } .sc-bars .br .b i { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+  .sc-bars .br .v { text-align: right; font-family: 'IBM Plex Mono', monospace; }
+  .sc-risk { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 22px; font-size: 11px; }
+  .sc-risk div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-soft); padding: 3px 0; } .sc-risk .k { color: var(--muted); } .sc-risk .warn { color: var(--sc-amber); } .sc-risk .bad { color: var(--neg); font-weight: 600; }
+  .sc-mod { border-top: 1px solid var(--sc-line); padding: 9px 11px; }
+  .sc-mod .sc-fields { grid-template-columns: repeat(5, 1fr); }
+  @media (max-width: 700px) { .sc-mod .sc-fields { grid-template-columns: repeat(2, 1fr); } }
+  .sc-foot { font-size: 10px; color: var(--muted-2); margin: 10px 2px; line-height: 1.5; }
+
+  /* ── v3: selling, structures, waiting orders, book risk ─────────── */
+  .sc-sidebar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .sc-side { margin: 0; flex: 0 0 auto; }
+  .sc-side button { padding: 4px 14px; font-size: 11.5px; }
+  .sc-side button.on.buy { background: var(--pos-dim); border-color: var(--pos); color: var(--pos); }
+  .sc-side button.on.sell { background: rgba(232,179,57,.14); border-color: var(--sc-amber); color: var(--sc-amber); }
+  .sc-order.sell { box-shadow: inset 3px 0 0 var(--sc-amber); }
+  .sc-sel { background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 4px; font-size: 10.5px; font-family: inherit; }
+  .sc-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; flex-wrap: wrap; }
+  .sc-row .sc-chk.sc-inl { margin: 0; }
+  .sc-trig { display: inline-flex; gap: 4px; align-items: center; }
+  .sc-trig input { width: 76px; background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; font-size: 11.5px; }
+  .sc-tag-in { flex: 1; background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 4px 7px; font-size: 11px; font-family: inherit; min-width: 0; }
+  .sc-pair.one { grid-template-columns: 1fr; }
+  .sc-go.sc-short { background-image: repeating-linear-gradient(135deg, rgba(0,0,0,.13) 0 5px, transparent 5px 10px); box-shadow: inset 0 0 0 2px rgba(0,0,0,.22); }
+  .sc-ladder td.c.on.sold, .sc-ladder td.p.on.sold { box-shadow: inset 0 0 0 1px var(--sc-amber); background-color: rgba(232,179,57,.12); }
+  .sc-ladder td.wing { outline: 1px dashed var(--sc-blue); outline-offset: -2px; }
+  .sc-click { cursor: pointer; }
+  .sc-card.short { border-left: 3px solid var(--sc-amber); }
+  .sc-card.wing { border-style: dashed; opacity: .88; }
+  .sc-card.grp { border-color: var(--sc-blue); }
+  .sc-card.grp.neg { border-color: var(--neg); }
+  .sc-tag.buy { color: var(--pos); border-color: var(--pos-dim); } .sc-tag.sell { color: var(--sc-amber); border-color: rgba(232,179,57,.5); }
+  .sc-grp-in { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+  .sc-grp-in label { display: flex; flex-direction: column; font-size: 10px; color: var(--muted); gap: 2px; }
+  .sc-grp-in input { width: 84px; background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 5px; font-size: 11.5px; }
+  .sc-tbl td.note { cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+  .sc-tbl tr.now td { background: rgba(125,155,255,.08); }
+  .sc-fx-hide { display: none !important; }
+  body.sc-fx { padding-top: 0; }
+  body.sc-fx #tab-scalp { padding-top: 4px; }
 </style>
 </head>
 <body>
@@ -2210,6 +2423,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   <div id="tokenBanner" class="token-banner" style="display:none;"></div>
   <nav class="tabs">
     <button class="tab active" data-tab="home">Home</button>
+    <button class="tab" data-tab="scalp" title="Zerodha scalping terminal: one-click CE/PE buys with managed exits and server-side risk limits (paper by default)">Scalping</button>
     <button class="tab" data-tab="today">Today</button>
         <button class="tab" data-tab="desk" title="Post-market FII/DII positioning and pre-market gap analysis — both fetched on demand">Desk</button>
     <button class="tab" data-tab="chain">Option Chain</button>
@@ -3089,6 +3303,119 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="preMktBody" style="padding:6px 8px;"><div class="movers-loading" style="font-size:10px;">Press Fetch before the open for GIFT Nifty, the overnight gap and today's expected range.</div></div>
           </div>
           </div>
+        </section>
+
+        <section id="tab-scalp" class="tab-panel">
+          <div id="scNote" class="sc-note" style="display:none;"></div>
+          <div class="sc-top">
+            <div class="sc-id"><b id="scSym">NIFTY</b><span id="scSpot" class="sc-n sc-spot">–</span><span id="scSpotChg" class="sc-n sc-dim"></span><span id="scExp" class="sc-dim"></span></div>
+            <span id="scMode" class="sc-badge sc-paper" title="PAPER fills against the live bid/ask and sends nothing to Zerodha. LIVE needs NSE_TRADE_MODE=live in env and the ARM switch.">PAPER</span>
+            <button id="scArm" class="sc-btn" title="LIVE only: orders are refused until armed. Disarms itself on kill or halt.">Arm</button>
+            <button id="scKill" class="sc-btn sc-danger" title="Stops all new entries. Hold Shift to also flatten everything.  (K)">Kill</button>
+            <button id="scFlat" class="sc-btn sc-danger" title="Sell every open position at the bid.  (Shift+F, then Enter)">Flatten all</button>
+            <div class="sc-day" title="Net of estimated charges, including open P&amp;L. The dashed line is the daily loss limit.">
+              <div class="sc-dayv"><span id="scDayPnl" class="sc-n sc-big">₹0</span><span id="scDayInfo" class="sc-dim"></span></div>
+              <svg id="scEq" class="sc-eq" viewBox="0 0 140 34" preserveAspectRatio="none"></svg>
+            </div>
+            <div id="scTurn" class="sc-turn" title="The chart's turn light. Click to carry its stop and target into the order."></div>
+            <span id="scBook" class="sc-chip sc-click" title="Net exposure of the open book: rupees gained per 1-point rise in the index, and time decay per minute. Click for the full risk view."></span>
+            <span id="scFeed" class="sc-chip" title="Age of the oldest quote you are looking at"></span>
+            <span id="scRate" class="sc-chip" title="Ticks per second on the chart's instrument"></span>
+            <button id="scFocus" class="sc-btn sc-ghost" title="Hide the dashboard header so the terminal fills the screen  (`)">⛶</button>
+            <button id="scHelp" class="sc-btn sc-ghost" title="Hotkeys">⌨</button>
+          </div>
+
+          <div class="sc-term">
+            <aside class="sc-left">
+              <section class="sc-sec">
+                <div class="sc-st">Strikes <span class="sc-dim" id="scLadHint">click a call or put to pick it</span></div>
+                <div class="sc-seg" id="scStrikes"></div>
+                <table id="scLadder" class="sc-ladder"></table>
+              </section>
+              <section class="sc-sec sc-order" id="scOrder">
+                <div class="sc-st">Order <span id="scQty" class="sc-dim sc-n"></span></div>
+                <div class="sc-sidebar">
+                  <div class="sc-seg sc-side" id="scSide" title="Buy to open (long premium) or sell to open (short premium).  S switches"></div>
+                  <div class="sc-seg sc-seg-s" id="scStruct" title="One contract, or both legs at once.  W switches"></div>
+                  <select id="scSOff" class="sc-sel" style="display:none;" title="How many strikes from the money each leg of a strangle sits"></select>
+                </div>
+                <div class="sc-lots">
+                  <button class="sc-step" id="scLotDn" title="Fewer lots (−)">−</button>
+                  <input id="scLots" type="number" min="1" step="1" value="1" class="sc-n">
+                  <button class="sc-step" id="scLotUp" title="More lots (+)">+</button>
+                  <label class="sc-chk sc-inl" title="Size the order so that hitting your stop loses about this much"><input type="checkbox" id="scRiskAuto"> size by risk ₹</label>
+                  <input id="scRiskRs" type="number" min="100" step="100" value="2000" class="sc-n sc-risk-in">
+                </div>
+                <div class="sc-pair" id="scPair">
+                  <button class="sc-go sc-buy" id="scBuyCE"><span>Buy call</span><kbd>1</kbd><small id="scBuyCEs" class="sc-n"></small></button>
+                  <button class="sc-go sc-sell" id="scBuyPE"><span>Buy put</span><kbd>2</kbd><small id="scBuyPEs" class="sc-n"></small></button>
+                </div>
+                <div id="scPlanCE" class="sc-plan sc-n"></div>
+                <div id="scPlanPE" class="sc-plan sc-n"></div>
+                <div class="sc-row" id="scHedgeRow" style="display:none;">
+                  <label class="sc-chk sc-inl" title="Buy a cheap far-out-of-the-money option of the same type first, then sell. It caps the loss and cuts the margin a lot. It is sold back after the short closes.  H"><input type="checkbox" id="scHedge"> Hedge with a wing</label>
+                  <select id="scWing" class="sc-sel" title="How many strikes further out the wing sits"></select>
+                  <span id="scWingInfo" class="sc-dim sc-n"></span>
+                </div>
+                <div class="sc-row" id="scMarginRow" style="display:none;">
+                  <button class="sc-btn sc-mini" id="scMarginBtn" title="Ask Zerodha how much margin this order would block (one API call, only when you press this)">Check margin</button>
+                  <span id="scMarginOut" class="sc-dim sc-n"></span>
+                </div>
+                <div class="sc-row">
+                  <label class="sc-chk sc-inl" title="Do not enter now: queue the order and send it when the premium or the index reaches a level.  Q"><input type="checkbox" id="scTrig"> Wait for a level</label>
+                  <span id="scTrigBox" class="sc-trig" style="display:none;">
+                    <select id="scTKind" class="sc-sel"><option value="px">premium</option><option value="spot">index</option></select>
+                    <select id="scTOp" class="sc-sel"><option value="le">falls to</option><option value="ge">rises to</option></select>
+                    <input id="scTLevel" type="number" step="any" class="sc-n" placeholder="level">
+                  </span>
+                </div>
+                <div class="sc-row">
+                  <input id="scTag" list="scTagList" class="sc-tag-in" placeholder="Setup tag (optional): breakout, fade ..." maxlength="24" autocomplete="off">
+                  <datalist id="scTagList"></datalist>
+                </div>
+                <div class="sc-st" style="margin-top:10px;">Exit plan <span class="sc-dim">watched by the server, even if this tab closes</span></div>
+                <div class="sc-presets" id="scPresets"></div>
+                <div class="sc-fields" id="scExitFields"></div>
+                <label class="sc-chk"><input type="checkbox" id="scLinkTurn"> Take the spot stop and target from the turn light</label>
+                <label class="sc-chk"><input type="checkbox" id="scConfirm" checked> LIVE: press twice to send</label>
+                <div class="sc-pin" id="scPinRow" style="display:none;"><span class="sc-dim">Trade PIN</span><input id="scPin" type="password" autocomplete="off" placeholder="NSE_TRADE_PIN"></div>
+                <div id="scMsg" class="sc-msg"></div>
+              </section>
+            </aside>
+
+            <main class="sc-center">
+              <div class="sc-ctl">
+                <div class="sc-tabs2" id="scChTabs"></div>
+                <div class="sc-seg sc-seg-s" id="scTfs"></div>
+                <div class="sc-opts" id="scOpts"></div>
+              </div>
+              <div id="scReadout" class="sc-readout sc-n"></div>
+              <div class="sc-chartwrap"><svg id="scChart"></svg></div>
+              <div class="sc-hint">Drag the stop, target or partial line to change it. With no position open, drag the dashed plan lines to set the next order's exits. Scroll to zoom.</div>
+            </main>
+
+            <aside class="sc-right">
+              <section class="sc-sec">
+                <div class="sc-st"><span id="scDepTitle">Book</span></div>
+                <div id="scDepth" class="sc-depth"></div>
+              </section>
+              <section class="sc-sec">
+                <div class="sc-st">Who is pushing <span class="sc-dim">aggressor volume</span></div>
+                <div id="scFlow" class="sc-flow"></div>
+              </section>
+              <section class="sc-sec">
+                <div class="sc-st">Trades <span class="sc-dim">newest first</span></div>
+                <div id="scTape" class="sc-tape"></div>
+              </section>
+            </aside>
+          </div>
+
+          <div class="sc-dock">
+            <div class="sc-dtabs" id="scDockTabs"></div>
+            <div id="scDockBody" class="sc-dbody"></div>
+            <div id="scMod" class="sc-mod" style="display:none;"></div>
+          </div>
+          <div class="sc-foot">Orders are marketable LIMIT, IOC, MIS on NFO. A short has no ceiling on its loss: it needs a stop, has its own lot cap, is off in LIVE unless NSE_TRADE_ALLOW_SHORT=1, and is best hedged with a wing. Stops, targets, trailing and the 15:14 square-off are watched by the server on the live tick feed, not placed at the exchange, so a gap can jump a stop. Waiting orders live in the server's memory only. Charges are an estimate.</div>
         </section>
 
         <section id="tab-today" class="tab-panel">
@@ -5265,10 +5592,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     switch (e.key.toLowerCase()) {
-      case 'n': els.symbolSelect.value = 'NIFTY';     els.symbolSelect.dispatchEvent(new Event('change')); break;
-      case 'b': els.symbolSelect.value = 'BANKNIFTY'; els.symbolSelect.dispatchEvent(new Event('change')); break;
-      case 'f': els.symbolSelect.value = 'FINNIFTY';  els.symbolSelect.dispatchEvent(new Event('change')); break;
-      case 'm': els.symbolSelect.value = 'MIDCPNIFTY';els.symbolSelect.dispatchEvent(new Event('change')); break;
+      case 'n': document.querySelector('.pill[data-symbol="NIFTY"]')?.click(); break;
+      case 'b': document.querySelector('.pill[data-symbol="BANKNIFTY"]')?.click(); break;
+      case 'f': document.querySelector('.pill[data-symbol="FINNIFTY"]')?.click(); break;
+      case 'm': document.querySelector('.pill[data-symbol="MIDCPNIFTY"]')?.click(); break;
       case 'r': document.getElementById('refreshBtn')?.click(); break;
       case 'a': {
         const cb = document.getElementById('autoToggle');
@@ -15107,6 +15434,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       if (tab.dataset.tab === 'today') {
         renderTodayTab();
       }
+      if (tab.dataset.tab === 'scalp' && typeof window.renderScalpTab === 'function') {
+        window.renderScalpTab();
+      }
       if (tab.dataset.tab === 'validate') {
         // panels load on button click to avoid slow auto-fetch; nudge if empty
       }
@@ -22668,6 +22998,20 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           _caSave(_caLoad().filter(x => x.id !== hit.rule.id));
           try { _caRenderRules(); } catch (_) {}
           try { renderPriceChart(); } catch (_) {}
+        });
+      }
+      // Mute / unmute: the same switch as Alerts > Master Control > "Mute
+      // everything on this browser" - it flips that checkbox and fires its own
+      // change handler, so storage, the toast and the status line all follow.
+      {
+        const sepM = document.createElement('div');
+        sepM.style.cssText = 'height:1px;background:rgba(255,255,255,0.12);margin:3px 0;';
+        menu.appendChild(sepM);
+        const muted = _masterMuted();
+        item(muted ? '🔊 Unmute everything' : '🔇 Mute everything', () => {
+          const mm = document.getElementById('masterMute');
+          if (mm) { mm.checked = !muted; mm.dispatchEvent(new Event('change')); }
+          else { try { localStorage.setItem('masterMute', muted ? '0' : '1'); } catch (_) {} _alertStatus(); }
         });
       }
       // Reset last, behind its own separator: it wipes settings, so it
@@ -40842,6 +41186,1260 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // Fetch OHLC whenever symbol changes (for pivot accuracy)
   const _origFetchChain = fetchChain;
   const _symbolAtLastOhlcFetch = { sym: null };
+
+  // ======================================================================
+  // FEATURE: Scalping terminal (Zerodha). Everything that can lose money is
+  // enforced on the SERVER (nse_trade.py): this tab sends intents and draws
+  // the engine's state. PAPER by default; LIVE needs NSE_TRADE_MODE=live in
+  // env AND the ARM switch. It reads /api/trade/state twice a second while
+  // open - served from the in-memory tick store, so no broker call is made.
+  // The chart is built here from the server's tick tape: candles, volume,
+  // aggressor-side order flow (CVD), VWAP and the draggable bracket.
+  // ======================================================================
+  const SC = {
+    st: null, quotes: {}, spot: 0, busy: false, legs: { CE: null, PE: null }, tape: {},
+    pref: { tf: 15, nvis: 70, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
+            selCE: 'o0', selPE: 'o0', chart: 'CE', dock: 'pos', side: 'B', struct: 'single', sOff: 2, hedge: true, wing: 3,
+            trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
+    pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
+    exitsBy: { B: {}, S: {} }, exits: {}, drag: null, hover: null, geom: null, lines: [], lastOrdT: null, bgT: 0, raf: 0,
+    sLegs: null, wing: null, margin: null, notes: {},
+  };
+  const SC_STRIKES = [['o-2', 'ITM 2'], ['o-1', 'ITM 1'], ['o0', 'ATM'], ['o1', 'OTM 1'], ['o2', 'OTM 2'], ['o3', 'OTM 3'], ['d0.4', 'Δ .40'], ['d0.3', 'Δ .30'], ['d0.2', 'Δ .20']];
+  const SC_TFS = [[5, '5s'], [15, '15s'], [30, '30s'], [60, '1m']];
+  const SC_MAXROWS = 6000, SC_POLL_MS = 500;
+  const SC_TAGS = ['Breakout', 'Reversal', 'Trend', 'Fade', 'Range', 'News', 'Expiry'];
+  // [key, label buying, label selling, default buying, default selling, tip buying, tip selling, group]
+  // premium POINTS from the fill price. Time stop is minutes. Group: s = single leg only, m = structure only, b = both.
+  const SC_FIELDS = [
+    ['sl_pts', 'Stop −pts', 'Stop +pts', 8, 12, 'Sell if the bid falls this many points below your fill', 'Buy back if the ask rises this many points above your sale price (a short must have one)', 's'],
+    ['tp_pts', 'Target +pts', 'Target −pts', 14, 8, 'Sell everything if the bid reaches this many points above your fill', 'Buy back everything when the ask falls this many points below your sale price', 's'],
+    ['tp1_pts', 'Partial +pts', 'Partial −pts', 8, 5, 'Take part of the position here, then move the stop to break-even', 'Cover part of the short here, then move the stop to break-even', 's'],
+    ['tp1_pct', 'Partial %', 'Partial %', 50, 50, 'Share of the position closed at the partial target (whole lots)', 'Share of the position closed at the partial target (whole lots)', 's'],
+    ['trail_pts', 'Trail pts', 'Trail pts', 5, 6, 'A stop that follows the best price, this many points behind', 'A stop that follows the lowest ask, this many points above it', 's'],
+    ['be_pts', 'B/E at +pts', 'B/E at +pts', 6, 5, 'Once the bid is this far above your fill, raise the stop to break-even', 'Once the ask is this far below your sale price, lower the stop to break-even', 's'],
+    ['g_sl_pct', 'Combined stop %', 'Combined stop %', 30, 25, 'Close every leg when the structure has lost this % of the premium paid (or received)', 'Close every leg when the structure has lost this % of the premium received', 'm'],
+    ['g_tp_pct', 'Combined target %', 'Combined target %', 50, 40, 'Close every leg when the structure has made this % of the premium paid', 'Close every leg when the structure has made this % of the premium received', 'm'],
+    ['time_min', 'Time stop min', 'Time stop min', 10, 10, 'Close if still open after this many minutes (scalps decay)', 'Close if still open after this many minutes', 'b'],
+    ['u_stop', 'Spot stop', 'Spot stop', '', '', 'Close when the SPOT crosses this level against you', 'Close when the SPOT crosses this level against you', 's'],
+    ['u_target', 'Spot target', 'Spot target', '', '', 'Close when the SPOT reaches this level in your favour', 'Close when the SPOT reaches this level in your favour', 's'],
+  ];
+  const SC_PRESETS_B = {
+    Tight:    { sl_pts: 6,  tp_pts: 10, tp1_pts: 6,  tp1_pct: 50, trail_pts: 4,  be_pts: 4,  time_min: 5 },
+    Standard: { sl_pts: 10, tp_pts: 20, tp1_pts: 12, tp1_pct: 50, trail_pts: 6,  be_pts: 8,  time_min: 10 },
+    Runner:   { sl_pts: 12, tp_pts: 40, tp1_pts: 20, tp1_pct: 50, trail_pts: 10, be_pts: 10, time_min: 20 },
+  };
+  const SC_PRESETS_S = {
+    Tight:    { sl_pts: 8,  tp_pts: 6,  tp1_pts: 4,  tp1_pct: 50, trail_pts: 4, be_pts: 4, time_min: 5 },
+    Standard: { sl_pts: 12, tp_pts: 10, tp1_pts: 6,  tp1_pct: 50, trail_pts: 6, be_pts: 6, time_min: 10 },
+    Runner:   { sl_pts: 15, tp_pts: 25, tp1_pts: 12, tp1_pct: 50, trail_pts: 8, be_pts: 8, time_min: 20 },
+  };
+  const scSgn = () => SC.pref.side === 'S' ? -1 : 1;                       // +1 buying, -1 selling
+  const scTs = typ => typ === 'CE' ? 1 : -1;                               // a call gains when spot rises
+  const scPresets = () => SC.pref.side === 'S' ? SC_PRESETS_S : SC_PRESETS_B;
+  const scIsStruct = () => SC.pref.struct !== 'single';
+  const scVerb = () => SC.pref.side === 'S' ? 'Sell' : 'Buy';
+  const scPosSg = p => p.side === 'short' ? -1 : 1;
+  const SC_UP = '#2ecc8f', SC_DN = '#ff5d6c', SC_AMB = '#e8b339', SC_BLUE = '#7d9bff', SC_VIO = '#b794f6', SC_FLAT = '#6b7388';
+  const $sc = id => document.getElementById(id);
+  const scBase = () => els.serverUrl.value.replace(/\/+$/, '');
+  const scNum = (v, d = 2) => (v == null || !isFinite(v)) ? '–' : (+v).toFixed(d);
+  const scRs = v => (v < 0 ? '−₹' : '₹') + Math.abs(Math.round(v)).toLocaleString('en-IN');
+  const scRsS = v => (v >= 0 ? '+' : '−') + '₹' + Math.abs(Math.round(v)).toLocaleString('en-IN');
+  const scCls = v => v > 0 ? 'pos-t' : v < 0 ? 'neg-t' : '';
+  const _scTf = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const scT = ms => _scTf.format(ms);
+  const scSet = (el, html) => { if (el && el._h !== html) { el._h = html; el.innerHTML = html; } };
+  // Zerodha equity-option charges, same numbers as nse_trade.py (an estimate)
+  function scCharges(buyVal, sellVal, orders) {
+    const brok = 20 * orders, txn = (buyVal + sellVal) * 0.0003553, sebi = (buyVal + sellVal) * 10 / 1e7;
+    return brok + txn + sebi + (brok + txn + sebi) * 0.18 + sellVal * 0.0015 + buyVal * 0.00003 + (buyVal + sellVal) * 0.01 / 1e7;
+  }
+  function scMsg(text, bad) {
+    const el = $sc('scMsg'); if (!el) return;
+    el.textContent = text || ''; el.className = 'sc-msg' + (text ? (bad ? ' bad' : ' ok') : '');
+    clearTimeout(scMsg._t); if (text) scMsg._t = setTimeout(() => { el.textContent = ''; el.className = 'sc-msg'; }, bad ? 9000 : 5000);
+  }
+  function scPin() { try { return sessionStorage.getItem('scalpPin') || ''; } catch (_) { return ''; } }
+  function scPrefLoad() { try { Object.assign(SC.pref, JSON.parse(localStorage.getItem('scalpPrefsV2') || '{}') || {}); } catch (_) {} }
+  function scPrefSave() { try { localStorage.setItem('scalpPrefsV2', JSON.stringify(SC.pref)); } catch (_) {} }
+  async function scApi(path, body) {
+    const h = { 'Content-Type': 'application/json', 'X-Trade-Intent': '1' };
+    const pin = scPin(); if (pin) h['X-Trade-Pin'] = pin;
+    try {
+      const r = await fetch(`${scBase()}/api/trade/${path}`, { method: 'POST', headers: h, body: JSON.stringify(body || {}), signal: AbortSignal.timeout(25000) });
+      let j; try { j = await r.json(); } catch (_) { j = { ok: false, msg: `HTTP ${r.status}` }; }
+      if (!r.ok && !j.msg) j.msg = `HTTP ${r.status}`;
+      if (j.state) { SC.st = j.state; if (j.state.quotes && Object.keys(j.state.quotes).length) SC.quotes = j.state.quotes; }
+      return j;
+    } catch (e) {
+      return { ok: false, msg: `${e.name === 'TimeoutError' ? 'timed out - check Orders before retrying' : 'server unreachable'}` };
+    }
+  }
+
+  // ── exit fields (one set for buying, one for selling) ──
+  function scLoadExits() {
+    let s = {}; try { s = JSON.parse(localStorage.getItem('scalpExitsV2') || '{}') || {}; } catch (_) {}
+    for (const sd of ['B', 'S']) {
+      const o = SC.exitsBy[sd] = {};
+      for (const f of SC_FIELDS) { const k = f[0]; o[k] = (k === 'u_stop' || k === 'u_target') ? '' : ((s[sd] && s[sd][k] != null) ? s[sd][k] : f[sd === 'B' ? 3 : 4]); }
+    }
+    SC.exits = SC.exitsBy[SC.pref.side];
+  }
+  function scSaveExits() {
+    try { const o = { B: { ...SC.exitsBy.B }, S: { ...SC.exitsBy.S } }; for (const sd of ['B', 'S']) { delete o[sd].u_stop; delete o[sd].u_target; } localStorage.setItem('scalpExitsV2', JSON.stringify(o)); } catch (_) {}
+  }
+  function scReadExits() {
+    for (const [k] of SC_FIELDS) { const el = $sc('scx_' + k); if (el) SC.exits[k] = el.value.trim(); }
+    scSaveExits();
+  }
+  const scEn = k => { const v = parseFloat(SC.exits[k]); return isFinite(v) && v > 0 ? v : 0; };
+  // the view a contract expresses: +1 bullish (buy a call, sell a put), -1 bearish (buy a put, sell a call)
+  const scView = (side, typ) => (side === 'S' ? -1 : 1) * scTs(typ);
+  function scExitsBody(typ, structure, side) {
+    side = side || SC.pref.side;
+    const keep = SC.exits; if (side === SC.pref.side) scReadExits(); else SC.exits = SC.exitsBy[side];
+    try { return scExitsBody2(typ, structure, side); } finally { SC.exits = keep; }
+  }
+  function scExitsBody2(typ, structure, side) {
+    const o = {};
+    if (scEn('time_min')) o.time_stop_s = Math.round(scEn('time_min') * 60);
+    if (structure) return { exits: o, linked: false };
+    for (const k of ['sl_pts', 'tp_pts', 'tp1_pts', 'trail_pts', 'be_pts']) if (scEn(k)) o[k] = scEn(k);
+    if (o.tp1_pts) o.tp1_pct = Math.min(100, Math.max(1, Math.round(scEn('tp1_pct') || 50)));
+    let us = scEn('u_stop'), ut = scEn('u_target'), linked = false;
+    if (SC.pref.link && typeof _turn !== 'undefined' && _turn.trig && (_turn.st === 'BUY' || _turn.st === 'SELL')) {
+      if (_turn.dir === scView(side, typ)) { us = us || _turn.trig.stop; ut = ut || _turn.trig.target; linked = true; }
+    }
+    if (us) o.u_stop = +us.toFixed(2);
+    if (ut) o.u_target = +ut.toFixed(2);
+    return { exits: o, linked };
+  }
+  function scApplyFieldVis() {
+    const m = scIsStruct() ? 'm' : 's';
+    document.querySelectorAll('#scExitFields label').forEach(l => { const g = l.dataset.g; l.style.display = (g === 'b' || g === m) ? '' : 'none'; });
+  }
+  function scBuildFields() {
+    const S = SC.pref.side === 'S';
+    $sc('scExitFields').innerHTML = SC_FIELDS.map(f => `<label data-g="${f[7]}" title="${escapeHtml(S ? f[6] : f[5])}">${S ? f[2] : f[1]}<input id="scx_${f[0]}" type="number" min="0" step="any" value="${escapeHtml(SC.exits[f[0]] ?? '')}" class="sc-n"></label>`).join('');
+    $sc('scExitFields').querySelectorAll('input').forEach(i => i.addEventListener('change', () => { scReadExits(); scRenderTicket(); scQueueDraw(); }));
+    $sc('scPresets').innerHTML = Object.keys(scPresets()).map(n => `<button data-p="${n}" title="Load the ${n} exit set">${n}</button>`).join('');
+    $sc('scPresets').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      Object.assign(SC.exits, scPresets()[b.dataset.p]);
+      for (const [k] of SC_FIELDS) { const el = $sc('scx_' + k); if (el && SC.exits[k] != null && k !== 'u_stop' && k !== 'u_target') el.value = SC.exits[k]; }
+      scSaveExits(); scRenderTicket(); scQueueDraw();
+    }));
+    scApplyFieldVis();
+  }
+
+  // ── contracts ──
+  function scChainOk() {
+    const d = state.lastData;
+    return !!(d && d._source === 'zerodha' && Array.isArray(d.strikes) && d.strikes.length && d.strikes.some(r => r.ce_symbol));
+  }
+  const scVolT = d => (typeof _volT === 'function') ? _volT(Math.max(1 / 1440, d.dte ?? 1)) : Math.max(1 / 1440, d.dte ?? 1) / 365;
+  function scPick() {
+    const d = state.lastData, out = { CE: null, PE: null };
+    if (!scChainOk()) return out;
+    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol), gap = d.strike_gap || 50, atm = d.atm;
+    const near = k => rows.reduce((b, r) => (!b || Math.abs(r.strike - k) < Math.abs(b.strike - k)) ? r : b, null);
+    const T = scVolT(d);
+    for (const side of ['CE', 'PE']) {
+      const key = SC.pref['sel' + side] || 'o0';
+      if (key[0] === 'o') { const n = parseInt(key.slice(1), 10) || 0; out[side] = near(side === 'CE' ? atm + n * gap : atm - n * gap); }
+      else if (key[0] === 'k') out[side] = near(parseFloat(key.slice(1)));
+      else {
+        const tgt = parseFloat(key.slice(1)); let best = null, be = 9;
+        for (const r of rows) {
+          const iv = (side === 'CE' ? r.ce_iv : r.pe_iv) || 0; if (iv <= 1) continue;
+          const dl = Math.abs(_bsDeltaJs(d.underlying_value, r.strike, T, iv / 100, side === 'CE'));
+          if (Math.abs(dl - tgt) < be) { be = Math.abs(dl - tgt); best = r; }
+        }
+        out[side] = best || near(atm);
+      }
+    }
+    return out;
+  }
+  function scGreeks(typ, strike) {
+    const d = state.lastData; if (!scChainOk()) return null;
+    const row = d.strikes.find(r => Math.abs(r.strike - strike) < 0.5); if (!row) return null;
+    const iv = (typ === 'CE' ? row.ce_iv : row.pe_iv) || 0; if (iv <= 1) return null;
+    try { const g = bsGreeks(d.underlying_value, strike, scVolT(d), iv / 100, 0.07, typ); return { delta: g.delta, gamma: g.gamma, thetaDay: g.theta, iv }; } catch (_) { return null; }
+  }
+  function scLegInfo(typ, row) {
+    if (!row) return null;
+    const p = typ.toLowerCase(), d = state.lastData, inst = row[p + '_symbol'], q = SC.quotes[inst] || {};
+    const bid = q.bid || row[p + '_bid'] || 0, ask = q.ask || row[p + '_ask'] || 0, ltp = q.ltp || row[p + '_ltp'] || 0;
+    const g = scGreeks(typ, row.strike);
+    return { typ, inst, row, strike: row.strike, bid, ask, ltp, iv: g ? g.iv : 0, dl: g ? g.delta : null, itm: typ === 'CE' ? row.strike < d.underlying_value : row.strike > d.underlying_value,
+             age: q.age, lot: d.lot_size || 1, spreadPct: (bid && ask) ? (ask - bid) / ((ask + bid) / 2) * 100 : null };
+  }
+  // lots: typed, or sized so that the stop loses about the risk amount
+  function scLots(typ) {
+    const typed = Math.max(1, parseInt($sc('scLots').value, 10) || 1);
+    if (!SC.pref.riskAuto || scIsStruct()) return typed;
+    const L = SC.legs[typ || 'CE'] || SC.legs.CE || SC.legs.PE, sl = scEn('sl_pts');
+    const cap = (SC.st && SC.st.limits && (SC.pref.side === 'S' ? Math.min(SC.st.limits.max_lots, SC.st.limits.max_short_lots) : SC.st.limits.max_lots)) || 1;
+    if (!L || !sl) return typed;
+    const px = SC.pref.side === 'S' ? (L.bid || L.ask) : L.ask, per = sl * L.lot + scCharges(px * L.lot, px * L.lot, 2);
+    return Math.max(1, Math.min(cap, Math.floor((+SC.pref.riskRs || 0) / per) || 1));
+  }
+  // the price this side of the ticket trades at: you buy at the ask, you sell at the bid
+  const scEntryPx = L => L ? (SC.pref.side === 'S' ? (L.bid || 0) : (L.ask || 0)) : 0;
+  // the far-out-of-the-money wing that hedges a short at strike K of this type
+  function scWingRow(typ, strike) {
+    const d = state.lastData; if (!scChainOk()) return null;
+    const gap = d.strike_gap || 50, want = typ === 'CE' ? strike + SC.pref.wing * gap : strike - SC.pref.wing * gap;
+    return d.strikes.find(r => Math.abs(r.strike - want) < 0.5 && r[typ.toLowerCase() + '_symbol']) || null;
+  }
+  // straddle / strangle legs from the chain
+  function scStructRows() {
+    const d = state.lastData; if (!scChainOk() || !scIsStruct()) return null;
+    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol), gap = d.strike_gap || 50, atm = d.atm;
+    const near = k => rows.reduce((b, r) => (!b || Math.abs(r.strike - k) < Math.abs(b.strike - k)) ? r : b, null);
+    const off = SC.pref.struct === 'strangle' ? Math.max(1, SC.pref.sOff) : 0;
+    const ce = near(atm + off * gap), pe = near(atm - off * gap);
+    return ce && pe ? { CE: ce, PE: pe } : null;
+  }
+  // the whole book's exposure: ₹ per spot point, gamma, theta per minute
+  function scBook() {
+    const out = { dl: 0, gm: 0, th: 0, n: 0, miss: 0 };
+    for (const p of scHeld()) {
+      const g = scGreeks(p.typ, p.strike); if (!g) { out.miss++; continue; }
+      const sg = scPosSg(p); out.n++;
+      out.dl += sg * p.qty * scTs(p.typ) * Math.abs(g.delta); out.gm += sg * p.qty * (g.gamma || 0); out.th += sg * p.qty * g.thetaDay / 375;
+    }
+    return out;
+  }
+  // change in open P&L if the spot moved by ds right now (delta + gamma, premium floored at zero); time and IV held still
+  function scScenario(ds) {
+    let tot = 0;
+    for (const p of scHeld()) {
+      const g = scGreeks(p.typ, p.strike); if (!g) continue;
+      const mk = p.mark || p.ltp || p.avg, nu = Math.max(0.05, mk + scTs(p.typ) * Math.abs(g.delta) * ds + 0.5 * (g.gamma || 0) * ds * ds);
+      tot += scPosSg(p) * p.qty * (nu - mk);
+    }
+    return tot;
+  }
+
+  // ── tick tape: digest rows into prints, order flow and VWAP ──
+  function scDigest(t, r) {                  // r = [seq, ms, ltp, bid, ask, bq, aq, vol]
+    const pv = t.prev; let dv = 0, side = t.side;
+    if (pv && r[7] != null && pv[7] != null) { dv = r[7] - pv[7]; if (dv < 0) dv = 0; }
+    if (dv > 0 && r[2] != null) {
+      if (pv && pv[4] && r[2] >= pv[4]) side = 1;                // lifted the offer
+      else if (pv && pv[3] && r[2] <= pv[3]) side = -1;          // hit the bid
+      else if (pv && pv[2] != null) { if (r[2] > pv[2]) side = 1; else if (r[2] < pv[2]) side = -1; }
+      t.side = side; t.cvd += side * dv; t.pvn += r[2] * dv; t.pvd += dv;
+    }
+    t.d.push({ ms: r[1], p: r[2], dv, side: dv > 0 ? side : 0, cvd: t.cvd, vw: t.pvd > 0 ? t.pvn / t.pvd : null });
+    t.prev = r;
+  }
+  function scTapeMerge(name, d) {
+    let t = SC.tape[name];
+    if (!t || d.reset) t = SC.tape[name] = { cur: 0, d: [], prev: null, side: 1, cvd: 0, pvn: 0, pvd: 0 };
+    for (const r of d.rows || []) scDigest(t, r);
+    if (d.cur) t.cur = d.cur;
+    if (t.d.length > SC_MAXROWS) t.d.splice(0, t.d.length - SC_MAXROWS);
+  }
+  function scBars(t, tf) {
+    const ms = tf * 1000, out = []; let cur = null;
+    const flat = (c, at, cvd, vw) => ({ t: at, o: c, h: c, l: c, c, v: 0, bv: 0, sv: 0, cvd, vw });
+    for (const x of t.d) {
+      if (x.p == null) continue;
+      const b = Math.floor(x.ms / ms) * ms;
+      if (!cur || cur.t !== b) {
+        if (cur && b - cur.t <= 400 * ms) for (let g = cur.t + ms; g < b; g += ms) out.push(flat(cur.c, g, cur.cvd, cur.vw));
+        cur = { t: b, o: x.p, h: x.p, l: x.p, c: x.p, v: 0, bv: 0, sv: 0, cvd: x.cvd, vw: x.vw }; out.push(cur);
+      }
+      if (x.p > cur.h) cur.h = x.p; if (x.p < cur.l) cur.l = x.p; cur.c = x.p;
+      if (x.dv) { cur.v += x.dv; if (x.side > 0) cur.bv += x.dv; else cur.sv += x.dv; }
+      cur.cvd = x.cvd; if (x.vw != null) cur.vw = x.vw;
+    }
+    if (cur) {
+      const nowB = Math.floor(scNow() / ms) * ms;
+      if (nowB - cur.t <= 400 * ms) for (let g = cur.t + ms; g <= nowB; g += ms) out.push(flat(cur.c, g, cur.cvd, cur.vw));
+    }
+    return out;
+  }
+  const scNow = () => (SC.st && SC.st.now ? SC.st.now * 1000 : Date.now());
+  function scFlowWin(t, win) {
+    const from = scNow() - win; let b = 0, s = 0;
+    for (let i = t.d.length - 1; i >= 0; i--) { const x = t.d[i]; if (x.ms < from) break; if (x.dv) { if (x.side > 0) b += x.dv; else s += x.dv; } }
+    return { b, s };
+  }
+
+  // ── chart ──
+  function scHeld() { return SC.st && SC.st.positions || []; }
+  function scChartTarget() {
+    const c = SC.pref.chart;
+    if (c === 'SPOT') return { name: state.symbol || 'NIFTY', kind: 'SPOT', inst: null };
+    if (c === 'CE' || c === 'PE') { const L = SC.legs[c]; return L ? { name: L.inst, kind: c, inst: L.inst, L } : null; }
+    const p = scHeld().find(x => x.inst === c);
+    if (p) return { name: p.inst, kind: p.typ, inst: p.inst, pos: p };
+    SC.pref.chart = 'CE'; const L = SC.legs.CE; return L ? { name: L.inst, kind: 'CE', inst: L.inst, L } : null;
+  }
+  // Lines the chart draws for this instrument: the bracket of an open position,
+  // the dashed plan of the next order, or (on the spot chart) the same levels
+  // projected onto the underlying through delta.
+  function scLines(T) {
+    const out = [], P = scHeld(), mk = (id, price, col, dash, drag, label, extra) => out.push({ id, price, col, dash, drag, label, ...(extra || {}) });
+    const fmtP = v => scNum(v);
+    if (T.kind === 'SPOT') {
+      const spot = SC.spot || state.lastData.underlying_value;
+      for (const p of P) {
+        const e = p.exits, g = scGreeks(p.typ, p.strike), ts = scTs(p.typ), sg = scPosSg(p), mark = p.mark || p.bid || p.ltp;
+        const tagS = `${p.side === 'short' ? 'short ' : ''}${fmtInt(p.strike)} ${p.typ}`;
+        if (p.role === 'hedge') continue;
+        if (e.u_stop) mk('u_stop' + p.inst, e.u_stop, SC_DN, '4,3', false, () => `spot stop ${fmtInt(e.u_stop)} · ${tagS}`);
+        if (e.u_target) mk('u_target' + p.inst, e.u_target, SC_UP, '4,3', false, () => `spot target ${fmtInt(e.u_target)} · ${tagS}`);
+        if (g && Math.abs(g.delta) > 0.05 && mark && spot) {
+          const d0 = Math.abs(g.delta);                                   // spot level at which the premium would be at the stop / target
+          if (p.eff_sl) mk('xs' + p.inst, spot + (p.eff_sl - mark) / (ts * d0), SC_DN, '1,3', false, () => `≈ premium stop · ${tagS}`);
+          if (e.tp) mk('xt' + p.inst, spot + (e.tp - mark) / (ts * d0), SC_UP, '1,3', false, () => `≈ premium target · ${tagS}`);
+        }
+      }
+      if (typeof _turn !== 'undefined' && _turn.trig && (_turn.st === 'BUY' || _turn.st === 'SELL')) {
+        mk('ts', _turn.trig.stop, '#ff9d4d', '6,3', false, () => `turn stop ${fmtInt(Math.round(_turn.trig.stop))}`);
+        mk('tt', _turn.trig.target, SC_BLUE, '6,3', false, () => `turn target ${fmtInt(Math.round(_turn.trig.target))}`);
+      }
+      return out;
+    }
+    const pos = P.find(p => p.inst === T.inst);
+    if (pos) {
+      const e = pos.exits, avg = pos.avg, qty = pos.qty, sg = scPosSg(pos), risk = e.sl ? sg * (avg - e.sl) : (pos.eff_sl ? sg * (avg - pos.eff_sl) : 0);
+      const pl = v => scRsS((v - avg) * qty * sg), word = sg > 0 ? 'bought' : 'sold';
+      mk('entry', avg, '#cfd6e6', '2,3', false, () => `${pos.role === 'hedge' ? 'wing ' : ''}${word} ${fmtP(avg)} · ${pos.lots} lot${pos.lots > 1 ? 's' : ''}`);
+      if (pos.role === 'hedge') return out;
+      if (e.sl) mk('sl', e.sl, SC_DN, '', true, v => `stop ${fmtP(v)}  ${pl(v)}`);
+      if (pos.eff_sl && (!e.sl || (sg > 0 ? pos.eff_sl > e.sl + 0.001 : pos.eff_sl < e.sl - 0.001))) mk('trail', pos.eff_sl, '#ff9d4d', '3,3', false, v => `trailing stop ${fmtP(v)}  ${pl(v)}`);
+      if (e.tp) mk('tp', e.tp, SC_UP, '', true, v => `target ${fmtP(v)}  ${pl(v)}${risk > 0 ? `  ${(sg * (v - avg) / risk).toFixed(1)}R` : ''}`);
+      if (e.tp1 && !e.tp1_done) mk('tp1', e.tp1, SC_AMB, '', true, v => `partial ${fmtP(v)} (${e.tp1_pct}%)  ${pl(v)}`);
+      return out;
+    }
+    const L = T.L, sg = scSgn(), px = scEntryPx(L);
+    if (L && px) {
+      const lots = scLots(T.kind), qty = lots * L.lot, pl = v => scRsS((v - px) * qty * sg);
+      mk('entry', px, '#cfd6e6', '2,3', false, () => `${sg > 0 ? 'buy' : 'sell'} at ${fmtP(px)} · ${lots} lot${lots > 1 ? 's' : ''}`);
+      if (!scIsStruct()) {
+        if (scEn('sl_pts')) mk('psl', Math.max(0.05, px - sg * scEn('sl_pts')), SC_DN, '5,4', true, v => `plan stop ${fmtP(v)}  ${pl(v)}`);
+        if (scEn('tp_pts')) mk('ptp', Math.max(0.05, px + sg * scEn('tp_pts')), SC_UP, '5,4', true, v => `plan target ${fmtP(v)}  ${pl(v)}`);
+        if (scEn('tp1_pts')) mk('ptp1', Math.max(0.05, px + sg * scEn('tp1_pts')), SC_AMB, '5,4', true, v => `plan partial ${fmtP(v)}  ${pl(v)}`);
+      }
+    }
+    return out;
+  }
+  function scTicks(lo, hi, n) {
+    const raw = (hi - lo) / n, p = Math.pow(10, Math.floor(Math.log10(raw))), m = raw / p;
+    const step = (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p, out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+    return { out, step };
+  }
+  function scQueueDraw() { if (!SC.raf) SC.raf = requestAnimationFrame(() => { SC.raf = 0; try { scDrawChart(); } catch (e) { console.log('[scalp] chart', e); } }); }
+  function scDrawChart() {
+    const svg = $sc('scChart'); if (!svg) return;
+    const T = scChartTarget();
+    const W = Math.max(320, svg.clientWidth || 800), H = Math.max(280, svg.clientHeight || 480);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    const note = t => { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="#7a8398" font-size="12" style="font-family:'IBM Plex Sans',sans-serif">${t}</text>`; SC.geom = null; };
+    if (!T) return note('Pick a strike on the ladder to chart it.');
+    const tape = SC.tape[T.name];
+    if (!tape || tape.d.length < 2) return note(SC.st && SC.st.feed && !SC.st.feed.streaming ? 'The Zerodha stream is not connected.' : 'Collecting ticks…');
+    const isSpot = T.kind === 'SPOT', tf = SC.pref.tf, all = scBars(tape, tf);
+    const cap = Math.max(8, SC.pref.nvis), vis = all.slice(-cap), nv = vis.length, off = cap - nv;
+    const R = 74, L = 6, TOP = 8, BOT = 18, gap = 6;
+    const volH = (!isSpot && SC.pref.vol) ? 44 : 0, cvdH = (!isSpot && SC.pref.cvd) ? 56 : 0;
+    const pH = H - TOP - BOT - (volH ? volH + gap : 0) - (cvdH ? cvdH + gap : 0);
+    const x0 = L, x1 = W - R, step = (x1 - x0) / (cap + 4), bx = i => x0 + step * (off + i + 0.5), bw = Math.max(1, Math.min(14, step * 0.72));
+    const q = T.inst ? (SC.quotes[T.inst] || {}) : {};
+    let lo = Infinity, hi = -Infinity;
+    for (const b of vis) { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; }
+    const span = Math.max(hi - lo, (hi + lo) / 2 * 0.0008, 0.3);
+    const lines = scLines(T); SC.lines = lines;
+    let flo = lo, fhi = hi;
+    if (SC.drag && SC.drag.scale) { flo = SC.drag.scale.lo; fhi = SC.drag.scale.hi; }
+    else {
+      for (const ln of lines) { if (ln.price > lo - 7 * span && ln.price < hi + 7 * span) { flo = Math.min(flo, ln.price); fhi = Math.max(fhi, ln.price); } else ln.off = ln.price > hi ? 'up' : 'dn'; }
+      for (const k of [q.bid, q.ask]) if (k) { flo = Math.min(flo, k); fhi = Math.max(fhi, k); }
+      const pad = Math.max((fhi - flo) * 0.07, 0.05); flo -= pad; fhi += pad;
+    }
+    const y = v => TOP + pH * (1 - (v - flo) / (fhi - flo));
+    SC.geom = { lo: flo, hi: fhi, TOP, pH, x0, x1, W, H, step, nv, vis, T };
+    const tk = scTicks(flo, fhi, 5), dec = tk.step < 0.1 ? 3 : tk.step < 1 ? 2 : tk.step < 10 ? 1 : 0, dec2 = isSpot ? 1 : 2;
+    let s = '';
+    for (const v of tk.out) s += `<line x1="${x0}" x2="${x1}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#12151c"/><text x="${x1 + 6}" y="${(y(v) + 3).toFixed(1)}" fill="#6b7388" font-size="10">${v.toFixed(dec)}</text>`;
+    // zones: the risk and the reward of the bracket as areas
+    const E = lines.find(l => l.id === 'entry'), SL = lines.find(l => l.id === 'sl' || l.id === 'psl'), TP = lines.find(l => l.id === 'tp' || l.id === 'ptp');
+    const live = l => (SC.drag && SC.drag.id === l.id) ? SC.drag.price : l.price;
+    if (E && SL && !SL.off) s += `<rect x="${x0}" y="${Math.min(y(E.price), y(live(SL))).toFixed(1)}" width="${x1 - x0}" height="${Math.abs(y(E.price) - y(live(SL))).toFixed(1)}" fill="${SC_DN}" opacity=".07"/>`;
+    if (E && TP && !TP.off) s += `<rect x="${x0}" y="${Math.min(y(E.price), y(live(TP))).toFixed(1)}" width="${x1 - x0}" height="${Math.abs(y(E.price) - y(live(TP))).toFixed(1)}" fill="${SC_UP}" opacity=".07"/>`;
+    // candles
+    vis.forEach((b, i) => {
+      const cx = bx(i), col = b.v === 0 && b.o === b.c ? SC_FLAT : (b.c >= b.o ? SC_UP : SC_DN), yo = y(b.o), yc = y(b.c);
+      s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(b.h).toFixed(1)}" y2="${y(b.l).toFixed(1)}" stroke="${col}"/>` +
+           `<rect x="${(cx - bw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, Math.abs(yo - yc)).toFixed(1)}" fill="${col}"/>`;
+    });
+    if (SC.pref.vwap && !isSpot) {
+      let d = '', pen = false;
+      vis.forEach((b, i) => { if (b.vw == null || b.vw < flo || b.vw > fhi) { pen = false; return; } d += `${pen ? 'L' : 'M'}${bx(i).toFixed(1)},${y(b.vw).toFixed(1)}`; pen = true; });
+      if (d) s += `<path d="${d}" fill="none" stroke="${SC_VIO}" stroke-width="1.3" opacity=".9"/>`;
+      const lb = vis[nv - 1].vw; if (lb != null && lb >= flo && lb <= fhi) s += `<text x="${x1 - 4}" y="${(y(lb) - 4).toFixed(1)}" text-anchor="end" fill="${SC_VIO}" font-size="9.5">VWAP ${lb.toFixed(2)}</text>`;
+    }
+    if (q.bid) s += `<line x1="${x0}" x2="${x1}" y1="${y(q.bid).toFixed(1)}" y2="${y(q.bid).toFixed(1)}" stroke="${SC_UP}" opacity=".5" stroke-dasharray="1,3"/>`;
+    if (q.ask) s += `<line x1="${x0}" x2="${x1}" y1="${y(q.ask).toFixed(1)}" y2="${y(q.ask).toFixed(1)}" stroke="${SC_DN}" opacity=".5" stroke-dasharray="1,3"/>`;
+    // bracket / plan lines, each with its own label and axis tag
+    for (const ln of lines) {
+      const price = live(ln), txt = ln.label(price);
+      if (ln.off) {
+        const yy = ln.off === 'up' ? TOP + 9 : TOP + pH - 9, w = txt.length * 6.1 + 14;
+        s += `<rect x="${x0 + 6}" y="${yy - 8}" width="${w}" height="14" rx="3" fill="#0b0d12" stroke="${ln.col}"/><text x="${x0 + 12}" y="${yy + 3}" fill="${ln.col}" font-size="10">${ln.off === 'up' ? '▲' : '▼'} ${txt}</text>`;
+        continue;
+      }
+      const yy = y(price), w = txt.length * 6.1 + 12;
+      s += `<line x1="${x0}" x2="${x1}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${ln.col}" stroke-width="${ln.drag ? 1.4 : 1}"${ln.dash ? ` stroke-dasharray="${ln.dash}"` : ''} opacity="${ln.drag ? 1 : .85}"/>`;
+      s += `<g${ln.drag ? ` class="sc-h" data-h="${ln.id}"` : ''}>${ln.drag ? `<rect x="${x0}" y="${(yy - 8).toFixed(1)}" width="${x1 - x0}" height="16" fill="transparent"/>` : ''}` +
+           `<rect x="${x0 + 6}" y="${(yy - 9).toFixed(1)}" width="${w.toFixed(0)}" height="14" rx="3" fill="#0b0d12" stroke="${ln.col}"/>` +
+           `<text x="${x0 + 12}" y="${(yy + 2).toFixed(1)}" fill="${ln.col}" font-size="10">${ln.drag ? '⇕ ' : ''}${txt}</text></g>`;
+      s += `<rect x="${x1 + 1}" y="${(yy - 7).toFixed(1)}" width="${R - 3}" height="14" fill="${ln.col}"/><text x="${x1 + 5}" y="${(yy + 3).toFixed(1)}" fill="#05070a" font-size="10" font-weight="600">${price.toFixed(dec2)}</text>`;
+    }
+    // last price tag and, with a position, its live P&L
+    const lastB = vis[nv - 1], ly = y(lastB.c), lcol = lastB.c >= lastB.o ? SC_UP : SC_DN;
+    s += `<line x1="${x0}" x2="${x1}" y1="${ly.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="${lcol}" opacity=".35"/><rect x="${x1 + 1}" y="${(ly - 7).toFixed(1)}" width="${R - 3}" height="14" fill="${lcol}"/><text x="${x1 + 5}" y="${(ly + 3).toFixed(1)}" fill="#05070a" font-size="10" font-weight="700">${lastB.c.toFixed(dec2)}</text>`;
+    const pos = scHeld().find(p => p.inst === T.inst);
+    if (pos) {
+      const sg = scPosSg(pos), sl = pos.exits.sl || pos.eff_sl, R1 = sl ? sg * (pos.avg - sl) : 0, mk = pos.mark || lastB.c, pl = (mk - pos.avg) * pos.qty * sg;
+      s += `<text x="${(bx(nv - 1) - 12).toFixed(1)}" y="${(ly - 10).toFixed(1)}" text-anchor="end" fill="${pl >= 0 ? SC_UP : SC_DN}" font-size="12" font-weight="600">${sg < 0 ? 'short ' : ''}${scRsS(pl)}${R1 > 0 && pos.role !== 'hedge' ? `  ${(sg * (mk - pos.avg) / R1).toFixed(1)}R` : ''}</text>`;
+    }
+    // volume (buyers over sellers) and cumulative delta
+    let yB = TOP + pH + gap;
+    if (volH) {
+      const mx = Math.max(1, ...vis.map(b => b.v)), base = yB + volH;
+      s += `<text x="${x0 + 4}" y="${yB + 9}" fill="#4d5568" font-size="9">volume · buy / sell</text>`;
+      vis.forEach((b, i) => {
+        if (!b.v) return; const ht = b.v / mx * (volH - 2), gh = b.bv / b.v * ht, cx = bx(i) - bw / 2;
+        s += `<rect x="${cx.toFixed(1)}" y="${(base - gh).toFixed(1)}" width="${bw.toFixed(1)}" height="${gh.toFixed(1)}" fill="${SC_UP}" opacity=".75"/><rect x="${cx.toFixed(1)}" y="${(base - ht).toFixed(1)}" width="${bw.toFixed(1)}" height="${(ht - gh).toFixed(1)}" fill="${SC_DN}" opacity=".75"/>`;
+      });
+      yB += volH + gap;
+    }
+    if (cvdH) {
+      const b0 = vis[0].cvd, vs = vis.map(b => b.cvd - b0); let cl = Math.min(0, ...vs), ch = Math.max(0, ...vs); if (ch - cl < 1) { ch += 1; cl -= 1; }
+      const cy = v => yB + 4 + (cvdH - 8) * (1 - (v - cl) / (ch - cl)), last = vs[vs.length - 1];
+      s += `<line x1="${x0}" x2="${x1}" y1="${cy(0).toFixed(1)}" y2="${cy(0).toFixed(1)}" stroke="#262b36" stroke-dasharray="2,3"/><text x="${x0 + 4}" y="${yB + 9}" fill="#4d5568" font-size="9">cumulative delta (buyers − sellers)</text>`;
+      s += `<path d="${vs.map((v, i) => `${i ? 'L' : 'M'}${bx(i).toFixed(1)},${cy(v).toFixed(1)}`).join('')}" fill="none" stroke="${last >= 0 ? SC_UP : SC_DN}" stroke-width="1.4"/>`;
+      s += `<text x="${x1 + 6}" y="${(cy(last) + 3).toFixed(1)}" fill="${last >= 0 ? SC_UP : SC_DN}" font-size="10">${last >= 0 ? '+' : ''}${Math.round(last).toLocaleString('en-IN')}</text>`;
+    }
+    // time axis
+    const every = Math.max(1, Math.ceil(96 / step));
+    vis.forEach((b, i) => { if (i % every === 0) s += `<text x="${bx(i).toFixed(1)}" y="${H - 5}" text-anchor="middle" fill="#5b6377" font-size="9.5">${tf < 60 ? scT(b.t) : scT(b.t).slice(0, 5)}</text>`; });
+    // crosshair + readout
+    let rb = lastB;
+    const hv = SC.hover;
+    if (hv && !SC.drag && hv.x >= x0 && hv.x <= x1) {
+      const i = Math.max(0, Math.min(nv - 1, Math.floor((hv.x - x0) / step) - off));
+      rb = vis[i]; const cx = bx(i);
+      s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${TOP}" y2="${H - BOT}" stroke="#8b93a7" opacity=".35" stroke-dasharray="3,3"/>`;
+      if (hv.y >= TOP && hv.y <= TOP + pH) {
+        const pv = flo + (fhi - flo) * (1 - (hv.y - TOP) / pH);
+        s += `<line x1="${x0}" x2="${x1}" y1="${hv.y.toFixed(1)}" y2="${hv.y.toFixed(1)}" stroke="#8b93a7" opacity=".35" stroke-dasharray="3,3"/><rect x="${x1 + 1}" y="${(hv.y - 7).toFixed(1)}" width="${R - 3}" height="14" fill="#2b3040"/><text x="${x1 + 5}" y="${(hv.y + 3).toFixed(1)}" fill="#e8ebf2" font-size="10">${pv.toFixed(dec2)}</text>`;
+      }
+    }
+    svg.innerHTML = s;
+    const dlt = rb.bv - rb.sv;
+    scSet($sc('scReadout'), `<b>${scT(rb.t)}</b> &nbsp;O <b>${rb.o.toFixed(dec2)}</b> H <b>${rb.h.toFixed(dec2)}</b> L <b>${rb.l.toFixed(dec2)}</b> C <b>${rb.c.toFixed(dec2)}</b>` +
+      (isSpot ? '' : ` &nbsp;vol <b>${rb.v}</b> (buy ${rb.bv} / sell ${rb.sv}) &nbsp;Δ <b class="${scCls(dlt)}">${dlt >= 0 ? '+' : ''}${dlt}</b>`));
+  }
+  const scClampLine = (id, p) => {
+    const T = SC.geom && SC.geom.T, q = (T && T.inst && SC.quotes[T.inst]) || {}, plan = (id === 'psl' || id === 'ptp' || id === 'ptp1');
+    const pos = !plan && T && T.inst ? scHeld().find(x => x.inst === T.inst) : null;
+    const sg = plan ? scSgn() : (pos ? scPosSg(pos) : 1);
+    // an open position's stop/target trigger on the price you would close at (a long: the bid, a short: the ask)
+    const ref = plan ? scEntryPx(T && T.L) || q.ask || 0 : (sg > 0 ? q.bid : q.ask) || 0, stopLike = (id === 'sl' || id === 'psl');
+    if (ref) { const away = stopLike ? sg : -sg; p = away > 0 ? Math.min(p, ref - 0.1) : Math.max(p, ref + 0.1); }
+    return Math.max(0.05, Math.round(p / 0.05) * 0.05);
+  };
+  async function scDragCommit() {
+    const D = SC.drag; SC.drag = null; if (!D) return;
+    const T = scChartTarget(), price = +D.price.toFixed(2);
+    if (!T) return;
+    if (D.id === 'sl' || D.id === 'tp' || D.id === 'tp1') {
+      const r = await scApi('modify', { inst: T.inst, exits: { [D.id]: price } });
+      scMsg(r.ok ? `${D.id === 'sl' ? 'Stop' : D.id === 'tp' ? 'Target' : 'Partial'} moved to ${price.toFixed(2)}` : (r.msg || 'could not change the exit'), !r.ok);
+    } else if (T.L) {
+      const key = D.id === 'psl' ? 'sl_pts' : D.id === 'ptp' ? 'tp_pts' : 'tp1_pts', pts = +Math.abs(price - scEntryPx(T.L)).toFixed(2);
+      SC.exits[key] = pts; const el = $sc('scx_' + key); if (el) el.value = pts; scSaveExits();
+      scMsg(`${D.id === 'psl' ? 'Stop' : D.id === 'ptp' ? 'Target' : 'Partial'} set to ${pts} points for the next order`, false);
+    }
+    scRenderAll();
+  }
+
+  // ── left: strike ladder and ticket ──
+  function scRenderLegs() {
+    const P = scPick();
+    SC.legs = { CE: scLegInfo('CE', P.CE), PE: scLegInfo('PE', P.PE) };
+    const sr = scStructRows();
+    SC.sLegs = sr ? { CE: scLegInfo('CE', sr.CE), PE: scLegInfo('PE', sr.PE) } : null;
+    SC.wing = {};
+    if (SC.pref.side === 'S' && SC.pref.hedge && !scIsStruct()) for (const typ of ['CE', 'PE']) { const L = SC.legs[typ]; if (L) { const r = scWingRow(typ, L.strike); SC.wing[typ] = r ? scLegInfo(typ, r) : null; } }
+  }
+  function scRenderLadder() {
+    const el = $sc('scLadder'), d = state.lastData;
+    scSet($sc('scStrikes'), SC_STRIKES.map(([k, l]) => `<button data-k="${k}" class="${(SC.pref.selCE === k && SC.pref.selPE === k) ? 'on' : ''}">${l}</button>`).join(''));
+    if (!scChainOk()) { scSet(el, '<tr><td class="sc-empty">Waiting for the Zerodha option chain…</td></tr>'); return; }
+    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol).sort((a, b) => a.strike - b.strike);
+    let ai = 0, bd = 1e9; rows.forEach((r, i) => { const dd = Math.abs(r.strike - d.atm); if (dd < bd) { bd = dd; ai = i; } });
+    const sl = rows.slice(Math.max(0, ai - 6), Math.min(rows.length, ai + 7));
+    const mx = Math.max(1, ...sl.map(r => Math.max(Math.abs(r.ce_oi_chg || 0), Math.abs(r.pe_oi_chg || 0))));
+    const T = scVolT(d), S = d.underlying_value, st = scIsStruct() && SC.sLegs;
+    const selC = st ? SC.sLegs.CE.strike : SC.legs.CE && SC.legs.CE.strike, selP = st ? SC.sLegs.PE.strike : SC.legs.PE && SC.legs.PE.strike;
+    const wC = SC.wing.CE && SC.wing.CE.strike, wP = SC.wing.PE && SC.wing.PE.strike;
+    const sell = SC.pref.side === 'S';
+    const cell = (r, typ) => {
+      const p = typ === 'CE' ? 'ce' : 'pe', ltp = r[p + '_ltp'] || 0, bid = r[p + '_bid'], ask = r[p + '_ask'], iv = r[p + '_iv'] || 0;
+      const dl = iv > 1 ? Math.abs(_bsDeltaJs(S, r.strike, T, iv / 100, typ === 'CE')) : null;
+      const sp = (bid && ask) ? (ask - bid) / ((ask + bid) / 2) * 100 : null, q = sp == null ? '' : sp < 2 ? 'ok' : sp < 5 ? 'warn' : 'bad';
+      const chg = r[p + '_oi_chg'] || 0, h = Math.min(100, Math.abs(chg) / mx * 100).toFixed(0), heat = chg >= 0 ? 'rgba(125,155,255,.22)' : 'rgba(139,147,167,.16)';
+      const itm = typ === 'CE' ? r.strike < S : r.strike > S, on = typ === 'CE' ? r.strike === selC : r.strike === selP, wing = typ === 'CE' ? r.strike === wC : r.strike === wP;
+      const tip = `${typ} ${fmtInt(r.strike)} · bid ${scNum(bid)} / ask ${scNum(ask)}${sp != null ? ` · spread ${sp.toFixed(1)}%` : ''} · OI change ${chg >= 0 ? '+' : ''}${fmtInt(chg)}${wing ? ' · hedge wing' : ''}`;
+      const body = typ === 'CE' ? `<span class="dot ${q}"></span><span class="dl">${dl != null ? 'Δ' + dl.toFixed(2).slice(1) : ''}</span>${scNum(ltp)}` : `${scNum(ltp)}<span class="dl">${dl != null ? 'Δ' + dl.toFixed(2).slice(1) : ''}</span><span class="dot ${q}"></span>`;
+      return `<td class="${typ === 'CE' ? 'c' : 'p'}${on ? (sell ? ' on sold' : ' on') : ''}${wing ? ' wing' : ''}${itm ? ' itm' : ''}" data-s="${typ}" data-k="${r.strike}" style="--h:${h}%;--heat:${heat}" title="${tip}">${body}</td>`;
+    };
+    scSet(el, '<tr><th>Call</th><th></th><th>Put</th></tr>' + sl.map(r => `<tr class="${r === rows[ai] ? 'atm' : ''}">${cell(r, 'CE')}<td class="k">${fmtInt(r.strike)}</td>${cell(r, 'PE')}</tr>`).join(''));
+  }
+
+  // what the order button trades: one contract, or both legs of a structure
+  function scGoLegs(typ) {
+    if (scIsStruct()) return SC.sLegs ? [SC.sLegs.CE, SC.sLegs.PE] : null;
+    const L = SC.legs[typ]; return L ? [L] : null;
+  }
+  const scRsNeg = v => scRs(v);
+  function scRenderTicket() {
+    const sell = SC.pref.side === 'S', verb = scVerb(), struct = scIsStruct(), lim = (SC.st && SC.st.limits) || {};
+    const panelEl = $sc('tab-scalp'); panelEl.classList.toggle('sc-selling', sell);
+    $sc('scOrder').classList.toggle('sell', sell);
+    scSet($sc('scSide'), [['B', 'Buy'], ['S', 'Sell']].map(([k, l]) => `<button data-s="${k}" class="${SC.pref.side === k ? 'on ' + (k === 'S' ? 'sell' : 'buy') : ''}">${l}</button>`).join(''));
+    scSet($sc('scStruct'), [['single', 'Single'], ['straddle', 'Straddle'], ['strangle', 'Strangle']].map(([k, l]) => `<button data-t="${k}" class="${SC.pref.struct === k ? 'on' : ''}">${l}</button>`).join(''));
+    const so = $sc('scSOff'); so.style.display = SC.pref.struct === 'strangle' ? '' : 'none';
+    scSet(so, [1, 2, 3, 4, 5].map(n => `<option value="${n}"${SC.pref.sOff === n ? ' selected' : ''}>${n} strike${n > 1 ? 's' : ''} out</option>`).join(''));
+    const auto = SC.pref.riskAuto && !struct, lotEl = $sc('scLots');
+    lotEl.disabled = auto; if (document.activeElement !== lotEl) lotEl.value = auto ? scLots('CE') : (SC.pref.lots || 1);
+    $sc('scRiskAuto').disabled = struct;
+    const lots = scLots('CE'), L0 = SC.legs.CE || SC.legs.PE;
+    $sc('scQty').textContent = L0 ? `${lots} × ${L0.lot} = ${lots * L0.lot} qty${struct ? ' per leg' : ''}` : '';
+    const trig = SC.pref.trig, q = trig ? 'Queue ' + verb.toLowerCase() : verb;
+    const bCE = $sc('scBuyCE'), bPE = $sc('scBuyPE'), keyOn = SC.pending;
+    bPE.style.display = struct ? 'none' : ''; $sc('scPair').classList.toggle('one', struct);
+    const setBtn = (b, typ, label, sub, viewUp) => {
+      b.className = 'sc-go ' + (viewUp ? 'sc-buy' : 'sc-sell') + (sell ? ' sc-short' : '') + (keyOn === typ ? ' confirm' : '');
+      if (keyOn !== typ) b.firstElementChild.textContent = label;
+      b.querySelector('small').textContent = sub;
+    };
+    if (struct) {
+      const S2 = SC.sLegs;
+      const prem = S2 ? (S2.CE.bid && S2.PE.bid ? (sell ? S2.CE.bid + S2.PE.bid : S2.CE.ask + S2.PE.ask) : 0) : 0;
+      setBtn(bCE, 'CE', `${q} ${SC.pref.struct}`, S2 ? `${fmtInt(S2.CE.strike)}${S2.CE.strike === S2.PE.strike ? '' : ' / ' + fmtInt(S2.PE.strike)} · ${scNum(prem)} pts` : '–', !sell);
+      bCE.querySelector('kbd').textContent = '1';
+    } else {
+      for (const typ of ['CE', 'PE']) {
+        const Lg = SC.legs[typ], b = typ === 'CE' ? bCE : bPE, px = scEntryPx(Lg);
+        setBtn(b, typ, `${q} ${typ === 'CE' ? 'call' : 'put'}`, Lg && px ? `${fmtInt(Lg.strike)} @ ${scNum(px)}` : '–', scView(SC.pref.side, typ) > 0);
+        b.querySelector('kbd').textContent = typ === 'CE' ? '1' : '2';
+        b.title = sell ? `Sell to open: ${scView(SC.pref.side, typ) > 0 ? 'a bullish' : 'a bearish'} view. Your loss is capped only by the stop${SC.pref.hedge ? ' and the wing' : ''}.` : '';
+      }
+    }
+    // the plan: what the order risks and what it can make
+    const sl = scEn('sl_pts'), tp = scEn('tp_pts');
+    const plan = (id, html) => scSet($sc(id), html);
+    if (struct) {
+      plan('scPlanPE', '');
+      const S2 = SC.sLegs;
+      if (!S2 || !S2.CE.bid || !S2.PE.bid) plan('scPlanCE', '');
+      else {
+        const qty = lots * S2.CE.lot, prem = (sell ? S2.CE.bid + S2.PE.bid : S2.CE.ask + S2.PE.ask) * qty, gs = prem * scEn('g_sl_pct') / 100, gt = prem * scEn('g_tp_pct') / 100;
+        const fee = scCharges(prem, prem, 4);
+        plan('scPlanCE', `<b>${SC.pref.struct}</b> ${sell ? 'credit' : 'debit'} <b>${scRs(prem)}</b> · stop at <b class="neg-t">−${scRs(gs)}</b>${gt ? ` · target <b class="pos-t">+${scRs(gt)}</b>` : ''} · fees ≈ ${scRs(fee)}` +
+          (sell && !gs ? ' · <span class="neg-t">set a combined stop</span>' : '') + (sell ? '<br><span class="sc-dim">Both legs are short: the loss grows without limit if price runs, so the combined stop does the protecting.</span>' : ''));
+      }
+    } else {
+      for (const typ of ['CE', 'PE']) {
+        const Lg = SC.legs[typ], px = scEntryPx(Lg);
+        if (!Lg || !px) { plan(typ === 'CE' ? 'scPlanCE' : 'scPlanPE', ''); continue; }
+        const lt = scLots(typ), qty = lt * Lg.lot, val = px * qty, fee = scCharges(val, val, 2), spr = Lg.bid ? Lg.ask - Lg.bid : 0;
+        const risk = sl * qty + fee, reward = tp * qty - fee, W = SC.wing[typ];
+        let h = `<b>${fmtInt(Lg.strike)} ${typ}</b> ${sell ? 'credit' : ''} ${scRs(val)} · ` + (sl ? `risk <b class="neg-t">${scRs(risk)}</b>` : '<span class="neg-t">no stop</span>') +
+          (tp ? ` · reward <b class="pos-t">${scRs(reward)}</b>` : '') + (sl && tp && risk > 0 ? ` · 1 : ${(reward / risk).toFixed(1)}` : '') + ` · break-even ${sell ? '−' : '+'}${(fee / qty + spr).toFixed(2)}`;
+        if (sell && SC.pref.hedge) h += W ? ` · wing ${fmtInt(W.strike)} costs <b>${scRs(W.ask * qty)}</b>` : ' · <span class="neg-t">no wing strike on the chart</span>';
+        plan(typ === 'CE' ? 'scPlanCE' : 'scPlanPE', h);
+      }
+    }
+    // hedge row
+    const hr = $sc('scHedgeRow'); hr.style.display = (sell && !struct) ? '' : 'none';
+    $sc('scHedge').checked = !!SC.pref.hedge;
+    scSet($sc('scWing'), [1, 2, 3, 4, 5, 6].map(n => `<option value="${n}"${SC.pref.wing === n ? ' selected' : ''}>${n} strike${n > 1 ? 's' : ''} out</option>`).join(''));
+    $sc('scWing').disabled = !SC.pref.hedge;
+    const wi = $sc('scWingInfo'); const gp = (state.lastData && state.lastData.strike_gap) || 50;
+    wi.textContent = SC.pref.hedge ? `(${SC.pref.wing * gp} pts)` : 'naked';
+    wi.className = 'sc-dim sc-n' + (SC.pref.hedge ? '' : ' neg-t');
+    $sc('scMarginRow').style.display = sell ? '' : 'none';
+    const mo = $sc('scMarginOut'), mg = SC.margin && SC.margin.key === scMarginKey() ? SC.margin : null;
+    mo.textContent = mg ? mg.text : ''; mo.className = 'sc-dim sc-n' + (mg && mg.bad ? ' neg-t' : '');
+    // wait-for-a-level row
+    $sc('scTrig').checked = !!trig; $sc('scTrigBox').style.display = trig ? '' : 'none';
+    $sc('scTKind').value = SC.pref.tkind; $sc('scTOp').value = SC.pref.top;
+    if (document.activeElement !== $sc('scTLevel')) $sc('scTLevel').value = SC.pref.tlevel;
+    if (document.activeElement !== $sc('scTag')) $sc('scTag').value = SC.pref.tag;
+  }
+  function scRenderTurn() {
+    const el = $sc('scTurn'); if (typeof _turn === 'undefined') { el.style.display = 'none'; return; }
+    const T = _turn; let cls = 'sc-turn', txt = 'Turn light: waiting';
+    if (T.st === 'BUY' || T.st === 'SELL') {
+      cls += T.dir > 0 ? ' up' : ' dn';
+      txt = `Turn ${T.dir > 0 ? '▲ bullish' : '▼ bearish'}${T.trig ? ` · spot stop ${fmtInt(Math.round(T.trig.stop))} · target ${fmtInt(Math.round(T.trig.target))}` : ''}`;
+    } else if (T.st === 'WATCH') { cls += ' watch'; txt = `Turn light: watching for a ${T.dir > 0 ? 'bottom' : 'top'}`; }
+    else if (T.st === 'QUIET') txt = 'Turn light: quiet';
+    scSet(el, txt); el.className = cls;
+  }
+  function scSparkEq(S) {
+    const lim = S.limits.day_loss || 0, pts = [0]; let c = 0;
+    for (const t of S.trades) { c += t.net; pts.push(c); }
+    pts.push(S.pnl.net);
+    let lo = Math.min(...pts, 0), hi = Math.max(...pts, 0); const showLim = lim && lo < -0.3 * lim; if (showLim) lo = Math.min(lo, -lim);
+    if (hi - lo < 1) { hi += 50; lo -= 50; }
+    const W = 140, H = 34, x = i => 2 + (W - 4) * i / Math.max(1, pts.length - 1), y = v => 3 + (H - 6) * (1 - (v - lo) / (hi - lo)), col = S.pnl.net >= 0 ? SC_UP : SC_DN;
+    return `<line x1="0" x2="${W}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="#262b36"/>` + (showLim ? `<line x1="0" x2="${W}" y1="${y(-lim).toFixed(1)}" y2="${y(-lim).toFixed(1)}" stroke="${SC_DN}" stroke-dasharray="3,3" opacity=".7"/>` : '') +
+      `<polyline fill="none" stroke="${col}" stroke-width="1.5" vector-effect="non-scaling-stroke" points="${pts.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}"/>`;
+  }
+  function scRenderBar() {
+    const S = SC.st, d = state.lastData, sym = state.symbol || 'NIFTY';
+    $sc('scSym').textContent = sym; $sc('scExp').textContent = d && d.expiry ? d.expiry : '';
+    const spot = SC.spot || (d && d.underlying_value) || 0;
+    $sc('scSpot').textContent = spot ? spot.toFixed(2) : '–';
+    const pc = d && d.spot_prev_close;
+    const ch = $sc('scSpotChg'); if (spot && pc) { const c = spot - pc; ch.textContent = `${c >= 0 ? '+' : ''}${c.toFixed(1)} (${(c / pc * 100).toFixed(2)}%)`; ch.className = 'sc-n sc-dim ' + scCls(c); } else ch.textContent = '';
+    if (!S || !S.enabled) return;
+    const live = S.mode === 'live', m = $sc('scMode');
+    m.textContent = live ? (S.armed ? 'LIVE · ARMED' : 'LIVE · disarmed') : 'PAPER';
+    m.className = 'sc-badge ' + (live ? 'sc-live' + (S.armed ? '' : ' sc-disarmed') : 'sc-paper');
+    const arm = $sc('scArm'); arm.style.display = live ? '' : 'none'; arm.classList.toggle('on', !!S.armed); arm.textContent = S.armed ? 'Disarm' : 'Arm';
+    const k = $sc('scKill'); k.classList.toggle('on', !!S.kill); k.textContent = S.kill ? 'Killed — resume' : 'Kill';
+    const p = S.pnl, L = S.limits, lim = L.day_loss || 1;
+    $sc('scDayPnl').textContent = scRsS(p.net); $sc('scDayPnl').className = 'sc-n sc-big ' + scCls(p.net);
+    const bits = [`${p.trades} trade${p.trades === 1 ? '' : 's'} · ${p.wins}W ${p.losses}L`, `limit −₹${Math.round(lim).toLocaleString('en-IN')}`];
+    if (L.day_target) bits.push(`target +₹${Math.round(L.day_target).toLocaleString('en-IN')}`);
+    if (L.giveback_pct && p.peak >= L.giveback_min) bits.push(`peak ${scRs(p.peak)}`);
+    $sc('scDayInfo').textContent = bits.join(' · ');
+    scSet($sc('scEq'), scSparkEq(S));
+    const ages = Object.values(SC.quotes).map(q => q.age).filter(a => a != null);
+    const f = $sc('scFeed'), worst = ages.length ? Math.max(...ages) : null, ok = S.feed && S.feed.streaming;
+    f.textContent = !ok ? 'feed: not streaming' : worst == null ? 'feed: live' : `quotes ${worst}s old`;
+    f.className = 'sc-chip ' + (!ok || (worst != null && worst > (S.limits.stale_s || 6)) ? 'bad' : 'ok');
+    const bk = scBook(), be = $sc('scBook');
+    if (bk.n) { be.style.display = ''; be.textContent = `Δ ${bk.dl >= 0 ? '+' : '−'}₹${Math.abs(Math.round(bk.dl))}/pt · θ ${bk.th >= 0 ? '+' : '−'}₹${Math.abs(Math.round(bk.th))}/min`; be.className = 'sc-chip sc-click ' + (Math.abs(bk.dl) < 1 ? '' : bk.dl > 0 ? 'ok' : 'bad'); }
+    else be.style.display = 'none';
+    $sc('scPinRow').style.display = S.limits.pin_required ? '' : 'none';
+    // why the buttons are off: the engine's own reason, then the ones only the ticket knows
+    let why = S.blocked || '';
+    const sell = SC.pref.side === 'S', struct = scIsStruct();
+    if (!why && sell && !L.allow_short) why = 'short selling is off in LIVE mode (set NSE_TRADE_ALLOW_SHORT=1 in env and restart)';
+    if (!why && sell && !struct && !scEn('sl_pts')) why = 'a short needs a stop: fill in Stop +pts';
+    if (!why && sell && struct && !scEn('g_sl_pct')) why = 'a short structure needs a combined stop %';
+    if (!why && sell && scLots('CE') > L.max_short_lots) why = `${scLots('CE')} lots is over the short cap of ${L.max_short_lots}`;
+    if (!why && sell && !struct && SC.pref.hedge && !(SC.wing.CE || SC.wing.PE)) why = 'no wing strike on the chart: change the wing distance or untick Hedge';
+    for (const typ of ['CE', 'PE']) {
+      const b = $sc(typ === 'CE' ? 'scBuyCE' : 'scBuyPE'); let w = why;
+      const lg = scGoLegs(typ);
+      if (!w && !lg) w = 'no contract yet';
+      if (!w && sell && !struct && SC.pref.hedge && !SC.wing[typ]) w = 'no wing strike for this side';
+      b.disabled = !!w; b.title = w ? `Entries blocked: ${w}` : b.title;
+    }
+  }
+  function scRenderChrome() {
+    const tabs = [['CE', SC.legs.CE ? `Call ${fmtInt(SC.legs.CE.strike)}` : 'Call'], ['PE', SC.legs.PE ? `Put ${fmtInt(SC.legs.PE.strike)}` : 'Put'], ['SPOT', 'Spot']];
+    for (const p of scHeld()) if (!(SC.legs.CE && SC.legs.CE.inst === p.inst) && !(SC.legs.PE && SC.legs.PE.inst === p.inst)) tabs.push([p.inst, `${p.side === 'short' ? 'S ' : p.role === 'hedge' ? 'W ' : ''}${fmtInt(p.strike)} ${p.typ}<span class="hd">●</span>`]);
+    scSet($sc('scChTabs'), tabs.map(([k, l]) => `<button data-c="${k}" class="${SC.pref.chart === k ? 'on' : ''}">${l}</button>`).join(''));
+    scSet($sc('scTfs'), SC_TFS.map(([v, l]) => `<button data-tf="${v}" class="${SC.pref.tf === v ? 'on' : ''}">${l}</button>`).join(''));
+    const T = SC.geom && SC.geom.T, spot = T && T.kind === 'SPOT';
+    scSet($sc('scOpts'), [['vol', 'Volume'], ['cvd', 'Order flow'], ['vwap', 'VWAP']].map(([k, l]) => `<label><input type="checkbox" data-o="${k}" ${SC.pref[k] ? 'checked' : ''}${spot ? ' disabled' : ''}>${l}</label>`).join(''));
+    const fb = $sc('scFocus'); fb.classList.toggle('on', !!SC.pref.focus);
+  }
+
+  // ── right: book, order flow, tape ──
+  function scRenderRight() {
+    const T = scChartTarget(), q = T && T.inst ? SC.quotes[T.inst] : null, tape = T ? SC.tape[T.name] : null;
+    $sc('scDepTitle').textContent = T ? (T.kind === 'SPOT' ? `${T.name} index` : `Book · ${fmtInt((T.L || T.pos || {}).strike)} ${T.kind}`) : 'Book';
+    if (!q) {
+      scSet($sc('scDepth'), `<div class="sc-dim" style="padding:6px 2px">${T && T.kind === 'SPOT' ? 'The index has no order book. Pick the call or put tab.' : 'No quote yet.'}</div>`);
+    } else {
+      const as = (q.asks || []).slice(0, 5), bs = (q.bids || []).slice(0, 5), mx = Math.max(1, ...as.map(x => x.q), ...bs.map(x => x.q));
+      const row = (x, c) => `<div class="r ${c}"><i style="width:${(x.q / mx * 100).toFixed(0)}%"></i><span class="q">${x.q}</span><span class="p">${x.p.toFixed(2)}</span><span class="n">${x.n || ''}</span></div>`;
+      const sp = q.ask && q.bid ? q.ask - q.bid : null, mid = sp != null ? (q.ask + q.bid) / 2 : null;
+      let micro = '', tilt = '';
+      if (as[0] && bs[0]) { const mp = (q.bid * as[0].q + q.ask * bs[0].q) / (as[0].q + bs[0].q); const tl = mp - mid; micro = mp; tilt = Math.abs(tl) < 0.005 ? 'balanced' : tl > 0 ? `▲ buyers heavier +${tl.toFixed(2)}` : `▼ sellers heavier ${tl.toFixed(2)}`; }
+      const tb = bs.reduce((a, x) => a + x.q, 0), ta = as.reduce((a, x) => a + x.q, 0);
+      scSet($sc('scDepth'), as.slice().reverse().map(x => row(x, 'a')).join('') +
+        `<div class="mid"><span>spread ${sp != null ? sp.toFixed(2) : '–'}${sp != null && mid ? ` (${(sp / mid * 100).toFixed(1)}%)` : ''}</span><span>bids ${tb + ta ? Math.round(tb / (tb + ta) * 100) : 50}%</span></div>` +
+        (micro ? `<div class="mid" style="margin-top:-3px;border-top:0"><span>micro-price ${micro.toFixed(2)}</span><span>${tilt}</span></div>` : '') + bs.map(x => row(x, 'b')).join(''));
+    }
+    // aggressor volume over three windows
+    if (!tape || T.kind === 'SPOT') { scSet($sc('scFlow'), `<div class="sc-dim">${T && T.kind === 'SPOT' ? 'Index ticks carry no volume.' : 'Collecting ticks…'}</div>`); }
+    else {
+      scSet($sc('scFlow'), [[15000, '15s'], [60000, '1m'], [300000, '5m']].map(([w, l]) => {
+        const f = scFlowWin(tape, w), tot = f.b + f.s, bp = tot ? f.b / tot * 100 : 50, net = f.b - f.s;
+        return `<div class="fr"><span>${l}</span><span class="bar" title="buyers lifting offers ${f.b} · sellers hitting bids ${f.s}"><i style="width:${bp.toFixed(0)}%"></i><i style="width:${(100 - bp).toFixed(0)}%"></i></span><span class="nt ${scCls(net)}">${tot ? (net >= 0 ? '+' : '') + net : '–'}</span></div>`;
+      }).join(''));
+    }
+    // tape
+    if (!tape || T.kind === 'SPOT') scSet($sc('scTape'), '');
+    else {
+      const out = []; for (let i = tape.d.length - 1; i >= 0 && out.length < 22; i--) { const x = tape.d[i]; if (x.dv > 0 && x.p != null) out.push(x); }
+      const med = out.length ? out.map(x => x.dv).sort((a, b) => a - b)[out.length >> 1] : 0, lot = (T.L || { lot: 1 }).lot || 1;
+      scSet($sc('scTape'), out.length ? out.map(x => `<div class="t s${x.side}${x.dv >= Math.max(3 * med, lot * 2) ? ' big' : ''}"><span>${scT(x.ms)}</span><span>${x.p.toFixed(2)}</span><span>${x.dv}</span></div>`).join('') : '<div class="sc-dim">No trades yet.</div>');
+    }
+    const rate = $sc('scRate');
+    if (tape) { const from = scNow() - 10000; let n = 0; for (let i = tape.d.length - 1; i >= 0 && tape.d[i].ms >= from; i--) n++; rate.textContent = `${(n / 10).toFixed(1)} ticks/s`; rate.className = 'sc-chip' + (n ? ' ok' : ' bad'); } else rate.textContent = '';
+  }
+
+  // ── bottom dock ──
+  function scReason(w) {
+    w = (w || '').toLowerCase();
+    return /^stop/.test(w) ? 'Stop' : /^target/.test(w) ? 'Target' : /^partial/.test(w) ? 'Partial' : /^underlying/.test(w) ? 'Spot level' : /^time/.test(w) ? 'Time stop'
+      : /^structure/.test(w) ? 'Structure exit' : /^hedge|^unwind/.test(w) ? 'Hedge' : /^end-of-day/.test(w) ? 'Square-off' : /^manual/.test(w) ? 'Manual' : /flat|kill|daily|halt/.test(w) ? 'Risk exit' : /^flip/.test(w) ? 'Flip' : 'Other';
+  }
+  // "25,000 CE" for a contract symbol, from the chain on screen (the raw symbol if it is not there)
+  function scNameOf(inst) {
+    const d = state.lastData, raw = (inst || '').replace('NFO:', '');
+    if (d && Array.isArray(d.strikes)) for (const r of d.strikes) { if (r.ce_symbol === raw) return `${fmtInt(r.strike)} CE`; if (r.pe_symbol === raw) return `${fmtInt(r.strike)} PE`; }
+    return raw;
+  }
+  function scHeld2(s) { s = Math.round(s); return s >= 3600 ? `${Math.floor(s / 3600)}h${Math.floor(s % 3600 / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m${s % 60}s` : `${s}s`; }
+  function scCard(p, hedgedBy) {
+    const e = p.exits, sg = scPosSg(p), g = scGreeks(p.typ, p.strike), mark = p.mark || p.bid || p.ltp || p.avg, pts = (mark - p.avg) * sg, wing = p.role === 'hedge';
+    const sl = e.sl || p.eff_sl, risk = sl ? sg * (p.avg - sl) : 0, Rm = risk > 0 ? pts / risk : null, short = sg < 0;
+    // rail: the stop is always on the left and the target on the right, whichever way the trade runs
+    const a = sl != null ? sl : p.avg - sg * 10, b = e.tp != null ? e.tp : p.avg + sg * Math.max(5, Math.abs(p.avg - a));
+    let lo = Math.min(a, b), hi = Math.max(a, b); if (lo >= p.avg) lo = p.avg - 5; if (hi <= p.avg) hi = p.avg + 5;
+    const pc = v => { const x = Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100)); return (short ? 100 - x : x).toFixed(1); };
+    const ts = scTs(p.typ), spot = SC.spot || (state.lastData && state.lastData.underlying_value) || 0;
+    const m = [`bid ${scNum(p.bid)} · ask ${scNum(p.ask)} · ltp ${scNum(p.ltp)}`, `held ${scHeld2(p.held_s)}`];
+    if (g) {
+      m.push(`Δ ${scTs(p.typ) * sg * Math.abs(g.delta) >= 0 ? '+' : '−'}${Math.abs(g.delta).toFixed(2)}`); m.push(`θ ≈ ${scRsS(sg * g.thetaDay / 375 * p.qty)}/min`);
+      if (!wing && p.eff_sl && Math.abs(g.delta) > 0.05 && spot) m.push(`stop ≈ spot ${fmtInt(Math.round(spot + (p.eff_sl - mark) / (ts * Math.abs(g.delta))))}`);
+    }
+    if (e.trail) m.push(`trail ${e.trail}`); if (e.be_at) m.push(`B/E at ${scNum(e.be_at)}`); if (e.time_stop) m.push(`time stop ${Math.round(e.time_stop / 60)}m`);
+    if (e.u_stop || e.u_target) m.push(`spot ${e.u_stop ? fmtInt(e.u_stop) : '–'} / ${e.u_target ? fmtInt(e.u_target) : '–'}`);
+    if (!wing && (p.mfe || p.mae)) m.push(`best ${scRsS(p.mfe)} · worst ${scRsS(-p.mae)}`);
+    if (p.slip) m.push(`slippage ${scRs(p.slip)}`);
+    const tags = (short ? '<span class="sc-tag sell">SHORT</span>' : wing ? '' : '<span class="sc-tag buy">LONG</span>') + (wing ? `<span class="sc-tag">wing for ${escapeHtml(scNameOf(p.hedge_for))}</span>` : '') +
+      (hedgedBy ? '<span class="sc-tag ok">hedged</span>' : short && !p.grp ? '<span class="sc-tag bad">naked</span>' : '') + (p.grp ? '<span class="sc-tag">structure</span>' : '') + (p.tag ? `<span class="sc-tag">${escapeHtml(p.tag)}</span>` : '') +
+      (p.exiting ? '<span class="sc-tag bad">closing…</span>' : '') + (p.stale ? `<span class="sc-tag bad">no price ${p.age != null ? p.age + 's' : ''}</span>` : '') + (!p.managed ? '<span class="sc-tag bad">no exits set</span>' : '') + (e.tp1_done ? '<span class="sc-tag ok">partial taken</span>' : '') + (p.note ? `<span class="sc-tag">${escapeHtml(p.note)}</span>` : '');
+    const close = short ? 'Cover' : 'Sell';
+    const acts = wing ? '<span class="sc-dim">Sold automatically after its short is covered. To close it yourself, cover the short first.</span>'
+      : `<button class="sc-btn sc-mini" data-x="25">${close} 25%</button><button class="sc-btn sc-mini" data-x="50">50%</button><button class="sc-btn sc-mini sc-danger" data-x="100">${close} all</button>` +
+        `<button class="sc-btn sc-mini" data-a="be" title="Move the stop to entry plus fees (needs the price past it)">Stop to B/E</button><button class="sc-btn sc-mini" data-a="mod">Edit exits</button>` +
+        (hedgedBy || p.grp ? '' : `<button class="sc-btn sc-mini" data-a="flip" title="Close this and open the other side with the same lots and the same ${short ? 'short' : 'long'} exits">Flip</button><button class="sc-btn sc-mini" data-a="add" title="Add one lot, same side">+1 lot</button>`);
+    return `<div class="sc-card${short ? ' short' : ''}${wing ? ' wing' : ''}${p.inst === SC.sel ? ' sel' : ''}${p.stale ? ' stale' : ''}" data-i="${p.inst}">` +
+      `<div class="h"><span><b>${fmtInt(p.strike)} ${p.typ}</b> <span class="sc-dim">${escapeHtml(p.expiry || '')} · ${p.lots} lot${p.lots > 1 ? 's' : ''} ${short ? 'sold' : 'bought'} @ ${scNum(p.avg)}</span>${tags}</span></div>` +
+      `<div class="pl ${scCls(p.pnl)}">${scRsS(p.pnl)}<small>${pts >= 0 ? '+' : ''}${pts.toFixed(2)} pts${Rm != null && !wing ? ` · ${Rm >= 0 ? '+' : ''}${Rm.toFixed(1)}R` : ''}</small></div>` +
+      (wing ? '' : `<div class="sc-rail" style="--e:${pc(p.avg)}%"><div class="tr"></div><div class="en" style="left:${pc(p.avg)}%"></div><div class="mk" style="left:calc(${pc(mark)}% - 1px)"></div>` +
+        `<span class="lb" style="left:2%">${sl != null ? 'stop ' + scNum(sl) : 'no stop'}</span><span class="lb" style="left:98%;transform:translateX(-100%)">${e.tp != null ? 'target ' + scNum(e.tp) : 'no target'}</span></div>`) +
+      `<div class="m">${m.map(x => `<span>${x}</span>`).join('')}</div><div class="a">${acts}</div></div>`;
+  }
+  function scGroupCard(g) {
+    const names = g.legs.map(scNameOf).join(' + '), sell = (scHeld().find(p => g.legs.includes(p.inst)) || {}).side === 'short';
+    return `<div class="sc-card grp${g.pnl < 0 ? ' neg' : ''}" data-gid="${g.id}"><div class="h"><span><b>${escapeHtml(g.kind || 'structure')}</b> <span class="sc-dim">${escapeHtml(names)}</span>${g.tag ? `<span class="sc-tag">${escapeHtml(g.tag)}</span>` : ''}${g.done ? '<span class="sc-tag bad">closing…</span>' : ''}</span></div>` +
+      `<div class="pl ${scCls(g.pnl)}">${scRsS(g.pnl)}<small>combined${sell ? ' · all legs short' : ''}</small></div>` +
+      `<div class="m"><span>closes everything at <b class="neg-t">${g.sl ? '−' + scRs(g.sl) : 'no stop'}</b> / <b class="pos-t">${g.tp ? '+' + scRs(g.tp) : 'no target'}</b></span></div>` +
+      `<div class="sc-grp-in"><label>Stop ₹<input data-gk="sl" type="number" min="0" step="100" class="sc-n" value="${g.sl || ''}"></label><label>Target ₹<input data-gk="tp" type="number" min="0" step="100" class="sc-n" value="${g.tp || ''}"></label>` +
+      `<button class="sc-btn sc-mini" data-ga="set">Set</button><button class="sc-btn sc-mini sc-danger" data-ga="exit">Close all legs</button></div></div>`;
+  }
+  // ── analytics ──
+  function scTradeKey(x) { return `${x.opened || 0}:${(x.inst || '').replace('NFO:', '')}:${x.t}`; }
+  const scRof = x => (x.risk > 0 ? x.net / x.risk : null);
+  function scDockStats() {
+    const T = SC.st.trades || [];
+    if (!T.length) return '<div class="sc-empty" style="padding:18px">No closed trades yet. The numbers appear after your first exit.</div>';
+    const sum = (a, f) => a.reduce((s, x) => s + f(x), 0), W = T.filter(x => x.net > 0), Ls = T.filter(x => x.net <= 0), n = T.length;
+    const sw = sum(W, x => x.net), sl = sum(Ls, x => x.net), gross = sum(T, x => x.gross), fees = sum(T, x => x.fee), net = sum(T, x => x.net);
+    const avgW = W.length ? sw / W.length : 0, avgL = Ls.length ? sl / Ls.length : 0, payoff = avgL ? avgW / Math.abs(avgL) : null, pf = sl ? sw / Math.abs(sl) : null;
+    let c = 0, peak = 0, dd = 0, run = 0, maxRun = 0; const eq = [0]; for (const t of T) { c += t.net; eq.push(c); peak = Math.max(peak, c); dd = Math.max(dd, peak - c); if (t.net <= 0) { run++; maxRun = Math.max(maxRun, run); } else run = 0; }
+    const hold = sum(T, x => x.held_s) / n, be = payoff ? 100 / (1 + payoff) : null;
+    const RT = T.map(scRof).filter(v => v != null), avgR = RT.length ? sum(RT, v => v) / RT.length : null;
+    const mfe = sum(T, x => x.mfe || 0), cap = mfe > 0 ? Math.max(-100, Math.min(100, sum(T, x => x.gross) / mfe * 100)) : null, slip = sum(T, x => x.slip || 0);
+    const st = (l, v, cls, tip) => `<div${tip ? ` title="${escapeHtml(tip)}"` : ''}><span class="v ${cls || ''}">${v}</span><span class="l">${l}</span></div>`;
+    const lo = Math.min(...eq), hi = Math.max(...eq), r = (hi - lo) || 1, W2 = 400, H2 = 120, X = i => 4 + (W2 - 8) * i / Math.max(1, eq.length - 1), Y = v => 6 + (H2 - 12) * (1 - (v - lo) / r);
+    const eqSvg = `<svg viewBox="0 0 ${W2} ${H2}" preserveAspectRatio="none" style="width:100%;height:120px;background:var(--sc-sunk);border:1px solid var(--border-soft);border-radius:4px"><line x1="0" x2="${W2}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="#262b36"/><polyline fill="none" stroke="${net >= 0 ? SC_UP : SC_DN}" stroke-width="1.6" vector-effect="non-scaling-stroke" points="${eq.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ')}"/></svg>`;
+    const grp = (keyf, order, minN) => { const m = {}; for (const t of T) { const k = keyf(t); if (k == null) continue; (m[k] = m[k] || { n: 0, net: 0 }); m[k].n++; m[k].net += t.net; } const ks = (order || Object.keys(m).sort((a, b) => m[b].n - m[a].n)).filter(k => m[k]); if (!ks.length) return '<div class="sc-dim">none yet</div>'; const mxa = Math.max(1, ...ks.map(k => Math.abs(m[k].net)));
+      return ks.map(k => `<div class="br"><span>${escapeHtml(String(k))}</span><span class="b"><i style="${m[k].net >= 0 ? 'left:50%' : 'right:50%'};width:${(Math.abs(m[k].net) / mxa * 50).toFixed(0)}%;background:${m[k].net >= 0 ? SC_UP : SC_DN}"></i></span><span class="v ${scCls(m[k].net)}">${m[k].n} · ${scRsS(m[k].net)}</span></div>`).join(''); };
+    const rb = v => v <= -2 ? '≤ −2R' : v <= -1 ? '−2 to −1R' : v < 0 ? '−1 to 0R' : v < 1 ? '0 to 1R' : v < 2 ? '1 to 2R' : '≥ 2R';
+    const hr = t => { const h = new Date(((t.opened || t.t) + 19800) * 1000).getUTCHours(); return `${String(h).padStart(2, '0')}:00`; };
+    return `<div class="sc-stats">${st('Net', scRsS(net), scCls(net))}${st('Win rate', (W.length / n * 100).toFixed(0) + '%')}${st('Expectancy / trade', scRsS(net / n), scCls(net))}${st('Avg R', avgR == null ? '–' : (avgR >= 0 ? '+' : '') + avgR.toFixed(2) + 'R', avgR == null ? '' : scCls(avgR), 'Net result divided by the risk at your initial stop, for trades that had a stop')}` +
+      `${st('Profit factor', pf == null ? '–' : pf.toFixed(2))}${st('Avg win / loss', `${scRs(avgW)} / ${scRs(avgL)}`)}${st('Payoff ratio', payoff == null ? '–' : payoff.toFixed(2))}${st('Win rate needed', be == null ? '–' : be.toFixed(0) + '%', '', 'The win rate at which this payoff ratio breaks even')}` +
+      `${st('Max drawdown', scRs(-dd), dd ? 'neg-t' : '')}${st('Worst losing run', maxRun + ' trade' + (maxRun === 1 ? '' : 's'))}${st('Fees paid', scRs(fees))}${st('Fees / gross profit', gross > 0 ? (fees / gross * 100).toFixed(0) + '%' : '–')}` +
+      `${st('Best / worst', `${scRs(Math.max(...T.map(x => x.net)))} / ${scRs(Math.min(...T.map(x => x.net)))}`)}${st('Avg hold', scHeld2(hold))}${st('Move captured', cap == null ? '–' : cap.toFixed(0) + '%', '', 'Gross profit as a share of the best move each trade had on offer (its MFE). Low means you give moves back.')}${st('Slippage paid', scRs(slip), '', 'Entry and exit fills against the quote at decision time')}</div>` +
+      `<div class="sc-anl"><div><div class="sc-st">Equity, trade by trade</div>${eqSvg}<div class="sc-st" style="margin-top:12px">Result in R <span class="sc-dim">trades · net</span></div>${grp(t => { const v = scRof(t); return v == null ? null : rb(v); }, ['≤ −2R', '−2 to −1R', '−1 to 0R', '0 to 1R', '1 to 2R', '≥ 2R'])}</div>` +
+      `<div class="sc-bars"><div class="sc-st">By exit reason <span class="sc-dim">trades · net</span></div>${grp(t => scReason(t.why))}<div class="sc-st" style="margin-top:10px">Long vs short</div>${grp(t => t.role === 'hedge' ? 'Hedge wings' : t.side === 'short' ? 'Short' : 'Long')}` +
+      `<div class="sc-st" style="margin-top:10px">Call vs put</div>${grp(t => t.typ === 'CE' ? 'Call' : t.typ === 'PE' ? 'Put' : null)}<div class="sc-st" style="margin-top:10px">By setup</div>${grp(t => t.tag || null)}` +
+      `<div class="sc-st" style="margin-top:10px">By entry hour</div>${grp(hr, Array.from(new Set(T.map(hr))).sort())}<div class="sc-st" style="margin-top:10px">By holding time</div>${grp(t => t.held_s < 30 ? 'under 30s' : t.held_s < 120 ? '30s – 2m' : t.held_s < 300 ? '2 – 5m' : 'over 5m', ['under 30s', '30s – 2m', '2 – 5m', 'over 5m'])}</div></div>`;
+  }
+  // ── the book: exposure, what the stops and targets would do, and a spot ladder ──
+  function scDockBook(S) {
+    const P = scHeld();
+    if (!P.length) return '<div class="sc-empty" style="padding:22px">No open positions. Net delta, theta, a spot-move table and the worst case at your stops appear here once you are in a trade.</div>';
+    const bk = scBook(), d = state.lastData, gap = (d && d.strike_gap) || 50, spot = SC.spot || (d && d.underlying_value) || 0;
+    let atStop = 0, atTgt = 0, noStop = 0, naked = 0;
+    for (const p of P) {
+      if (p.role === 'hedge') continue; const sg = scPosSg(p);
+      const sl = p.eff_sl, tp = p.exits.tp;
+      if (sl) atStop += sg * (sl - p.avg) * p.qty; else noStop++;
+      if (tp) atTgt += sg * (tp - p.avg) * p.qty;
+      if (sg < 0 && !P.some(h => h.role === 'hedge' && h.hedge_for === p.inst) && !p.grp) naked++;
+    }
+    const unreal = S.pnl.unrealized, lim = S.limits.day_loss, room = lim + S.pnl.net;
+    const tile = (l, v, cls, tip) => `<div${tip ? ` title="${escapeHtml(tip)}"` : ''}><span class="v ${cls || ''}">${v}</span><span class="l">${l}</span></div>`;
+    const moves = [-2, -1, -0.5, 0, 0.5, 1, 2].map(k => k * gap);
+    const scen = moves.map(ds => { const ch = scScenario(ds), day = S.pnl.net + ch; return `<tr class="${ds === 0 ? 'now' : ''}"><td>${spot ? fmtInt(Math.round(spot + ds)) : '–'}</td><td>${ds >= 0 ? '+' : '−'}${Math.abs(ds)}</td><td class="${scCls(ch)}">${scRsS(ch)}</td><td class="${scCls(day)}"><b>${scRsS(day)}</b></td><td>${day <= -lim ? '<span class="neg-t">over the loss limit</span>' : ''}</td></tr>`; }).join('');
+    const rows = P.map(p => {
+      const g = scGreeks(p.typ, p.strike), sg = scPosSg(p), dl = g ? sg * p.qty * scTs(p.typ) * Math.abs(g.delta) : null, th = g ? sg * p.qty * g.thetaDay / 375 : null;
+      const as = p.role !== 'hedge' && p.eff_sl ? sg * (p.eff_sl - p.avg) * p.qty : null;
+      return `<tr><td>${fmtInt(p.strike)} ${p.typ}${p.role === 'hedge' ? ' wing' : ''}</td><td>${sg < 0 ? 'short' : 'long'}</td><td>${p.lots}</td><td class="${scCls(p.pnl)}">${scRsS(p.pnl)}</td><td>${dl == null ? '–' : scRsS(dl)}</td><td>${th == null ? '–' : scRsS(th)}</td><td class="${as != null ? scCls(as) : ''}">${as == null ? '–' : scRsS(as)}</td></tr>`;
+    }).join('');
+    return `<div class="sc-stats">${tile('Net delta', `${scRsS(bk.dl)} / pt`, scCls(bk.dl), 'Rupees the open book gains per 1-point rise in the index (negative: it gains when the index falls)')}${tile('Gamma', `${bk.gm >= 0 ? '+' : '−'}${Math.abs(bk.gm).toFixed(2)}`, scCls(bk.gm), 'Rupees of delta gained per point. Negative: you lose faster the further price runs (short options).')}` +
+      `${tile('Theta', `${scRsS(bk.th)} / min`, scCls(bk.th), 'Time decay per minute. Positive when you are net short options.')}${tile('Open P&L', scRsS(unreal), scCls(unreal))}${tile('If every stop is hit', scRsS(atStop), scCls(atStop), 'Open positions closed at their stops, measured from entry. Wings are left out. A gap can be worse.')}${tile('If every target is hit', scRsS(atTgt), scCls(atTgt))}` +
+      `${tile('Room to the loss limit', scRs(Math.max(0, room)), room < lim * 0.35 ? 'neg-t' : '', 'How much more the day can lose before the limit stops it')}${tile('No stop on', String(noStop), noStop ? 'neg-t' : '')}${tile('Naked shorts', String(naked), naked ? 'neg-t' : '', 'Short options with no wing and not part of a structure')}</div>` +
+      (bk.miss ? '<div class="sc-dim" style="margin:-4px 0 8px">Greeks need the chain\'s implied volatility; some legs are missing it.</div>' : '') +
+      `<div class="sc-anl"><div><div class="sc-st">If the index moves now <span class="sc-dim">delta + gamma, no time or volatility change</span></div><div class="sc-tblwrap"><table class="sc-tbl"><tr><th>Index</th><th>Move</th><th>Open P&amp;L change</th><th>Day P&amp;L</th><th></th></tr>${scen}</table></div></div>` +
+      `<div><div class="sc-st">By position</div><div class="sc-tblwrap"><table class="sc-tbl"><tr><th>Contract</th><th>Side</th><th>Lots</th><th>P&amp;L</th><th>Δ ₹/pt</th><th>θ ₹/min</th><th>At stop</th></tr>${rows}</table></div></div></div>`;
+  }
+  function scCsv() {
+    const T = (SC.st && SC.st.trades) || [], q = v => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+    const head = ['date', 'time', 'contract', 'side', 'qty', 'entry', 'exit', 'gross', 'fees', 'net', 'R', 'held_s', 'reason', 'setup', 'mfe', 'mae', 'slippage', 'structure', 'note'];
+    const rows = T.map(x => [SC.st.day, scT(x.t * 1000), (x.inst || '').replace('NFO:', ''), x.role === 'hedge' ? 'wing' : x.side || 'long', x.qty, x.avg, x.exit, x.gross, x.fee, x.net, scRof(x) == null ? '' : scRof(x).toFixed(2), x.held_s, x.why, x.tag || '', x.mfe || '', x.mae || '', x.slip || '', x.grp || '', SC.notes[scTradeKey(x)] || ''].map(q).join(','));
+    const blob = new Blob([[head.map(q).join(',')].concat(rows).join('\n')], { type: 'text/csv' }), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `scalping_${SC.st.day || 'today'}.csv`; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function scRenderDock() {
+    const S = SC.st, tab = SC.pref.dock;
+    const P = scHeld(), nT = S && S.trades ? S.trades.length : 0, nP = S && S.pending ? S.pending.length : 0;
+    scSet($sc('scDockTabs'), [['pos', 'Positions', P.length], ['pend', 'Waiting', nP], ['orders', 'Orders', S && S.orders ? S.orders.length : 0], ['trades', 'Closed trades', nT], ['stats', 'Analytics', 0], ['book', 'Book risk', 0], ['risk', 'Limits', 0]]
+      .map(([k, l, n]) => `<button data-d="${k}" class="${tab === k ? 'on' : ''}">${l}${n ? `<span class="ct">${n}</span>` : ''}</button>`).join(''));
+    const body = $sc('scDockBody');
+    if (!S || !S.enabled) { scSet(body, ''); return; }
+    if (SC.down && (tab === 'pos' || tab === 'pend')) return;
+    if (document.activeElement && body.contains(document.activeElement) && /input/i.test(document.activeElement.tagName)) return;      // do not rebuild under a field being typed in
+    if (tab === 'pos') {
+      if (!P.find(p => p.inst === SC.sel)) SC.sel = P.length ? (P.find(p => p.role !== 'hedge') || P[0]).inst : null;
+      const hedgedBy = {}; for (const p of P) if (p.role === 'hedge') hedgedBy[p.hedge_for] = p.inst;
+      const gcards = (S.groups || []).map(scGroupCard).join(''), cards = P.map(p => scCard(p, hedgedBy[p.inst])).join('');
+      scSet(body, P.length ? `<div class="sc-cards">${gcards}${cards}</div>` : '<div class="sc-empty" style="padding:22px">No open positions. <b>1</b> / <b>2</b> send the call or put order, <b>S</b> switches between buying and selling.</div>');
+    } else if (tab === 'pend') {
+      const pr = (S.pending || []).map(d => {
+        const sp = d.spec, tr = d.trig, legs = sp.legs ? sp.legs.map(l => scNameOf(l.inst)).join(' + ') : scNameOf(sp.inst), q = sp.inst ? SC.quotes[sp.inst] : null;
+        const now = tr.kind === 'spot' ? SC.spot : q ? (sp.side === 'SELL' ? q.bid : q.ask) : null;
+        return `<tr><td><b>${sp.side === 'SELL' ? 'Sell' : 'Buy'}</b> ${sp.lots} lot ${escapeHtml(sp.kind || legs)}${sp.hedge ? ' + wing' : ''}</td><td>${tr.kind === 'spot' ? 'index' : 'premium'} ${tr.op === 'le' ? 'falls to' : 'rises to'} <b>${scNum(tr.level)}</b></td><td>${now ? scNum(now) : '–'}</td><td>${Math.floor(d.left_s / 60)}m</td><td><button class="sc-btn sc-mini" data-pc="${d.id}">Cancel</button></td></tr>`;
+      }).join('');
+      const lg = (S.pend_log || []).slice().reverse().map(x => `<div class="${x.ok ? 'pos-t' : 'neg-t'}">${x.ok ? '✓' : '✗'} ${scT(x.t * 1000)} ${escapeHtml(x.side || '')} ${escapeHtml(x.inst || '')} <span class="sc-dim">${escapeHtml(x.msg || '')}</span></div>`).join('');
+      scSet(body, `<div class="sc-tblwrap"><table class="sc-tbl"><tr><th>Order</th><th>Sends when</th><th>Now</th><th>Expires</th><th></th></tr>${pr || '<tr><td colspan="5" class="sc-empty">Nothing waiting. Tick “Wait for a level” in the ticket, set a level, and press the order button to queue one.</td></tr>'}</table></div>` +
+        ((S.pending || []).length ? '<div style="margin-top:6px"><button class="sc-btn sc-mini" data-pc="*">Cancel all</button></div>' : '') +
+        `<div class="sc-st" style="margin-top:12px">What happened to the last ones <span class="sc-dim">a waiting order is held in the server's memory: a restart drops it</span></div><div class="sc-log">${lg || '<div class="sc-dim">none yet</div>'}</div>`);
+    } else if (tab === 'orders') {
+      const rows = [];
+      for (const o of (S.orders || []).slice().reverse()) rows.push(`<div class="${o.filled > 0 ? '' : 'neg-t'}">${scT(o.t * 1000)} ${o.side} ${escapeHtml(scNameOf(o.inst))} ${o.filled || 0}/${o.qty}${o.price ? ' @' + scNum(o.price) : ''} <span class="sc-dim">${escapeHtml(o.status || '')} ${escapeHtml(o.why || '')}${o.msg ? ' · ' + escapeHtml(o.msg) : ''}</span></div>`);
+      for (const j of (SC.journal || [])) rows.push(`<div class="sc-dim">${scT(j.t * 1000)} ${escapeHtml(j.ev)} ${escapeHtml(JSON.stringify(j).slice(0, 150))}</div>`);
+      scSet(body, `<div style="margin-bottom:6px"><button class="sc-btn sc-mini" data-a="recon" title="Compare the book with Zerodha's positions (LIVE). Needed after a halt.">Reconcile with Zerodha</button> <button class="sc-btn sc-mini" data-a="journal" title="Load today's journal file">Load journal</button></div><div class="sc-log">${rows.join('') || '<div class="sc-dim">No orders yet today.</div>'}</div>`);
+    } else if (tab === 'trades') {
+      const T = (S.trades || []).slice().reverse();
+      scSet(body, `<div style="margin-bottom:6px"><button class="sc-btn sc-mini" data-a="csv" title="Download today's closed trades as a spreadsheet, with your notes">Export CSV</button> <span class="sc-dim">click a note cell to write about the trade</span></div><div class="sc-tblwrap"><table class="sc-tbl"><tr><th>Time</th><th>Contract</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Gross</th><th>Fees</th><th>Net</th><th>R</th><th>Best / worst</th><th>Held</th><th>Why</th><th>Setup</th><th>Note</th></tr>` + (T.length ? T.map(x => {
+        const r = scRof(x), k = scTradeKey(x), nt = SC.notes[k] || '';
+        return `<tr><td>${scT(x.t * 1000)}</td><td>${escapeHtml(scNameOf(x.inst))}</td><td>${x.role === 'hedge' ? 'wing' : x.side === 'short' ? 'short' : 'long'}</td><td>${x.qty}</td><td>${scNum(x.avg)}</td><td>${scNum(x.exit)}</td><td class="${scCls(x.gross)}">${scRs(x.gross)}</td><td>${scRs(x.fee)}</td><td class="${scCls(x.net)}"><b>${scRs(x.net)}</b></td><td class="${r == null ? '' : scCls(r)}">${r == null ? '–' : (r >= 0 ? '+' : '') + r.toFixed(1) + 'R'}</td><td>${x.mfe != null ? scRs(x.mfe) + ' / ' + scRs(-x.mae) : '–'}</td><td>${scHeld2(x.held_s)}</td><td>${escapeHtml(x.why || '')}</td><td>${escapeHtml(x.tag || '')}</td><td class="note" data-nk="${escapeHtml(k)}">${nt ? escapeHtml(nt) : '<span class="sc-dim">✎</span>'}</td></tr>`;
+      }).join('') : '<tr><td colspan="15" class="sc-empty">No closed trades yet.</td></tr>') + '</table></div>');
+    } else if (tab === 'stats') scSet(body, scDockStats());
+    else if (tab === 'book') scSet(body, scDockBook(S));
+    else {
+      const L = S.limits, p = S.pnl, r = (k, v, c) => `<div><span class="k">${k}</span><span class="${c || ''}">${v}</span></div>`, hm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const h = [r('Per order', `${L.max_lots} lot · ≤ ${scRs(L.max_value)}`), r('Open lots', `${S.open_lots} / ${L.max_open_lots}`, S.open_lots >= L.max_open_lots ? 'warn' : ''), r('Trades today', `${p.trades} / ${L.max_trades}`),
+        r('Short selling', L.allow_short ? `on · up to ${L.max_short_lots} lot${L.max_short_lots > 1 ? 's' : ''}, stop required` : 'OFF (NSE_TRADE_ALLOW_SHORT=1 to allow)', L.allow_short ? '' : 'warn'),
+        r('Losses in a row', `${p.streak} / ${L.loss_streak}`, p.streak >= L.loss_streak ? 'bad' : p.streak ? 'warn' : ''), r('Cool-off', S.cooldown_s > 0 ? `${S.cooldown_s}s` : 'none', S.cooldown_s > 0 ? 'warn' : ''),
+        r('Day loss limit', `${scRs(p.net)} / −${scRs(L.day_loss).slice(1)}`, p.net <= -L.day_loss ? 'bad' : ''), r('Day target', L.day_target ? `${scRs(p.net)} / ${scRs(L.day_target)}` : 'off'),
+        r('Give-back rule', L.giveback_pct ? `stop after giving back ${L.giveback_pct}% of a peak ≥ ${scRs(L.giveback_min)} (peak ${scRs(p.peak)})` : 'off'), r('Loss limit per order', L.max_risk ? scRs(L.max_risk) : 'off'),
+        r('Widest spread allowed', `${L.max_spread_pct}%`), r('Cheapest premium', `₹${L.min_premium}`),
+        r('Slippage buffer', `${L.slip_pct}% (at least ₹${L.slip_min})`), r('Entry window', `${S.entries_open ? 'open' : 'closed'} · ${hm(L.entry_from)}–${hm(L.entry_to)}`, S.entries_open ? '' : 'warn'),
+        r('Square-off', hm(L.flatten_at)), r('Orders per second', `≤ ${L.ops}`)];
+      if (S.halt) h.unshift(r('Halted', escapeHtml(S.halt), 'bad')); if (S.kill) h.unshift(r('Kill switch', escapeHtml(S.kill_why || 'on'), 'bad'));
+      scSet(body, `<div class="sc-risk">${h.join('')}</div>`);
+    }
+  }
+  function scOpenMod(inst) {
+    const p = scHeld().find(x => x.inst === inst); if (!p || p.role === 'hedge') return;
+    SC.mod = inst; const e = p.exits, el = $sc('scMod'), sg = scPosSg(p), short = sg < 0;
+    const f = (k, lab, v, tip) => `<label title="${tip}">${lab}<input data-k="${k}" type="number" min="0" step="any" class="sc-n" value="${v == null || v === 0 ? '' : v}"></label>`;
+    el.style.display = ''; el._h = null;
+    el.innerHTML = `<div class="sc-st">Edit exits · ${short ? 'short ' : ''}${fmtInt(p.strike)} ${p.typ} <span class="sc-dim">premium levels in ₹; leave blank for none${short ? ' (a short must keep a stop)' : ''}</span></div><div class="sc-fields">` +
+      f('sl', 'Stop ₹', e.sl, short ? 'Buy back if the ask rises to this premium' : 'Sell if the bid falls to this premium') + f('tp', 'Target ₹', e.tp, short ? 'Buy back if the ask falls to this premium' : 'Sell if the bid reaches this premium') + f('tp1', 'Partial ₹', e.tp1, 'Partial-exit premium') + f('tp1_pct', 'Partial %', e.tp1_pct, 'Share closed at the partial') +
+      f('trail_pts', 'Trail pts', e.trail, 'Trailing distance') + f('be_pts', 'B/E at +pts', e.be_at ? +(sg * (e.be_at - p.avg)).toFixed(2) : '', 'Move the stop to break-even once this many points in profit') +
+      f('u_stop', 'Spot stop', e.u_stop, 'Spot level against you') + f('u_target', 'Spot target', e.u_target, 'Spot level in your favour') + f('time_min', 'Time stop min', e.time_stop ? +(e.time_stop / 60).toFixed(1) : '', 'Minutes since entry') +
+      `</div><button class="sc-btn on" data-a="apply">Apply</button> ${short ? '' : '<button class="sc-btn" data-a="clear">Clear all exits</button> '}<button class="sc-btn sc-ghost" data-a="close">Close</button>`;
+  }
+  async function scApplyMod() {
+    const o = {};
+    $sc('scMod').querySelectorAll('input').forEach(i => { const v = parseFloat(i.value) || 0; if (i.dataset.k === 'time_min') o.time_stop_s = Math.round(v * 60); else o[i.dataset.k] = v; });
+    const r = await scApi('modify', { inst: SC.mod, exits: o });
+    scMsg(r.msg || (r.ok ? 'exits updated' : 'failed'), !r.ok); if (r.ok) $sc('scMod').style.display = 'none';
+    scRenderAll();
+  }
+  function scRenderAll() {
+    scRenderLegs(); scRenderBar(); scRenderLadder(); scRenderTicket(); scRenderTurn(); scRenderChrome(); scRenderRight(); scRenderDock(); scQueueDraw();
+  }
+  function scNote() {
+    const el = $sc('scNote'); let msg = '', bad = false; const S = SC.st;
+    if (location.protocol === 'file:') { msg = 'This page was opened from a file. The Scalping tab only works when the dashboard is served by <code>nse_chain_server.py</code>: open it at the server\'s address (for example <code>http://127.0.0.1:8765/</code>) so orders come from the same origin.'; bad = true; }
+    else if (S && S.enabled === false) { msg = escapeHtml(S.why || 'Scalping is not available.'); bad = true; }
+    else if (SC.fails >= 3) { msg = `Can't reach the trade engine (${escapeHtml(SC.lastErr || 'no reply')}). Open positions keep being managed on the server.`; bad = true; }
+    else if (state.lastData && state.lastData._source !== 'zerodha') { msg = 'The dashboard\'s data source is not Zerodha, so there are no tradable option symbols. Set DATA_SOURCE=zerodha and restart the server.'; bad = true; }
+    else if (S && S.enabled && S.mode === 'paper') msg = 'Paper mode: fills are simulated against the live bid and ask (shorts included), and nothing is sent to Zerodha. For real orders set <code>NSE_TRADE_MODE=live</code> in env, restart, then press Arm. Selling to open in LIVE also needs <code>NSE_TRADE_ALLOW_SHORT=1</code>.';
+    else if (S && S.halt) { msg = 'Halted: ' + escapeHtml(S.halt) + '. Check Zerodha, then use Reconcile on the Orders tab.'; bad = true; }
+    scSet(el, msg); el.style.display = msg ? '' : 'none'; el.className = 'sc-note' + (bad ? ' sc-bad' : '');
+  }
+
+  // ── sound and notices: fills here, and stops or targets on any tab ──
+  function scBeep(kind) {
+    try {
+      if ((typeof _masterMuted === 'function' && _masterMuted()) || !_audioUnlocked) return;
+      if (kind === 'buy') { _playTone(660, 0.12); setTimeout(() => _playTone(880, 0.14), 110); }
+      else if (kind === 'win') { _playTone(880, 0.2); setTimeout(() => _playTone(1175, 0.25), 130); }
+      else _playTone(240, 0.35);
+    } catch (_) {}
+  }
+  function scNotify(st) {
+    const os = st.orders || [];
+    if (SC.lastOrdT == null) { SC.lastOrdT = os.length ? os[os.length - 1].t : 0; return; }
+    const active = $sc('tab-scalp').classList.contains('active'); let top = SC.lastOrdT;
+    for (const o of os) {
+      if (o.t <= SC.lastOrdT) continue; top = Math.max(top, o.t);
+      if (!(o.filled > 0)) continue;
+      const closing = o.act ? o.act === 'close' : o.side !== 'BUY';
+      if (!closing) { scBeep('buy'); continue; }
+      const tr = (st.trades || []).slice().reverse().find(x => x.inst === o.inst && Math.abs(x.t - o.t) < 5), nm = scNameOf(o.inst);
+      scBeep(tr && tr.net > 0 ? 'win' : 'loss');
+      if ((!active || o.why !== 'manual') && typeof showToast === 'function') showToast(`${tr && tr.net > 0 ? '✅' : '🔻'} Scalping: ${o.why || 'exit'} · ${nm}${tr ? ' · ' + scRsS(tr.net) : ''}`);
+    }
+    SC.lastOrdT = top;
+    // a waiting order that fired or failed while you were elsewhere
+    const lg = st.pend_log || [];
+    if (SC.lastPendId == null) { SC.lastPendId = lg.length ? lg[lg.length - 1].id : ''; return; }
+    const at = lg.findIndex(x => x.id === SC.lastPendId);
+    for (const x of lg.slice(at + 1)) if (typeof showToast === 'function' && !(active && x.ok)) showToast(`${x.ok ? '⏱' : '⚠️'} Waiting order ${x.ok ? 'sent' : 'not sent'}: ${x.inst || ''} · ${x.msg || ''}`);
+    if (lg.length) SC.lastPendId = lg[lg.length - 1].id;
+  }
+
+  // ── polling ──
+  function scNames() {
+    const n = [], add = i => { if (i && !n.includes(i)) n.push(i); };
+    for (const t of ['CE', 'PE']) add(SC.legs[t] && SC.legs[t].inst);
+    if (SC.sLegs) { add(SC.sLegs.CE.inst); add(SC.sLegs.PE.inst); }
+    for (const t of ['CE', 'PE']) add(SC.wing && SC.wing[t] && SC.wing[t].inst);
+    for (const p of scHeld()) add(p.inst);
+    for (const d of (SC.st && SC.st.pending) || []) add(d.spec && d.spec.inst);
+    return n.slice(0, 12);
+  }
+  async function scPoll() {
+    const panel = $sc('tab-scalp');
+    if (!panel || !panel.classList.contains('active') || document.hidden || SC.busy) return;
+    if (location.protocol === 'file:') { scNote(); return; }
+    SC.busy = true;
+    try {
+      const names = scNames(), sym = state.symbol || 'NIFTY';
+      const t = names.concat([sym]).map(n => `${n}:${(SC.tape[n] || {}).cur || 0}`).join(',');
+      const r = await fetch(`${scBase()}/api/trade/state?q=${encodeURIComponent(names.join(','))}&u=${encodeURIComponent(sym)}&t=${encodeURIComponent(t)}`, { signal: AbortSignal.timeout(3000) });
+      const j = await r.json();
+      SC.fails = 0; SC.st = j; SC.quotes = j.quotes || {};
+      if (j.spot) SC.spot = j.spot;
+      for (const [name, d] of Object.entries(j.tape || {})) scTapeMerge(name, d);
+      if (j.enabled) scNotify(j);
+    } catch (e) { SC.fails++; SC.lastErr = e.name === 'TimeoutError' ? 'slow reply' : (e.message || 'error'); }
+    finally { SC.busy = false; }
+    scRenderAll(); scNote();
+  }
+
+  // ── actions ──
+  function scClearPending() { SC.pending = null; clearTimeout(SC.pendTimer); if ($sc('scBuyCE')) scRenderTicket(); }
+  const scReq = () => `sc${Date.now().toString(36)}${(SC.seq++).toString(36)}`;
+  function scMarginKey() {
+    const lg = scGoLegs('CE'), lgP = scIsStruct() ? null : scGoLegs('PE');
+    return [SC.pref.side, SC.pref.struct, SC.pref.hedge, SC.pref.wing, scLots('CE'), lg && lg[0].inst, lgP && lgP[0].inst].join('|');
+  }
+  async function scMargin() {
+    if (SC.pref.side !== 'S') return;
+    const struct = scIsStruct(), lots = scLots('CE'), out = $sc('scMarginOut'), legs = [];
+    if (struct) { if (!SC.sLegs) return; legs.push({ inst: SC.sLegs.CE.inst, side: 'SELL' }, { inst: SC.sLegs.PE.inst, side: 'SELL' }); }
+    else {
+      const typ = SC.pref.chart === 'PE' ? 'PE' : 'CE', L = SC.legs[typ]; if (!L) return;
+      if (SC.pref.hedge && SC.wing[typ]) legs.push({ inst: SC.wing[typ].inst, side: 'BUY' });
+      legs.push({ inst: L.inst, side: 'SELL' });
+    }
+    out.textContent = 'asking Zerodha…';
+    const r = await scApi('margin', { legs, lots });
+    SC.margin = { key: scMarginKey(), text: r.ok ? `margin ≈ ${scRs(r.required)}${r.cached ? ' (cached)' : ''}` : (r.msg || 'failed'), bad: !r.ok };
+    scRenderAll();
+  }
+  async function scGo(typ) {
+    const S = SC.st, live = S && S.mode === 'live', side = SC.pref.side, sd = side === 'S' ? 'SELL' : 'BUY', struct = scIsStruct();
+    const lg = scGoLegs(typ);
+    if (!lg) { scMsg('No contract yet. Wait for the Zerodha option chain to load.', true); return; }
+    const lots = scLots(typ), what = struct ? `${SC.pref.struct} ${lg.map(l => fmtInt(l.strike)).join('/')}` : `${fmtInt(lg[0].strike)} ${typ}`;
+    const wingL = (!struct && sd === 'SELL' && SC.pref.hedge) ? SC.wing[typ] : null;
+    if (!struct && sd === 'SELL' && SC.pref.hedge && !wingL) { scMsg('No wing strike on the chart for this side. Change the wing distance or untick Hedge.', true); return; }
+    let level = 0;
+    if (SC.pref.trig) { level = parseFloat(SC.pref.tlevel); if (!(level > 0)) { scMsg('Enter the level to wait for, then press the order button again.', true); return; } }
+    const verb = sd === 'SELL' ? 'sell' : 'buy', px = struct ? null : scEntryPx(lg[0]);
+    if (live && SC.pref.confirm && SC.pending !== typ) {
+      scClearPending(); SC.pending = typ; scRenderTicket();
+      const b = $sc(typ === 'CE' ? 'scBuyCE' : 'scBuyPE'); b.firstElementChild.textContent = 'Confirm live';
+      scMsg(`LIVE: ${SC.pref.trig ? 'queue ' : ''}${verb} ${lots} lot ${what}${px ? ' at about ' + scNum(px) : ''}${sd === 'SELL' && !struct && !wingL ? ' — NAKED: only your stop limits the loss' : ''}. Press again (or Enter) to send.`, false);
+      SC.pendTimer = setTimeout(scClearPending, 4000); return;
+    }
+    scClearPending();
+    const { exits, linked } = scExitsBody(typ, struct);
+    if (!struct && sd === 'BUY' && !exits.sl_pts && !exits.u_stop && live && !confirm('No stop is set for this order. Send it anyway?')) return;
+    const body = { side: sd, lots, exits, tag: (SC.pref.tag || '').trim(), src: linked ? 'turn' : 'manual', req_id: scReq() };
+    if (struct) {
+      const prem = lg.reduce((s, L) => s + (sd === 'SELL' ? L.bid : L.ask), 0) * lots * lg[0].lot;
+      body.legs = lg.map(L => ({ inst: L.inst, side: sd })); body.kind = SC.pref.struct;
+      body.g_sl = Math.round(prem * scEn('g_sl_pct') / 100); body.g_tp = Math.round(prem * scEn('g_tp_pct') / 100);
+    } else { body.inst = lg[0].inst; if (wingL) body.hedge = wingL.inst; }
+    if (SC.pref.trig) body.trigger = { kind: SC.pref.tkind, op: SC.pref.top, level };
+    const b = $sc(typ === 'CE' ? 'scBuyCE' : 'scBuyPE'); b.disabled = true; scMsg(SC.pref.trig ? 'queueing…' : 'sending…', false);
+    const r = await scApi('order', body);
+    if (r.ok && SC.pref.trig) { scMsg(`Waiting: ${verb} ${what} when the ${SC.pref.tkind === 'spot' ? 'index' : 'premium'} ${SC.pref.top === 'le' ? 'falls to' : 'rises to'} ${scNum(level)}`, false); SC.pref.dock = 'pend'; scPrefSave(); }
+    else scMsg(r.msg || (r.ok ? 'filled' : 'rejected'), !r.ok);
+    if (r.ok && !SC.pref.trig) { SC.sel = lg[0].inst; if (!struct) { SC.pref.chart = typ; } scPrefSave(); }
+    scRenderAll();
+  }
+  async function scExit(inst, pct) {
+    const p = scHeld().find(x => x.inst === inst), short = p && p.side === 'short';
+    scMsg(short ? 'covering…' : 'selling…', false); const r = await scApi('exit', { inst, pct, why: 'manual' }); scMsg(r.msg || (r.ok ? 'closed' : 'exit failed'), !r.ok); scRenderAll();
+  }
+  async function scBE(inst) {
+    const p = scHeld().find(x => x.inst === inst); if (!p || p.role === 'hedge') return;
+    const sg = scPosSg(p), fee = scCharges(p.avg * p.qty, p.avg * p.qty, 2), per = fee / p.qty;
+    const lvl = sg > 0 ? Math.ceil((p.avg + per) / 0.05 - 1e-9) * 0.05 : Math.floor((p.avg - per) / 0.05 + 1e-9) * 0.05;
+    const cur = sg > 0 ? (p.bid || p.ltp) : (p.ask || p.ltp);
+    if (sg > 0 ? cur < lvl + 0.1 : cur > lvl - 0.1) { scMsg(`The ${sg > 0 ? 'bid' : 'ask'} (${cur.toFixed(2)}) has not passed break-even (${lvl.toFixed(2)}, entry ${sg > 0 ? 'plus' : 'minus'} fees), so the stop cannot be moved there yet.`, true); return; }
+    const r = await scApi('modify', { inst, exits: { sl: +lvl.toFixed(2) } });
+    scMsg(r.ok ? `Stop moved to break-even, ${lvl.toFixed(2)}` : (r.msg || 'failed'), !r.ok); scRenderAll();
+  }
+  async function scFlip(inst) {
+    const p = scHeld().find(x => x.inst === inst); if (!p || p.role === 'hedge') return;
+    const short = p.side === 'short', opp = p.typ === 'CE' ? 'PE' : 'CE', L = SC.legs[opp];
+    if (!L) { scMsg(`No ${opp === 'CE' ? 'call' : 'put'} is selected to flip into.`, true); return; }
+    const { exits } = scExitsBody(opp, false, short ? 'S' : 'B');
+    if (short && !exits.sl_pts) { scMsg('A short needs a stop: fill in Stop +pts in the Sell exit set first, so nothing is closed for a flip that would be refused.', true); return; }
+    const live = SC.st && SC.st.mode === 'live', key = 'flip:' + inst;
+    if (live && SC.pref.confirm && SC.pending !== key) {
+      scClearPending(); SC.pending = key; scMsg(`LIVE: ${short ? 'cover' : 'sell'} ${p.lots} lot ${fmtInt(p.strike)} ${p.typ}, then ${short ? 'sell' : 'buy'} ${fmtInt(L.strike)} ${opp}. Press Flip again to send.`, false);
+      SC.pendTimer = setTimeout(scClearPending, 4000); return;
+    }
+    scClearPending();
+    const r1 = await scApi('exit', { inst, pct: 100, why: 'flip' });
+    if (!r1.ok) { scMsg(r1.msg || 'the close failed, so nothing new was opened', true); return; }
+    const r2 = await scApi('order', { inst: L.inst, side: short ? 'SELL' : 'BUY', lots: p.lots, exits, src: 'flip', tag: p.tag || '', req_id: scReq() });
+    scMsg(r2.ok ? `Flipped: ${r1.msg}; ${r2.msg}` : `Closed, but the new order was refused: ${r2.msg}`, !r2.ok);
+    if (r2.ok) { SC.sel = L.inst; SC.pref.chart = opp; scPrefSave(); }
+    scRenderAll();
+  }
+  async function scAdd(inst) {
+    const p = scHeld().find(x => x.inst === inst); if (!p || p.role === 'hedge') return;
+    const short = p.side === 'short', { exits } = scExitsBody(p.typ, false, short ? 'S' : 'B');
+    if (short && !exits.sl_pts) { scMsg('A short needs a stop: fill in Stop +pts in the Sell exit set.', true); return; }
+    const r = await scApi('order', { inst, side: short ? 'SELL' : 'BUY', lots: 1, exits, src: 'add', tag: p.tag || '', req_id: scReq() });
+    scMsg(r.msg || (r.ok ? 'added' : 'refused'), !r.ok); scRenderAll();
+  }
+  async function scGroupExit(gid) {
+    const g = ((SC.st && SC.st.groups) || []).find(x => x.id === gid); if (!g) return;
+    const legs = scHeld().filter(p => g.legs.includes(p.inst)).sort((a, b) => (a.side === 'short' ? 0 : 1) - (b.side === 'short' ? 0 : 1));
+    let last = null; for (const p of legs) { last = await scApi('exit', { inst: p.inst, pct: 100, why: 'structure exit (manual)' }); if (!last.ok) break; }
+    scMsg(last ? (last.ok ? 'structure closed' : last.msg) : 'nothing to close', last ? !last.ok : false); scRenderAll();
+  }
+  async function scGroupSet(gid, card) {
+    const v = k => parseFloat((card.querySelector(`input[data-gk="${k}"]`) || {}).value) || 0;
+    const r = await scApi('modify', { grp: gid, g_sl: v('sl'), g_tp: v('tp') }); scMsg(r.msg || (r.ok ? 'updated' : 'failed'), !r.ok); scRenderAll();
+  }
+  async function scCancel(id) { const r = await scApi('cancel', { id: id === '*' ? '' : id }); scMsg(r.msg || 'cancelled', !r.ok); scRenderAll(); }
+  async function scFlatten() { const r = await scApi('flatten', {}); scMsg(r.msg || (r.ok ? 'flattened' : 'failed'), !r.ok); scRenderAll(); }
+  let _scFlatArm = 0;
+  function scFlatClick() {
+    const b = $sc('scFlat');
+    if (Date.now() - _scFlatArm < 4000) { _scFlatArm = 0; b.textContent = 'Flatten all'; scFlatten(); return; }
+    _scFlatArm = Date.now(); b.textContent = 'Confirm flatten';
+    setTimeout(() => { if (_scFlatArm) { _scFlatArm = 0; b.textContent = 'Flatten all'; } }, 4000);
+  }
+  async function scKillToggle(ev) {
+    const S = SC.st; if (!S) return; const on = !S.kill;
+    const r = await scApi('kill', { on, flatten: on && !!(ev && ev.shiftKey) });
+    scMsg(r.msg || (on ? 'kill switch on' : 'resumed'), !r.ok); scRenderAll();
+  }
+  async function scArmToggle() {
+    const S = SC.st; if (!S) return; const r = await scApi('arm', { on: !S.armed });
+    scMsg(r.msg || (r.ok ? (S.armed ? 'disarmed' : 'armed') : 'failed'), !r.ok); scRenderAll();
+  }
+  const scCycle = (arr, cur, dir) => arr[(arr.indexOf(cur) + dir + arr.length) % arr.length];
+  function scSetSide(s) {
+    scReadExits(); SC.pref.side = s; SC.exits = SC.exitsBy[s]; scPrefSave(); scBuildFields(); scClearPending(); scRenderAll();
+  }
+  // focus mode: hide everything above the terminal (the dashboard's header and tab bar)
+  function scFocusApply() {
+    const panel = $sc('tab-scalp'), on = !!SC.pref.focus && panel.classList.contains('active');
+    document.body.classList.toggle('sc-fx', on);
+    for (let n = panel; n && n !== document.body; n = n.parentElement) for (let s = n.previousElementSibling; s; s = s.previousElementSibling) s.classList.toggle('sc-fx-hide', on);
+  }
+  function scNotesLoad() { try { SC.notes = JSON.parse(localStorage.getItem('scalpNotesV1') || '{}') || {}; } catch (_) { SC.notes = {}; } }
+  function scNotesSave() { try { const ks = Object.keys(SC.notes); if (ks.length > 600) for (const k of ks.slice(0, ks.length - 500)) delete SC.notes[k]; localStorage.setItem('scalpNotesV1', JSON.stringify(SC.notes)); } catch (_) {} }
+
+  // ── wiring ──
+  (function scInit() {
+    const panel = $sc('tab-scalp'); if (!panel) return;
+    scPrefLoad(); scLoadExits(); scBuildFields(); scNotesLoad();
+    $sc('scLots').value = SC.pref.lots || 1; $sc('scRiskAuto').checked = !!SC.pref.riskAuto; $sc('scRiskRs').value = SC.pref.riskRs || 2000;
+    $sc('scLinkTurn').checked = !!SC.pref.link; $sc('scConfirm').checked = SC.pref.confirm !== false;
+    $sc('scTagList').innerHTML = SC_TAGS.map(t => `<option value="${t}">`).join('');
+    try { $sc('scPin').value = scPin(); } catch (_) {}
+    const save = (k, v) => { SC.pref[k] = v; scPrefSave(); };
+    $sc('scPin').addEventListener('input', e => { try { sessionStorage.setItem('scalpPin', e.target.value); } catch (_) {} });
+    $sc('scLinkTurn').addEventListener('change', e => save('link', e.target.checked));
+    $sc('scConfirm').addEventListener('change', e => save('confirm', e.target.checked));
+    $sc('scRiskAuto').addEventListener('change', e => { save('riskAuto', e.target.checked); scClearPending(); scRenderTicket(); scQueueDraw(); });
+    $sc('scRiskRs').addEventListener('change', e => { save('riskRs', Math.max(100, parseFloat(e.target.value) || 2000)); scRenderTicket(); scQueueDraw(); });
+    const setLots = n => { n = Math.max(1, n | 0); $sc('scLots').value = n; save('lots', n); scClearPending(); scRenderTicket(); scQueueDraw(); };
+    const bump = d => { if (SC.pref.riskAuto && !scIsStruct()) { const v = Math.max(500, (+SC.pref.riskRs || 2000) + d * 500); $sc('scRiskRs').value = v; save('riskRs', v); scRenderTicket(); scQueueDraw(); } else setLots(scLots('CE') + d); };
+    $sc('scLotUp').addEventListener('click', () => bump(1)); $sc('scLotDn').addEventListener('click', () => bump(-1));
+    $sc('scLots').addEventListener('change', () => setLots(parseInt($sc('scLots').value, 10) || 1));
+    $sc('scSide').addEventListener('click', e => { const b = e.target.closest('button[data-s]'); if (b && b.dataset.s !== SC.pref.side) scSetSide(b.dataset.s); });
+    $sc('scStruct').addEventListener('click', e => { const b = e.target.closest('button[data-t]'); if (!b) return; save('struct', b.dataset.t); scApplyFieldVis(); scClearPending(); scRenderAll(); });
+    $sc('scSOff').addEventListener('change', e => { save('sOff', parseInt(e.target.value, 10) || 2); scRenderAll(); });
+    $sc('scHedge').addEventListener('change', e => { save('hedge', e.target.checked); scRenderAll(); });
+    $sc('scWing').addEventListener('change', e => { save('wing', parseInt(e.target.value, 10) || 3); scRenderAll(); });
+    $sc('scMarginBtn').addEventListener('click', scMargin);
+    const trigFill = () => {                                       // a sensible starting level: where the order would trade now
+      const lg = scGoLegs('CE'); if (SC.pref.tkind === 'spot') return SC.spot ? SC.spot.toFixed(1) : '';
+      const L = SC.pref.chart === 'PE' ? SC.legs.PE : (lg && lg[0]); const px = scEntryPx(L); return px ? px.toFixed(2) : '';
+    };
+    $sc('scTrig').addEventListener('change', e => { save('trig', e.target.checked); if (e.target.checked && !SC.pref.tlevel) save('tlevel', trigFill()); scClearPending(); scRenderAll(); });
+    $sc('scTKind').addEventListener('change', e => { save('tkind', e.target.value); save('tlevel', trigFill()); scRenderAll(); });
+    $sc('scTOp').addEventListener('change', e => { save('top', e.target.value); scRenderAll(); });
+    $sc('scTLevel').addEventListener('input', e => save('tlevel', e.target.value));
+    $sc('scTag').addEventListener('input', e => save('tag', e.target.value.slice(0, 24)));
+    $sc('scBook').addEventListener('click', () => { save('dock', 'book'); scRenderDock(); });
+    $sc('scFocus').addEventListener('click', () => { save('focus', !SC.pref.focus); scFocusApply(); scRenderChrome(); scQueueDraw(); });
+    $sc('scStrikes').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; SC.pref.selCE = SC.pref.selPE = b.dataset.k; scPrefSave(); scClearPending(); scRenderAll(); });
+    $sc('scLadder').addEventListener('click', e => {
+      const td = e.target.closest('td[data-s]'); if (!td) return;
+      SC.pref['sel' + td.dataset.s] = 'k' + td.dataset.k; SC.pref.chart = td.dataset.s; scPrefSave(); scClearPending(); scRenderAll();
+    });
+    $sc('scChTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; SC.pref.chart = b.dataset.c; scPrefSave(); scRenderAll(); });
+    $sc('scTfs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('tf', +b.dataset.tf); scRenderAll(); });
+    $sc('scOpts').addEventListener('change', e => { const o = e.target.dataset.o; if (o) { save(o, e.target.checked); scRenderAll(); } });
+    $sc('scBuyCE').addEventListener('click', () => scGo('CE')); $sc('scBuyPE').addEventListener('click', () => scGo('PE'));
+    $sc('scArm').addEventListener('click', scArmToggle); $sc('scKill').addEventListener('click', scKillToggle); $sc('scFlat').addEventListener('click', scFlatClick);
+    $sc('scTurn').addEventListener('click', () => {
+      if (typeof _turn === 'undefined' || !(_turn.st === 'BUY' || _turn.st === 'SELL' || _turn.st === 'WATCH')) return;
+      $sc('scLinkTurn').checked = true; save('link', true);
+      scMsg(`Spot stop and target will follow the turn light for ${_turn.dir > 0 ? 'bullish' : 'bearish'} orders (buy ${_turn.dir > 0 ? 'calls' : 'puts'} or sell ${_turn.dir > 0 ? 'puts' : 'calls'}).`, false);
+    });
+    $sc('scHelp').addEventListener('click', () => scMsg('Hotkeys: 1 call · 2 put · S buy/sell · W single/straddle/strangle · H hedge wing · Q wait for a level · Enter confirm · Esc cancel · X close all · Z close half · E stop to break-even · , . pick position · + − lots · [ ] strike · T timeframe · V next chart · K kill · Shift+F flatten (then Enter) · ` focus mode', false));
+    // dock
+    $sc('scDockTabs').addEventListener('click', e => { const b = e.target.closest('button[data-d]'); if (!b) return; save('dock', b.dataset.d); scRenderDock(); });
+    const body = $sc('scDockBody');
+    body.addEventListener('mousedown', () => { SC.down = true; });
+    document.addEventListener('mouseup', () => { setTimeout(() => { SC.down = false; }, 0); });
+    body.addEventListener('click', async e => {
+      SC.down = false;
+      const pc = e.target.closest('button[data-pc]'), nt = e.target.closest('td.note[data-nk]'), gb = e.target.closest('button[data-ga]'), gcard = e.target.closest('.sc-card[data-gid]');
+      if (pc) { scCancel(pc.dataset.pc); return; }
+      if (nt) {
+        const k = nt.dataset.nk, cur = SC.notes[k] || '', v = prompt('Note for this trade (what you saw, what you would change):', cur);
+        if (v != null) { if (v.trim()) SC.notes[k] = v.trim().slice(0, 300); else delete SC.notes[k]; scNotesSave(); scRenderDock(); }
+        return;
+      }
+      if (gb && gcard) { if (gb.dataset.ga === 'exit') scGroupExit(gcard.dataset.gid); else scGroupSet(gcard.dataset.gid, gcard); return; }
+      const a = e.target.closest('button[data-a]'), card = e.target.closest('.sc-card[data-i]'), x = e.target.closest('button[data-x]');
+      if (a && !card) {
+        if (a.dataset.a === 'recon') {
+          const r = await scApi('reconcile', {});
+          if (!r.ok && r.msg && /differ/i.test(r.msg) && confirm(`${r.msg}\n\nAdopt Zerodha's positions into this book?`)) { const r2 = await scApi('reconcile', { adopt: true }); scMsg(r2.msg, !r2.ok); } else scMsg(r.msg, !r.ok);
+        } else if (a.dataset.a === 'journal') {
+          try { const r = await fetch(`${scBase()}/api/trade/journal`, { signal: AbortSignal.timeout(5000) }); SC.journal = ((await r.json()).rows || []).slice(-40).reverse(); } catch (_) { SC.journal = [{ t: Date.now() / 1000, ev: 'journal unreachable' }]; }
+        } else if (a.dataset.a === 'csv') { scCsv(); return; }
+        scRenderAll(); return;
+      }
+      if (!card) return;
+      const inst = card.dataset.i; SC.sel = inst;
+      if (x) scExit(inst, +x.dataset.x); else if (a && a.dataset.a === 'mod') scOpenMod(inst); else if (a && a.dataset.a === 'be') scBE(inst); else if (a && a.dataset.a === 'flip') scFlip(inst); else if (a && a.dataset.a === 'add') scAdd(inst);
+      else { SC.pref.chart = (SC.legs.CE && SC.legs.CE.inst === inst) ? 'CE' : (SC.legs.PE && SC.legs.PE.inst === inst) ? 'PE' : inst; scPrefSave(); }
+      scRenderDock(); scQueueDraw();
+    });
+    $sc('scMod').addEventListener('click', async e => {
+      const a = e.target.closest('button[data-a]'); if (!a) return;
+      if (a.dataset.a === 'apply') scApplyMod(); else if (a.dataset.a === 'close') $sc('scMod').style.display = 'none';
+      else if (a.dataset.a === 'clear') { const r = await scApi('modify', { inst: SC.mod, exits: {}, clear: true }); scMsg(r.msg, !r.ok); $sc('scMod').style.display = 'none'; scRenderAll(); }
+    });
+    // chart: drag a bracket line, hover for the crosshair, wheel to zoom
+    const svg = $sc('scChart');
+    svg.addEventListener('pointerdown', e => {
+      const g = e.target.closest('[data-h]'); if (!g || !SC.geom) return;
+      const ln = SC.lines.find(l => l.id === g.dataset.h); if (!ln) return;
+      SC.drag = { id: ln.id, price: ln.price, scale: { lo: SC.geom.lo, hi: SC.geom.hi } };
+      try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+      e.preventDefault(); scQueueDraw();
+    });
+    svg.addEventListener('pointermove', e => {
+      const r = svg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+      if (SC.drag && SC.geom) { const g = SC.geom; SC.drag.price = scClampLine(SC.drag.id, g.lo + (g.hi - g.lo) * (1 - (my - g.TOP) / g.pH)); scQueueDraw(); return; }
+      SC.hover = { x: mx, y: my }; scQueueDraw();
+    });
+    svg.addEventListener('pointerup', () => { if (SC.drag) scDragCommit(); });
+    svg.addEventListener('pointercancel', () => { SC.drag = null; scQueueDraw(); });
+    svg.addEventListener('pointerleave', () => { if (!SC.drag) { SC.hover = null; scQueueDraw(); } });
+    svg.addEventListener('wheel', e => { e.preventDefault(); save('nvis', Math.max(20, Math.min(240, Math.round(SC.pref.nvis * (e.deltaY < 0 ? 0.85 : 1.18))))); scQueueDraw(); }, { passive: false });
+    window.addEventListener('resize', () => { if (panel.classList.contains('active')) scQueueDraw(); });
+    // hotkeys: capture phase, so the page's global letter shortcuts (N/B/F/M/R/A/H/C) cannot also fire here
+    document.addEventListener('keydown', e => {
+      if (!panel.classList.contains('active')) return;
+      const tag = (document.activeElement && document.activeElement.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key; let used = true; const P = scHeld(), at = P.findIndex(p => p.inst === SC.sel);
+      if (k === '1') scGo('CE'); else if (k === '2') scGo('PE');
+      else if (k === 'Enter') { if (SC.pending && SC.pending[0] !== 'f') scGo(SC.pending); else if (SC.pending) scFlip(SC.pending.slice(5)); else if (_scFlatArm) scFlatClick(); else used = false; }
+      else if (k === 'Escape') { scClearPending(); _scFlatArm = 0; $sc('scFlat').textContent = 'Flatten all'; }
+      else if (k === 's' || k === 'S') scSetSide(SC.pref.side === 'S' ? 'B' : 'S');
+      else if (k === 'w' || k === 'W') { save('struct', scCycle(['single', 'straddle', 'strangle'], SC.pref.struct, 1)); scApplyFieldVis(); scClearPending(); scRenderAll(); }
+      else if (k === 'h' || k === 'H') { save('hedge', !SC.pref.hedge); scRenderAll(); }
+      else if (k === 'q' || k === 'Q') { save('trig', !SC.pref.trig); if (SC.pref.trig && !SC.pref.tlevel) save('tlevel', trigFill()); scClearPending(); scRenderAll(); }
+      else if (k === '`') { save('focus', !SC.pref.focus); scFocusApply(); scRenderChrome(); scQueueDraw(); }
+      else if (k === 'x' || k === 'X') { if (SC.sel) scExit(SC.sel, 100); else used = false; }
+      else if (k === 'z' || k === 'Z') { if (SC.sel) scExit(SC.sel, 50); else used = false; }
+      else if (k === 'e' || k === 'E') { if (SC.sel) scBE(SC.sel); else used = false; }
+      else if (k === 'F') scFlatClick();
+      else if (k === 'k' || k === 'K') scKillToggle(e);
+      else if (k === '+' || k === '=') bump(1); else if (k === '-' || k === '_') bump(-1);
+      else if (k === ',') { if (P.length) SC.sel = P[(at - 1 + P.length) % P.length].inst; scRenderDock(); }
+      else if (k === '.') { if (P.length) SC.sel = P[(at + 1) % P.length].inst; scRenderDock(); }
+      else if (k === 't' || k === 'T') { save('tf', scCycle(SC_TFS.map(x => x[0]), SC.pref.tf, 1)); scRenderAll(); }
+      else if (k === 'v' || k === 'V') { const ks = ['CE', 'PE', 'SPOT'].concat(P.map(p => p.inst).filter(i => !(SC.legs.CE && SC.legs.CE.inst === i) && !(SC.legs.PE && SC.legs.PE.inst === i))); save('chart', scCycle(ks, SC.pref.chart, 1)); scRenderAll(); }
+      else if (k === '[' || k === ']') {
+        const L = SC.legs.CE, d = state.lastData; if (L && d) { const off = Math.round((L.strike - d.atm) / (d.strike_gap || 50)) + (k === ']' ? 1 : -1); SC.pref.selCE = SC.pref.selPE = 'o' + Math.max(-4, Math.min(5, off)); scPrefSave(); scRenderAll(); }
+      } else used = false;
+      if (used) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+    setInterval(scPoll, SC_POLL_MS);
+    // a stop or target hit while you are on another tab still reaches you (a toast and, unless muted, a tone)
+    setInterval(() => {
+      if (SC.pref.focus && !panel.classList.contains('active')) scFocusApply();                    // never leave the header hidden on another tab
+      if (panel.classList.contains('active') || location.protocol === 'file:' || (SC.st && SC.st.enabled === false)) return;
+      const every = (SC.st && SC.st.positions && SC.st.positions.length) ? 4000 : 20000;
+      if (Date.now() - SC.bgT < every) return; SC.bgT = Date.now();
+      fetch(`${scBase()}/api/trade/state`, { signal: AbortSignal.timeout(3000) }).then(r => r.json()).then(j => { SC.st = j; if (j && j.enabled) scNotify(j); }).catch(() => {});
+    }, 2000);
+    window.renderScalpTab = () => { scNote(); scRenderAll(); scFocusApply(); scPoll(); };
+  })();
 
   // ---------- boot ----------
   loadFnoSymbolList();

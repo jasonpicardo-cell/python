@@ -320,6 +320,7 @@ _key2tok: Dict[str, int] = {}
 _tok2key: Dict[int, str] = {}
 _kind: Dict[str, str] = {}            # key -> IDX / EQ / OPT / FUT
 _lot_of: Dict[str, int] = {}          # key -> lot size (derivatives)
+_meta_of: Dict[str, Dict[str, Any]] = {}   # option key -> {under, typ, strike, expiry, lot, ts(tradingsymbol)}
 _opts: Dict[Tuple[str, str], Dict[str, Dict[float, Dict[str, str]]]] = {}   # (exch, name) -> expiry -> strike -> {CE, PE}
 _futs: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}                     # (exch, name) -> [(expiry, key)]
 _idx_key: Dict[str, str] = {}         # NIFTY -> "NSE:NIFTY 50"
@@ -397,6 +398,8 @@ def _index_rows(rows: List[Dict[str, Any]]) -> None:
         elif r["it"] in ("CE", "PE"):
             _kind[key] = "OPT"
             _lot_of[key] = r["lot"]
+            _meta_of[key] = {"under": r["n"], "typ": r["it"], "strike": r["k"], "expiry": r["e"],
+                             "lot": r["lot"], "ts": r["s"], "exch": r["x"]}
             node = _opts.setdefault((r["x"], r["n"]), {}).setdefault(r["e"], {}).setdefault(r["k"], {})
             node[r["it"]] = key
         elif r["it"] == "FUT":
@@ -602,6 +605,47 @@ def _norm(t: Dict[str, Any]) -> Dict[str, Any]:
     return d
 
 
+# ── tick tape: every change to an option's (or index's) price, book top or
+# volume, kept in memory for the Scalping tab's candles, tape and order flow.
+# Rows are (seq, epoch_ms, ltp, bid, ask, bid_qty, ask_qty, volume); seq counts
+# up per instrument, so a reader asks for "everything after seq N" and never
+# misses or repeats a row. No broker call is involved - it is the tick stream.
+import collections as _col_tape
+_tape: Dict[str, Any] = {}
+_TAPE_MAX = 6000
+
+
+def _tape_add(key: str, now: float, tk: Dict[str, Any]) -> None:
+    dq = _tape.get(key)
+    if dq is None:
+        dq = _tape[key] = _col_tape.deque(maxlen=_TAPE_MAX)
+    body = (tk.get("ltp"), tk.get("bid"), tk.get("ask"), tk.get("bid_qty"), tk.get("ask_qty"), tk.get("volume"))
+    if dq and dq[-1][2:] == body:
+        return
+    dq.append((dq[-1][0] + 1 if dq else 1, int(now * 1000)) + body)
+
+
+def tape_since(key: str, after: int = 0, limit: int = 1500) -> Dict[str, Any]:
+    """Rows newer than `after` (at most `limit`, the newest ones). `reset` is
+    true when the caller's cursor is ahead of ours (the server restarted)."""
+    key = key if ":" in key else "NFO:" + key
+    with _lock:
+        dq = _tape.get(key)
+        if not dq:
+            return {"cur": 0, "rows": [], "reset": bool(after)}
+        last = dq[-1][0]
+        reset = after > last
+        if reset:
+            after = 0
+        out = []
+        for r in reversed(dq):
+            if r[0] <= after or len(out) >= limit:
+                break
+            out.append(r)
+    out.reverse()
+    return {"cur": last, "rows": [list(r) for r in out], "reset": reset}
+
+
 def _on_ticks(_ws, ticks) -> None:
     now = time.time()
     push = False
@@ -642,6 +686,8 @@ def _on_ticks(_ws, ticks) -> None:
                         "tts": now if tbq is not None else prev.get("tts"),
                     }
                 _ticks[key] = {**_ticks.get(key, {}), **d}
+                if kind in ("OPT", "IDX"):
+                    _tape_add(key, now, _ticks[key])
                 _status["ticks"] += 1
                 _status["streaming"] = True
                 if d.get("oi"):
@@ -2112,6 +2158,64 @@ def raw_debug(match: str) -> Dict[str, Any]:
 def depth_snapshot() -> Dict[str, Any]:
     with _lock:
         return {k: dict(v) for k, v in _depth.items()}
+
+
+# ── orders (used only by the Scalping tab's engine, nse_trade.py) ─────
+# Called directly rather than through _rest(): _rest paces calls 0.12 s apart
+# behind everything else, and an exit must not queue behind a background call.
+# They are still counted in the day's API usage.
+def _order_call(kind: str, fn, *args, **kwargs):
+    _count_rest(kind)
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:  # noqa: BLE001
+        _rest_errors.append({"ts": time.time(), "kind": kind, "err": f"{type(e).__name__}: {str(e)[:140]}"})
+        del _rest_errors[:-30]
+        if type(e).__name__ == "TokenException":
+            _set_err(f"token rejected ({e}) - run zerodha_login.py")
+        raise
+
+
+def place_order(tradingsymbol: str, side: str, qty: int, price: float, tag: str = "") -> str:
+    """One marketable LIMIT, IOC, intraday (MIS) order on NFO. Returns the order id.
+    A static IP registered in the Kite developer console is required for this call."""
+    if not connect() or _kite is None:
+        raise RuntimeError(status().get("last_error") or "zerodha unavailable")
+    return str(_order_call(
+        "order", _kite.place_order, variety="regular", exchange="NFO", tradingsymbol=tradingsymbol,
+        transaction_type="BUY" if side.upper() == "BUY" else "SELL", quantity=int(qty), product="MIS",
+        order_type="LIMIT", price=float(price), validity="IOC", tag=(tag or "nsescalp")[:20]))
+
+
+def order_margin(orders: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Margin the broker would block for these orders together (a hedged short is
+    cheaper than a naked one - the basket call knows). ONE API call; the page only
+    makes it when you press 'Check margin', never on a timer."""
+    if not connect() or _kite is None:
+        raise RuntimeError(status().get("last_error") or "zerodha unavailable")
+    params = [dict(exchange="NFO", tradingsymbol=o["tradingsymbol"], transaction_type="BUY" if str(o["side"]).upper() == "BUY" else "SELL",
+                   variety="regular", product="MIS", order_type="LIMIT", quantity=int(o["qty"]), price=float(o["price"])) for o in orders]
+    r = _order_call("margin", _kite.basket_order_margins, params, consider_positions=True) or {}
+    tot = lambda k: float(((r.get(k) or {}).get("total")) or 0)          # noqa: E731
+    return {"initial": tot("initial"), "required": tot("final") or tot("initial")}
+
+
+def order_status(order_id: str) -> Dict[str, Any]:
+    """Latest state of one order: status, filled quantity, average price, message."""
+    if _kite is None:
+        return {"status": "UNKNOWN", "msg": "not connected"}
+    hist = _order_call("order_status", _kite.order_history, order_id) or []
+    last = hist[-1] if hist else {}
+    return {"status": str(last.get("status") or "UNKNOWN").upper(), "filled": int(last.get("filled_quantity") or 0),
+            "avg": float(last.get("average_price") or 0), "msg": str(last.get("status_message") or "")}
+
+
+def net_positions() -> List[Dict[str, Any]]:
+    """The broker's intraday option positions (NFO, MIS)."""
+    if _kite is None:
+        return []
+    net = (_order_call("positions", _kite.positions) or {}).get("net") or []
+    return [r for r in net if r.get("exchange") == "NFO" and r.get("product") == "MIS"]
 
 
 def market_depth(symbol: str) -> Dict[str, Any]:

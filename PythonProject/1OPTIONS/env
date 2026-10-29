@@ -17,6 +17,10 @@
 #   Every broker source switches NSE polling OFF automatically.
 DATA_SOURCE=zerodha
 
+NSE_HTTPS=1
+NSE_ACCESS_TOKEN=Welcome12345
+NSE_PUBLIC_IP=125.99.240.171
+
 # ── Fyers API v3 ─────────────────────────────────────────────────────
 # The richest source available here: real-time WebSocket ticks, genuine OHLC
 # with TRADED VOLUME, bid/ask per strike and Level-2 market depth. Set
@@ -200,3 +204,33 @@ ZERODHA_INDEX_VOLUME=futures
 ZERODHA_OI_BACKFILL=1
 # Leave blank: OI/volume units are detected from the data (shares vs contracts).
 ZERODHA_QTY_UNIT=
+
+# ── Scalping tab (Zerodha only) ──
+# NSE_TRADE_MODE=paper           # paper = simulated fills; live = real orders (also needs ARM in the tab)
+# NSE_TRADE_PIN=                 # optional PIN the tab asks for before any order
+# NSE_TRADE_MAX_LOTS=2           # per order
+# NSE_TRADE_MAX_OPEN_LOTS=4      # all positions together
+# NSE_TRADE_MAX_VALUE=150000     # ₹ premium per order
+# NSE_TRADE_DAY_LOSS=5000        # net of charges, incl. open P&L → no entries
+# NSE_TRADE_LOSS_FLATTEN=1       # 1 = sell everything when that limit is hit
+# NSE_TRADE_MAX_TRADES=40
+# NSE_TRADE_LOSS_STREAK=3        # losers in a row → cool-off
+# NSE_TRADE_COOLDOWN_S=300
+# NSE_TRADE_SLIP_PCT=1.5         # limit-price buffer beyond bid/ask (%), min below
+# NSE_TRADE_SLIP_MIN=0.5
+# NSE_TRADE_MAX_SPREAD_PCT=6     # refuse entries if bid-ask is wider
+# NSE_TRADE_MIN_PREMIUM=3
+# NSE_TRADE_OPS=3                # orders per second (Zerodha allows 10)
+# NSE_TRADE_STALE_S=6            # quote older than this is flagged NO PRICE
+# NSE_TRADE_ENTRY_FROM=09:20
+# NSE_TRADE_ENTRY_TO=15:00
+# NSE_TRADE_FLATTEN_AT=15:14     # square-off of anything still open
+# NSE_TRADE_RECONCILE_S=20       # live: compare with Zerodha positions this often
+
+# ── Short selling and desk rules ──
+NSE_TRADE_ALLOW_SHORT=1
+NSE_TRADE_MAX_SHORT_LOTS=1
+NSE_TRADE_MAX_RISK=2000
+NSE_TRADE_DAY_TARGET=5000
+NSE_TRADE_GIVEBACK_PCT=40
+NSE_TRADE_GIVEBACK_MIN=1500

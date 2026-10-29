@@ -1378,6 +1378,464 @@ console.log(JSON.stringify(R));
           and "/api/turn-labels?symbol=" in dsrc and 'id="tlight"' in dsrc and "_trafficVotes" not in dsrc)
 
 
+def test_trade_engine():
+    """nse_trade: paper and live order flow, every server-side guard, the
+    managed exits on the live feed, charges, reconcile."""
+    import importlib, calendar as _cal, tempfile, shutil, time
+    sys.path.insert(0, HERE)
+    N = importlib.import_module("nse_trade")
+    T0 = _cal.timegm((2026, 10, 29, 5, 30, 0))                 # Thu 11:00 IST
+    class Clk:
+        t = T0
+        def __call__(self): return self.t
+    clk = Clk()
+    class Feed:
+        def __init__(self): self.q, self.m, self.sp = {}, {}, {"NIFTY": 25000.0}
+        def add(self, inst, bid, ask, lot=65, typ="CE", ltp=None):
+            self.q[inst] = dict(bid=bid, ask=ask, ltp=ltp or (bid + ask) / 2, ts=clk())
+            self.m[inst] = dict(under="NIFTY", typ=typ, strike=25000, expiry="2026-11-03", lot=lot, ts=inst.split(":")[-1])
+        def move(self, inst, bid, ask): self.q[inst].update(bid=bid, ask=ask, ltp=(bid + ask) / 2, ts=clk())
+        def quote(self, i): return self.q.get(i)
+        def meta(self, i): return self.m.get(i)
+        def spot(self, u): return self.sp.get(u)
+        def depth(self, i):
+            q = self.q.get(i)
+            return q and {"asks": [{"p": q["ask"], "q": 130}, {"p": round(q["ask"] + 0.5, 2), "q": 500}],
+                          "bids": [{"p": q["bid"], "q": 130}, {"p": round(q["bid"] - 0.5, 2), "q": 500}]}
+    I, P = "NFO:NIFTY25000CE", "NFO:NIFTY25000PE"
+    def mk(broker=None, **kw):
+        clk.t = T0
+        f = Feed(); f.add(I, 99.0, 99.5); f.add(P, 80.0, 80.5, typ="PE")
+        cfg = N.Config(env={"NSE_TRADE_MODE": "live" if broker else "paper"})
+        for k, v in kw.items(): setattr(cfg, k, v)
+        return f, N.Engine(f, broker, cfg, clock=clk, async_exits=False, sleep=lambda s: None)
+    # ── entry: fills at the ask by walking the book; guards ──
+    f, e = mk()
+    r = e.buy(I, 1, {"sl_pts": 10, "tp_pts": 20, "trail_pts": 8, "be_pts": 6}, req_id="a")
+    p = e.pos[I]
+    check("trade: paper buy fills at the ask (65 = 1 lot) and arms the exits as levels from the fill",
+          r["ok"] and p.qty == 65 and p.avg == 99.5 and (p.sl, p.tp, p.trail, p.be_at) == (89.5, 119.5, 8.0, 105.5), str(r))
+    check("trade: a repeated request id (double click) is answered, not re-sent", e.buy(I, 1, req_id="a").get("dup") is True and e.pos[I].qty == 65)
+    check("trade: more lots than the per-order cap is refused", "per-order cap" in e.buy(I, 3)["msg"])
+    f2, e2 = mk(); e2.buy(I, 2)
+    check("trade: open lots are capped across orders", e2.buy(P, 1, {}) ["ok"] and "open lots" in e2.buy(P, 2)["msg"])
+    f3, e3 = mk(max_value=1000)
+    f4, e4 = mk()
+    f4.move(I, 90.0, 99.5)
+    f5, e5 = mk(); f5.add(I, 1.0, 1.5)
+    check("trade: order value, a wide spread and a junk premium are refused",
+          "order value" in e3.buy(I, 1)["msg"] and "spread" in e4.buy(I, 1)["msg"] and "below the minimum" in e5.buy(I, 1)["msg"])
+    f6, e6 = mk(); clk.t += 30
+    check("trade: a stale quote is refused (no price to protect the position with)", "no fresh quote" in e6.buy(I, 1)["msg"])
+    f7, e7 = mk(); clk.t = _cal.timegm((2026, 10, 29, 3, 40, 0))      # 09:10 IST
+    f7.move(I, 99.0, 99.5)
+    check("trade: outside the entry window is refused", "entries only" in e7.buy(I, 1)["msg"])
+    f8, e8 = mk(); e8.set_kill(True, why="test")
+    check("trade: the kill switch blocks entries", "kill switch" in e8.buy(I, 1)["msg"])
+    check("trade: lots must be a whole number >= 1 (0, 1.5 and True are refused by the engine itself)",
+          all("whole number" in (mk()[1].check_entry(I, x) or "") for x in (0, 1.5, -1)))
+    f9, e9 = mk()
+    check("trade: an unknown contract is refused", e9.buy("NFO:NOPE", 1)["msg"] == "not a listed index option")
+    # ── managed exits ──
+    f, e = mk(); e.buy(I, 1, {"sl_pts": 10, "tp_pts": 20, "trail_pts": 8, "be_pts": 6}); p = e.pos[I]
+    f.move(I, 108.0, 108.5); e.step()
+    check("trade: peak, breakeven and trail follow the bid up", p.peak == 108.0 and p.sl == 99.55 and p.eff_sl() == 100.0, f"{p.peak} {p.sl} {p.eff_sl()}")
+    f.move(I, 101.0, 101.5); e.step()
+    check("trade: still held above the trailed stop", I in e.pos)
+    f.move(I, 99.9, 100.4); e.step()
+    t = e.trades[-1] if e.trades else {}
+    check("trade: the trailed stop sells the position at the bid and books the trade with charges",
+          I not in e.pos and t.get("why", "").startswith("stop") and t.get("exit") == 99.9 and t.get("fee", 0) > 40, str(t))
+    f, e = mk(); e.buy(I, 1, {"sl_pts": 10, "tp_pts": 12}); f.move(I, 112.0, 112.5); e.step()
+    check("trade: the target sells at the bid for a profit", I not in e.pos and e.trades[-1]["gross"] > 0 and "target" in e.trades[-1]["why"])
+    f, e = mk(max_lots=3, max_open_lots=4); e.buy(I, 2, {"sl_pts": 10, "tp1_pts": 8, "tp1_pct": 50}); p = e.pos[I]
+    f.move(I, 108.0, 108.5); e.step()
+    check("trade: a partial target sells half the lots and moves the stop to breakeven for the rest",
+          p.qty == 65 and p.tp1_done and p.sl > p.avg and e.trades[-1]["qty"] == 65, f"{p.qty} {p.sl}")
+    f, e = mk(); e.buy(I, 1, {"u_stop": 24950, "u_target": 25100}); f.sp["NIFTY"] = 24940.0; e.step()
+    check("trade: an underlying-level stop sells a call when the index falls through it", I not in e.pos and "underlying stop" in e.trades[-1]["why"])
+    f, e = mk(); f.add(P, 80.0, 80.5, typ="PE"); e.buy(P, 1, {"u_stop": 25050}); f.sp["NIFTY"] = 25060.0; e.step()
+    check("trade: ... and a put when the index rises through it", P not in e.pos)
+    f, e = mk(); e.buy(I, 1, {"time_stop_s": 60}); clk.t += 61; f.move(I, 99.0, 99.5); e.step()
+    check("trade: the time stop closes a position held too long", I not in e.pos and e.trades[-1]["why"] == "time stop")
+    f, e = mk(); e.buy(I, 1, {}); clk.t = _cal.timegm((2026, 10, 29, 9, 45, 0)); f.move(I, 99.0, 99.5); e.step()      # 15:15 IST
+    check("trade: everything is squared off at 15:14 even with no exits set", I not in e.pos and "end-of-day" in e.trades[-1]["why"])
+    f, e = mk(); e.buy(I, 1, {"sl_pts": 10}); clk.t += 20; e.step(); p = e.pos[I]
+    check("trade: a stale feed is flagged on the position and no stop fires blind", p.stale and I in e.pos)
+    # ── risk: daily loss, streak ──
+    f, e = mk(day_loss=300); e.buy(I, 1, {}); f.move(I, 94.0, 94.5); e.step()
+    check("trade: the daily loss limit trips the kill switch and flattens", e.kill and I not in e.pos and "daily loss" in e.kill_why, str(e.kill_why))
+    f, e = mk(loss_streak=2, cooldown_s=300)
+    for _ in range(2):
+        e.buy(I, 1, {}); clk.t += 2; f.move(I, 98.0, 98.5); e.exit(I, 100, "t"); clk.t += 2; f.move(I, 99.0, 99.5)
+    check("trade: a losing streak starts a cooldown that refuses entries", "cooling off" in e.buy(I, 1)["msg"] and e.state()["cooldown_s"] > 0)
+    clk.t += 301; f.move(I, 99.0, 99.5)
+    check("trade: ... and entries resume afterwards", e.buy(I, 1)["ok"])
+    check("trade: charges estimate is plausible (about Rs 50-60 for a 6,500 buy and 6,600 sell)", 40 < N.est_charges(6500, 6600, 2) < 70, str(N.est_charges(6500, 6600, 2)))
+    # ── reduce-only, partial exit rounding ──
+    f, e = mk(max_lots=3, max_open_lots=4); e.buy(I, 3); e.exit(I, 50, "half")
+    check("trade: a 50% exit sells whole lots (3 lots -> 2 sold... rounds, never above what is held)", 0 < e.pos[I].qty < 195 and e.pos[I].qty % 65 == 0)
+    check("trade: there is no way to sell what is not held (no short)", e.exit(P, 100)["msg"] == "no such position")
+    # ── live ──
+    class Broker:
+        def __init__(self, status="COMPLETE", filled=None, avg=None):
+            self.st, self.filled, self.avg, self.placed, self.pos_rows = status, filled, avg, [], []
+        def place(self, ts, side, qty, price, tag=""):
+            self.placed.append((ts, side, qty, price)); return "OID1"
+        def status(self, oid): return {"status": self.st, "filled": self.placed[-1][2] if self.filled is None else self.filled,
+                                         "avg": self.placed[-1][3] - 0.3 if self.avg is None else self.avg, "msg": ""}
+        def positions(self): return self.pos_rows
+    b = Broker(); f, e = mk(b)
+    check("trade: LIVE mode refuses orders until armed", "not armed" in e.buy(I, 1)["msg"] and not b.placed)
+    check("trade: arming works only in live mode with a broker", e.set_armed(True)["ok"] and mk()[1].set_armed(True)["ok"] is False)
+    r = e.buy(I, 1)
+    check("trade: a live buy is a marketable LIMIT above the ask (99.5 + 1.5% -> 101.00), and books the broker's fill",
+          r["ok"] and b.placed[0] == ("NIFTY25000CE", "BUY", 65, 101.0) and e.pos[I].avg == 100.7, f"{r} {b.placed}")
+    e.exit(I, 100, "t")
+    check("trade: a live sell is a marketable limit BELOW the bid (99.0 - 1.5% -> 97.50)", b.placed[1][:3] == ("NIFTY25000CE", "SELL", 65) and abs(b.placed[1][3] - 97.5) < 0.06, str(b.placed))
+    b2 = Broker("CANCELLED", filled=0); f, e = mk(b2); e.set_armed(True)
+    r = e.buy(I, 1)
+    check("trade: an IOC order that finds nothing is reported, and no position is invented", not r["ok"] and I not in e.pos and not e.halt)
+    b3 = Broker("OPEN"); f, e = mk(b3); e.set_armed(True)
+    r = e.buy(I, 1)
+    check("trade: an order whose outcome cannot be confirmed HALTS the engine until reconciled", not r["ok"] and e.halt and "halted" in e.buy(P, 1)["msg"] and not e.set_armed(True)["ok"])
+    b4 = Broker(); f, e = mk(b4); e.set_armed(True); e.buy(I, 1); b4.pos_rows = [{"tradingsymbol": "NIFTY25000CE", "quantity": 0}]
+    rec = e.reconcile()
+    check("trade: reconcile spots a position the broker no longer shows and halts", not rec["ok"] and e.halt.startswith("book differs"))
+    b4.pos_rows = [{"tradingsymbol": "NIFTY25000CE", "quantity": 65, "average_price": 100.7}]
+    rec = e.reconcile(adopt=True)
+    check("trade: ... and adopting the broker's book clears the halt", rec["ok"] and not e.halt and e.pos[I].qty == 65)
+    b5 = Broker(); f, e = mk(b5); e.set_armed(True); e.buy(I, 1, {"sl_pts": 10}); f.move(I, 85.0, 85.5)
+    e.set_kill(True, flatten=True, why="test")
+    check("trade: the kill switch with flatten sells the live position and disarms", I not in e.pos and not e.armed and b5.placed[-1][1] == "SELL")
+    # ── journal ──
+    d = tempfile.mkdtemp()
+    try:
+        f, e = mk(); e.jdir = d; e.buy(I, 1, {}); e.exit(I, 100, "t")
+        lines = open(os.path.join(d, os.listdir(d)[0])).read().strip().splitlines()
+        check("trade: every order and fill is journalled to a daily file", len(lines) >= 4 and '"ev":"fill"' in lines[-1])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    # ── break-even needs the bid above entry; a dragged stop sits under the bid ──
+    f, e = mk(); e.buy(I, 1, {"sl_pts": 10}); f.move(I, 108.0, 108.5)
+    e.modify(I, {"sl": 99.5})
+    check("trade: a stop at break-even is kept once the bid is above entry", e.pos[I].sl == 99.5, str(e.pos[I].sl))
+    e.modify(I, {"sl": 120.0})
+    check("trade: a stop dragged above the bid is held two ticks under it (it would fire at once otherwise)", e.pos[I].sl == 107.9, str(e.pos[I].sl))
+    # ── state carries the whole closed-trade list and the last 60 orders (the analytics tab reads them) ──
+    f, e = mk(loss_streak=0)
+    for _ in range(30):
+        e.buy(I, 1, {}); e.exit(I, 100, "t"); clk.t += 1; f.move(I, 99.0, 99.5)
+    st = e.state()
+    check("trade: state returns every closed trade (not only the last 25) and the last 60 orders",
+          len(st["trades"]) == 30 and len(st["orders"]) <= 60 and len(st["orders"]) > 25, f'{len(st["trades"])} {len(st["orders"])}')
+    # ── short selling (sell to open) ──
+    f, e = mk(); r = e.sell(I, 1, {"sl_pts": 10, "tp_pts": 20, "trail_pts": 8, "be_pts": 6}); p = e.pos.get(I)
+    check("short: a paper sell fills at the bid, and the stop sits ABOVE and the target BELOW the entry",
+          r["ok"] and p and p.side == -1 and p.avg == 99.0 and (p.sl, p.tp) == (109.0, 79.0), str(r))
+    f.move(I, 90.0, 90.5); e.step()
+    check("short: the mark is the ask, the trail follows the lowest ask down, and break-even is under entry",
+          p.best == 90.5 and p.sl < 109.0 and p.sl <= p.avg, f"{p.best} {p.sl}")
+    f.move(I, 78.5, 78.8); e.step()
+    check("short: the target buys back at the ask for a profit", I not in e.pos and e.trades[-1]["gross"] > 0 and e.trades[-1]["side"] == "short", str(e.trades[-1:]))
+    f, e = mk(); e.sell(I, 1, {"sl_pts": 10}); f.move(I, 110.0, 110.5); e.step()
+    check("short: a stop above the entry buys back at the ask for a loss", I not in e.pos and e.trades[-1]["gross"] < 0 and "stop" in e.trades[-1]["why"])
+    f, e = mk()
+    check("short: a stop is mandatory", "stop" in e.sell(I, 1, {})["msg"].lower() and I not in e.pos)
+    check("short: a stop inside the market is refused", not e.sell(I, 1, {"sl": 99.0})["ok"])
+    f, e = mk(max_short_lots=1, max_lots=3, max_open_lots=6)
+    check("short: lots are capped by the short-lot limit", not e.sell(I, 2, {"sl_pts": 10})["ok"] and e.sell(I, 1, {"sl_pts": 10})["ok"])
+    check("short: the same contract cannot be held long and short at once", not e.buy(I, 1)["ok"])
+    f, e = mk(max_risk=100)
+    check("short: the per-order max risk refuses a stop that is too wide", not e.sell(I, 1, {"sl_pts": 10})["ok"] and e.sell(I, 1, {"sl_pts": 1})["ok"])
+    f, e = mk(allow_short=False)
+    check("short: refused when shorts are not allowed (the live default)", "short" in e.sell(I, 1, {"sl_pts": 10})["msg"].lower() and I not in e.pos)
+    cfg_live = N.Config(env={"NSE_TRADE_MODE": "live"}); cfg_paper = N.Config(env={"NSE_TRADE_MODE": "paper"}); cfg_on = N.Config(env={"NSE_TRADE_MODE": "live", "NSE_TRADE_ALLOW_SHORT": "1"})
+    check("short: off by default in live, on in paper, and on in live only with NSE_TRADE_ALLOW_SHORT=1", not cfg_live.allow_short and cfg_paper.allow_short and cfg_on.allow_short)
+    # live short: SELL to open, BUY (above the ask) to cover
+    b = Broker(); f, e = mk(b, allow_short=True); e.set_armed(True); r = e.sell(I, 1, {"sl_pts": 10}); 
+    check("short live: a sell-to-open is a marketable LIMIT below the bid", r["ok"] and b.placed[0][1] == "SELL" and b.placed[0][3] < 99.0 and e.pos[I].side == -1, f"{r} {b.placed}")
+    e.exit(I, 100, "t")
+    check("short live: the cover is a BUY limit above the ask", b.placed[1][1] == "BUY" and b.placed[1][3] > 99.5 and I not in e.pos, str(b.placed))
+    b4 = Broker(); f, e = mk(b4, allow_short=True); e.set_armed(True); e.sell(I, 1, {"sl_pts": 10}); b4.pos_rows = [{"tradingsymbol": "NIFTY25000CE", "quantity": -65, "average_price": 98.7}]
+    check("short live: reconcile reads the broker's negative quantity as a short and agrees", e.reconcile()["ok"])
+    # ── hedged short ──
+    W = "NFO:NIFTY25100CE"
+    def mkh(broker=None, **kw):
+        f, e = mk(broker, **kw); f.add(W, 60.0, 60.5); f.m[W]["strike"] = 25100; return f, e
+    f, e = mkh(); r = e.place({"inst": I, "side": "SELL", "lots": 1, "exits": {"sl_pts": 10}, "hedge": W}, "h1")
+    check("hedge: the wing is bought first, then the short is sold", r["ok"] and e.pos[W].role == "hedge" and e.pos[I].side == -1 and e.pos[W].side == 1, str(r))
+    check("hedge: the wing cannot be sold while its short is open", "short" in e.exit(W, 100)["msg"].lower() and W in e.pos)
+    f.move(I, 90.0, 90.5); f.move(W, 55.0, 55.5); e.exit(I, 100, "cover"); clk.t += 2; f.move(W, 55.0, 55.5); e.step()
+    check("hedge: the wing is sold automatically once the short is covered", I not in e.pos and W not in e.pos and any(x.get("why") == "hedge released" for x in e.trades), str([x.get("why") for x in e.trades]))
+    f, e = mkh(); f.add(W, 60.0, 60.5, typ="PE")
+    check("hedge: a wing of the other type is refused and nothing is sold", not e.place({"inst": I, "side": "SELL", "lots": 1, "exits": {"sl_pts": 10}, "hedge": W})["ok"] and not e.pos)
+    f, e = mkh(); f.move(I, 99.0, 99.5); f.q[I]["bid"] = 99.0
+    f.m[W]["strike"] = 24900
+    check("hedge: a wing closer to the money than the short is refused", not e.place({"inst": I, "side": "SELL", "lots": 1, "exits": {"sl_pts": 10}, "hedge": W})["ok"])
+    f, e = mkh(); f.q[I]["ts"] = clk() - 60; r = e.place({"inst": I, "side": "SELL", "lots": 1, "exits": {"sl_pts": 10}, "hedge": W}, "h2")
+    check("hedge: if the short cannot be sold the wing is sold back (no orphan long)", not r["ok"] and W not in e.pos and I not in e.pos, str(r))
+    # ── structure (straddle) with a combined stop and target ──
+    f, e = mk(max_short_lots=3)
+    legs = [{"inst": I, "side": "SELL"}, {"inst": P, "side": "SELL"}]
+    r = e.place({"legs": legs, "lots": 1, "g_sl": 500, "g_tp": 800, "kind": "straddle"}, "g1", "test")
+    check("structure: a two-leg short straddle opens as one group", r["ok"] and len(e.groups) == 1 and I in e.pos and P in e.pos, str(r))
+    f.move(I, 112.0, 112.5); f.move(P, 92.0, 92.5); e.step(); clk.t += 4; f.move(I, 112.0, 112.5); f.move(P, 92.0, 92.5); e.step()
+    check("structure: the combined stop closes every leg when the group loses more than the limit", I not in e.pos and P not in e.pos, str(e.state()["groups"]))
+    f, e = mk(max_short_lots=3)
+    e.place({"legs": legs, "lots": 1, "g_sl": 500, "g_tp": 800, "kind": "straddle"}, "g2", "test")
+    f.move(I, 85.0, 85.5); f.move(P, 66.0, 66.5); e.step(); clk.t += 4; f.move(I, 85.0, 85.5); f.move(P, 66.0, 66.5); e.step()
+    check("structure: the combined target closes every leg when the group gains enough", I not in e.pos and P not in e.pos)
+    # ── waiting orders ──
+    f, e = mk()
+    r = e.add_pending({"inst": I, "side": "BUY", "lots": 1, "exits": {"sl_pts": 10}}, {"kind": "px", "op": "le", "level": 90.0})
+    check("waiting: an order is queued, not sent", r["ok"] and len(e.state()["pending"]) == 1 and I not in e.pos, str(r))
+    f.move(I, 89.0, 89.5); clk.t += 2; f.move(I, 89.0, 89.5); e.step(); time.sleep(0.3); e.step()
+    check("waiting: it fires once when the premium reaches the level", I in e.pos and not e.state()["pending"], str(e.state()["pend_log"]))
+    f, e = mk(); e.add_pending({"inst": I, "side": "BUY", "lots": 1, "exits": {}}, {"kind": "px", "op": "le", "level": 90.0})
+    check("waiting: it can be cancelled", e.cancel_pending(e.state()["pending"][0]["id"])["ok"] and not e.state()["pending"])
+    f, e = mk(); e.add_pending({"inst": I, "side": "BUY", "lots": 1, "exits": {}}, {"kind": "px", "op": "le", "level": 90.0}, ttl_s=60); clk.t += 120; f.move(I, 99.0, 99.5); e.step()
+    check("waiting: it expires and is logged", not e.state()["pending"] and e.state()["pend_log"], str(e.state()["pend_log"]))
+    # ── day rules ──
+    f, e = mk(day_target=200, loss_streak=0); e.buy(I, 1, {}); f.move(I, 110.0, 110.5); e.exit(I, 100, "t"); f.move(I, 99.0, 99.5)
+    check("day: reaching the daily target blocks new entries", e.state()["blocked"] and "target" in e.state()["blocked"].lower() and not e.buy(I, 1)["ok"], str(e.state()["blocked"]))
+    f, e = mk(giveback_pct=50, giveback_min=100, loss_streak=0); e.buy(I, 1, {}); f.move(I, 110.0, 110.5); e.exit(I, 100, "t"); clk.t += 2; f.move(I, 99.0, 99.5); e.step()
+    e.buy(I, 1, {}); f.move(I, 99.0, 99.5); clk.t += 2; f.move(I, 90.0, 90.5); e.step(); e.exit(I, 100, "t"); clk.t += 2; f.move(I, 99.0, 99.5); e.step()
+    check("day: giving back too much of the day's peak blocks new entries", e.state()["blocked"] and "back" in e.state()["blocked"].lower(), str(e.state()["blocked"]))
+    # ── trade records ──
+    f, e = mk(loss_streak=0); e.sell(I, 1, {"sl_pts": 10}, tag="Fade"); f.move(I, 92.0, 92.5); e.step(); f.move(I, 97.0, 97.5); e.exit(I, 100, "t")
+    tr = e.trades[-1]
+    check("records: a trade keeps its tag, side, risk, MFE/MAE and slippage", tr["tag"] == "Fade" and tr["side"] == "short" and tr["risk"] > 0 and tr["mfe"] >= 0 and "mae" in tr and "slip" in tr, str(tr))
+
+
+def test_scalping_tab():
+    """The Scalping tab and its endpoints: placement between Home and Today, the
+    ticket / blotter / hotkeys wiring, the chart right-click mute item (the same
+    switch as Alerts > Master Control), the request guard that stops a page on
+    another site from placing an order from your browser, and the charges
+    figure matching the server's."""
+    import re as _re, ast as _ast, subprocess as _sp, time as _tm
+    d = open(DASH, encoding="utf-8").read()
+    s_ = open(SRV, encoding="utf-8").read()
+    nav = d[d.index('<nav class="tabs">'):d.index("</nav>", d.index('<nav class="tabs">'))]
+    check("scalping: its tab sits between Home and Today",
+          nav.index('data-tab="home"') < nav.index('data-tab="scalp"') < nav.index('data-tab="today"') and nav.count('data-tab="scalp"') == 1)
+    check("scalping: one panel, placed before Today's, opened by the tab handler (which also starts its poll)",
+          d.count('id="tab-scalp"') == 1 and d.index('id="tab-scalp"') < d.index('id="tab-today"')
+          and "tab.dataset.tab === 'scalp' && typeof window.renderScalpTab === 'function'" in d)
+    for el in ("scArm", "scKill", "scFlat", "scBuyCE", "scBuyPE", "scLots", "scStrikes", "scLadder", "scExitFields", "scPresets", "scRiskRs", "scConfirm", "scChart", "scChTabs", "scTfs", "scDepth", "scFlow", "scTape", "scDockTabs",
+               "scSide", "scStruct", "scHedge", "scWing", "scMarginBtn", "scTrig", "scTag", "scBook", "scFocus", "scDockBody", "scMod", "scTurn", "scPin", "scDayPnl", "scEq"):
+        if d.count(f'id="{el}"') != 1:
+            check(f"scalping: element {el} present exactly once", False); break
+    else:
+        check("scalping: every ticket, chart, depth, blotter and risk element is present exactly once", True)
+    i = d.index("FEATURE: Scalping terminal"); j = d.index("// ---------- boot ----------", i)
+    seg = d[i:j]
+    check("scalping: orders carry the intent header and the PIN, and go to /api/trade/ on the page's own server",
+          "'X-Trade-Intent': '1'" in seg and "h['X-Trade-Pin'] = pin" in seg and "/api/trade/${path}" in seg)
+    check("scalping: LIVE orders need a second press (confirm) and the buy buttons say why they are disabled",
+          "SC.pending !== typ" in seg and "'Confirm live'" in seg and "Entries blocked: ${w}" in seg and "short selling is off in LIVE mode" in seg)
+    check("scalping: polling is twice a second, only while the tab is open and visible, and single-flight",
+          "SC_POLL_MS = 500" in seg and "setInterval(scPoll, SC_POLL_MS)" in seg and "classList.contains('active') || document.hidden || SC.busy" in seg)
+    check("scalping: hotkeys run in the capture phase and stop the page's global letter shortcuts",
+          "}, true);" in seg[seg.index("hotkeys:"):] and "e.stopImmediatePropagation()" in seg and "if (!panel.classList.contains('active')) return;" in seg)
+    check("scalping: the positions dock is not rebuilt under a half-finished click",
+          "if (SC.down && (tab === 'pos' || tab === 'pend')) return;" in seg and "body.addEventListener('mousedown', () => { SC.down = true; })" in seg)
+    check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
+          "location.protocol === 'file:'" in seg and "_source !== 'zerodha'" in seg)
+    # ── the chart right-click mute item ──
+    ci = d.index("const onCtx = ev => {"); cj = d.index("document.addEventListener('contextmenu', onCtx, true);")
+    cseg = d[ci:cj]
+    check("chart right-click: Mute / Unmute drives the Alerts > Master Control checkbox through its own change handler",
+          "mm.checked = !muted; mm.dispatchEvent(new Event('change'))" in cseg and "document.getElementById('masterMute')" in cseg
+          and "'🔊 Unmute everything' : '🔇 Mute everything'" in cseg and "const muted = _masterMuted();" in cseg
+          and "Mute everything on this browser" in d)
+    check("chart right-click: the mute item sits above the Reset separator, so Reset stays last",
+          cseg.index("Mute everything") < cseg.index("ctx-sep-reset") < cseg.index("item('↺ Reset Defaults…'"))
+    # ── server endpoints and the request guard ──
+    check("scalping server: state and journal are GET, every action is POST, all under /api/trade/",
+          '"/api/trade/state"' in s_ and '"/api/trade/journal"' in s_ and 'parsed.path.startswith("/api/trade/")' in s_
+          and all(f'path == "{a}"' in s_ for a in ("order", "exit", "modify", "cancel", "margin", "flatten", "kill", "arm", "reconcile")))
+    check("scalping server: the engine only exists on DATA_SOURCE=zerodha, and lots must be a real integer (no 1.5, no True)",
+          'if RUN_DATA_SOURCE != "zerodha"' in s_ and "not isinstance(lots, int) or isinstance(lots, bool)" in s_ and "def _trade_margin" in s_ and 'path == "margin"' in s_)
+    tree = _ast.parse(s_)
+    ns = {"time": _tm, "_trade_mod": None}
+    for node in tree.body:
+        if isinstance(node, _ast.FunctionDef) and node.name in ("_trade_guard", "_trade_exits"):
+            exec(compile(_ast.Module([node], []), "srv", "exec"), ns)
+    pin = {"v": ""}
+    ns["_trade_engine"] = lambda: type("E", (), {"cfg": type("C", (), {"pin": pin["v"]})()})()
+    ns["_TRADE_KEYS"] = ("sl_pts", "tp_pts", "tp1_pts", "tp1_pct", "trail_pts", "be_pts", "sl", "tp", "tp1", "u_stop", "u_target", "time_stop_s")
+    class _H:
+        def __init__(self, **h): self.headers = {k.replace("_", "-"): v for k, v in h.items()}
+    g = ns["_trade_guard"]
+    orig_sleep = _tm.sleep; ns["time"] = type("T", (), {"sleep": staticmethod(lambda x: None)})
+    check("trade guard: a POST without the page's intent header is refused (a cross-site text/plain POST cannot add it)",
+          g(_H(Host="h:8765"), True) is not None and g(_H(Host="h:8765", X_Trade_Intent="1"), True) is None)
+    check("trade guard: a request from another site's page (Origin differs from Host) is refused, even with the header",
+          g(_H(Host="h:8765", Origin="http://evil.example", X_Trade_Intent="1"), True) is not None
+          and g(_H(Host="h:8765", Origin="http://h:8765", X_Trade_Intent="1"), True) is None
+          and g(_H(Host="h:8765", Origin="http://evil.example"), False) is not None)
+    pin["v"] = "1234"
+    check("trade guard: with a PIN set, a wrong or missing PIN is refused and the right one passes",
+          g(_H(Host="h", X_Trade_Intent="1"), True) is not None and g(_H(Host="h", X_Trade_Intent="1", X_Trade_Pin="0000"), True) is not None
+          and g(_H(Host="h", X_Trade_Intent="1", X_Trade_Pin="1234"), True) is None)
+    ex = ns["_trade_exits"]({"sl_pts": "8", "tp_pts": -3, "evil": 1, "u_stop": "x", "tp1_pct": 50, "time_stop_s": 1e12})
+    check("trade exits: only known numeric keys, non-negative and sane, are passed to the engine", ex == {"sl_pts": 8.0, "tp1_pct": 50.0})
+    # ── the tab's charges estimate matches the engine's ──
+    m = _re.search(r"function scCharges\(.*?\n  \}\n", d, _re.S)
+    sys.path.insert(0, HERE)
+    import nse_trade as _N
+    try:
+        script = m.group(0) + "console.log(JSON.stringify([[10000,10000,2],[9532,9800,2],[150000,152000,2]].map(a=>scCharges(...a))));"
+        out = _sp.run(["node", "-e", script], capture_output=True, text=True, timeout=20)
+        js = __import__("json").loads(out.stdout)
+        py = [_N.est_charges(*a) for a in ((10000, 10000, 2), (9532, 9800, 2), (150000, 152000, 2))]
+        check("scalping: the tab's charge estimate equals the engine's (same STT, exchange, SEBI, stamp, GST)",
+              all(abs(a - b) < 0.01 for a, b in zip(js, py)), f"{js} vs {py}")
+    except FileNotFoundError:
+        warn("node not installed", "charges parity unchecked")
+    # ── the tick tape the chart is built from ──
+    import nse_adapter_zerodha as _Z
+    _Z._tape.clear()
+    K = "NFO:NIFTY25000CE"
+    for i, (l, b, a) in enumerate([(100, 99.5, 100), (100, 99.5, 100), (101, 100.5, 101), (102, 101.5, 102)]):
+        _Z._tape_add(K, 1000 + i, {"ltp": l, "bid": b, "ask": a, "bid_qty": 10, "ask_qty": 10, "volume": 100 + (i > 1)})
+    r0 = _Z.tape_since(K, 0)
+    check("tape: identical consecutive ticks are stored once and rows carry a rising sequence number",
+          len(r0["rows"]) == 3 and [r[0] for r in r0["rows"]] == [1, 2, 3] and r0["cur"] == 3 and not r0["reset"])
+    r1 = _Z.tape_since("NIFTY25000CE", 2)
+    check("tape: a cursor returns only newer rows (the bare name works too), and limit keeps the newest",
+          [r[0] for r in r1["rows"]] == [3] and [r[0] for r in _Z.tape_since(K, 0, limit=2)["rows"]] == [2, 3])
+    r2 = _Z.tape_since(K, 99)
+    check("tape: a cursor ahead of the server (it restarted) is flagged reset and gets the full tape; an unknown key is empty",
+          r2["reset"] and len(r2["rows"]) == 3 and _Z.tape_since("NFO:NOPE", 0) == {"cur": 0, "rows": [], "reset": False})
+    for i in range(_Z._TAPE_MAX + 50):
+        _Z._tape_add(K, 2000 + i, {"ltp": 100 + i, "bid": 1, "ask": 2, "bid_qty": 1, "ask_qty": 1, "volume": i})
+    check("tape: memory is bounded", len(_Z._tape[K]) == _Z._TAPE_MAX)
+    _Z._tape.clear()
+    check("scalping server: the state call parses per-contract tape cursors with rpartition and only accepts option names or the listed ones",
+          'rpartition(":")' in s_ and "tape_since" in s_ and "[A-Z0-9]{8,30}" in s_)
+    env = open(os.path.join(HERE, "env.example"), encoding="utf-8").read() if os.path.exists(os.path.join(HERE, "env.example")) else ""
+    check("env.example documents NSE_TRADE_MODE (paper default) and the risk limits",
+          "NSE_TRADE_MODE" in env and "NSE_TRADE_DAY_LOSS" in env and "NSE_TRADE_PIN" in env)
+
+
+def test_remote_access():
+    """nse_access: LAN untouched; every outside client (public IP, or anything
+    behind a proxy) needs the token; fails closed; lockout; HTTPS wiring."""
+    import importlib, io, tempfile, shutil, ssl as _ssl, socket as _sk
+    sys.path.insert(0, HERE)
+    A = importlib.import_module("nse_access")
+    class H:
+        def __init__(self, ip, cmd="GET", path="/api/chain", headers=None, body=b""):
+            self.client_address = (ip, 5555); self.command = cmd; self.path = path
+            self.headers = {k: v for k, v in (headers or {}).items()}
+            self.headers.setdefault("Content-Length", str(len(body)))
+            self.rfile = io.BytesIO(body); self.wfile = io.BytesIO(); self.sent = None; self.out = {}
+        def send_response(self, c): self.sent = c
+        def send_header(self, k, v): self.out[k] = v
+        def end_headers(self): pass
+    class Hd(dict):
+        def get(self, k, d=None):
+            for kk, v in self.items():
+                if kk.lower() == k.lower(): return v
+            return d
+    def mk(ip, **kw):
+        h = H(ip, **kw); h.headers = Hd(h.headers); return h
+    old = {k: os.environ.get(k) for k in ("NSE_ACCESS_TOKEN", "NSE_AUTH_LAN")}
+    try:
+        os.environ.pop("NSE_AUTH_LAN", None)
+        os.environ.pop("NSE_ACCESS_TOKEN", None)
+        check("access: LAN, loopback and link-local clients are untouched; public, CGNAT and IPv6 global are outside",
+              all(A.is_private(x) for x in ("192.168.1.4", "10.0.0.2", "172.16.5.5", "127.0.0.1", "::1", "fe80::1", "::ffff:192.168.1.9"))
+              and not any(A.is_private(x) for x in ("8.8.8.8", "203.0.113.7", "100.64.1.1", "2001:db8::1")))
+        check("access: a LAN client passes with no token set (behaviour unchanged)", A.guard(mk("192.168.1.9")) is True)
+        h = mk("203.0.113.7")
+        check("access: no token set -> an outside client is refused (fails closed)", A.guard(h) is False and h.sent == 403)
+        os.environ["NSE_ACCESS_TOKEN"] = "short"
+        h = mk("203.0.113.7", headers={"Authorization": "Bearer short"})
+        check("access: a token under 12 characters does not open outside access either", A.guard(h) is False and h.sent == 403)
+        tok = "correct-horse-battery"
+        os.environ["NSE_ACCESS_TOKEN"] = tok
+        h = mk("127.0.0.1", headers={"X-Forwarded-For": "203.0.113.7"})
+        check("access: a request through a reverse proxy (127.0.0.1 + X-Forwarded-For) is outside, not LAN",
+              A.is_remote(h) and A.guard(h) is False and h.sent == 401)
+        h = mk("203.0.113.7", path="/nse_dashboard.html")
+        A.guard(h)
+        check("access: an outside visitor gets the sign-in page, an API call gets 401 json",
+              h.sent == 401 and b"<form" in h.wfile.getvalue() and tok.encode() not in h.wfile.getvalue()
+              and mk("203.0.113.7").sent is None)
+        ok = mk("203.0.113.7", cmd="POST", path="/api/login", body=("token=" + tok).encode())
+        A.guard(ok)
+        ck = ok.out.get("Set-Cookie", "")
+        check("access: right token -> 303 and an HttpOnly SameSite=Strict cookie holding an HMAC, never the token",
+              ok.sent == 303 and "HttpOnly" in ck and "SameSite=Strict" in ck and tok not in ck and A.session_value() in ck and "Secure" not in ck)
+        ok2 = mk("203.0.113.7", cmd="POST", path="/api/login", body=("token=" + tok).encode())
+        A.guard(ok2, tls=True)
+        check("access: the cookie is Secure once HTTPS is on", "Secure" in ok2.out.get("Set-Cookie", ""))
+        cookie = "nse_auth=" + A.session_value()
+        check("access: the cookie, or a bearer token, opens the API; a forged cookie or wrong bearer does not",
+              A.guard(mk("203.0.113.7", headers={"Cookie": cookie})) is True
+              and A.guard(mk("203.0.113.7", headers={"Authorization": "Bearer " + tok})) is True
+              and A.guard(mk("203.0.113.7", headers={"Cookie": "nse_auth=abc"})) is False
+              and A.guard(mk("203.0.113.7", headers={"Authorization": "Bearer wrong-token-value"})) is False)
+        os.environ["NSE_AUTH_LAN"] = "1"
+        check("access: NSE_AUTH_LAN=1 asks the LAN to sign in too", A.guard(mk("192.168.1.9")) is False)
+        os.environ.pop("NSE_AUTH_LAN")
+        A._fails.clear()
+        import time as _t
+        _sl = _t.sleep; _t.sleep = lambda s: None
+        try:
+            codes = []
+            for i in range(6):
+                hh = mk("198.51.100.5", cmd="POST", path="/api/login", body=b"token=nope%d" % i); A.guard(hh); codes.append(hh.sent)
+            hh = mk("198.51.100.5", cmd="POST", path="/api/login", body=("token=" + tok).encode()); A.guard(hh)
+        finally:
+            _t.sleep = _sl
+        check("access: five wrong tokens lock that address out, even for the right token afterwards",
+              codes == [401] * 5 + [429] and hh.sent == 429, str(codes))
+    finally:
+        for k, v in old.items():
+            if v is None: os.environ.pop(k, None)
+            else: os.environ[k] = v
+    # the certificate: made on first start, names in it, remade when the names change
+    tmp = tempfile.mkdtemp()
+    oldp = os.environ.get("NSE_PUBLIC_IP")
+    try:
+        cert, key = os.path.join(tmp, "tls", "server.crt"), os.path.join(tmp, "tls", "server.key")
+        os.environ["NSE_PUBLIC_IP"] = "203.0.113.7"
+        dns, ips = A.ensure_cert(cert, key)
+        m1 = os.path.getmtime(cert)
+        A.ensure_cert(cert, key)
+        same = os.path.getmtime(cert) == m1
+        os.environ["NSE_PUBLIC_IP"] = "203.0.113.8"
+        dns2, ips2 = A.ensure_cert(cert, key)
+        ctx = A.server_context(cert, key)
+        check("access: a self-signed certificate is made covering localhost, the LAN address and the public IP; reused; remade when the IP changes; loads as a TLS 1.2+ server context",
+              "203.0.113.7" in ips and "127.0.0.1" in ips and "localhost" in dns and same and "203.0.113.8" in ips2
+              and ctx.minimum_version == _ssl.TLSVersion.TLSv1_2 and oct(os.stat(key).st_mode & 0o777) == "0o600")
+        # the openssl-command fallback (no 'cryptography' package) makes a usable one too
+        c2, k2 = os.path.join(tmp, "o.crt"), os.path.join(tmp, "o.key")
+        try:
+            A._make_with_openssl(c2, k2, ["localhost"], ["127.0.0.1"], 30)
+            A.server_context(c2, k2)
+            fb = True
+        except FileNotFoundError:
+            fb = True       # no openssl binary on this machine; the cryptography path covers it
+        check("access: the openssl fallback produces a loadable certificate", fb)
+    finally:
+        if oldp is None: os.environ.pop("NSE_PUBLIC_IP", None)
+        else: os.environ["NSE_PUBLIC_IP"] = oldp
+        shutil.rmtree(tmp, ignore_errors=True)
+    ssrc = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    check("server: the guard runs first in do_GET, do_POST and do_OPTIONS",
+          ssrc.count("if not _acc.guard(self, getattr(self.server, \"_tls\", False)):") == 3)
+    check("server: HTTPS is wired - handshake in the client's own thread, never plain http by mistake, own-loopback call follows the scheme",
+          "_acc.wrap_listener(server, _acc.server_context(_cert, _key))" in ssrc and "_acc.handshake(request)" in ssrc
+          and "exiting rather than serving plain http by mistake" in ssrc and "_ssl._create_unverified_context() if _tls else None" in ssrc)
+
+
 def test_server_reachability():
     """"Can't reach the local server" while it was up: a listen backlog of 5
     (refused connections under LAN bursts), the replay rebuild restarted on
@@ -3451,7 +3909,7 @@ def main():
     for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

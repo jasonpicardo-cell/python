@@ -101,6 +101,8 @@ import time
 import concurrent.futures
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import nse_access as _acc      # HTTPS + the login that outside (non-LAN) clients must pass
+import nse_trade as _trade_mod # the Scalping tab's order engine (paper by default)
 from urllib.parse import urlparse, parse_qs
 
 try:
@@ -6610,6 +6612,298 @@ def _stock_search(q: str) -> dict:
     return {"results": (prefix + others)[:50]}
 
 
+# ── SCALPING TERMINAL: the engine's feed and broker, and its endpoints ───────
+# nse_trade.Engine does the work (paper by default; LIVE only with
+# NSE_TRADE_MODE=live AND the tab's ARM switch). These classes only connect it
+# to the Zerodha adapter's live ticks and order calls.
+_trade_eng = None
+_trade_eng_lock = threading.Lock()
+
+
+def _zmod():
+    import nse_adapter_zerodha as _z
+    return _z
+
+
+class _ZFeed:
+    """Quotes, depth, option metadata and spot for the engine - all from the
+    adapter's in-memory tick store, so reading them costs no broker call."""
+    @staticmethod
+    def _key(inst):
+        return inst if ":" in inst else "NFO:" + inst
+
+    def quote(self, inst):
+        z = _zmod()
+        t = z._ticks.get(self._key(inst))
+        if not t or not t.get("ltp"):
+            return None
+        return {"ltp": t.get("ltp"), "bid": t.get("bid") or 0, "ask": t.get("ask") or 0,
+                "bid_qty": t.get("bid_qty"), "ask_qty": t.get("ask_qty"), "ts": t.get("ts") or 0}
+
+    def depth(self, inst):
+        d = _zmod()._depth.get(self._key(inst))
+        return {"bids": list(d.get("bids") or []), "asks": list(d.get("asks") or [])} if d else None
+
+    def meta(self, inst):
+        m = _zmod()._meta_of.get(self._key(inst))
+        return dict(m) if m else None
+
+    def spot(self, under):
+        z = _zmod()
+        t = z._ticks.get(z._idx_key.get((under or "").upper()) or "")
+        return float(t["ltp"]) if t and t.get("ltp") and time.time() - float(t.get("ts") or 0) < 10 else 0.0
+
+
+class _ZBroker:
+    def place(self, tradingsymbol, side, qty, price, tag=""):
+        return _zmod().place_order(tradingsymbol, side, qty, price, tag)
+
+    def status(self, order_id):
+        return _zmod().order_status(order_id)
+
+    def positions(self):
+        return _zmod().net_positions()
+
+    def margin(self, orders):
+        return _zmod().order_margin(orders)
+
+
+def _trade_engine():
+    """The one engine, built on first use. None unless DATA_SOURCE=zerodha."""
+    global _trade_eng
+    if _trade_eng is not None:
+        return _trade_eng
+    if RUN_DATA_SOURCE != "zerodha":
+        return None
+    with _trade_eng_lock:
+        if _trade_eng is None:
+            cfg = _trade_mod.Config()
+            eng = _trade_mod.Engine(_ZFeed(), _ZBroker(), cfg,
+                                    journal_dir=_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "trade_log"))
+            eng.start()
+            _trade_eng = eng
+            print(f"[trade] Scalping engine ready - {cfg.mode.upper()} mode"
+                  + ("" if cfg.mode == "paper" else " (orders go to Zerodha once ARMed in the tab)")
+                  + f"; limits: {cfg.max_lots} lot/order, {cfg.max_open_lots} open, day loss Rs {cfg.day_loss:,.0f}"
+                  + f"; shorts {'ON (' + str(cfg.max_short_lots) + ' lot cap)' if cfg.allow_short else 'OFF (NSE_TRADE_ALLOW_SHORT=1 to allow)'}")
+    return _trade_eng
+
+
+_TRADE_KEYS = ("sl_pts", "tp_pts", "tp1_pts", "tp1_pct", "trail_pts", "be_pts", "sl", "tp", "tp1", "u_stop", "u_target", "time_stop_s")
+
+
+def _trade_exits(raw) -> dict:
+    out = {}
+    for k in _TRADE_KEYS:
+        if isinstance(raw, dict) and k in raw:
+            try:
+                v = float(raw[k] or 0)
+            except (TypeError, ValueError):
+                continue
+            if v == v and abs(v) < 1e9 and v >= 0:
+                out[k] = v
+    return out
+
+
+def _trade_num(v) -> float:
+    try:
+        x = float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return x if (x == x and 0 <= x < 1e9) else 0.0
+
+
+_margin_cache: dict = {}
+
+
+def _trade_margin(eng, body: dict) -> dict:
+    """What the broker would block for this order (all legs together). One broker call,
+    made only when asked, cached for 20 s per identical request."""
+    import re as _re_m
+    legs = body.get("legs") if isinstance(body.get("legs"), list) else [{"inst": body.get("inst"), "side": body.get("side")}]
+    lots = body.get("lots")
+    if not isinstance(lots, int) or isinstance(lots, bool) or not 1 <= lots <= 50:
+        return {"ok": False, "msg": "lots must be a whole number"}
+    orders = []
+    for lg in legs[:4]:
+        inst = str((lg or {}).get("inst") or "")
+        if not _re_m.match(r"^(NFO:)?[A-Z0-9]{8,30}$", inst):
+            return {"ok": False, "msg": "bad instrument"}
+        meta, q = eng.feed.meta(inst), eng.feed.quote(inst)
+        if not meta or not q:
+            return {"ok": False, "msg": "no quote for " + inst.split(":")[-1]}
+        sd = "SELL" if str((lg or {}).get("side") or "BUY").upper().startswith("S") else "BUY"
+        px = (q.get("bid") if sd == "SELL" else q.get("ask")) or q.get("ltp")
+        orders.append({"tradingsymbol": meta.get("ts") or inst.split(":")[-1], "side": sd, "qty": lots * int(meta["lot"]), "price": px})
+    key = repr(sorted((o["tradingsymbol"], o["side"], o["qty"]) for o in orders))
+    hit = _margin_cache.get(key)
+    if hit and time.time() - hit[0] < 20:
+        return dict(hit[1], cached=True)
+    if not eng.broker:
+        return {"ok": False, "msg": "no broker connection"}
+    try:
+        m = eng.broker.margin(orders)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "msg": f"margin check failed: {type(e).__name__}: {str(e)[:120]}"}
+    out = {"ok": True, "msg": f"margin Rs {m['required']:,.0f}", "required": m["required"], "initial": m["initial"]}
+    _margin_cache[key] = (time.time(), out)
+    if len(_margin_cache) > 40:
+        _margin_cache.clear()
+    return out
+
+
+def _trade_state_payload(q: str = "", u: str = "", t: str = "") -> dict:
+    eng = _trade_engine()
+    if eng is None:
+        return {"enabled": False, "why": "The Scalping terminal needs DATA_SOURCE=zerodha (live option quotes and order calls)."}
+    st = eng.state()
+    z = _zmod()
+    try:
+        zs = z.status()
+    except Exception:
+        zs = {}
+    st["feed"] = {"streaming": bool(zs.get("streaming")), "connected": bool(zs.get("connected")), "error": zs.get("last_error") or ""}
+    st["broker_ready"] = bool(zs.get("connected"))
+    # live quotes + depth for the ticket's instruments, straight from the tick
+    # store (no broker call): the tab asks for what it is showing
+    import re as _re_q
+    feed, now = eng.feed, time.time()
+    qs = {}
+    for inst in [x for x in (q or "").split(",") if _re_q.match(r"^(NFO:)?[A-Z0-9]{8,30}$", x)][:12]:
+        qq = feed.quote(inst)
+        if qq:
+            d = feed.depth(inst) or {}
+            qs[inst] = {**qq, "age": round(now - float(qq.get("ts") or 0), 1),
+                        "bids": (d.get("bids") or [])[:5], "asks": (d.get("asks") or [])[:5]}
+    st["quotes"] = qs
+    spot_ok = bool(_re_q.match(r"^[A-Z]{3,12}$", u or ""))
+    if spot_ok:
+        st["spot"] = feed.spot(u)
+    # tick tape since the caller's cursors ("NAME:seq,NAME:seq"; NAME is an
+    # option symbol or the underlying for the spot), newest rows only
+    tp = {}
+    for part in [x for x in (t or "").split(",") if x][:14]:
+        name, _, cur = part.rpartition(":")
+        if not cur.isdigit() or not name:
+            continue
+        if name in qs or (":" in name and _re_q.match(r"^(NFO:)?[A-Z0-9]{8,30}$", name)):
+            key = name
+        elif spot_ok and name == u:
+            key = _zmod()._idx_key.get(u) or ""
+        else:
+            continue
+        if key:
+            tp[name] = _zmod().tape_since(key, int(cur), 1500)
+    st["tape"] = tp
+    return st
+
+
+def _trade_guard(h, mutating: bool):
+    """Why this request may not touch the engine, or None. A page on ANOTHER
+    site must not be able to place an order from your browser: a cross-site
+    POST needs no preflight when its type is text/plain, and the server answers
+    CORS '*', so the request itself is vetted - same Origin as the Host it was
+    sent to, a custom header only our page adds, and the PIN if one is set."""
+    org = h.headers.get("Origin")
+    if org:
+        from urllib.parse import urlparse as _up
+        if _up(org).netloc != (h.headers.get("Host") or ""):
+            return "cross-site request refused"
+    if not mutating:
+        return None
+    if h.headers.get("X-Trade-Intent") != "1":
+        return "missing X-Trade-Intent header"
+    eng = _trade_engine()
+    pin = eng.cfg.pin if eng else ""
+    if pin:
+        import hmac as _hm
+        if not _hm.compare_digest((h.headers.get("X-Trade-Pin") or "").encode(), pin.encode()):
+            time.sleep(0.5)
+            return "wrong or missing trade PIN"
+    return None
+
+
+def _trade_post(h, path: str, body: dict) -> None:
+    why = _trade_guard(h, True)
+    if why:
+        h._send_json({"ok": False, "msg": why}, status=403)
+        return
+    eng = _trade_engine()
+    if eng is None:
+        h._send_json({"ok": False, "msg": "Scalping terminal needs DATA_SOURCE=zerodha"}, status=409)
+        return
+    import re as _re_tr
+    name_ok = lambda s: bool(_re_tr.match(r"^(NFO:)?[A-Z0-9]{8,30}$", str(s or "")))          # noqa: E731
+    inst = str(body.get("inst") or "")
+    if path in ("order", "exit", "modify") and not body.get("legs") and not body.get("grp") and not name_ok(inst):
+        h._send_json({"ok": False, "msg": "bad instrument"}, status=400)
+        return
+    try:
+        if path == "order":
+            lots = body.get("lots")
+            if not isinstance(lots, int) or isinstance(lots, bool):
+                h._send_json({"ok": False, "msg": "lots must be a whole number"}, status=400)
+                return
+            side = str(body.get("side") or "BUY").upper()
+            if side not in ("BUY", "SELL"):
+                h._send_json({"ok": False, "msg": "side must be BUY or SELL"}, status=400)
+                return
+            spec = {"inst": inst, "side": side, "lots": lots, "exits": _trade_exits(body.get("exits")),
+                    "tag": "".join(ch for ch in str(body.get("tag") or "")[:24] if ch.isalnum() or ch in " -_/+.")}
+            hedge = str(body.get("hedge") or "")
+            if hedge:
+                if not name_ok(hedge):
+                    h._send_json({"ok": False, "msg": "bad hedge instrument"}, status=400)
+                    return
+                spec["hedge"] = hedge
+            legs = body.get("legs")
+            if legs:
+                if not isinstance(legs, list) or not all(isinstance(x, dict) and name_ok(x.get("inst")) for x in legs):
+                    h._send_json({"ok": False, "msg": "bad legs"}, status=400)
+                    return
+                spec["legs"] = [{"inst": str(x["inst"]), "side": "SELL" if str(x.get("side") or "BUY").upper().startswith("S") else "BUY"} for x in legs[:4]]
+                spec["g_sl"] = _trade_num(body.get("g_sl"))
+                spec["g_tp"] = _trade_num(body.get("g_tp"))
+                spec["kind"] = "".join(ch for ch in str(body.get("kind") or "")[:16] if ch.isalnum())
+            trig = body.get("trigger")
+            if isinstance(trig, dict) and trig:
+                r = eng.add_pending(spec, {"kind": trig.get("kind"), "op": trig.get("op"), "level": _trade_num(trig.get("level"))},
+                                    ttl_s=_trade_num(trig.get("ttl_s")) or 1800)
+            else:
+                r = eng.place(spec, req_id=str(body.get("req_id") or "")[:40] or None, src=str(body.get("src") or "manual")[:12])
+        elif path == "cancel":
+            r = eng.cancel_pending(str(body.get("id") or "")[:20] or None)
+        elif path == "exit":
+            r = eng.exit(inst, max(1, min(100, int(body.get("pct") or 100))), why=str(body.get("why") or "manual")[:40], wait=True)
+        elif path == "modify":
+            if body.get("grp"):
+                r = eng.modify_group(str(body["grp"])[:20], sl=_trade_num(body.get("g_sl")) if "g_sl" in body else None,
+                                     tp=_trade_num(body.get("g_tp")) if "g_tp" in body else None)
+            else:
+                ex = _trade_exits(body.get("exits"))
+                if body.get("clear"):
+                    ex["clear"] = True
+                r = eng.modify(inst, ex)
+        elif path == "margin":
+            r = _trade_margin(eng, body)
+        elif path == "flatten":
+            r = eng.flatten("flatten all", wait=True)
+        elif path == "kill":
+            r = eng.set_kill(bool(body.get("on")), flatten=bool(body.get("flatten")), why="manual (tab)")
+        elif path == "arm":
+            r = eng.set_armed(bool(body.get("on")))
+        elif path == "reconcile":
+            r = eng.reconcile(adopt=bool(body.get("adopt")))
+        else:
+            h._send_json({"ok": False, "msg": "unknown trade action"}, status=404)
+            return
+    except Exception as e:  # noqa: BLE001
+        print(f"[trade] {path} failed: {type(e).__name__}: {e}")
+        r = {"ok": False, "msg": f"{type(e).__name__}: {e}"}
+    r["state"] = _trade_state_payload()
+    h._send_json(r)
+
+
 class Handler(BaseHTTPRequestHandler):
     # Quiet the default per-request console spam; we print our own concise log line.
     def log_message(self, fmt, *args):
@@ -6662,6 +6956,8 @@ class Handler(BaseHTTPRequestHandler):
         print(f"[http] {msg}")
 
     def do_OPTIONS(self):
+        if not _acc.guard(self, getattr(self.server, "_tls", False)):
+            return
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -6669,6 +6965,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if not _acc.guard(self, getattr(self.server, "_tls", False)):
+            return
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         # name this request for the broker's call counter, so the Diagnostics
@@ -7324,9 +7622,11 @@ class Handler(BaseHTTPRequestHandler):
 
             # 5. what a real call produces right now
             try:
-                import urllib.request as _u
-                inner = f"http://127.0.0.1:{self.server.server_address[1]}/api/intraday-candles?symbol={symbol}&interval=5&force=1"
-                with _u.urlopen(inner, timeout=25) as rr:
+                import urllib.request as _u, ssl as _ssl
+                _tls = getattr(self.server, "_tls", False)
+                inner = f"{'https' if _tls else 'http'}://127.0.0.1:{self.server.server_address[1]}/api/intraday-candles?symbol={symbol}&interval=5&force=1"
+                _cx = _ssl._create_unverified_context() if _tls else None      # our own loopback, own certificate
+                with _u.urlopen(inner, timeout=25, context=_cx) as rr:
                     j = json.loads(rr.read().decode())
                 add("actual_result", bool(j.get("candles")),
                     f"source={j.get('source')} coverage={j.get('coverage')} "
@@ -7338,6 +7638,28 @@ class Handler(BaseHTTPRequestHandler):
                               if not any(x["ok"] for x in rep["checks"][:3])
                               else "At least one backfill source is working")
             self._send_json(rep)
+            return
+
+        if parsed.path == "/api/trade/state":
+            why = _trade_guard(self, False)
+            if why:
+                self._send_json({"enabled": False, "why": why}, status=403)
+                return
+            _qs = parse_qs(parsed.query)
+            self._send_json(_trade_state_payload((_qs.get("q") or [""])[0], (_qs.get("u") or [""])[0], (_qs.get("t") or [""])[0]))
+            return
+
+        if parsed.path == "/api/trade/journal":
+            eng = _trade_engine()
+            rows = []
+            try:
+                fp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "trade_log", f"{eng.day if eng else ''}.jsonl")
+                if eng and _os.path.exists(fp):
+                    with open(fp) as f:
+                        rows = [json.loads(x) for x in f.read().splitlines()[-300:] if x.strip()]
+            except Exception as e:  # noqa: BLE001
+                rows = [{"ev": "error", "msg": str(e)}]
+            self._send_json({"rows": rows})
             return
 
         if parsed.path == "/api/turn-times":
@@ -9641,6 +9963,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": f"Unknown route: {parsed.path}"}, status=404)
 
     def do_POST(self):
+        if not _acc.guard(self, getattr(self.server, "_tls", False)):
+            return
         parsed = urlparse(self.path)
         try:
             content_length = int(self.headers.get("Content-Length", 0))
@@ -9656,6 +9980,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(run_backtest(symbol, body))
             except Exception as e:  # noqa: BLE001
                 self._send_json({"error": f"Backtest failed: {e}"}, status=500)
+            return
+
+        if parsed.path.startswith("/api/trade/"):
+            _trade_post(self, parsed.path[len("/api/trade/"):], body if isinstance(body, dict) else {})
             return
 
         if parsed.path == "/api/turn-log":
@@ -10006,11 +10334,19 @@ def main():
         # are REFUSED - which a browser reports as "can't reach the server"
         # although the server is up. Queued connections cost nothing.
         request_queue_size = 128
+        _tls = False
+        def finish_request(self, request, client_address):
+            # TLS handshake in THIS client's thread (a slow or hostile client
+            # must not hold up accept()); a failed handshake is just a scan or
+            # a plain-http client knocking on the https port
+            if self._tls:
+                _acc.handshake(request)
+            super().finish_request(request, client_address)
         def handle_error(self, request, client_address):
-            import sys as _s
+            import sys as _s, ssl as _ssl_
             exc = _s.exc_info()[1]
-            if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
-                return                      # routine client disconnect
+            if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, _ssl_.SSLError, TimeoutError)):
+                return                      # routine client disconnect / failed handshake
             super().handle_error(request, client_address)
 
     if _envbool("NSE_KEEP_AWAKE", RUN_KEEP_AWAKE):
@@ -10048,6 +10384,28 @@ def main():
         _start_reconciler([s.strip() for s in (args.poll or "NIFTY").split(",")],
                           float(_os.environ.get("NSE_RECONCILE_INTERVAL", RUN_RECONCILE_INTERVAL)))
     server = _QuietThreadingHTTPServer((args.host, args.port), Handler)
+    # ── HTTPS (NSE_HTTPS=1, or your own NSE_TLS_CERT / NSE_TLS_KEY) ──
+    _scheme = "http"
+    if _envbool("NSE_HTTPS", False) or (env("NSE_TLS_CERT") and env("NSE_TLS_KEY")):
+        try:
+            _cert, _key, _own = _acc.tls_files(_os.path.dirname(_os.path.abspath(__file__)))
+            if _own:
+                _dns, _ips = _acc.ensure_cert(_cert, _key)
+                print(f"[tls] self-signed certificate {_cert} covers: {', '.join(_dns + _ips)}")
+                if not (env("NSE_PUBLIC_IP") or env("NSE_PUBLIC_HOST")):
+                    print("[tls] NSE_PUBLIC_IP is not set - the certificate does not name your static IP yet")
+            _acc.wrap_listener(server, _acc.server_context(_cert, _key))
+            server._tls = True
+            _scheme = "https"
+        except Exception as e:  # noqa: BLE001
+            print(f"[tls] HTTPS could NOT be started ({type(e).__name__}: {e}) - exiting rather than serving plain http by mistake")
+            raise SystemExit(1)
+    if _acc.token_ok():
+        print(f"[access] outside (non-LAN) clients must sign in with NSE_ACCESS_TOKEN"
+              f"{'; the LAN too (NSE_AUTH_LAN)' if env('NSE_AUTH_LAN') else ''}")
+    else:
+        print("[access] outside (non-LAN) clients are REFUSED: set NSE_ACCESS_TOKEN (12+ characters) in env to allow them"
+              + (f" - it is set but too short ({len(_acc.token())})" if _acc.token() else ""))
     # Build stamp: printed so you can confirm at a glance which version is
     # actually running. Several rounds of "still not working" turned out to be
     # an older file still in place, which no amount of code fixing can cure.
@@ -10058,7 +10416,7 @@ def main():
                           ("keep-awake", "_keep_awake" in globals())):
         _feat.append(f"{name}:{'yes' if present else 'NO'}")
     print(f"[i] Build 2026-08-21 · {' · '.join(_feat)}")
-    print(f"[i] NSE chain server running at http://{args.host}:{args.port}")
+    print(f"[i] NSE chain server running at {_scheme}://{args.host}:{args.port}")
     if args.host == "0.0.0.0":
         try:
             import socket as _sock
@@ -10066,7 +10424,10 @@ def main():
             s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
         except Exception:
             lan_ip = "<this-machine-ip>"
-        print(f"[i] LAN mode: other computers open  http://{lan_ip}:{args.port}/nse_dashboard.html")
+        print(f"[i] LAN mode: other computers open  {_scheme}://{lan_ip}:{args.port}/nse_dashboard.html")
+        if env("NSE_PUBLIC_IP") or env("NSE_PUBLIC_HOST"):
+            print(f"[i] From outside (router must forward TCP {args.port} to {lan_ip}):  "
+                  f"{_scheme}://{env('NSE_PUBLIC_HOST') or env('NSE_PUBLIC_IP')}:{args.port}/")
         print(f"[i] They must set the same address in the dashboard's Server URL box.")
     print(f"[i] Shared chain cache: TTL {_CHAIN_TTL}s — simultaneous browsers are coalesced "
           f"into ONE NSE request; check /api/cache-stats")
