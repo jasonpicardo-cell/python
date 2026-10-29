@@ -6751,7 +6751,7 @@ def _trade_margin(eng, body: dict) -> dict:
     return out
 
 
-def _trade_state_payload(q: str = "", u: str = "", t: str = "") -> dict:
+def _trade_state_payload(q: str = "", u: str = "", t: str = "", b: str = "") -> dict:
     eng = _trade_engine()
     if eng is None:
         return {"enabled": False, "why": "The Scalping terminal needs DATA_SOURCE=zerodha (live option quotes and order calls)."}
@@ -6775,6 +6775,12 @@ def _trade_state_payload(q: str = "", u: str = "", t: str = "") -> dict:
             qs[inst] = {**qq, "age": round(now - float(qq.get("ts") or 0), 1),
                         "bids": (d.get("bids") or [])[:5], "asks": (d.get("asks") or [])[:5]}
     st["quotes"] = qs
+    # total bid / offer quantity per strike for the chart's strike grid (memory only, no broker call)
+    bk_names = [x for x in (b or "").split(",") if _re_q.match(r"^(NFO:)?[A-Z0-9]{8,30}$", x)][:16]
+    try:
+        st["book"] = _zmod().book_totals(bk_names) if bk_names else {}
+    except Exception:
+        st["book"] = {}
     spot_ok = bool(_re_q.match(r"^[A-Z]{3,12}$", u or ""))
     if spot_ok:
         st["spot"] = feed.spot(u)
@@ -7645,7 +7651,34 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"enabled": False, "why": why}, status=403)
                 return
             _qs = parse_qs(parsed.query)
-            self._send_json(_trade_state_payload((_qs.get("q") or [""])[0], (_qs.get("u") or [""])[0], (_qs.get("t") or [""])[0]))
+            self._send_json(_trade_state_payload((_qs.get("q") or [""])[0], (_qs.get("u") or [""])[0], (_qs.get("t") or [""])[0], (_qs.get("b") or [""])[0]))
+            return
+
+        if parsed.path == "/api/trade/candles":
+            why = _trade_guard(self, False)
+            if why:
+                self._send_json({"enabled": False, "msg": why}, status=403)
+                return
+            _qs = parse_qs(parsed.query)
+            try:
+                _tf = int((_qs.get("tf") or ["1"])[0])
+                _inst = (_qs.get("inst") or [""])[0]
+                _sym = (_qs.get("sym") or [""])[0].upper()
+                eng = _trade_engine()
+                if _tf not in (1, 3, 5, 10, 15):
+                    raise ValueError("tf must be 1, 3, 5, 10 or 15 minutes")
+                if _inst:
+                    if not eng or not eng.feed.meta(_inst):
+                        raise ValueError("not a listed index option")
+                    key = _inst
+                elif _sym in ("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
+                    key = _sym
+                else:
+                    raise ValueError("inst or sym required")
+                rows = _zmod().fetch_bars(key, _tf)
+                self._send_json({"bars": [[b["t"], b["o"], b["h"], b["l"], b["c"], b["v"]] for b in rows], "tf": _tf})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"bars": None, "msg": f"{type(e).__name__}: {str(e)[:160]}"}, status=200)
             return
 
         if parsed.path == "/api/trade/journal":

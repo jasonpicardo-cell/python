@@ -2245,6 +2245,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-chartwrap svg * { pointer-events: none; }
   .sc-chartwrap svg .sc-h, .sc-chartwrap svg .sc-h * { pointer-events: all; }
   .sc-chartwrap svg .sc-mk, .sc-chartwrap svg .sc-mk * { pointer-events: all; cursor: default; }
+  /* the strike grid sits on the chart's lower left as ordinary page content: opaque, so nothing the chart or its indicators draw shows through, and it never scales with the chart */
+  .sc-grid { position: absolute; left: 8px; bottom: 24px; z-index: 6; background: #0b0d12; border: 1px solid var(--border); border-radius: 4px; padding: 0; box-shadow: 0 2px 10px rgba(0,0,0,.5); }
+  .sc-grid table { border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--text); }
+  .sc-grid th, .sc-grid td { border: 1px solid #1b1f29; padding: 2px 6px; text-align: right; white-space: nowrap; }
+  .sc-grid th { color: var(--muted); font-weight: 600; background: #10131a; text-align: center; }
+  .sc-grid td.k { text-align: center; font-weight: 700; cursor: pointer; background: #10131a; } .sc-grid td.k:hover { color: var(--accent); }
+  .sc-grid tr.atm td { background: rgba(232,179,57,.10); } .sc-grid tr.atm td.k { background: rgba(232,179,57,.22); color: #ffd780; }
+  .sc-grid tr.sel td.k { box-shadow: inset 3px 0 0 var(--accent); }
+  .sc-grid td.up { color: #2ecc8f; background: rgba(46,204,143,.12); font-weight: 600; } .sc-grid td.dn { color: #ff5d6c; background: rgba(255,93,108,.12); font-weight: 600; }
+  .sc-grid .cap { font-size: 10px; color: var(--muted); padding: 3px 6px; border-bottom: 1px solid #1b1f29; }
   .sc-h { cursor: ns-resize; }
 
   /* right column */
@@ -2666,6 +2676,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <!-- traffic light, top left over the candles: a sibling of
                    chartBody so the chart redraws cannot destroy it -->
               <div id="tlight" style="position:absolute;left:14px;top:10px;z-index:6;"></div>
+              <!-- NIFTY strike grid, lower left of the price chart. A sibling of chartBody for the same reason as the
+                   traffic light: the chart redraws wipe chartBody. It never touches the SVG, so zoom cannot move it. -->
+              <div id="homeGrid" class="sc-grid" style="display:none;pointer-events:none;bottom:auto;left:0;top:0;opacity:.96"></div>
               <div id="chartBody" style="padding:4px 6px;">
                 <div class="movers-loading">Loading candles…</div>
               </div>
@@ -3413,7 +3426,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <div class="sc-opts" id="scOpts"><button class="sc-indbtn" id="scInd" title="Add EMA 5/13, RSI, VWAP, volume or order flow to this chart">ƒx Indicators</button><div class="sc-indmenu" id="scIndMenu" style="display:none"></div></div>
               </div>
               <div id="scReadout" class="sc-readout sc-n"></div>
-              <div class="sc-chartwrap"><svg id="scChart"></svg><div class="sc-lg-row" id="scLegP"></div><div class="sc-lg-row" id="scLegR"></div></div>
+              <div class="sc-chartwrap"><svg id="scChart"></svg><div class="sc-lg-row" id="scLegP"></div><div class="sc-lg-row" id="scLegR"></div><div class="sc-grid" id="scGrid" style="display:none"></div></div>
               <div class="sc-hint">Drag the stop, target or partial line to change it. With no position open, drag the dashed plan lines to set the next order's exits. Scroll or use + / − to zoom. Candles follow Kite's intervals and open at 09:15. ▲ ▼ mark your fills (solid = entry, outlined = exit). Indicators sit in the ƒx menu; ✕ on a legend removes it.</div>
             </main>
 
@@ -28180,7 +28193,48 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         el.style.left = Math.max(0, Math.round(b.left - a.left + 10)) + 'px';
       }
     } catch (_) {}
+    homeGridRender();
   }
+
+  // ── NIFTY strike grid on the home chart: ATM +/- 3 round-hundred strikes with the total bid and offer
+  // quantity of each CE and PE book. Buyers on a call and sellers on a put are green; the reverse is red.
+  // Read from the chain payload (Zerodha's live book totals), so it costs no extra broker call. ──
+  let _hgLast = '';
+  function homeGridRender() {
+    const el = document.getElementById('homeGrid'); if (!el) return;
+    try {
+      const svgEl = document.getElementById('chartSvg') || document.getElementById('renkoSvg');
+      if ((state.symbol || 'NIFTY') !== 'NIFTY' || !svgEl || !svgEl.getClientRects().length) { el.style.display = 'none'; return; }   // an SVG has no offsetParent: ask for its boxes instead
+      const d = state.lastData, n = v => v == null ? '–' : Math.round(v).toLocaleString('en-IN');
+      const rows = d && Array.isArray(d.strikes) ? d.strikes.filter(r => r.ce_symbol && r.pe_symbol && r.strike % 100 === 0).sort((a, b) => a.strike - b.strike) : [];
+      let html;
+      if (!rows.length) {
+        const why = !d ? 'waiting for the option chain…' : d._source !== 'zerodha' ? `the chain is coming from "${escapeHtml(String(d._source || 'unknown'))}", not Zerodha. The grid needs the Zerodha feed.` : 'the chain has no tradable strikes yet.';
+        html = `<div class="cap">NIFTY strike grid: ${why}</div>`;
+      } else {
+        const spot = d.underlying_value || d.atm; let ai = 0, bd = 1e12;
+        rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
+        const show = rows.slice(Math.max(0, ai - 3), ai + 4).reverse(), atm = rows[ai].strike;
+        const ratio = (b, o, put) => {
+          if (!(b > 0) || !(o > 0)) return '<td>–</td>';
+          const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers;
+          return `<td class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}</td>`;
+        };
+        const cell = (r, put) => { const p = put ? 'pe' : 'ce', b = r[p + '_tbq'], o = r[p + '_tsq']; return `<td>${n(b)}</td><td>${n(o)}</td>${ratio(b, o, put)}`; };
+        const any = show.some(r => (r.ce_tbq > 0) || (r.pe_tbq > 0));
+        html = `<div class="cap">NIFTY ${escapeHtml(String(d.expiry || ''))} · total bid and offer quantity · ATM ${fmtInt(atm)}</div>` +
+          (any ? '' : '<div class="cap" style="color:#e8b339">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30).</div>') +
+          `<table><tr><th rowspan="2">Strike</th><th colspan="3">CE</th><th colspan="3">PE</th></tr><tr><th>Bid</th><th>Offer</th><th>Ratio</th><th>Bid</th><th>Offer</th><th>Ratio</th></tr>` +
+          show.map(r => `<tr class="${r.strike === atm ? 'atm' : ''}"><td class="k">${fmtInt(r.strike)}</td>${cell(r, false)}${cell(r, true)}</tr>`).join('') + '</table>';
+      }
+      el.style.display = '';
+      if (html !== _hgLast) { el.innerHTML = html; _hgLast = html; }
+      const wrap = el.parentElement, a = wrap.getBoundingClientRect(), b = svgEl.getBoundingClientRect();
+      const top = Math.max(b.top - a.top + 4, b.bottom - a.top - el.offsetHeight - 40);   // lower left of the price chart, above its time axis
+      el.style.top = Math.round(top) + 'px'; el.style.left = Math.round(b.left - a.left + 8) + 'px';
+    } catch (e) { console.error('home grid', e); }
+  }
+  setInterval(homeGridRender, 1500);
 
   // ── clock watermark in the context pane ─────────────────────────────
   // 12-hour IST time with seconds, stretched to fill the whole plot, very
@@ -41226,7 +41280,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
             trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
     pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
     exitsBy: { B: {}, S: {} }, exits: {}, drag: null, hover: null, geom: null, lines: [], lastOrdT: null, bgT: 0, raf: 0,
-    sLegs: null, wing: null, margin: null, notes: {}, hist: {},
+    sLegs: null, wing: null, margin: null, notes: {}, hist: {}, book: {},
   };
   const SC_STRIKES = [['o-2', 'ITM 2'], ['o-1', 'ITM 1'], ['o0', 'ATM'], ['o1', 'OTM 1'], ['o2', 'OTM 2'], ['o3', 'OTM 3'], ['d0.4', 'Δ .40'], ['d0.3', 'Δ .30'], ['d0.2', 'Δ .20']];
   const SC_TFS = [[60, '1m'], [180, '3m'], [300, '5m'], [600, '10m'], [900, '15m']];     // Kite's own intervals, anchored to the 09:15 open
@@ -42335,7 +42389,46 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     scRenderAll();
   }
   function scRenderAll() {
-    scRenderLegs(); scRenderBar(); scRenderLadder(); scRenderTicket(); scRenderTurn(); scRenderChrome(); scRenderRight(); scRenderDock(); scQueueDraw();
+    // each step is isolated: one failing panel must not stop the grid (or the chart) from drawing
+    for (const f of [scRenderGrid, scRenderLegs, scRenderBar, scRenderLadder, scRenderTicket, scRenderTurn, scRenderChrome, scRenderRight, scRenderDock]) {
+      try { f(); } catch (e) { SC.stepErr = `${f.name}: ${e.message || e}`; console.error('scalp ' + f.name, e); }
+    }
+    scQueueDraw();
+  }
+  // ── strike grid: total bid and offer quantity of ATM +/- 3 strikes, NIFTY's chain expiry only ──
+  function scGridRows() {
+    const d = state.lastData; if ((state.symbol || 'NIFTY') !== 'NIFTY' || !d || !scChainOk()) return null;
+    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol && r.strike % 100 === 0).sort((a, b) => a.strike - b.strike); if (!rows.length) return null;   // the 50-strikes (22950, 22850…) are left out
+    const spot = SC.spot || d.underlying_value || d.atm; let ai = 0, bd = 1e12;
+    rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
+    return { rows: rows.slice(Math.max(0, ai - 3), ai + 4).reverse(), atm: rows[ai].strike, expiry: d.expiry };
+  }
+  function scGridNames() { const g = scGridRows(); return g ? g.rows.flatMap(r => [r.ce_symbol, r.pe_symbol]) : []; }
+  function scRenderGrid() {
+    const el = $sc('scGrid'); if (!el) return;
+    try { scRenderGridBody(el); } catch (e) { el.style.display = ''; scSet(el, `<div class="cap" style="color:#ff5d6c">strike grid error: ${escapeHtml(String(e.message || e))}</div>`); console.error('scalp grid', e); }
+  }
+  function scRenderGridBody(el) {
+    if ((state.symbol || 'NIFTY') !== 'NIFTY') { el.style.display = 'none'; return; }
+    const g = scGridRows(); el.style.display = '';
+    if (!g) {
+      const d = state.lastData, why = !d ? 'waiting for the option chain…' : d._source !== 'zerodha' ? `the chain is coming from "${escapeHtml(String(d._source || 'unknown'))}", not Zerodha. The grid needs the Zerodha feed: run zerodha_login.py and restart the server.` : 'the chain has no tradable strikes yet.';
+      scSet(el, `<div class="cap">NIFTY strike grid: ${why}</div>`); return;
+    }
+    const n = v => v == null ? '–' : Math.round(v).toLocaleString('en-IN');
+    // buyers over sellers = total bid / total offer. On a call, buyers are bullish (green); on a put, buyers are bearish (red) and sellers green.
+    const ratio = (b, o, put) => {
+      if (b == null || o == null || !(o > 0) || !(b > 0)) return '<td>–</td>';
+      const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers;
+      return `<td class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}</td>`;
+    };
+    // live totals from the tick stream; until it has them, the chain's own snapshot (Zerodha's quote) so the grid is never blank
+    const cell = (r, put) => { const p = put ? 'pe' : 'ce', lv = SC.book[r[p + '_symbol']], b = lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; return `<td>${n(b[0])}</td><td>${n(b[1])}</td>${ratio(b[0], b[1], put)}`; };
+    const any = g.rows.some(r => ['ce', 'pe'].some(p => { const lv = SC.book[r[p + '_symbol']]; return ((lv ? lv[0] : r[p + '_tbq']) || 0) > 0; }));
+    const selK = (SC.pref.selCE || '').slice(1);
+    const body = g.rows.map(r => `<tr class="${r.strike === g.atm ? 'atm' : ''}${String(r.strike) === selK ? ' sel' : ''}"><td class="k" data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart">${fmtInt(r.strike)}</td>${cell(r, false)}${cell(r, true)}</tr>`).join('');
+    scSet(el, `<div class="cap">NIFTY ${escapeHtml(String(g.expiry || ''))} · total bid and offer quantity of each strike's book · ATM ${fmtInt(g.atm)} · grid v3</div>${any ? '' : '<div class="cap" style="color:#e8b339">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table><tr><th rowspan="2">Strike</th><th colspan="3" title="Calls: more buyers is bullish (green), more sellers bearish (red)">CE</th><th colspan="3" title="Puts: more sellers is bullish (green), more buyers bearish (red)">PE</th></tr>` +
+      `<tr><th title="Total quantity bidding">Bid</th><th title="Total quantity offered">Offer</th><th title="Bid ÷ offer">Ratio</th><th>Bid</th><th>Offer</th><th>Ratio</th></tr>${body}</table>`);
   }
   function scNote() {
     const el = $sc('scNote'); let msg = '', bad = false; const S = SC.st;
@@ -42395,11 +42488,11 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     if (location.protocol === 'file:') { scNote(); return; }
     SC.busy = true;
     try {
-      const names = scNames(), sym = state.symbol || 'NIFTY';
+      const names = scNames(), sym = state.symbol || 'NIFTY', bnames = scGridNames();
       const t = names.concat([sym]).map(n => `${n}:${(SC.tape[n] || {}).cur || 0}`).join(',');
-      const r = await fetch(`${scBase()}/api/trade/state?q=${encodeURIComponent(names.join(','))}&u=${encodeURIComponent(sym)}&t=${encodeURIComponent(t)}`, { signal: AbortSignal.timeout(3000) });
+      const r = await fetch(`${scBase()}/api/trade/state?q=${encodeURIComponent(names.join(','))}&u=${encodeURIComponent(sym)}&t=${encodeURIComponent(t)}&b=${encodeURIComponent(bnames.join(','))}`, { signal: AbortSignal.timeout(3000) });
       const j = await r.json();
-      SC.fails = 0; SC.st = j; SC.quotes = j.quotes || {};
+      SC.fails = 0; SC.st = j; SC.quotes = j.quotes || {}; SC.book = j.book || {};
       if (j.spot) SC.spot = j.spot;
       for (const [name, d] of Object.entries(j.tape || {})) scTapeMerge(name, d);
       if (j.enabled) scNotify(j);
@@ -42591,6 +42684,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       else if (nk) { const v = Math.max(1, Math.min(200, Math.round(+e.target.value) || SC.pref[nk])); save(nk, v); }
       scRenderChrome(); scQueueDraw();
     });
+    $sc('scGrid').addEventListener('click', e => { const td = e.target.closest('td.k'); if (!td) return; SC.pref.selCE = SC.pref.selPE = 'k' + td.dataset.k; SC.pref.chart = SC.pref.chart === 'PE' ? 'PE' : 'CE'; scPrefSave(); scClearPending(); scRenderAll(); });
     $sc('scZoom').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('nvis', Math.max(20, Math.min(240, Math.round(SC.pref.nvis * (b.dataset.z === 'in' ? 0.8 : 1.25))))); scQueueDraw(); });
     for (const id of ['scLegP', 'scLegR']) $sc(id).addEventListener('click', e => { const x = e.target.dataset.x; if (!x) return; save(x, false); scRenderChrome(); scQueueDraw(); });
     $sc('scBuyCE').addEventListener('click', () => scGo('CE')); $sc('scBuyPE').addEventListener('click', () => scGo('PE'));

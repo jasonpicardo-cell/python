@@ -1638,6 +1638,8 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
             rec[f"{p}_ask"] = float(d.get("ask") or 0)
             rec[f"{p}_bid_qty"] = d.get("bid_qty")
             rec[f"{p}_ask_qty"] = d.get("ask_qty")
+            rec[f"{p}_tbq"] = d.get("tbq")            # whole-book totals: the strike grid's fallback until the live stream has them
+            rec[f"{p}_tsq"] = d.get("tsq")
             rec[f"{p}_iv"] = 0.0
             rec[f"{p}_prev_close"] = float(d.get("prev_close") or 0)
             rec[f"{p}_symbol"] = key
@@ -2102,6 +2104,19 @@ def constituent_quotes(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
 
 
 # ── diagnostics, in the shapes /api/data-audit and friends read ──────
+def book_totals(keys: List[str]) -> Dict[str, List[Any]]:
+    """Total bid and total offer quantity of each contract's whole book, as the exchange
+    reports them in the full-mode tick: {key: [total_buy, total_sell, age_s]}. Memory only."""
+    now = time.time()
+    out: Dict[str, List[Any]] = {}
+    with _lock:
+        for k in keys:
+            v = _depth.get(k)
+            if v and v.get("tts"):
+                out[k] = [v.get("tbq"), v.get("tsq"), round(now - v["tts"], 1)]
+    return out
+
+
 def depth_status(symbols: Optional[List[str]] = None) -> Dict[str, Any]:
     now = time.time()
     with _lock:
