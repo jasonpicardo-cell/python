@@ -1710,7 +1710,7 @@ def test_scalping_tab():
         const row = k => h.split('<tr class=').find(x => x.includes('data-k="' + k + '"')) || '';
         SC.spot = 25080; scRenderGrid(); const order2 = [...el.h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]);
         SYM = 'BANKNIFTY'; const none = scGridRows();
-        console.log(JSON.stringify({ order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[1]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), 
+        console.log(JSON.stringify({ order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), 
           atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× buyers/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length) }));""")
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}

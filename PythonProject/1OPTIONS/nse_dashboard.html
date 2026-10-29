@@ -28224,8 +28224,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const any = show.some(r => (r.ce_tbq > 0) || (r.pe_tbq > 0));
         html = `<div class="cap">NIFTY ${escapeHtml(String(d.expiry || ''))} · total bid and offer quantity · ATM ${fmtInt(atm)}</div>` +
           (any ? '' : '<div class="cap" style="color:#e8b339">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30).</div>') +
-          `<table><tr><th rowspan="2">Strike</th><th colspan="3">CE</th><th colspan="3">PE</th></tr><tr><th>Bid</th><th>Offer</th><th>Ratio</th><th>Bid</th><th>Offer</th><th>Ratio</th></tr>` +
-          show.map(r => `<tr class="${r.strike === atm ? 'atm' : ''}"><td class="k">${fmtInt(r.strike)}</td>${cell(r, false)}${cell(r, true)}</tr>`).join('') + '</table>';
+          `<table><tr><th colspan="3">CE</th><th rowspan="2">Strike</th><th colspan="3">PE</th></tr><tr><th>Bid</th><th>Offer</th><th>Ratio</th><th>Bid</th><th>Offer</th><th>Ratio</th></tr>` +
+          show.map(r => `<tr class="${r.strike === atm ? 'atm' : ''}">${cell(r, false)}<td class="k">${fmtInt(r.strike)}</td>${cell(r, true)}</tr>`).join('') + '</table>';
       }
       el.style.display = '';
       if (html !== _hgLast) { el.innerHTML = html; _hgLast = html; }
@@ -42426,8 +42426,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const cell = (r, put) => { const p = put ? 'pe' : 'ce', lv = SC.book[r[p + '_symbol']], b = lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; return `<td>${n(b[0])}</td><td>${n(b[1])}</td>${ratio(b[0], b[1], put)}`; };
     const any = g.rows.some(r => ['ce', 'pe'].some(p => { const lv = SC.book[r[p + '_symbol']]; return ((lv ? lv[0] : r[p + '_tbq']) || 0) > 0; }));
     const selK = (SC.pref.selCE || '').slice(1);
-    const body = g.rows.map(r => `<tr class="${r.strike === g.atm ? 'atm' : ''}${String(r.strike) === selK ? ' sel' : ''}"><td class="k" data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart">${fmtInt(r.strike)}</td>${cell(r, false)}${cell(r, true)}</tr>`).join('');
-    scSet(el, `<div class="cap">NIFTY ${escapeHtml(String(g.expiry || ''))} · total bid and offer quantity of each strike's book · ATM ${fmtInt(g.atm)} · grid v3</div>${any ? '' : '<div class="cap" style="color:#e8b339">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table><tr><th rowspan="2">Strike</th><th colspan="3" title="Calls: more buyers is bullish (green), more sellers bearish (red)">CE</th><th colspan="3" title="Puts: more sellers is bullish (green), more buyers bearish (red)">PE</th></tr>` +
+    const body = g.rows.map(r => `<tr class="${r.strike === g.atm ? 'atm' : ''}${String(r.strike) === selK ? ' sel' : ''}">${cell(r, false)}<td class="k" data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart">${fmtInt(r.strike)}</td>${cell(r, true)}</tr>`).join('');
+    scSet(el, `<div class="cap">NIFTY ${escapeHtml(String(g.expiry || ''))} · total bid and offer quantity of each strike's book · ATM ${fmtInt(g.atm)} · grid v3</div>${any ? '' : '<div class="cap" style="color:#e8b339">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table><tr><th colspan="3" title="Calls: more buyers is bullish (green), more sellers bearish (red)">CE</th><th rowspan="2">Strike</th><th colspan="3" title="Puts: more sellers is bullish (green), more buyers bearish (red)">PE</th></tr>` +
       `<tr><th title="Total quantity bidding">Bid</th><th title="Total quantity offered">Offer</th><th title="Bid ÷ offer">Ratio</th><th>Bid</th><th>Offer</th><th>Ratio</th></tr>${body}</table>`);
   }
   function scNote() {
