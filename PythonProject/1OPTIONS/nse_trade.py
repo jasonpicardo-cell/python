@@ -1,14 +1,13 @@
 """
 nse_trade.py - the order engine behind the Scalping tab.
 
-Long AND short. A long (buy a call or put) can lose at most the premium. A
-SHORT (sell a call or put to open) has no such ceiling, so it is held to harder
-rules: it is OFF in live mode unless NSE_TRADE_ALLOW_SHORT=1, it must carry a
-stop, it has its own lot cap, and it can be HEDGED - the engine buys the far
-out-of-the-money wing first (so the margin benefit is real and the loss is
-capped), then sells, and sells the wing back only after the short is covered.
-Structures (straddle, strangle) open as one unit with a combined stop/target
-in rupees. Conditional entries fire when a premium or the index crosses a level.
+Long AND short, with no size or risk limits: each order goes out as pressed. A
+short (sell a call or put to open) has no ceiling on its loss, so set a stop or
+HEDGE it - the engine buys the far out-of-the-money wing first (so the margin
+benefit is real and the loss is capped), then sells, and sells the wing back only
+after the short is covered. Structures (straddle, strangle) open as one unit with a
+combined stop/target in rupees. Conditional entries fire when a premium or the
+index crosses a level.
 
 Two modes
   PAPER (default)  fills against the live bid/ask, walking the 5-level book for
@@ -17,10 +16,9 @@ Two modes
                    marketable LIMIT, IOC (never a market order, never resting):
                    buy at ask + a small buffer, sell at bid - a small buffer.
 
-Everything that protects the account is enforced HERE, on the server, not in
-the page: lots per order, open lots, order value, spread, entry window, daily
-loss, trade count, a cooldown after a losing streak, an order-rate cap, a
-kill switch, de-duplication of double clicks, and reduce-only exits.
+Server-side, whatever the page does: an order-rate cap, a kill switch, de-duplication
+of double clicks, reduce-only exits, a fresh-quote check, and the entry window and
+15:14 square-off.
 
 Stops, targets, the trailing stop, the breakeven move, the partial target,
 the underlying-level exits, the time stop and the 15:14 square-off all run in
@@ -80,37 +78,40 @@ def _hm(s, default):
 
 
 class Config:
+    """Deliberately small: the only settings are NSE_TRADE_MODE (paper | live) and an
+    optional NSE_TRADE_PIN. There are no size or risk limits - what you press is what is
+    sent. The fields below are the engine's fixed behaviour (0 = off); tests set them
+    directly, nothing reads them from env."""
     def __init__(self, env=None):
         e = (env if env is not None else os.environ).get
-        f = lambda k, d: float(e(k) or d)
         self.mode = "live" if str(e("NSE_TRADE_MODE") or "paper").strip().lower() == "live" else "paper"
-        self.max_lots = int(f("NSE_TRADE_MAX_LOTS", 2))
-        self.max_open_lots = int(f("NSE_TRADE_MAX_OPEN_LOTS", 4))
-        self.max_value = f("NSE_TRADE_MAX_VALUE", 150000)          # rupees per order
-        self.day_loss = f("NSE_TRADE_DAY_LOSS", 5000)               # rupees, net of charges, incl. open P&L
-        self.max_trades = int(f("NSE_TRADE_MAX_TRADES", 40))
-        self.loss_streak = int(f("NSE_TRADE_LOSS_STREAK", 3))
-        self.cooldown_s = f("NSE_TRADE_COOLDOWN_S", 300)
-        self.slip_pct = f("NSE_TRADE_SLIP_PCT", 1.5)
-        self.slip_min = f("NSE_TRADE_SLIP_MIN", 0.5)
-        self.max_spread_pct = f("NSE_TRADE_MAX_SPREAD_PCT", 6)
-        self.min_premium = f("NSE_TRADE_MIN_PREMIUM", 3)
-        self.ops = f("NSE_TRADE_OPS", 3)                            # orders / second, well under the 10 SEBI cap
-        self.stale_s = f("NSE_TRADE_STALE_S", 6)
-        self.entry_from = _hm(e("NSE_TRADE_ENTRY_FROM"), 9 * 60 + 20)
-        self.entry_to = _hm(e("NSE_TRADE_ENTRY_TO"), 15 * 60)
-        self.flatten_at = _hm(e("NSE_TRADE_FLATTEN_AT"), 15 * 60 + 14)
-        self.loss_flatten = str(e("NSE_TRADE_LOSS_FLATTEN") or "1").strip().lower() in ("1", "true", "yes", "on")
         self.pin = (e("NSE_TRADE_PIN") or "").strip()
-        self.reconcile_s = f("NSE_TRADE_RECONCILE_S", 20)
-        sh = e("NSE_TRADE_ALLOW_SHORT")
-        # paper may short freely; live needs the explicit switch
-        self.allow_short = (self.mode == "paper") if sh in (None, "") else str(sh).strip().lower() in ("1", "true", "yes", "on")
-        self.max_short_lots = int(f("NSE_TRADE_MAX_SHORT_LOTS", 2))
-        self.max_risk = f("NSE_TRADE_MAX_RISK", 0)                  # rupees lost at the stop, per order (0 = off)
-        self.day_target = f("NSE_TRADE_DAY_TARGET", 0)              # stop opening trades once the day is up this much (0 = off)
-        self.giveback_pct = f("NSE_TRADE_GIVEBACK_PCT", 0)          # stop opening trades after giving back this % of the day's peak (0 = off)
-        self.giveback_min = f("NSE_TRADE_GIVEBACK_MIN", 1500)       # ... once the peak was at least this much
+        # no limits
+        self.max_lots = 0
+        self.max_open_lots = 0
+        self.max_value = 0
+        self.day_loss = 0
+        self.max_trades = 0
+        self.loss_streak = 0
+        self.cooldown_s = 0
+        self.max_spread_pct = 0
+        self.min_premium = 0
+        self.allow_short = True
+        self.max_short_lots = 0
+        self.max_risk = 0
+        self.day_target = 0
+        self.giveback_pct = 0
+        self.giveback_min = 0
+        self.loss_flatten = True
+        # fixed execution behaviour
+        self.slip_pct = 1.5             # limit buffer beyond the bid/ask, % of price
+        self.slip_min = 0.5
+        self.ops = 5                    # orders per second (Zerodha allows 10)
+        self.stale_s = 6                # a quote older than this is flagged NO PRICE
+        self.entry_from = 9 * 60 + 15
+        self.entry_to = 15 * 60 + 14
+        self.flatten_at = 15 * 60 + 14  # MIS is squared off here, before Zerodha's own 15:20 square-off
+        self.reconcile_s = 20
 
     def public(self):
         d = {k: v for k, v in self.__dict__.items() if k != "pin"}
@@ -379,10 +380,10 @@ class Engine:
         if role == "main":
             if now < self.cool_until:
                 return f"cooling off after {c.loss_streak} losses in a row - {int(self.cool_until - now)}s left"
-            if len(self.trades) >= c.max_trades:
+            if c.max_trades and len(self.trades) >= c.max_trades:
                 return f"max trades for the day ({c.max_trades}) reached"
             net = self.net_day()
-            if net <= -c.day_loss:
+            if c.day_loss and net <= -c.day_loss:
                 return f"daily loss limit (Rs {c.day_loss:,.0f}) reached"
             if c.day_target and net >= c.day_target:
                 return f"daily target (Rs {c.day_target:,.0f}) reached - the day is locked in"
@@ -406,23 +407,21 @@ class Engine:
             return "lots must be a whole number >= 1"
         if role == "hedge":
             return None                     # the main entry already vetted the caps for it
-        if lots > c.max_lots:
+        if c.max_lots and lots > c.max_lots:
             return f"{lots} lots exceeds the per-order cap of {c.max_lots}"
         open_lots = sum(self._lots_of(p) for p in self.pos.values())
-        if open_lots + lots + extra_lots > c.max_open_lots:
+        if c.max_open_lots and open_lots + lots + extra_lots > c.max_open_lots:
             return f"open lots would be {open_lots + lots + extra_lots}; cap is {c.max_open_lots}"
         have = self.pos.get(inst)
         if have and have.side != (1 if side == "BUY" else -1):
             return "you hold the opposite side of this contract - close it first (or use Flip)"
         if side == "SELL":
             if not c.allow_short:
-                return "short selling is off in live mode - set NSE_TRADE_ALLOW_SHORT=1 in env and restart"
-            if not stop_ok and not (exits and (exits.get("sl") or exits.get("sl_pts"))):
-                return "a short needs a stop (set Stop pts) - its loss has no ceiling otherwise"
-            if lots > c.max_short_lots:
+                return "short selling is off"
+            if c.max_short_lots and lots > c.max_short_lots:
                 return f"{lots} lots exceeds the short cap of {c.max_short_lots}"
             short_lots = sum(self._lots_of(p) for p in self.pos.values() if p.side < 0 and p.role == "main")
-            if short_lots + lots + extra_short > c.max_short_lots:
+            if c.max_short_lots and short_lots + lots + extra_short > c.max_short_lots:
                 return f"short lots would be {short_lots + lots + extra_short}; the short cap is {c.max_short_lots}"
         if inst in self.inflight:
             return "an order for this contract is already in flight"
@@ -475,9 +474,9 @@ class Engine:
                 if ref < self.cfg.min_premium:
                     return self._done(req_id, {"ok": False, "msg": f"premium {ref} is below the minimum {self.cfg.min_premium}"})
                 spr = (ask - bid) / ask * 100
-                if spr > self.cfg.max_spread_pct:
+                if self.cfg.max_spread_pct and spr > self.cfg.max_spread_pct:
                     return self._done(req_id, {"ok": False, "msg": f"spread {spr:.1f}% is wider than {self.cfg.max_spread_pct:g}%"})
-            if ref * qty > self.cfg.max_value:
+            if self.cfg.max_value and ref * qty > self.cfg.max_value:
                 return self._done(req_id, {"ok": False, "msg": f"order value Rs {ref * qty:,.0f} exceeds Rs {self.cfg.max_value:,.0f}"})
             if side == "SELL" and exits.get("sl") and float(exits["sl"]) <= ask + TICK:
                 return self._done(req_id, {"ok": False, "msg": f"stop {float(exits['sl']):g} is inside the market (ask {ask:g}) - set it above"})
@@ -592,8 +591,6 @@ class Engine:
         with self.lock:
             if req_id and req_id in self.seen and now - self.seen[req_id][0] < 15:
                 return dict(self.seen[req_id][1], dup=True)
-            if n_short and g_sl <= 0 and not (exits.get("sl") or exits.get("sl_pts")):
-                return self._done(req_id, {"ok": False, "msg": "a structure with a short leg needs a combined stop (Rs) or a per-leg stop"})
             metas = [self.feed.meta(i) or {} for i, _ in norm]
             if len({(m.get("under"), m.get("expiry")) for m in metas}) != 1 or not all(m.get("typ") for m in metas):
                 return self._done(req_id, {"ok": False, "msg": "all legs must be options on the same index and expiry"})
@@ -981,7 +978,7 @@ class Engine:
         with self.lock:
             self.day_peak = max(self.day_peak, self.net_day()) if (self.pos or self.trades) else self.day_peak
         # the daily loss limit: no more entries, and (by default) out of everything
-        if self.pos and not self.kill and self.net_day() <= -c.day_loss:
+        if c.day_loss and self.pos and not self.kill and self.net_day() <= -c.day_loss:
             self.set_kill(True, flatten=c.loss_flatten, why=f"daily loss limit Rs {c.day_loss:,.0f}")
         # live: does the book still match the broker?
         if self.live() and self.broker and (self.pos or self.armed) and now - self.last_recon >= c.reconcile_s and not self.inflight \

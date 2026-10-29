@@ -1918,6 +1918,54 @@ def fetch_candles(symbol: str, interval_min: int = 1, days: int = 1,
             _ev.set()
 
 
+_bars_cache: Dict[Any, Any] = {}
+_bars_lock = threading.Lock()
+
+
+def fetch_bars(key: str, interval_min: int = 1, back_days: int = 9, sessions: int = 4) -> List[Dict[str, Any]]:
+    """Candles for the Scalping chart, like Kite's own chart: an option contract
+    ("NFO:NIFTY26N0325000CE") or an index name ("NIFTY"), the last few sessions at
+    1/3/5/10/15 minutes, in-session bars only, from 09:15 of the last `sessions` trading
+    days that contract has data for (so the EMA and RSI carry on from yesterday instead
+    of starting cold). One REST call per (contract, interval), cached for 15 s; the page
+    adds the live ticks to it and asks again only about once a minute."""
+    if not connect() or _kite is None:
+        return []
+    iv = _KITE_IV.get(int(interval_min))
+    if not iv or int(interval_min) not in (1, 3, 5, 10, 15):
+        raise ValueError("interval must be 1, 3, 5, 10 or 15 minutes")
+    k = str(key)
+    if ":" in k:
+        _ensure_instruments([k.split(":")[0]])
+        tok = _key2tok.get(k)
+    else:
+        sym = k.upper()
+        _ensure_instruments(_exchanges_for(sym))
+        tok = _key2tok.get(_idx_key.get(sym) or "")
+    if not tok:
+        return []
+    ck = (tok, int(interval_min))
+    with _bars_lock:
+        hit = _bars_cache.get(ck)
+        if hit and time.time() - hit[0] < 15.0:
+            return hit[1]
+        if len(_bars_cache) > 60:
+            _bars_cache.clear()
+    frm = f"{_ist_today(back_days)} 09:00:00"
+    to = f"{_ist_today(0)} 15:45:00"
+    rows = _hist(tok, frm, to, iv)
+    out = []
+    for b in rows:
+        g = time.gmtime(b["t"] + 19800)
+        if _in_session(g.tm_hour * 60 + g.tm_min):
+            out.append(b)
+    days = sorted({(b["t"] + 19800) // 86400 for b in out})[-int(sessions):]
+    out = [b for b in out if (b["t"] + 19800) // 86400 in days][-6000:]
+    with _bars_lock:
+        _bars_cache[ck] = (time.time(), out)
+    return out
+
+
 def _future_for_day(sym: str, day: str) -> Optional[str]:
     spec = _INDEX_SPEC.get(sym)
     if not spec:

@@ -91,6 +91,11 @@ NSE_POLL_INTERVAL=5
 NSE_WARM_DAYS=2
 # Extra closures beyond the built-in 2026 NSE holiday list (comma separated):
 # NSE_HOLIDAYS=YYYY-MM-DD,YYYY-MM-DD
+# Turn light: extra event windows (IST) when it stays QUIET, ';'-separated.
+# RBI policy days and the Union Budget are built in.
+# NSE_EVENTS=2026-11-14 09:15-09:45 Election results
+# Turn model: turns of each kind needed before a fitted model is used (default 100)
+# NSE_TURN_MIN_EVENTS=100
 
 # ── Alert engine thresholds ──────────────────────────────────────────
 NSE_ALERT_OI_PCT=3
@@ -205,32 +210,69 @@ ZERODHA_OI_BACKFILL=1
 # Leave blank: OI/volume units are detected from the data (shares vs contracts).
 ZERODHA_QTY_UNIT=
 
-# ── Scalping tab (Zerodha only) ──
-# NSE_TRADE_MODE=paper           # paper = simulated fills; live = real orders (also needs ARM in the tab)
-# NSE_TRADE_PIN=                 # optional PIN the tab asks for before any order
-# NSE_TRADE_MAX_LOTS=2           # per order
-# NSE_TRADE_MAX_OPEN_LOTS=4      # all positions together
-# NSE_TRADE_MAX_VALUE=150000     # ₹ premium per order
-# NSE_TRADE_DAY_LOSS=5000        # net of charges, incl. open P&L → no entries
-# NSE_TRADE_LOSS_FLATTEN=1       # 1 = sell everything when that limit is hit
-# NSE_TRADE_MAX_TRADES=40
-# NSE_TRADE_LOSS_STREAK=3        # losers in a row → cool-off
-# NSE_TRADE_COOLDOWN_S=300
-# NSE_TRADE_SLIP_PCT=1.5         # limit-price buffer beyond bid/ask (%), min below
-# NSE_TRADE_SLIP_MIN=0.5
-# NSE_TRADE_MAX_SPREAD_PCT=6     # refuse entries if bid-ask is wider
-# NSE_TRADE_MIN_PREMIUM=3
-# NSE_TRADE_OPS=3                # orders per second (Zerodha allows 10)
-# NSE_TRADE_STALE_S=6            # quote older than this is flagged NO PRICE
-# NSE_TRADE_ENTRY_FROM=09:20
-# NSE_TRADE_ENTRY_TO=15:00
-# NSE_TRADE_FLATTEN_AT=15:14     # square-off of anything still open
-# NSE_TRADE_RECONCILE_S=20       # live: compare with Zerodha positions this often
+# ══════════════════════════════════════════════════════════════════════
+#  Reaching the dashboard from outside your home (router port-forward)
+#  The server treats your LAN as before. Anything from a public address -
+#  or arriving through a reverse proxy - must sign in with the token below.
+#  With no token (or one under 12 characters) outside clients are REFUSED.
+# ══════════════════════════════════════════════════════════════════════
+# Serve HTTPS. A self-signed certificate is made in ./tls on first start and
+# covers localhost, this machine's LAN address and the names below.
+NSE_HTTPS=1
+# The sign-in passphrase for outside clients: long and random, 12+ characters.
+NSE_ACCESS_TOKEN=
+# Your static IP (and/or a hostname pointing at it), so the certificate names it.
+NSE_PUBLIC_IP=
+# NSE_PUBLIC_HOST=
+# Your own certificate instead (for example Let's Encrypt), both or neither:
+# NSE_TLS_CERT=/path/to/fullchain.pem
+# NSE_TLS_KEY=/path/to/privkey.pem
+# Ask for the sign-in on the LAN too (default: LAN needs none):
+# NSE_AUTH_LAN=1
+# Port the router forwards to this machine (default 8765): NSE_PORT=8765
 
-# ── Short selling and desk rules ──
-NSE_TRADE_ALLOW_SHORT=1
-NSE_TRADE_MAX_SHORT_LOTS=1
-NSE_TRADE_MAX_RISK=2000
-NSE_TRADE_DAY_TARGET=5000
-NSE_TRADE_GIVEBACK_PCT=40
-NSE_TRADE_GIVEBACK_MIN=1500
+
+# ── Scalping tab (Zerodha only) ──────────────────────────────────────────────
+# PAPER is the default: fills are simulated against the live bid/ask and nothing
+# is sent to Zerodha. For real orders set NSE_TRADE_MODE=live, restart the
+# server, then press ARM in the tab. Live orders also need your static IP to be
+# registered for the Kite app (developers.kite.trade).
+# There are no size or risk settings: each order goes out as you press it.
+# NSE_TRADE_MODE=paper
+# NSE_TRADE_PIN=                 # optional: the tab asks for it before any order
+
+
+
+
+
+#how to create these files
+
+# NSE_TLS_CERT=/path/to/fullchain.pem
+# NSE_TLS_KEY=/path/to/privkey.pem
+
+#You can skip those two lines. With NSE_HTTPS=1 the server already makes its own self-signed certificate for your IP and localhost. Use NSE_TLS_CERT and NSE_TLS_KEY only if you want a certificate your browser trusts without a warning.
+
+#They are the two files of a normal TLS certificate: fullchain.pem is the certificate and privkey.pem is its private key. There are two ways to get them.
+
+#1. Let’s Encrypt (trusted, free). This needs a domain name that points at your static IP. Let’s Encrypt won’t issue certificates for a bare IP address.
+
+# bash
+# brew install certbot
+#sudo certbot certonly --standalone -d yourname.example.com
+#Port 80 must reach your Mac while it runs. Forward it on your router for a minute.
+#The files land in /etc/letsencrypt/live/yourname.example.com/.
+#Put these in env:
+#NSE_TLS_CERT=/etc/letsencrypt/live/yourname.example.com/fullchain.pem
+#NSE_TLS_KEY=/etc/letsencrypt/live/yourname.example.com/privkey.pem
+#NSE_PUBLIC_HOST=yourname.example.com
+#The files are readable only by root, so either copy them somewhere your user can read, or start the server with sudo.
+#The certificate lasts 90 days, so run sudo certbot renew now and then and restart the server.
+
+#2. Your own self-signed certificate (no domain). The browser shows a one-time warning that you accept.
+
+#bash
+#openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+#  -keyout privkey.pem -out fullchain.pem \
+#  -subj "/CN=YOUR.STATIC.IP" -addext "subjectAltName=IP:YOUR.STATIC.IP"
+
+#Then set NSE_TLS_CERT and NSE_TLS_KEY to the full paths of those two files. This does the same thing as NSE_HTTPS=1, which is simpler.

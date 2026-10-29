@@ -1416,13 +1416,14 @@ def test_trade_engine():
     check("trade: paper buy fills at the ask (65 = 1 lot) and arms the exits as levels from the fill",
           r["ok"] and p.qty == 65 and p.avg == 99.5 and (p.sl, p.tp, p.trail, p.be_at) == (89.5, 119.5, 8.0, 105.5), str(r))
     check("trade: a repeated request id (double click) is answered, not re-sent", e.buy(I, 1, req_id="a").get("dup") is True and e.pos[I].qty == 65)
-    check("trade: more lots than the per-order cap is refused", "per-order cap" in e.buy(I, 3)["msg"])
-    f2, e2 = mk(); e2.buy(I, 2)
+    f, e = mk(max_lots=2, max_open_lots=4)
+    check("trade: more lots than the per-order cap is refused (when a cap is set)", "per-order cap" in e.buy(I, 3)["msg"])
+    f2, e2 = mk(max_lots=2, max_open_lots=4); e2.buy(I, 2)
     check("trade: open lots are capped across orders", e2.buy(P, 1, {}) ["ok"] and "open lots" in e2.buy(P, 2)["msg"])
     f3, e3 = mk(max_value=1000)
-    f4, e4 = mk()
+    f4, e4 = mk(max_spread_pct=6)
     f4.move(I, 90.0, 99.5)
-    f5, e5 = mk(); f5.add(I, 1.0, 1.5)
+    f5, e5 = mk(min_premium=3); f5.add(I, 1.0, 1.5)
     check("trade: order value, a wide spread and a junk premium are refused",
           "order value" in e3.buy(I, 1)["msg"] and "spread" in e4.buy(I, 1)["msg"] and "below the minimum" in e5.buy(I, 1)["msg"])
     f6, e6 = mk(); clk.t += 30
@@ -1541,7 +1542,8 @@ def test_trade_engine():
     f, e = mk(); e.sell(I, 1, {"sl_pts": 10}); f.move(I, 110.0, 110.5); e.step()
     check("short: a stop above the entry buys back at the ask for a loss", I not in e.pos and e.trades[-1]["gross"] < 0 and "stop" in e.trades[-1]["why"])
     f, e = mk()
-    check("short: a stop is mandatory", "stop" in e.sell(I, 1, {})["msg"].lower() and I not in e.pos)
+    check("short: no stop is required (no limits: it goes out as pressed)", e.sell(I, 1, {})["ok"] and e.pos[I].side == -1 and e.pos[I].sl is None)
+    f, e = mk()
     check("short: a stop inside the market is refused", not e.sell(I, 1, {"sl": 99.0})["ok"])
     f, e = mk(max_short_lots=1, max_lots=3, max_open_lots=6)
     check("short: lots are capped by the short-lot limit", not e.sell(I, 2, {"sl_pts": 10})["ok"] and e.sell(I, 1, {"sl_pts": 10})["ok"])
@@ -1549,9 +1551,14 @@ def test_trade_engine():
     f, e = mk(max_risk=100)
     check("short: the per-order max risk refuses a stop that is too wide", not e.sell(I, 1, {"sl_pts": 10})["ok"] and e.sell(I, 1, {"sl_pts": 1})["ok"])
     f, e = mk(allow_short=False)
-    check("short: refused when shorts are not allowed (the live default)", "short" in e.sell(I, 1, {"sl_pts": 10})["msg"].lower() and I not in e.pos)
-    cfg_live = N.Config(env={"NSE_TRADE_MODE": "live"}); cfg_paper = N.Config(env={"NSE_TRADE_MODE": "paper"}); cfg_on = N.Config(env={"NSE_TRADE_MODE": "live", "NSE_TRADE_ALLOW_SHORT": "1"})
-    check("short: off by default in live, on in paper, and on in live only with NSE_TRADE_ALLOW_SHORT=1", not cfg_live.allow_short and cfg_paper.allow_short and cfg_on.allow_short)
+    check("short: can still be switched off in code (nothing in env does)", "short" in e.sell(I, 1, {"sl_pts": 10})["msg"].lower() and I not in e.pos)
+    big = N.Config(env={"NSE_TRADE_MODE": "live", "NSE_TRADE_MAX_LOTS": "1", "NSE_TRADE_DAY_LOSS": "10", "NSE_TRADE_MAX_OPEN_LOTS": "1", "NSE_TRADE_ALLOW_SHORT": "0", "NSE_TRADE_MAX_VALUE": "1"})
+    check("config: only NSE_TRADE_MODE and NSE_TRADE_PIN are read - every limit env key is ignored, and shorts are always allowed",
+          big.mode == "live" and big.allow_short and not (big.max_lots or big.max_open_lots or big.day_loss or big.max_value or big.max_short_lots or big.max_risk or big.day_target or big.giveback_pct or big.max_trades or big.loss_streak or big.max_spread_pct)
+          and N.Config(env={"NSE_TRADE_PIN": " 12 "}).pin == "12" and N.Config(env={}).mode == "paper")
+    f, e = mk(); W2 = "NFO:NIFTY25100CE"; f.add(W2, 70.0, 70.5)
+    r1, r2, r3 = e.buy(I, 9, {}), e.buy(P, 9, {}), e.sell(W2, 5, {})
+    check("config: with no limits, 9 lots, 9 more on another contract, and a 5-lot short with no stop all go through", r1["ok"] and r2["ok"] and r3["ok"], f"{r1} {r2} {r3}")
     # live short: SELL to open, BUY (above the ask) to cover
     b = Broker(); f, e = mk(b, allow_short=True); e.set_armed(True); r = e.sell(I, 1, {"sl_pts": 10}); 
     check("short live: a sell-to-open is a marketable LIMIT below the bid", r["ok"] and b.placed[0][1] == "SELL" and b.placed[0][3] < 99.0 and e.pos[I].side == -1, f"{r} {b.placed}")
@@ -1629,18 +1636,71 @@ def test_scalping_tab():
             check(f"scalping: element {el} present exactly once", False); break
     else:
         check("scalping: every ticket, chart, depth, blotter and risk element is present exactly once", True)
+    check("scalping chart: the indicators menu, legends and zoom buttons are present exactly once",
+          all(d.count(f'id="{x}"') == 1 for x in ("scInd", "scIndMenu", "scLegP", "scLegR", "scZoom")))
     i = d.index("FEATURE: Scalping terminal"); j = d.index("// ---------- boot ----------", i)
     seg = d[i:j]
     check("scalping: orders carry the intent header and the PIN, and go to /api/trade/ on the page's own server",
           "'X-Trade-Intent': '1'" in seg and "h['X-Trade-Pin'] = pin" in seg and "/api/trade/${path}" in seg)
     check("scalping: LIVE orders need a second press (confirm) and the buy buttons say why they are disabled",
-          "SC.pending !== typ" in seg and "'Confirm live'" in seg and "Entries blocked: ${w}" in seg and "short selling is off in LIVE mode" in seg)
+          "SC.pending !== typ" in seg and "'Confirm live'" in seg and "Entries blocked: ${w}" in seg)
     check("scalping: polling is twice a second, only while the tab is open and visible, and single-flight",
           "SC_POLL_MS = 500" in seg and "setInterval(scPoll, SC_POLL_MS)" in seg and "classList.contains('active') || document.hidden || SC.busy" in seg)
     check("scalping: hotkeys run in the capture phase and stop the page's global letter shortcuts",
           "}, true);" in seg[seg.index("hotkeys:"):] and "e.stopImmediatePropagation()" in seg and "if (!panel.classList.contains('active')) return;" in seg)
     check("scalping: the positions dock is not rebuilt under a half-finished click",
           "if (SC.down && (tab === 'pos' || tab === 'pend')) return;" in seg and "body.addEventListener('mousedown', () => { SC.down = true; })" in seg)
+    check("chart timeframes follow Kite (1m 3m 5m 10m 15m), candles are anchored to the 09:15 open, history is fetched once per contract and interval, and an old saved 5s/15s/30s choice falls back to 1m",
+          "const SC_TFS = [[60, '1m'], [180, '3m'], [300, '5m'], [600, '10m'], [900, '15m']]" in seg and "const SC_ANCHOR = 13500000" in seg
+          and "(x.ms - SC_ANCHOR) / ms" in seg and "/api/trade/candles?" in seg and "if (!SC_TFS.some(x => x[0] === SC.pref.tf)) SC.pref.tf = 60" in seg)
+    check("scalping server: /api/trade/candles is GET, guarded, limited to 1/3/5/10/15 minutes and to listed options or the four indices",
+          'parsed.path == "/api/trade/candles"' in s_ and "tf must be 1, 3, 5, 10 or 15 minutes" in s_ and '"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"' in s_ and "not a listed index option" in s_)
+    check("chart indicators: EMA 5/13 and RSI 14 with a 14-bar MA are on by default, and RSI draws 80, 70 (dotted), 50, 30 (dotted) and 20",
+          "ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14" in seg
+          and "[[80, SC_OB, '', .8], [70, SC_OB, '2,3', .65], [50, '#8b93a7', '', .55], [30, SC_OS, '2,3', .65], [20, SC_OS, '', .8]]" in seg)
+    # the indicator maths, run for real in node against known values
+    fn = "\n".join(seg[seg.index(k):seg.index("\n  }\n", seg.index(k)) + 5] for k in ("function scEmaArr", "function scRsiArr", "function scSmaArr"))
+    js = fn + """
+    const cl = [44.34,44.09,44.15,43.61,44.33,44.83,45.10,45.42,45.84,46.08,45.89,46.03,45.61,46.28,46.28,46.00,46.03,46.41,46.22,45.64];
+    const r = scRsiArr(cl, 14), e = scEmaArr([1,2,3,4,5,6,7,8], 3), m = scSmaArr([null,null,10,20,30,40], 2);
+    console.log(JSON.stringify({ r14: r[14], r15: r[15], r19: r[19], pre: r[13], e: e, m: m, up: scRsiArr([1,2,3,4,5,6], 3)[5], flat: scRsiArr([5,5,5,5,5,5], 3)[5] }));"""
+    try:
+        o = json.loads(_sp.run(["node", "-e", js], capture_output=True, text=True, timeout=20).stdout)
+        check("chart indicators: Wilder RSI(14) matches the textbook series (70.5, 66.3 ... 58.0), is blank until 15 bars, 100 on a pure rise, 50 when flat",
+              abs(o["r14"] - 70.53) < 0.3 and abs(o["r15"] - 66.32) < 0.3 and abs(o["r19"] - 57.97) < 0.4 and o["pre"] is None and o["up"] == 100 and o["flat"] == 50, str(o))
+        js2 = "const SC_ANCHOR = 13500000; let NOW = 0; const scNow = () => NOW;\n" + seg[seg.index("function scMergeBars"):seg.index("\n  }\n", seg.index("function scMergeBars")) + 5] + seg[seg.index("function scFillGaps"):seg.index("\n  }\n", seg.index("function scFillGaps")) + 5] + seg[seg.index("function scVwapFill"):seg.index("\n  }\n", seg.index("function scVwapFill")) + 5] + """
+        const bar = (t, o, c, v) => ({ t, o, h: Math.max(o, c), l: Math.min(o, c), c, v, v0: v, lv0: 0, bv: 0, sv: 0, cvd: null });
+        const D = Date.UTC(2026, 9, 28) - 19800000, OPEN = D + 33300000, M = 60000;           // 28 Oct 2026, 09:15 IST
+        NOW = OPEN + 13 * M + 5000;
+        // history: first trade at 09:25, then 09:26, then nothing until 09:28; the 09:28 bar is still forming and live ticks have begun
+        const H = [bar(OPEN + 10 * M, 100, 101, 100), bar(OPEN + 11 * M, 101, 102, 200), bar(OPEN + 13 * M, 102, 103, 300)];
+        H[2].lv0 = 100;
+        const L = [{ t: OPEN + 13 * M, o: 103.5, h: 106, l: 102.5, c: 105, v: 160, bv: 90, sv: 70, cvd: 20 }, { t: OPEN + 14 * M, o: 105, h: 105, l: 105, c: 105, v: 0, bv: 0, sv: 0, cvd: 20 }];
+        const m = scMergeBars(H, L, 60); scVwapFill(m);
+        const prevDay = scMergeBars([bar(OPEN - 86400000 + 5 * M, 90, 91, 50), bar(OPEN, 100, 101, 100)], [], 60); scVwapFill(prevDay);
+        console.log(JSON.stringify({ n: m.length, ts: m.map(x => (x.t - OPEN) / M), pad: m[0].c, padv: m[0].v, gap: m[12].c, fo: m[13].o, h: m[13].h, c: m[13].c, v: m[13].v, same: scMergeBars([], L, 60) === L,
+          days: prevDay.filter(x => x.dayStart).length, firstDay: (prevDay[0].t - (OPEN - 86400000)) / M, vw: m[10].vw }));"""
+        o2 = json.loads(_sp.run(["node", "-e", js2], capture_output=True, text=True, timeout=20).stdout)
+        check("chart candles: every session runs from 09:15 (late first trade padded back to the open, minutes with no trade filled flat), history plus live merge (the forming bar keeps its historical open, takes the live high and close, and adds only the volume seen since the history call), and VWAP restarts per session",
+              o2["ts"] == list(range(0, 15)) and o2["pad"] == 100 and o2["padv"] == 0 and o2["same"] and o2["gap"] == 102 and o2["fo"] == 102 and o2["c"] == 105 and o2["h"] == 106 and o2["v"] == 360
+              and o2["days"] == 2 and o2["firstDay"] == 0 and abs(o2["vw"] - 302 / 3) < 1e-6, str(o2))
+        js3 = "const fmtInt = x => x;\n" + seg[seg.index("function scFills"):seg.index("\n  }\n", seg.index("function scFills")) + 5] + """
+        const S = { trades: [
+          { inst: 'A', typ: 'CE', strike: 25000, side: 'long', role: 'main', qty: 65, avg: 100, exit: 110, net: 500, t: 2000, opened: 1000, why: 'partial' },
+          { inst: 'A', typ: 'CE', strike: 25000, side: 'long', role: 'main', qty: 65, avg: 100, exit: 90, net: -700, t: 3000, opened: 1000, why: 'stop' },
+          { inst: 'B', typ: 'PE', strike: 25000, side: 'short', role: 'main', qty: 65, avg: 80, exit: 70, net: 600, t: 4000, opened: 3500, why: 'target' },
+          { inst: 'W', typ: 'CE', strike: 25200, side: 'long', role: 'hedge', qty: 65, avg: 20, exit: 21, net: 10, t: 4000, opened: 3500, why: 'hedge released' }],
+          positions: [{ inst: 'A', typ: 'CE', strike: 25000, side: 'long', role: 'main', qty: 65, lots: 1, avg: 120, opened: 5000 }] };
+        const a = scFills(S, { kind: 'CE', inst: 'A' }), sp = scFills(S, { kind: 'SPOT' });
+        console.log(JSON.stringify({ a: a.map(f => [f.k, f.buy, f.up, f.qty, f.price]), spUp: sp.filter(f => f.inst === 'B').map(f => [f.k, f.up]), spN: sp.length, hedgeOnSpot: sp.some(f => f.inst === 'W'), wOwn: scFills(S, { kind: 'CE', inst: 'W' }).length }));"""
+        o3 = json.loads(_sp.run(["node", "-e", js3], capture_output=True, text=True, timeout=20).stdout)
+        check("chart fills: an option's chart gets one entry marker per fill (partial exits share their entry, quantities add up), an outlined exit marker per exit, and the open position; the spot chart draws by view (a short put is bullish: up at entry, down at exit) and leaves wings out",
+              o3["a"] == [["in", True, True, 130, 100], ["out", False, False, 65, 110], ["out", False, False, 65, 90], ["in", True, True, 65, 120]]
+              and o3["spUp"] == [["in", True], ["out", False]] and not o3["hedgeOnSpot"] and o3["spN"] == 6 and o3["wOwn"] == 2, str(o3))
+        check("chart indicators: EMA seeds with the SMA and follows 2/(n+1); the RSI average waits for a full window",
+              o["e"][:2] == [None, None] and o["e"][2] == 2 and abs(o["e"][3] - 3) < 1e-9 and abs(o["e"][7] - 7) < 1e-9 and o["m"] == [None, None, None, 15, 25, 35], str(o))
+    except Exception as ex:  # noqa: BLE001
+        check("chart indicators: the maths runs in node", False, str(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
           "location.protocol === 'file:'" in seg and "_source !== 'zerodha'" in seg)
     # ── the chart right-click mute item ──
@@ -1717,8 +1777,8 @@ def test_scalping_tab():
     check("scalping server: the state call parses per-contract tape cursors with rpartition and only accepts option names or the listed ones",
           'rpartition(":")' in s_ and "tape_since" in s_ and "[A-Z0-9]{8,30}" in s_)
     env = open(os.path.join(HERE, "env.example"), encoding="utf-8").read() if os.path.exists(os.path.join(HERE, "env.example")) else ""
-    check("env.example documents NSE_TRADE_MODE (paper default) and the risk limits",
-          "NSE_TRADE_MODE" in env and "NSE_TRADE_DAY_LOSS" in env and "NSE_TRADE_PIN" in env)
+    check("env.example documents NSE_TRADE_MODE (paper default) and the PIN, and no size or risk limits",
+          "NSE_TRADE_MODE" in env and "NSE_TRADE_PIN" in env and not any(k in env for k in ("NSE_TRADE_DAY_LOSS", "NSE_TRADE_MAX_LOTS", "NSE_TRADE_ALLOW_SHORT", "NSE_TRADE_MAX_RISK", "NSE_TRADE_DAY_TARGET", "NSE_TRADE_GIVEBACK")))
 
 
 def test_remote_access():
@@ -2544,6 +2604,17 @@ def test_zerodha_adapter():
               and _ZFakeKite.calls["historical"] - h0 <= 2, f"{len(c1)} {_ZFakeKite.calls['historical'] - h0}")
         hd = Z.fetch_history_days("NIFTY", 60)
         check("zerodha: 60 days of minute bars in ONE history call", hd and _ZFakeKite.calls["historical"] - h0 <= 3, str(len(hd)))
+        # the Scalping chart's candles: an option or the index, in-session bars only, one call, then cached
+        h1 = _ZFakeKite.calls["historical"]
+        fb1 = Z.fetch_bars(ce_key, 5); fb2 = Z.fetch_bars(ce_key, 5); fbi = Z.fetch_bars("NIFTY", 1)
+        insess = all(Z._in_session(((b["t"] + 19800) % 86400) // 60) for b in fb1)
+        try:
+            Z.fetch_bars(ce_key, 7); bad_iv = False
+        except ValueError:
+            bad_iv = True
+        check("zerodha: chart candles for an option and the index - sorted, in session, ONE call per contract and interval (cached), odd intervals refused",
+              fb1 and fb1 == fb2 and fbi and insess and [b["t"] for b in fb1] == sorted(b["t"] for b in fb1) and bad_iv
+              and _ZFakeKite.calls["historical"] - h1 == 2 and 1 <= len({(b["t"] + 19800) // 86400 for b in fb1}) <= 4, f"{len(fb1)} {len(fbi)} {_ZFakeKite.calls['historical'] - h1}")
         # constituents: REST first, socket afterwards
         cq = Z.constituent_quotes(["RELIANCE", "HDFCBANK"])
         qa = _ZFakeKite.calls["quote"]

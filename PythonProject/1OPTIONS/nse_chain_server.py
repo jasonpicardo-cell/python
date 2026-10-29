@@ -6684,8 +6684,7 @@ def _trade_engine():
             _trade_eng = eng
             print(f"[trade] Scalping engine ready - {cfg.mode.upper()} mode"
                   + ("" if cfg.mode == "paper" else " (orders go to Zerodha once ARMed in the tab)")
-                  + f"; limits: {cfg.max_lots} lot/order, {cfg.max_open_lots} open, day loss Rs {cfg.day_loss:,.0f}"
-                  + f"; shorts {'ON (' + str(cfg.max_short_lots) + ' lot cap)' if cfg.allow_short else 'OFF (NSE_TRADE_ALLOW_SHORT=1 to allow)'}")
+                  + "; no size or risk limits (every order goes out as pressed)")
     return _trade_eng
 
 

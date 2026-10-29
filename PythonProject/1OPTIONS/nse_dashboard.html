@@ -2217,12 +2217,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-opts label { font-size: 10.5px; color: var(--muted); display: flex; gap: 4px; align-items: center; cursor: pointer; }
   .sc-readout { min-height: 16px; font-size: 11px; color: var(--muted); margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sc-readout b { color: var(--text); font-weight: 500; }
-  .sc-chartwrap { height: 480px; background: var(--sc-sunk); border: 1px solid var(--border-soft); border-radius: 4px; }
+  .sc-chartwrap { height: 620px; position: relative; background: var(--sc-sunk); border: 1px solid var(--border-soft); border-radius: 4px; }
+  .sc-opts { position: relative; align-items: center; }
+  .sc-zoom { display: flex; gap: 0; } .sc-zoom button { background: var(--panel-3); color: var(--text); border: 1px solid var(--border); padding: 1px 8px; font-size: 13px; line-height: 16px; cursor: pointer; font-family: inherit; }
+  .sc-zoom button:first-child { border-radius: 4px 0 0 4px; } .sc-zoom button:last-child { border-radius: 0 4px 4px 0; border-left: 0; } .sc-zoom button:hover { background: var(--border); }
+  .sc-indbtn { background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .sc-indbtn:hover, .sc-indbtn.on { border-color: var(--accent); }
+  .sc-indbtn .cnt { background: var(--accent); color: #05070a; border-radius: 8px; padding: 0 6px; margin-left: 6px; font-size: 10px; }
+  .sc-indmenu { position: absolute; right: 0; top: calc(100% + 6px); width: 330px; z-index: 30; background: #0f1218; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  .sc-indmenu .ih { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .sc-indmenu .ih button { background: none; border: 0; color: var(--accent); cursor: pointer; font-size: 11px; font-family: inherit; }
+  .sc-indmenu .ir { display: grid; grid-template-columns: 18px 1fr; gap: 2px 8px; padding: 7px 0; border-top: 1px solid var(--border-soft); }
+  .sc-indmenu .ir.off { opacity: .45; }
+  .sc-indmenu .ir label { font-size: 12px; color: var(--text); font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .sc-indmenu .ir .d { grid-column: 2; font-size: 10.5px; color: var(--muted); line-height: 1.35; }
+  .sc-indmenu .ir .p { grid-column: 2; display: flex; gap: 6px; align-items: center; font-size: 10.5px; color: var(--muted); }
+  .sc-indmenu input[type=number] { width: 52px; background: var(--panel-3); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; font-size: 11.5px; }
+  .sc-indmenu .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; }
+  .sc-lg-row { position: absolute; left: 8px; right: 82px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 10.5px; color: var(--muted); pointer-events: none; font-family: 'IBM Plex Mono', monospace; }
+  .sc-lg-row .sc-lg { display: inline-flex; align-items: center; gap: 4px; background: rgba(11,13,18,.72); border-radius: 3px; padding: 0 4px; } .sc-lg-row .sc-lg b { color: var(--text); font-weight: 600; }
+  .sc-lg-row .sc-lg i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; }
+  .sc-lg-row .sig { background: rgba(11,13,18,.72); border-radius: 3px; padding: 0 5px; font-weight: 600; } .sc-lg-row .sig.up { color: #2ecc8f; } .sc-lg-row .sig.dn { color: #ff5d6c; } .sc-lg-row .sig.wu { color: #7a8398; font-weight: 400; }
+  .sc-lg-row .sc-lgx { pointer-events: auto; background: rgba(11,13,18,.72); border: 0; color: #7a8398; cursor: pointer; font-size: 11px; border-radius: 3px; padding: 0 5px; } .sc-lg-row .sc-lgx:hover { color: #ff5d6c; }
   .sc-chartwrap svg { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; }
   .sc-chartwrap text { font-family: 'IBM Plex Mono', monospace; }
   .sc-hint { font-size: 10px; color: var(--muted-2); margin-top: 5px; }
   .sc-chartwrap svg * { pointer-events: none; }
   .sc-chartwrap svg .sc-h, .sc-chartwrap svg .sc-h * { pointer-events: all; }
+  .sc-chartwrap svg .sc-mk, .sc-chartwrap svg .sc-mk * { pointer-events: all; cursor: default; }
   .sc-h { cursor: ns-resize; }
 
   /* right column */
@@ -3387,11 +3409,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <div class="sc-ctl">
                 <div class="sc-tabs2" id="scChTabs"></div>
                 <div class="sc-seg sc-seg-s" id="scTfs"></div>
-                <div class="sc-opts" id="scOpts"></div>
+                <div class="sc-zoom" id="scZoom"><button data-z="in" title="Zoom in (scroll up over the chart)">+</button><button data-z="out" title="Zoom out (scroll down over the chart)">−</button></div>
+                <div class="sc-opts" id="scOpts"><button class="sc-indbtn" id="scInd" title="Add EMA 5/13, RSI, VWAP, volume or order flow to this chart">ƒx Indicators</button><div class="sc-indmenu" id="scIndMenu" style="display:none"></div></div>
               </div>
               <div id="scReadout" class="sc-readout sc-n"></div>
-              <div class="sc-chartwrap"><svg id="scChart"></svg></div>
-              <div class="sc-hint">Drag the stop, target or partial line to change it. With no position open, drag the dashed plan lines to set the next order's exits. Scroll to zoom.</div>
+              <div class="sc-chartwrap"><svg id="scChart"></svg><div class="sc-lg-row" id="scLegP"></div><div class="sc-lg-row" id="scLegR"></div></div>
+              <div class="sc-hint">Drag the stop, target or partial line to change it. With no position open, drag the dashed plan lines to set the next order's exits. Scroll or use + / − to zoom. Candles follow Kite's intervals and open at 09:15. ▲ ▼ mark your fills (solid = entry, outlined = exit). Indicators sit in the ƒx menu; ✕ on a legend removes it.</div>
             </main>
 
             <aside class="sc-right">
@@ -3415,7 +3438,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="scDockBody" class="sc-dbody"></div>
             <div id="scMod" class="sc-mod" style="display:none;"></div>
           </div>
-          <div class="sc-foot">Orders are marketable LIMIT, IOC, MIS on NFO. A short has no ceiling on its loss: it needs a stop, has its own lot cap, is off in LIVE unless NSE_TRADE_ALLOW_SHORT=1, and is best hedged with a wing. Stops, targets, trailing and the 15:14 square-off are watched by the server on the live tick feed, not placed at the exchange, so a gap can jump a stop. Waiting orders live in the server's memory only. Charges are an estimate.</div>
+          <div class="sc-foot">Orders are marketable LIMIT, IOC, MIS on NFO. There are no size or risk limits: each order goes out as pressed. A short has no ceiling on its loss; set a stop, or hedge it with a wing. Stops, targets, trailing and the 15:14 square-off are watched by the server on the live tick feed, not placed at the exchange, so a gap can jump a stop. Waiting orders live in the server's memory only. Charges are an estimate.</div>
         </section>
 
         <section id="tab-today" class="tab-panel">
@@ -41198,15 +41221,15 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // ======================================================================
   const SC = {
     st: null, quotes: {}, spot: 0, busy: false, legs: { CE: null, PE: null }, tape: {},
-    pref: { tf: 15, nvis: 70, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
+    pref: { tf: 60, nvis: 70, ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
             selCE: 'o0', selPE: 'o0', chart: 'CE', dock: 'pos', side: 'B', struct: 'single', sOff: 2, hedge: true, wing: 3,
             trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
     pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
     exitsBy: { B: {}, S: {} }, exits: {}, drag: null, hover: null, geom: null, lines: [], lastOrdT: null, bgT: 0, raf: 0,
-    sLegs: null, wing: null, margin: null, notes: {},
+    sLegs: null, wing: null, margin: null, notes: {}, hist: {},
   };
   const SC_STRIKES = [['o-2', 'ITM 2'], ['o-1', 'ITM 1'], ['o0', 'ATM'], ['o1', 'OTM 1'], ['o2', 'OTM 2'], ['o3', 'OTM 3'], ['d0.4', 'Δ .40'], ['d0.3', 'Δ .30'], ['d0.2', 'Δ .20']];
-  const SC_TFS = [[5, '5s'], [15, '15s'], [30, '30s'], [60, '1m']];
+  const SC_TFS = [[60, '1m'], [180, '3m'], [300, '5m'], [600, '10m'], [900, '15m']];     // Kite's own intervals, anchored to the 09:15 open
   const SC_MAXROWS = 6000, SC_POLL_MS = 500;
   const SC_TAGS = ['Breakout', 'Reversal', 'Trend', 'Fade', 'Range', 'News', 'Expiry'];
   // [key, label buying, label selling, default buying, default selling, tip buying, tip selling, group]
@@ -41261,7 +41284,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     clearTimeout(scMsg._t); if (text) scMsg._t = setTimeout(() => { el.textContent = ''; el.className = 'sc-msg'; }, bad ? 9000 : 5000);
   }
   function scPin() { try { return sessionStorage.getItem('scalpPin') || ''; } catch (_) { return ''; } }
-  function scPrefLoad() { try { Object.assign(SC.pref, JSON.parse(localStorage.getItem('scalpPrefsV2') || '{}') || {}); } catch (_) {} }
+  function scPrefLoad() { try { Object.assign(SC.pref, JSON.parse(localStorage.getItem('scalpPrefsV2') || '{}') || {}); } catch (_) {} if (!SC_TFS.some(x => x[0] === SC.pref.tf)) SC.pref.tf = 60; }
   function scPrefSave() { try { localStorage.setItem('scalpPrefsV2', JSON.stringify(SC.pref)); } catch (_) {} }
   async function scApi(path, body) {
     const h = { 'Content-Type': 'application/json', 'X-Trade-Intent': '1' };
@@ -41379,7 +41402,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const typed = Math.max(1, parseInt($sc('scLots').value, 10) || 1);
     if (!SC.pref.riskAuto || scIsStruct()) return typed;
     const L = SC.legs[typ || 'CE'] || SC.legs.CE || SC.legs.PE, sl = scEn('sl_pts');
-    const cap = (SC.st && SC.st.limits && (SC.pref.side === 'S' ? Math.min(SC.st.limits.max_lots, SC.st.limits.max_short_lots) : SC.st.limits.max_lots)) || 1;
+    const cap = 50;
     if (!L || !sl) return typed;
     const px = SC.pref.side === 'S' ? (L.bid || L.ask) : L.ask, per = sl * L.lot + scCharges(px * L.lot, px * L.lot, 2);
     return Math.max(1, Math.min(cap, Math.floor((+SC.pref.riskRs || 0) / per) || 1));
@@ -41442,12 +41465,70 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     if (d.cur) t.cur = d.cur;
     if (t.d.length > SC_MAXROWS) t.d.splice(0, t.d.length - SC_MAXROWS);
   }
+  const SC_ANCHOR = 13500000;     // 09:15 IST as a UTC time of day in ms: Kite's candles start here (a 10m candle is 09:15-09:25, not 09:10-09:20)
+  // history: one call per contract and interval, then live ticks extend it
+  function scHistKey(T, tf) { return (T.kind === 'SPOT' ? 'SPOT:' + T.name : T.inst) + '|' + tf; }
+  function scEnsureHist(T, tf) {
+    const k = scHistKey(T, tf), h = SC.hist[k];
+    const age = h ? Date.now() - h.at : 1e9;
+    if (h && (h.loading || (h.bars && age < 60000) || (h.err && age < 30000))) return;      // refreshed about once a minute, so a late candle from Zerodha is picked up
+    SC.hist[k] = h && h.bars ? Object.assign({}, h, { loading: true }) : { loading: true, at: Date.now() };
+    const q = T.kind === 'SPOT' ? `sym=${encodeURIComponent(T.name)}` : `inst=${encodeURIComponent(T.inst)}`;
+    fetch(`/api/trade/candles?${q}&tf=${tf / 60}`, { cache: 'no-store' }).then(r => r.json()).then(j => {
+      if (j && j.bars) {
+        const bars = j.bars.map(r => ({ t: r[0] * 1000, o: r[1], h: r[2], l: r[3], c: r[4], v: r[5], v0: r[5], lv0: 0, bv: 0, sv: 0, cvd: null, hist: true }));
+        const tp = SC.tape[T.name], lastB = bars[bars.length - 1];           // the live volume already inside the forming candle's history volume
+        if (lastB && tp && tp.d.length >= 2) { const m = scBars(tp, tf).find(x => x.t === lastB.t); lastB.lv0 = m ? m.v : 0; }
+        SC.hist[k] = { at: Date.now(), bars };
+      } else SC.hist[k] = failed((j && (j.msg || j.why)) || 'no data');
+      scQueueDraw();
+    }).catch(e => { SC.hist[k] = failed(String(e && e.message || e)); scQueueDraw(); });
+    const failed = err => { const p = SC.hist[k]; return p && p.bars ? Object.assign({}, p, { loading: false, at: Date.now() }) : { at: Date.now(), err }; };
+  }
+  // history first, then the live bars after it; the bar being formed takes its open from history and its high/low/close/volume from both
+  function scMergeBars(hist, live, tf) {
+    if (!hist || !hist.length) return live;
+    const out = hist.map(h => Object.assign({}, h)), last = out[out.length - 1];
+    for (const l of live) {
+      if (l.t === last.t) { last.h = Math.max(last.h, l.h); last.l = Math.min(last.l, l.l); last.c = l.c; last.v = last.v0 + Math.max(0, l.v - (last.lv0 || 0)); last.bv = l.bv; last.sv = l.sv; last.cvd = l.cvd; }
+      else if (l.t > last.t) out.push(l);
+    }
+    return scFillGaps(out, tf);
+  }
+  // Kite leaves out minutes with no trade. Fill them with flat candles so every session runs 09:15 onwards
+  // and the indicators see a steady clock; a session whose first trade came late is padded back to the open.
+  function scFillGaps(arr, tf) {
+    const ms = tf * 1000, DAY = 86400000, IST = 19800000, OPEN = 33300000, out = [];
+    const flat = (c, t) => ({ t, o: c, h: c, l: c, c, v: 0, v0: 0, lv0: 0, bv: 0, sv: 0, cvd: null, hist: true });
+    const dayOf = t => Math.floor((t + IST) / DAY), openOf = t => dayOf(t) * DAY - IST + OPEN;
+    for (const b of arr) {
+      const prev = out[out.length - 1];
+      if (!prev || dayOf(prev.t) !== dayOf(b.t)) { for (let g = openOf(b.t), n = 0; g < b.t && n < 400; g += ms, n++) out.push(flat(b.o, g)); }
+      else for (let g = prev.t + ms, n = 0; g < b.t && g < openOf(prev.t) + 375 * 60000 && n < 400; g += ms, n++) out.push(flat(prev.c, g));     // never past 15:30: nothing trades after the close
+      out.push(b);
+    }
+    const last = out[out.length - 1], now = scNow();
+    if (last && dayOf(last.t) === dayOf(now)) {
+      const nowB = Math.floor((now - SC_ANCHOR) / ms) * ms + SC_ANCHOR, end = openOf(now) + 375 * 60000;
+      for (let g = last.t + ms; g <= nowB && g < end; g += ms) out.push(flat(last.c, g));
+    }
+    return out;
+  }
+  // session VWAP from the candles themselves (typical price x volume), restarting each day
+  function scVwapFill(all) {
+    let day = null, pv = 0, vv = 0;
+    for (const b of all) {
+      const d = Math.floor((b.t + 19800000) / 86400000);
+      if (d !== day) { day = d; pv = 0; vv = 0; b.dayStart = true; }
+      pv += (b.h + b.l + b.c) / 3 * (b.v || 0); vv += b.v || 0; b.vw = vv > 0 ? pv / vv : null; b.day = d;
+    }
+  }
   function scBars(t, tf) {
     const ms = tf * 1000, out = []; let cur = null;
     const flat = (c, at, cvd, vw) => ({ t: at, o: c, h: c, l: c, c, v: 0, bv: 0, sv: 0, cvd, vw });
     for (const x of t.d) {
       if (x.p == null) continue;
-      const b = Math.floor(x.ms / ms) * ms;
+      const b = Math.floor((x.ms - SC_ANCHOR) / ms) * ms + SC_ANCHOR;
       if (!cur || cur.t !== b) {
         if (cur && b - cur.t <= 400 * ms) for (let g = cur.t + ms; g < b; g += ms) out.push(flat(cur.c, g, cur.cvd, cur.vw));
         cur = { t: b, o: x.p, h: x.p, l: x.p, c: x.p, v: 0, bv: 0, sv: 0, cvd: x.cvd, vw: x.vw }; out.push(cur);
@@ -41457,7 +41538,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       cur.cvd = x.cvd; if (x.vw != null) cur.vw = x.vw;
     }
     if (cur) {
-      const nowB = Math.floor(scNow() / ms) * ms;
+      const nowB = Math.floor((scNow() - SC_ANCHOR) / ms) * ms + SC_ANCHOR;
       if (nowB - cur.t <= 400 * ms) for (let g = cur.t + ms; g <= nowB; g += ms) out.push(flat(cur.c, g, cur.cvd, cur.vw));
     }
     return out;
@@ -41535,6 +41616,95 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
     return { out, step };
   }
+  // ── indicators: EMA 5/13 crossover, RSI with a moving average ──
+  const SC_EF = '#40c4ff', SC_ES = '#ffab40', SC_RSI = '#d6dcea', SC_RMA = '#ffd54f', SC_OB = '#ef5350', SC_OS = '#26a69a';
+  function scEmaArr(cl, n) {
+    const out = new Array(cl.length).fill(null); if (cl.length < n || n < 1) return out;
+    let e = 0; for (let i = 0; i < n; i++) e += cl[i]; e /= n; out[n - 1] = e;
+    const k = 2 / (n + 1); for (let i = n; i < cl.length; i++) { e = cl[i] * k + e * (1 - k); out[i] = e; }
+    return out;
+  }
+  function scRsiArr(cl, n) {                       // Wilder's RSI
+    const out = new Array(cl.length).fill(null); if (cl.length <= n || n < 1) return out;
+    let g = 0, l = 0; for (let i = 1; i <= n; i++) { const d = cl[i] - cl[i - 1]; if (d > 0) g += d; else l -= d; }
+    g /= n; l /= n; out[n] = l === 0 ? (g === 0 ? 50 : 100) : 100 - 100 / (1 + g / l);
+    for (let i = n + 1; i < cl.length; i++) {
+      const d = cl[i] - cl[i - 1]; g = (g * (n - 1) + (d > 0 ? d : 0)) / n; l = (l * (n - 1) + (d < 0 ? -d : 0)) / n;
+      out[i] = l === 0 ? (g === 0 ? 50 : 100) : 100 - 100 / (1 + g / l);
+    }
+    return out;
+  }
+  function scSmaArr(a, n) {
+    const out = new Array(a.length).fill(null); let s = 0, c = 0;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] == null) continue; s += a[i]; c++;
+      if (c > n) { s -= a[i - n]; c--; }
+      if (c === n) out[i] = s / n;
+    }
+    return out;
+  }
+  // writes ef/es/rsi/rma onto the bars and lists the EMA crossings (index into `all`, dir +1 bullish / -1 bearish)
+  function scIndicators(all) {
+    const P = SC.pref, cl = all.map(b => b.c), n = all.length;
+    const ef = P.ema ? scEmaArr(cl, P.emaF) : null, es = P.ema ? scEmaArr(cl, P.emaS) : null;
+    const rs = P.rsi ? scRsiArr(cl, P.rsiN) : null, rm = rs ? scSmaArr(rs, P.rsiM) : null, cross = [];
+    for (let i = 0; i < n; i++) { const b = all[i]; b.ef = ef ? ef[i] : null; b.es = es ? es[i] : null; b.rsi = rs ? rs[i] : null; b.rma = rm ? rm[i] : null; }
+    if (ef && es) {
+      let prev = 0;
+      for (let i = 0; i < n; i++) {
+        if (ef[i] == null || es[i] == null) continue;
+        const s = ef[i] > es[i] ? 1 : ef[i] < es[i] ? -1 : 0;
+        if (s !== 0) { if (prev !== 0 && s !== prev) cross.push({ i, dir: s }); prev = s; }
+      }
+    }
+    return { cross, n };
+  }
+  function scLinePath(vis, key, bx, y, lo, hi) {
+    let d = '', pen = false;
+    vis.forEach((b, i) => { const v = b[key]; if (v == null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${bx(i).toFixed(1)},${y(v).toFixed(1)}`; pen = true; });
+    return d;
+  }
+  function scRenderIndMenu(spot) {
+    const P = SC.pref, menu = $sc('scIndMenu'), btn = $sc('scInd'); if (!menu) return;
+    const n = ['ema', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
+    scSet(btn, `ƒx Indicators${n ? `<span class="cnt">${n}</span>` : ''}`);
+    btn.classList.toggle('on', !!SC.indOpen); menu.style.display = SC.indOpen ? '' : 'none';
+    if (!SC.indOpen) return;
+    const row = (k, name, desc, extra, dis) => `<div class="ir${P[k] && !dis ? '' : ' off'}"><input type="checkbox" data-o="${k}" id="scio_${k}" ${P[k] ? 'checked' : ''}${dis ? ' disabled' : ''}><label for="scio_${k}">${name}</label><div class="d">${desc}</div>${extra ? `<div class="p">${extra}</div>` : ''}</div>`;
+    const num = (k, v, mx) => `<input type="number" data-n="${k}" min="1" max="${mx || 200}" value="${v}">`;
+    scSet(menu, `<div class="ih"><span>Indicators on this chart</span><button data-ind="reset" title="EMA 5/13 and RSI 14 on, everything else as it is">Defaults</button></div>` +
+      row('ema', 'EMA crossover', 'A fast and a slow moving average of the close. ▲ marks where the fast one crosses above (bullish), ▼ where it crosses below (bearish). The band between them is green when fast is above, red when below.',
+        `<span class="sw" style="background:${SC_EF}"></span>fast ${num('emaF', P.emaF)} <span class="sw" style="background:${SC_ES}"></span>slow ${num('emaS', P.emaS)}`) +
+      row('rsi', 'RSI with moving average', 'Momentum from 0 to 100 in its own pane. 80 and 20 are the overbought and oversold lines, 50 is the middle, and the dotted lines are 70 and 30. The yellow line is the average of the RSI.',
+        `<span class="sw" style="background:${SC_RSI}"></span>RSI ${num('rsiN', P.rsiN)} <span class="sw" style="background:${SC_RMA}"></span>MA ${num('rsiM', P.rsiM)}`) +
+      row('vwap', 'VWAP', 'Volume-weighted average price of this contract since the page started collecting.' + (spot ? ' Not available on the spot chart.' : ''), '', spot) +
+      row('vol', 'Volume', 'Bars of traded volume, split into buyers and sellers.' + (spot ? ' Not available on the spot chart.' : ''), '', spot) +
+      row('cvd', 'Order flow (cumulative delta)', 'Running total of buyer volume minus seller volume.' + (spot ? ' Not available on the spot chart.' : ''), '', spot));
+  }
+  // your fills for the chart on screen: entries and exits of closed trades plus the open positions, one entry per fill price and time.
+  // S = the engine state. On an option's chart a fill is a buy or a sell of that contract; on the spot chart it is drawn by view
+  // (a bullish position is an up arrow at entry, and its exit a down arrow), at the spot of that candle.
+  function scFills(S, T) {
+    const out = [], seen = {}, spot = T.kind === 'SPOT';
+    const view = (typ, sg) => sg * (typ === 'CE' ? 1 : -1);
+    const add = (k, inst, typ, strike, sg, t, price, qty, lots, extra) => {
+      const id = `${k}|${inst}|${t}|${price}`;
+      if (seen[id]) { seen[id].qty += qty; seen[id].lots += lots; if (extra && extra.net != null) seen[id].net = (seen[id].net || 0) + extra.net; return; }
+      const buy = k === 'in' ? sg > 0 : sg < 0;
+      seen[id] = Object.assign({ k, inst, typ, strike, sg, t, price, qty, lots, buy, up: spot ? (k === 'in' ? view(typ, sg) > 0 : view(typ, sg) < 0) : buy }, extra || {}); out.push(seen[id]);
+    };
+    for (const tr of (S && S.trades) || []) {
+      if (spot ? tr.role === 'hedge' : tr.inst !== T.inst) continue;
+      const sg = tr.side === 'short' ? -1 : 1, lots = tr.lot ? Math.round(tr.qty / tr.lot) : 0;
+      add('in', tr.inst, tr.typ, tr.strike, sg, tr.opened, tr.avg, tr.qty, lots, { pair: tr.t + '|' + tr.exit });
+      add('out', tr.inst, tr.typ, tr.strike, sg, tr.t, tr.exit, tr.qty, lots, { net: tr.net, why: tr.why || '', pair: tr.opened + '|' + tr.avg });
+    }
+    for (const p of (S && S.positions) || []) {
+      if (spot ? p.role === 'hedge' : p.inst !== T.inst) continue;
+      add('in', p.inst, p.typ, p.strike, p.side === 'short' ? -1 : 1, p.opened, p.avg, p.qty, p.lots || 0, { open: true });
+    }
+    return out;
+  }
   function scQueueDraw() { if (!SC.raf) SC.raf = requestAnimationFrame(() => { SC.raf = 0; try { scDrawChart(); } catch (e) { console.log('[scalp] chart', e); } }); }
   function scDrawChart() {
     const svg = $sc('scChart'); if (!svg) return;
@@ -41543,13 +41713,17 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     const note = t => { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="#7a8398" font-size="12" style="font-family:'IBM Plex Sans',sans-serif">${t}</text>`; SC.geom = null; };
     if (!T) return note('Pick a strike on the ladder to chart it.');
-    const tape = SC.tape[T.name];
-    if (!tape || tape.d.length < 2) return note(SC.st && SC.st.feed && !SC.st.feed.streaming ? 'The Zerodha stream is not connected.' : 'Collecting ticks…');
-    const isSpot = T.kind === 'SPOT', tf = SC.pref.tf, all = scBars(tape, tf);
+    const tape = SC.tape[T.name], tf = SC.pref.tf;
+    scEnsureHist(T, tf);
+    const H0 = SC.hist[scHistKey(T, tf)], haveH = !!(H0 && H0.bars && H0.bars.length), haveL = !!(tape && tape.d.length >= 2);
+    if (!haveH && !haveL) return note(H0 && H0.loading ? 'Loading candles…' : SC.st && SC.st.feed && !SC.st.feed.streaming ? 'The Zerodha stream is not connected.' : 'Collecting ticks…');
+    const isSpot = T.kind === 'SPOT', all = scMergeBars(haveH ? H0.bars : [], haveL ? scBars(tape, tf) : [], tf);
+    scVwapFill(all); const ind = scIndicators(all);
     const cap = Math.max(8, SC.pref.nvis), vis = all.slice(-cap), nv = vis.length, off = cap - nv;
     const R = 74, L = 6, TOP = 8, BOT = 18, gap = 6;
     const volH = (!isSpot && SC.pref.vol) ? 44 : 0, cvdH = (!isSpot && SC.pref.cvd) ? 56 : 0;
-    const pH = H - TOP - BOT - (volH ? volH + gap : 0) - (cvdH ? cvdH + gap : 0);
+    const rsiH = SC.pref.rsi ? 112 : 0;
+    const pH = Math.max(150, H - TOP - BOT - (rsiH ? rsiH + gap : 0) - (volH ? volH + gap : 0) - (cvdH ? cvdH + gap : 0));
     const x0 = L, x1 = W - R, step = (x1 - x0) / (cap + 4), bx = i => x0 + step * (off + i + 0.5), bw = Math.max(1, Math.min(14, step * 0.72));
     const q = T.inst ? (SC.quotes[T.inst] || {}) : {};
     let lo = Infinity, hi = -Infinity;
@@ -41566,7 +41740,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const y = v => TOP + pH * (1 - (v - flo) / (fhi - flo));
     SC.geom = { lo: flo, hi: fhi, TOP, pH, x0, x1, W, H, step, nv, vis, T };
     const tk = scTicks(flo, fhi, 5), dec = tk.step < 0.1 ? 3 : tk.step < 1 ? 2 : tk.step < 10 ? 1 : 0, dec2 = isSpot ? 1 : 2;
-    let s = '';
+    let s = `<defs><clipPath id="scClipP"><rect x="${x0}" y="${TOP}" width="${x1 - x0}" height="${pH}"/></clipPath></defs>`;
     for (const v of tk.out) s += `<line x1="${x0}" x2="${x1}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="#12151c"/><text x="${x1 + 6}" y="${(y(v) + 3).toFixed(1)}" fill="#6b7388" font-size="10">${v.toFixed(dec)}</text>`;
     // zones: the risk and the reward of the bracket as areas
     const E = lines.find(l => l.id === 'entry'), SL = lines.find(l => l.id === 'sl' || l.id === 'psl'), TP = lines.find(l => l.id === 'tp' || l.id === 'ptp');
@@ -41579,6 +41753,28 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(b.h).toFixed(1)}" y2="${y(b.l).toFixed(1)}" stroke="${col}"/>` +
            `<rect x="${(cx - bw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, Math.abs(yo - yc)).toFixed(1)}" fill="${col}"/>`;
     });
+    if (SC.pref.ema && nv > 1) {
+      let up = '', dn = '';
+      for (let i = 0; i < nv - 1; i++) {
+        const a = vis[i], b = vis[i + 1]; if (a.ef == null || a.es == null || b.ef == null || b.es == null) continue;
+        const da = a.ef - a.es, db = b.ef - b.es, xa = bx(i), xb = bx(i + 1), P2 = (...q) => 'M' + q.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join('L') + 'Z';
+        if (da * db >= 0) { const sh = P2([xa, y(a.ef)], [xb, y(b.ef)], [xb, y(b.es)], [xa, y(a.es)]); if (da + db >= 0) up += sh; else dn += sh; }
+        else {
+          const tt = da / (da - db), xm = xa + (xb - xa) * tt, ym = y(a.ef + (b.ef - a.ef) * tt);
+          const s1 = P2([xa, y(a.ef)], [xm, ym], [xa, y(a.es)]), s2 = P2([xm, ym], [xb, y(b.ef)], [xb, y(b.es)]);
+          if (da > 0) { up += s1; dn += s2; } else { dn += s1; up += s2; }
+        }
+      }
+      s += `<g clip-path="url(#scClipP)">${up ? `<path d="${up}" fill="${SC_UP}" opacity=".13"/>` : ''}${dn ? `<path d="${dn}" fill="${SC_DN}" opacity=".13"/>` : ''}` +
+           `<path d="${scLinePath(vis, 'es', bx, y)}" fill="none" stroke="${SC_ES}" stroke-width="1.5"/><path d="${scLinePath(vis, 'ef', bx, y)}" fill="none" stroke="${SC_EF}" stroke-width="1.5"/>`;
+      const off0 = ind.n - nv;
+      for (const c of ind.cross) {
+        const i = c.i - off0; if (i < 0 || i >= nv) continue; const b = vis[i], cx = bx(i), bull = c.dir > 0;
+        const my = bull ? Math.min(TOP + pH - 10, y(b.l) + 11) : Math.max(TOP + 10, y(b.h) - 11), col = bull ? SC_UP : SC_DN;
+        s += `<path d="${bull ? `M${cx.toFixed(1)},${(my - 6).toFixed(1)}L${(cx - 6).toFixed(1)},${(my + 5).toFixed(1)}L${(cx + 6).toFixed(1)},${(my + 5).toFixed(1)}Z` : `M${cx.toFixed(1)},${(my + 6).toFixed(1)}L${(cx - 6).toFixed(1)},${(my - 5).toFixed(1)}L${(cx + 6).toFixed(1)},${(my - 5).toFixed(1)}Z`}" fill="${col}" stroke="#05070a" stroke-width=".8"><title>${scT(b.t)}  EMA ${SC.pref.emaF} crossed ${bull ? 'above' : 'below'} EMA ${SC.pref.emaS}${bull ? ': bullish' : ': bearish'}</title></path>`;
+      }
+      s += '</g>';
+    }
     if (SC.pref.vwap && !isSpot) {
       let d = '', pen = false;
       vis.forEach((b, i) => { if (b.vw == null || b.vw < flo || b.vw > fhi) { pen = false; return; } d += `${pen ? 'L' : 'M'}${bx(i).toFixed(1)},${y(b.vw).toFixed(1)}`; pen = true; });
@@ -41602,6 +41798,28 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
            `<text x="${x0 + 12}" y="${(yy + 2).toFixed(1)}" fill="${ln.col}" font-size="10">${ln.drag ? '⇕ ' : ''}${txt}</text></g>`;
       s += `<rect x="${x1 + 1}" y="${(yy - 7).toFixed(1)}" width="${R - 3}" height="14" fill="${ln.col}"/><text x="${x1 + 5}" y="${(yy + 3).toFixed(1)}" fill="#05070a" font-size="10" font-weight="600">${price.toFixed(dec2)}</text>`;
     }
+    // your fills: ▲ buy / ▼ sell at the price filled (solid = entry, outlined = exit), entry joined to exit by a dotted line with the result
+    if (SC.st) {
+      const fills = scFills(SC.st, T), ms = tf * 1000, at = {}; vis.forEach((b, i) => { at[b.t] = i; });
+      const place = f => { const bt = Math.floor((f.t * 1000 - SC_ANCHOR) / ms) * ms + SC_ANCHOR, i = at[bt]; if (i == null) return null; const px = isSpot ? vis[i].c : f.price; return { i, x: bx(i), y: Math.max(TOP + 12, Math.min(TOP + pH - 12, y(px))) }; };
+      const ins = {}; for (const f of fills) if (f.k === 'in') ins[f.t + '|' + f.price] = f;
+      let mk = '';
+      for (const f of fills) { f.pt = place(f); }
+      if (!isSpot) for (const f of fills) {
+        if (f.k !== 'out' || !f.pt) continue; const e = ins[f.pair]; if (!e || !e.pt) continue;
+        const col = (f.net || 0) >= 0 ? SC_UP : SC_DN;
+        mk += `<line x1="${e.pt.x.toFixed(1)}" y1="${e.pt.y.toFixed(1)}" x2="${f.pt.x.toFixed(1)}" y2="${f.pt.y.toFixed(1)}" stroke="${col}" stroke-width="1.3" stroke-dasharray="3,3" opacity=".8"/>`;
+      }
+      for (const f of fills) {
+        if (!f.pt) continue; const { x, y: yy } = f.pt, up = f.up, col = up ? SC_UP : SC_DN, ent = f.k === 'in';
+        const tri = up ? `${x.toFixed(1)},${(yy - 1).toFixed(1)} ${(x - 6.5).toFixed(1)},${(yy + 11).toFixed(1)} ${(x + 6.5).toFixed(1)},${(yy + 11).toFixed(1)}` : `${x.toFixed(1)},${(yy + 1).toFixed(1)} ${(x - 6.5).toFixed(1)},${(yy - 11).toFixed(1)} ${(x + 6.5).toFixed(1)},${(yy - 11).toFixed(1)}`;
+        const nm = `${fmtInt(f.strike)} ${f.typ}${f.sg < 0 ? ' short' : ''}`, verb = f.buy ? 'Bought' : 'Sold';
+        const tip = `${verb} ${f.qty}${f.lots ? ` (${f.lots} lot${f.lots > 1 ? 's' : ''})` : ''} ${isSpot ? nm + ' ' : ''}@ ${f.price.toFixed(2)} · ${scT(f.t * 1000)} · ${ent ? (f.open ? 'open position' : 'entry') : 'exit'}${f.why ? ' · ' + f.why : ''}${f.net != null ? ` · ${f.net >= 0 ? '+' : '−'}₹${Math.abs(Math.round(f.net)).toLocaleString('en-IN')} net` : ''}`;
+        mk += `<g class="sc-mk"><polygon points="${tri}" fill="${ent ? col : '#0b0d12'}" fill-opacity="${ent ? .95 : .85}" stroke="${col}" stroke-width="1.6"/><title>${escapeHtml(tip)}</title></g>`;
+        if (f.k === 'out' && f.net != null && !isSpot) mk += `<text x="${(x + 9).toFixed(1)}" y="${(yy + (up ? 9 : -4)).toFixed(1)}" fill="${f.net >= 0 ? SC_UP : SC_DN}" font-size="10" font-weight="600">${f.net >= 0 ? '+' : '−'}₹${Math.abs(Math.round(f.net)).toLocaleString('en-IN')}</text>`;
+      }
+      s += mk;
+    }
     // last price tag and, with a position, its live P&L
     const lastB = vis[nv - 1], ly = y(lastB.c), lcol = lastB.c >= lastB.o ? SC_UP : SC_DN;
     s += `<line x1="${x0}" x2="${x1}" y1="${ly.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="${lcol}" opacity=".35"/><rect x="${x1 + 1}" y="${(ly - 7).toFixed(1)}" width="${R - 3}" height="14" fill="${lcol}"/><text x="${x1 + 5}" y="${(ly + 3).toFixed(1)}" fill="#05070a" font-size="10" font-weight="700">${lastB.c.toFixed(dec2)}</text>`;
@@ -41612,22 +41830,45 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
     // volume (buyers over sellers) and cumulative delta
     let yB = TOP + pH + gap;
+    let rsiTop = 0;
+    if (rsiH) {
+      rsiTop = yB; const ry = v => rsiTop + 5 + (rsiH - 10) * (1 - v / 100), lv = [[80, SC_OB, '', .8], [70, SC_OB, '2,3', .65], [50, '#8b93a7', '', .55], [30, SC_OS, '2,3', .65], [20, SC_OS, '', .8]];
+      s += `<rect x="${x0}" y="${rsiTop}" width="${x1 - x0}" height="${rsiH}" fill="#0a0c11"/><rect x="${x0}" y="${ry(100).toFixed(1)}" width="${x1 - x0}" height="${(ry(80) - ry(100)).toFixed(1)}" fill="${SC_OB}" opacity=".09"/><rect x="${x0}" y="${ry(20).toFixed(1)}" width="${x1 - x0}" height="${(ry(0) - ry(20)).toFixed(1)}" fill="${SC_OS}" opacity=".09"/>`;
+      s += `<line x1="${x0}" x2="${x1}" y1="${rsiTop}" y2="${rsiTop}" stroke="#262b36"/>`;
+      for (const [v, col, dash, op] of lv) s += `<line x1="${x0}" x2="${x1}" y1="${ry(v).toFixed(1)}" y2="${ry(v).toFixed(1)}" stroke="${col}" stroke-width="1" opacity="${op}"${dash ? ` stroke-dasharray="${dash}"` : ''}/><text x="${x1 + 6}" y="${(ry(v) + 3).toFixed(1)}" fill="${col}" font-size="9.5" opacity=".95">${v}</text>`;
+      const rp = scLinePath(vis, 'rsi', bx, ry), mp = scLinePath(vis, 'rma', bx, ry);
+      if (mp) s += `<path d="${mp}" fill="none" stroke="${SC_RMA}" stroke-width="1.3"/>`;
+      if (rp) s += `<path d="${rp}" fill="none" stroke="${SC_RSI}" stroke-width="1.5"/>`;
+      const lr = vis[nv - 1];
+      if (lr.rsi != null) s += `<rect x="${x1 + 26}" y="${(ry(lr.rsi) - 7).toFixed(1)}" width="${R - 28}" height="14" fill="${lr.rsi >= 80 ? SC_OB : lr.rsi <= 20 ? SC_OS : SC_RSI}"/><text x="${x1 + 29}" y="${(ry(lr.rsi) + 3).toFixed(1)}" fill="#05070a" font-size="10" font-weight="700">${lr.rsi.toFixed(1)}</text>`;
+      if (lr.rma != null) s += `<text x="${x1 + 29}" y="${(ry(lr.rma) + 3).toFixed(1)}" fill="${SC_RMA}" font-size="9.5">${lr.rma.toFixed(1)}</text>`;
+      yB += rsiH + gap;
+    }
     if (volH) {
       const mx = Math.max(1, ...vis.map(b => b.v)), base = yB + volH;
-      s += `<text x="${x0 + 4}" y="${yB + 9}" fill="#4d5568" font-size="9">volume · buy / sell</text>`;
+      s += `<text x="${x0 + 4}" y="${yB + 9}" fill="#4d5568" font-size="9">volume · buy / sell where ticks were seen</text>`;
       vis.forEach((b, i) => {
-        if (!b.v) return; const ht = b.v / mx * (volH - 2), gh = b.bv / b.v * ht, cx = bx(i) - bw / 2;
+        if (!b.v) return; const ht = b.v / mx * (volH - 2), sp = b.bv + b.sv, gh = sp > 0 ? b.bv / sp * ht : (b.c >= b.o ? ht : 0), cx = bx(i) - bw / 2;
         s += `<rect x="${cx.toFixed(1)}" y="${(base - gh).toFixed(1)}" width="${bw.toFixed(1)}" height="${gh.toFixed(1)}" fill="${SC_UP}" opacity=".75"/><rect x="${cx.toFixed(1)}" y="${(base - ht).toFixed(1)}" width="${bw.toFixed(1)}" height="${(ht - gh).toFixed(1)}" fill="${SC_DN}" opacity=".75"/>`;
       });
       yB += volH + gap;
     }
     if (cvdH) {
-      const b0 = vis[0].cvd, vs = vis.map(b => b.cvd - b0); let cl = Math.min(0, ...vs), ch = Math.max(0, ...vs); if (ch - cl < 1) { ch += 1; cl -= 1; }
-      const cy = v => yB + 4 + (cvdH - 8) * (1 - (v - cl) / (ch - cl)), last = vs[vs.length - 1];
-      s += `<line x1="${x0}" x2="${x1}" y1="${cy(0).toFixed(1)}" y2="${cy(0).toFixed(1)}" stroke="#262b36" stroke-dasharray="2,3"/><text x="${x0 + 4}" y="${yB + 9}" fill="#4d5568" font-size="9">cumulative delta (buyers − sellers)</text>`;
-      s += `<path d="${vs.map((v, i) => `${i ? 'L' : 'M'}${bx(i).toFixed(1)},${cy(v).toFixed(1)}`).join('')}" fill="none" stroke="${last >= 0 ? SC_UP : SC_DN}" stroke-width="1.4"/>`;
-      s += `<text x="${x1 + 6}" y="${(cy(last) + 3).toFixed(1)}" fill="${last >= 0 ? SC_UP : SC_DN}" font-size="10">${last >= 0 ? '+' : ''}${Math.round(last).toLocaleString('en-IN')}</text>`;
+      const lv = []; vis.forEach((b, i) => { if (b.cvd != null) lv.push([i, b.cvd]); });
+      s += `<text x="${x0 + 4}" y="${yB + 9}" fill="#4d5568" font-size="9">cumulative delta (buyers − sellers), from the ticks seen since this page opened</text>`;
+      if (lv.length > 1) {
+        const b0 = lv[0][1], vs = lv.map(([i, c]) => [i, c - b0]); let cl = Math.min(0, ...vs.map(x => x[1])), ch = Math.max(0, ...vs.map(x => x[1])); if (ch - cl < 1) { ch += 1; cl -= 1; }
+        const cy = v => yB + 4 + (cvdH - 8) * (1 - (v - cl) / (ch - cl)), last = vs[vs.length - 1][1];
+        s += `<line x1="${x0}" x2="${x1}" y1="${cy(0).toFixed(1)}" y2="${cy(0).toFixed(1)}" stroke="#262b36" stroke-dasharray="2,3"/>`;
+        s += `<path d="${vs.map(([i, v], k) => `${k ? 'L' : 'M'}${bx(i).toFixed(1)},${cy(v).toFixed(1)}`).join('')}" fill="none" stroke="${last >= 0 ? SC_UP : SC_DN}" stroke-width="1.4"/>`;
+        s += `<text x="${x1 + 6}" y="${(cy(last) + 3).toFixed(1)}" fill="${last >= 0 ? SC_UP : SC_DN}" font-size="10">${last >= 0 ? '+' : ''}${Math.round(last).toLocaleString('en-IN')}</text>`;
+      }
     }
+    // a new session starts: a dashed line and the date
+    vis.forEach((b, i) => { if (i > 0 && b.day !== vis[i - 1].day) {
+      const cx = bx(i) - step / 2, dd = new Date(b.t + 19800000);
+      s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${TOP}" y2="${H - BOT}" stroke="#4d5568" stroke-dasharray="1,3"/><text x="${(cx + 4).toFixed(1)}" y="${TOP + pH - 4}" fill="#6b7388" font-size="9.5">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dd.getUTCDay()]} ${dd.getUTCDate()}</text>`; } });
+    if (H0 && H0.err) s += `<text x="${x1 - 6}" y="${TOP + 12}" text-anchor="end" fill="#e8b339" font-size="10">candle history unavailable (${String(H0.err).replace(/[<&]/g, ' ').slice(0, 70)}): live bars only</text>`;
     // time axis
     const every = Math.max(1, Math.ceil(96 / step));
     vis.forEach((b, i) => { if (i % every === 0) s += `<text x="${bx(i).toFixed(1)}" y="${H - 5}" text-anchor="middle" fill="#5b6377" font-size="9.5">${tf < 60 ? scT(b.t) : scT(b.t).slice(0, 5)}</text>`; });
@@ -41644,9 +41885,25 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       }
     }
     svg.innerHTML = s;
+    const P = SC.pref, f1 = v => v == null ? '–' : v.toFixed(dec2), lastI = ind.n - 1;
+    let lgP = '', lgR = '';
+    if (P.ema) {
+      const lc = ind.cross.length ? ind.cross[ind.cross.length - 1] : null, st = (lastB.ef != null && lastB.es != null) ? (lastB.ef > lastB.es ? 1 : lastB.ef < lastB.es ? -1 : 0) : null;
+      let sig;
+      if (st == null) sig = `<span class="sig wu">EMA warming up · ${Math.min(ind.n, P.emaS)}/${P.emaS} bars</span>`;
+      else sig = `<span class="sig ${st > 0 ? 'up' : st < 0 ? 'dn' : 'wu'}">${st > 0 ? '▲ ' + P.emaF + ' over ' + P.emaS + ' · bullish' : st < 0 ? '▼ ' + P.emaF + ' under ' + P.emaS + ' · bearish' : 'flat'}${lc ? ` · crossed ${lastI - lc.i} bar${lastI - lc.i === 1 ? '' : 's'} ago` : ' · no cross yet'}</span>`;
+      lgP = `<span class="sc-lg"><i style="background:${SC_EF}"></i>EMA ${P.emaF} <b>${f1(rb.ef)}</b></span><span class="sc-lg"><i style="background:${SC_ES}"></i>EMA ${P.emaS} <b>${f1(rb.es)}</b></span>${sig}<button class="sc-lgx" data-x="ema" title="Remove EMA ${P.emaF}/${P.emaS} from the chart" style="pointer-events:auto">✕</button>`;
+    }
+    if (P.rsi) {
+      const r = rb.rsi, zone = r == null ? '' : r >= 80 ? '<span class="sig dn">overbought</span>' : r <= 20 ? '<span class="sig up">oversold</span>' : r >= 70 ? '<span class="sig wu">above 70</span>' : r <= 30 ? '<span class="sig wu">below 30</span>' : '';
+      lgR = `<span class="sc-lg"><i style="background:${SC_RSI}"></i>RSI ${P.rsiN} <b>${r == null ? '–' : r.toFixed(1)}</b></span><span class="sc-lg"><i style="background:${SC_RMA}"></i>MA ${P.rsiM} <b>${rb.rma == null ? '–' : rb.rma.toFixed(1)}</b></span>${lastB.rsi == null ? `<span class="sig wu">RSI warming up · ${Math.min(ind.n, P.rsiN + 1)}/${P.rsiN + 1} bars</span>` : zone}<button class="sc-lgx" data-x="rsi" title="Remove RSI from the chart" style="pointer-events:auto">✕</button>`;
+    }
+    const lp = $sc('scLegP'), lr2 = $sc('scLegR');
+    if (lp) { lp.style.top = (TOP - 2) + 'px'; scSet(lp, lgP); }
+    if (lr2) { lr2.style.top = (rsiTop + 2) + 'px'; lr2.style.display = rsiH ? '' : 'none'; scSet(lr2, lgR); }
     const dlt = rb.bv - rb.sv;
     scSet($sc('scReadout'), `<b>${scT(rb.t)}</b> &nbsp;O <b>${rb.o.toFixed(dec2)}</b> H <b>${rb.h.toFixed(dec2)}</b> L <b>${rb.l.toFixed(dec2)}</b> C <b>${rb.c.toFixed(dec2)}</b>` +
-      (isSpot ? '' : ` &nbsp;vol <b>${rb.v}</b> (buy ${rb.bv} / sell ${rb.sv}) &nbsp;Δ <b class="${scCls(dlt)}">${dlt >= 0 ? '+' : ''}${dlt}</b>`));
+      (isSpot ? '' : ` &nbsp;vol <b>${Math.round(rb.v)}</b>${rb.bv + rb.sv > 0 ? ` (buy ${rb.bv} / sell ${rb.sv}) &nbsp;Δ <b class="${scCls(dlt)}">${dlt >= 0 ? '+' : ''}${dlt}</b>` : ''}`));
   }
   const scClampLine = (id, p) => {
     const T = SC.geom && SC.geom.T, q = (T && T.inst && SC.quotes[T.inst]) || {}, plan = (id === 'psl' || id === 'ptp' || id === 'ptp1');
@@ -41756,8 +42013,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       else {
         const qty = lots * S2.CE.lot, prem = (sell ? S2.CE.bid + S2.PE.bid : S2.CE.ask + S2.PE.ask) * qty, gs = prem * scEn('g_sl_pct') / 100, gt = prem * scEn('g_tp_pct') / 100;
         const fee = scCharges(prem, prem, 4);
-        plan('scPlanCE', `<b>${SC.pref.struct}</b> ${sell ? 'credit' : 'debit'} <b>${scRs(prem)}</b> · stop at <b class="neg-t">−${scRs(gs)}</b>${gt ? ` · target <b class="pos-t">+${scRs(gt)}</b>` : ''} · fees ≈ ${scRs(fee)}` +
-          (sell && !gs ? ' · <span class="neg-t">set a combined stop</span>' : '') + (sell ? '<br><span class="sc-dim">Both legs are short: the loss grows without limit if price runs, so the combined stop does the protecting.</span>' : ''));
+        plan('scPlanCE', `<b>${SC.pref.struct}</b> ${sell ? 'credit' : 'debit'} <b>${scRs(prem)}</b> · ${gs ? `stop at <b class="neg-t">−${scRs(gs)}</b>` : 'no combined stop'}${gt ? ` · target <b class="pos-t">+${scRs(gt)}</b>` : ''} · fees ≈ ${scRs(fee)}` +
+          (sell && !gs ? '<br><span class="sc-dim">Both legs are short and there is no combined stop: a run in either direction has no ceiling.</span>' : ''));
       }
     } else {
       for (const typ of ['CE', 'PE']) {
@@ -41821,11 +42078,10 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     m.className = 'sc-badge ' + (live ? 'sc-live' + (S.armed ? '' : ' sc-disarmed') : 'sc-paper');
     const arm = $sc('scArm'); arm.style.display = live ? '' : 'none'; arm.classList.toggle('on', !!S.armed); arm.textContent = S.armed ? 'Disarm' : 'Arm';
     const k = $sc('scKill'); k.classList.toggle('on', !!S.kill); k.textContent = S.kill ? 'Killed — resume' : 'Kill';
-    const p = S.pnl, L = S.limits, lim = L.day_loss || 1;
+    const p = S.pnl, L = S.limits;
     $sc('scDayPnl').textContent = scRsS(p.net); $sc('scDayPnl').className = 'sc-n sc-big ' + scCls(p.net);
-    const bits = [`${p.trades} trade${p.trades === 1 ? '' : 's'} · ${p.wins}W ${p.losses}L`, `limit −₹${Math.round(lim).toLocaleString('en-IN')}`];
-    if (L.day_target) bits.push(`target +₹${Math.round(L.day_target).toLocaleString('en-IN')}`);
-    if (L.giveback_pct && p.peak >= L.giveback_min) bits.push(`peak ${scRs(p.peak)}`);
+    const bits = [`${p.trades} trade${p.trades === 1 ? '' : 's'} · ${p.wins}W ${p.losses}L`];
+    if (p.peak > 0) bits.push(`peak ${scRs(p.peak)}`);
     $sc('scDayInfo').textContent = bits.join(' · ');
     scSet($sc('scEq'), scSparkEq(S));
     const ages = Object.values(SC.quotes).map(q => q.age).filter(a => a != null);
@@ -41839,10 +42095,6 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // why the buttons are off: the engine's own reason, then the ones only the ticket knows
     let why = S.blocked || '';
     const sell = SC.pref.side === 'S', struct = scIsStruct();
-    if (!why && sell && !L.allow_short) why = 'short selling is off in LIVE mode (set NSE_TRADE_ALLOW_SHORT=1 in env and restart)';
-    if (!why && sell && !struct && !scEn('sl_pts')) why = 'a short needs a stop: fill in Stop +pts';
-    if (!why && sell && struct && !scEn('g_sl_pct')) why = 'a short structure needs a combined stop %';
-    if (!why && sell && scLots('CE') > L.max_short_lots) why = `${scLots('CE')} lots is over the short cap of ${L.max_short_lots}`;
     if (!why && sell && !struct && SC.pref.hedge && !(SC.wing.CE || SC.wing.PE)) why = 'no wing strike on the chart: change the wing distance or untick Hedge';
     for (const typ of ['CE', 'PE']) {
       const b = $sc(typ === 'CE' ? 'scBuyCE' : 'scBuyPE'); let w = why;
@@ -41858,7 +42110,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     scSet($sc('scChTabs'), tabs.map(([k, l]) => `<button data-c="${k}" class="${SC.pref.chart === k ? 'on' : ''}">${l}</button>`).join(''));
     scSet($sc('scTfs'), SC_TFS.map(([v, l]) => `<button data-tf="${v}" class="${SC.pref.tf === v ? 'on' : ''}">${l}</button>`).join(''));
     const T = SC.geom && SC.geom.T, spot = T && T.kind === 'SPOT';
-    scSet($sc('scOpts'), [['vol', 'Volume'], ['cvd', 'Order flow'], ['vwap', 'VWAP']].map(([k, l]) => `<label><input type="checkbox" data-o="${k}" ${SC.pref[k] ? 'checked' : ''}${spot ? ' disabled' : ''}>${l}</label>`).join(''));
+    scRenderIndMenu(spot);
     const fb = $sc('scFocus'); fb.classList.toggle('on', !!SC.pref.focus);
   }
 
@@ -41993,10 +42245,10 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       if (tp) atTgt += sg * (tp - p.avg) * p.qty;
       if (sg < 0 && !P.some(h => h.role === 'hedge' && h.hedge_for === p.inst) && !p.grp) naked++;
     }
-    const unreal = S.pnl.unrealized, lim = S.limits.day_loss, room = lim + S.pnl.net;
+    const unreal = S.pnl.unrealized;
     const tile = (l, v, cls, tip) => `<div${tip ? ` title="${escapeHtml(tip)}"` : ''}><span class="v ${cls || ''}">${v}</span><span class="l">${l}</span></div>`;
     const moves = [-2, -1, -0.5, 0, 0.5, 1, 2].map(k => k * gap);
-    const scen = moves.map(ds => { const ch = scScenario(ds), day = S.pnl.net + ch; return `<tr class="${ds === 0 ? 'now' : ''}"><td>${spot ? fmtInt(Math.round(spot + ds)) : '–'}</td><td>${ds >= 0 ? '+' : '−'}${Math.abs(ds)}</td><td class="${scCls(ch)}">${scRsS(ch)}</td><td class="${scCls(day)}"><b>${scRsS(day)}</b></td><td>${day <= -lim ? '<span class="neg-t">over the loss limit</span>' : ''}</td></tr>`; }).join('');
+    const scen = moves.map(ds => { const ch = scScenario(ds), day = S.pnl.net + ch; return `<tr class="${ds === 0 ? 'now' : ''}"><td>${spot ? fmtInt(Math.round(spot + ds)) : '–'}</td><td>${ds >= 0 ? '+' : '−'}${Math.abs(ds)}</td><td class="${scCls(ch)}">${scRsS(ch)}</td><td class="${scCls(day)}"><b>${scRsS(day)}</b></td></tr>`; }).join('');
     const rows = P.map(p => {
       const g = scGreeks(p.typ, p.strike), sg = scPosSg(p), dl = g ? sg * p.qty * scTs(p.typ) * Math.abs(g.delta) : null, th = g ? sg * p.qty * g.thetaDay / 375 : null;
       const as = p.role !== 'hedge' && p.eff_sl ? sg * (p.eff_sl - p.avg) * p.qty : null;
@@ -42004,7 +42256,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }).join('');
     return `<div class="sc-stats">${tile('Net delta', `${scRsS(bk.dl)} / pt`, scCls(bk.dl), 'Rupees the open book gains per 1-point rise in the index (negative: it gains when the index falls)')}${tile('Gamma', `${bk.gm >= 0 ? '+' : '−'}${Math.abs(bk.gm).toFixed(2)}`, scCls(bk.gm), 'Rupees of delta gained per point. Negative: you lose faster the further price runs (short options).')}` +
       `${tile('Theta', `${scRsS(bk.th)} / min`, scCls(bk.th), 'Time decay per minute. Positive when you are net short options.')}${tile('Open P&L', scRsS(unreal), scCls(unreal))}${tile('If every stop is hit', scRsS(atStop), scCls(atStop), 'Open positions closed at their stops, measured from entry. Wings are left out. A gap can be worse.')}${tile('If every target is hit', scRsS(atTgt), scCls(atTgt))}` +
-      `${tile('Room to the loss limit', scRs(Math.max(0, room)), room < lim * 0.35 ? 'neg-t' : '', 'How much more the day can lose before the limit stops it')}${tile('No stop on', String(noStop), noStop ? 'neg-t' : '')}${tile('Naked shorts', String(naked), naked ? 'neg-t' : '', 'Short options with no wing and not part of a structure')}</div>` +
+      `${tile('Day P&L', scRsS(S.pnl.net), scCls(S.pnl.net), 'Closed trades net of charges, plus the open P&L')}${tile('No stop on', String(noStop), noStop ? 'neg-t' : '')}${tile('Naked shorts', String(naked), naked ? 'neg-t' : '', 'Short options with no wing and not part of a structure')}</div>` +
       (bk.miss ? '<div class="sc-dim" style="margin:-4px 0 8px">Greeks need the chain\'s implied volatility; some legs are missing it.</div>' : '') +
       `<div class="sc-anl"><div><div class="sc-st">If the index moves now <span class="sc-dim">delta + gamma, no time or volatility change</span></div><div class="sc-tblwrap"><table class="sc-tbl"><tr><th>Index</th><th>Move</th><th>Open P&amp;L change</th><th>Day P&amp;L</th><th></th></tr>${scen}</table></div></div>` +
       `<div><div class="sc-st">By position</div><div class="sc-tblwrap"><table class="sc-tbl"><tr><th>Contract</th><th>Side</th><th>Lots</th><th>P&amp;L</th><th>Δ ₹/pt</th><th>θ ₹/min</th><th>At stop</th></tr>${rows}</table></div></div></div>`;
@@ -42019,7 +42271,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   function scRenderDock() {
     const S = SC.st, tab = SC.pref.dock;
     const P = scHeld(), nT = S && S.trades ? S.trades.length : 0, nP = S && S.pending ? S.pending.length : 0;
-    scSet($sc('scDockTabs'), [['pos', 'Positions', P.length], ['pend', 'Waiting', nP], ['orders', 'Orders', S && S.orders ? S.orders.length : 0], ['trades', 'Closed trades', nT], ['stats', 'Analytics', 0], ['book', 'Book risk', 0], ['risk', 'Limits', 0]]
+    scSet($sc('scDockTabs'), [['pos', 'Positions', P.length], ['pend', 'Waiting', nP], ['orders', 'Orders', S && S.orders ? S.orders.length : 0], ['trades', 'Closed trades', nT], ['stats', 'Analytics', 0], ['book', 'Book risk', 0], ['risk', 'Session', 0]]
       .map(([k, l, n]) => `<button data-d="${k}" class="${tab === k ? 'on' : ''}">${l}${n ? `<span class="ct">${n}</span>` : ''}</button>`).join(''));
     const body = $sc('scDockBody');
     if (!S || !S.enabled) { scSet(body, ''); return; }
@@ -42055,12 +42307,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     else if (tab === 'book') scSet(body, scDockBook(S));
     else {
       const L = S.limits, p = S.pnl, r = (k, v, c) => `<div><span class="k">${k}</span><span class="${c || ''}">${v}</span></div>`, hm = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-      const h = [r('Per order', `${L.max_lots} lot · ≤ ${scRs(L.max_value)}`), r('Open lots', `${S.open_lots} / ${L.max_open_lots}`, S.open_lots >= L.max_open_lots ? 'warn' : ''), r('Trades today', `${p.trades} / ${L.max_trades}`),
-        r('Short selling', L.allow_short ? `on · up to ${L.max_short_lots} lot${L.max_short_lots > 1 ? 's' : ''}, stop required` : 'OFF (NSE_TRADE_ALLOW_SHORT=1 to allow)', L.allow_short ? '' : 'warn'),
-        r('Losses in a row', `${p.streak} / ${L.loss_streak}`, p.streak >= L.loss_streak ? 'bad' : p.streak ? 'warn' : ''), r('Cool-off', S.cooldown_s > 0 ? `${S.cooldown_s}s` : 'none', S.cooldown_s > 0 ? 'warn' : ''),
-        r('Day loss limit', `${scRs(p.net)} / −${scRs(L.day_loss).slice(1)}`, p.net <= -L.day_loss ? 'bad' : ''), r('Day target', L.day_target ? `${scRs(p.net)} / ${scRs(L.day_target)}` : 'off'),
-        r('Give-back rule', L.giveback_pct ? `stop after giving back ${L.giveback_pct}% of a peak ≥ ${scRs(L.giveback_min)} (peak ${scRs(p.peak)})` : 'off'), r('Loss limit per order', L.max_risk ? scRs(L.max_risk) : 'off'),
-        r('Widest spread allowed', `${L.max_spread_pct}%`), r('Cheapest premium', `₹${L.min_premium}`),
+      const h = [r('Mode', S.mode === 'live' ? (S.armed ? 'LIVE · armed' : 'LIVE · disarmed') : 'PAPER · nothing is sent to Zerodha', S.mode === 'live' ? 'warn' : ''),
+        r('Open lots', String(S.open_lots)), r('Trades today', `${p.trades} · ${p.wins}W ${p.losses}L`), r('Day P&L', scRs(p.net), scCls(p.net)),
+        r('Orders', 'no size or risk limits: each order goes out as pressed'),
         r('Slippage buffer', `${L.slip_pct}% (at least ₹${L.slip_min})`), r('Entry window', `${S.entries_open ? 'open' : 'closed'} · ${hm(L.entry_from)}–${hm(L.entry_to)}`, S.entries_open ? '' : 'warn'),
         r('Square-off', hm(L.flatten_at)), r('Orders per second', `≤ ${L.ops}`)];
       if (S.halt) h.unshift(r('Halted', escapeHtml(S.halt), 'bad')); if (S.kill) h.unshift(r('Kill switch', escapeHtml(S.kill_why || 'on'), 'bad'));
@@ -42094,7 +42343,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     else if (S && S.enabled === false) { msg = escapeHtml(S.why || 'Scalping is not available.'); bad = true; }
     else if (SC.fails >= 3) { msg = `Can't reach the trade engine (${escapeHtml(SC.lastErr || 'no reply')}). Open positions keep being managed on the server.`; bad = true; }
     else if (state.lastData && state.lastData._source !== 'zerodha') { msg = 'The dashboard\'s data source is not Zerodha, so there are no tradable option symbols. Set DATA_SOURCE=zerodha and restart the server.'; bad = true; }
-    else if (S && S.enabled && S.mode === 'paper') msg = 'Paper mode: fills are simulated against the live bid and ask (shorts included), and nothing is sent to Zerodha. For real orders set <code>NSE_TRADE_MODE=live</code> in env, restart, then press Arm. Selling to open in LIVE also needs <code>NSE_TRADE_ALLOW_SHORT=1</code>.';
+    else if (S && S.enabled && S.mode === 'paper') msg = 'Paper mode: fills are simulated against the live bid and ask (shorts included), and nothing is sent to Zerodha. For real orders set <code>NSE_TRADE_MODE=live</code> in env, restart, then press Arm.';
     else if (S && S.halt) { msg = 'Halted: ' + escapeHtml(S.halt) + '. Check Zerodha, then use Reconcile on the Orders tab.'; bad = true; }
     scSet(el, msg); el.style.display = msg ? '' : 'none'; el.className = 'sc-note' + (bad ? ' sc-bad' : '');
   }
@@ -42231,7 +42480,6 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const short = p.side === 'short', opp = p.typ === 'CE' ? 'PE' : 'CE', L = SC.legs[opp];
     if (!L) { scMsg(`No ${opp === 'CE' ? 'call' : 'put'} is selected to flip into.`, true); return; }
     const { exits } = scExitsBody(opp, false, short ? 'S' : 'B');
-    if (short && !exits.sl_pts) { scMsg('A short needs a stop: fill in Stop +pts in the Sell exit set first, so nothing is closed for a flip that would be refused.', true); return; }
     const live = SC.st && SC.st.mode === 'live', key = 'flip:' + inst;
     if (live && SC.pref.confirm && SC.pending !== key) {
       scClearPending(); SC.pending = key; scMsg(`LIVE: ${short ? 'cover' : 'sell'} ${p.lots} lot ${fmtInt(p.strike)} ${p.typ}, then ${short ? 'sell' : 'buy'} ${fmtInt(L.strike)} ${opp}. Press Flip again to send.`, false);
@@ -42248,7 +42496,6 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   async function scAdd(inst) {
     const p = scHeld().find(x => x.inst === inst); if (!p || p.role === 'hedge') return;
     const short = p.side === 'short', { exits } = scExitsBody(p.typ, false, short ? 'S' : 'B');
-    if (short && !exits.sl_pts) { scMsg('A short needs a stop: fill in Stop +pts in the Sell exit set.', true); return; }
     const r = await scApi('order', { inst, side: short ? 'SELL' : 'BUY', lots: 1, exits, src: 'add', tag: p.tag || '', req_id: scReq() });
     scMsg(r.msg || (r.ok ? 'added' : 'refused'), !r.ok); scRenderAll();
   }
@@ -42335,7 +42582,17 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     });
     $sc('scChTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; SC.pref.chart = b.dataset.c; scPrefSave(); scRenderAll(); });
     $sc('scTfs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('tf', +b.dataset.tf); scRenderAll(); });
-    $sc('scOpts').addEventListener('change', e => { const o = e.target.dataset.o; if (o) { save(o, e.target.checked); scRenderAll(); } });
+    $sc('scInd').addEventListener('click', e => { e.stopPropagation(); SC.indOpen = !SC.indOpen; scRenderChrome(); });
+    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14 }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
+    document.addEventListener('click', e => { if (SC.indOpen && !e.target.closest('#scOpts')) { SC.indOpen = false; scRenderChrome(); } });
+    $sc('scIndMenu').addEventListener('change', e => {
+      const o = e.target.dataset.o, nk = e.target.dataset.n;
+      if (o) save(o, e.target.checked);
+      else if (nk) { const v = Math.max(1, Math.min(200, Math.round(+e.target.value) || SC.pref[nk])); save(nk, v); }
+      scRenderChrome(); scQueueDraw();
+    });
+    $sc('scZoom').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('nvis', Math.max(20, Math.min(240, Math.round(SC.pref.nvis * (b.dataset.z === 'in' ? 0.8 : 1.25))))); scQueueDraw(); });
+    for (const id of ['scLegP', 'scLegR']) $sc(id).addEventListener('click', e => { const x = e.target.dataset.x; if (!x) return; save(x, false); scRenderChrome(); scQueueDraw(); });
     $sc('scBuyCE').addEventListener('click', () => scGo('CE')); $sc('scBuyPE').addEventListener('click', () => scGo('PE'));
     $sc('scArm').addEventListener('click', scArmToggle); $sc('scKill').addEventListener('click', scKillToggle); $sc('scFlat').addEventListener('click', scFlatClick);
     $sc('scTurn').addEventListener('click', () => {
