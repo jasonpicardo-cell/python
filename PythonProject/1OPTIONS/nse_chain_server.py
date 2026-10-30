@@ -6776,7 +6776,7 @@ def _trade_state_payload(q: str = "", u: str = "", t: str = "", b: str = "") -> 
                         "bids": (d.get("bids") or [])[:5], "asks": (d.get("asks") or [])[:5]}
     st["quotes"] = qs
     # total bid / offer quantity per strike for the chart's strike grid (memory only, no broker call)
-    bk_names = [x for x in (b or "").split(",") if _re_q.match(r"^(NFO:)?[A-Z0-9]{8,30}$", x)][:16]
+    bk_names = [x for x in (b or "").split(",") if _re_q.match(r"^(NFO:)?[A-Z0-9]{8,30}$", x)][:24]
     try:
         st["book"] = _zmod().book_totals(bk_names) if bk_names else {}
     except Exception:

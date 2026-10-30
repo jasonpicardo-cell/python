@@ -1655,8 +1655,8 @@ def test_scalping_tab():
           and "(x.ms - SC_ANCHOR) / ms" in seg and "/api/trade/candles?" in seg and "if (!SC_TFS.some(x => x[0] === SC.pref.tf)) SC.pref.tf = 60" in seg)
     check("scalping server: /api/trade/candles is GET, guarded, limited to 1/3/5/10/15 minutes and to listed options or the four indices",
           'parsed.path == "/api/trade/candles"' in s_ and "tf must be 1, 3, 5, 10 or 15 minutes" in s_ and '"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"' in s_ and "not a listed index option" in s_)
-    check("strike grid: one element, inside the chart's wrapper (HTML, so zoom cannot touch it), opaque, fed by the state poll's b= list",
-          d.count('id="scGrid"') == 1 and '<div class="sc-grid" id="scGrid"' in d and ".sc-grid { position: absolute; left: 8px; bottom: 24px; z-index: 6; background: #0b0d12;" in d
+    check("strike grid: one element, directly below the chart box and its volume pane (HTML, so zoom cannot touch it), opaque, fed by the state poll's b= list",
+          d.count('id="scGrid"') == 1 and '<div class="sc-grid sc-grid-below" id="scGrid"' in d and ".sc-grid.sc-grid-below { position: static;" in d and ".sc-grid { --g-bg: #0b0d12;" in d
           and "&b=${encodeURIComponent(bnames.join(','))}" in seg and 'parse_qs' in s_ and '(_qs.get("b") or [""])[0]' in s_ and "book_totals" in s_)
     check("chart indicators: EMA 5/13 and RSI 14 with a 14-bar MA are on by default, and RSI draws 80, 70 (dotted), 50, 30 (dotted) and 20",
           "ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14" in seg
@@ -1702,29 +1702,29 @@ def test_scalping_tab():
               and o3["spUp"] == [["in", True], ["out", False]] and not o3["hedgeOnSpot"] and o3["spN"] == 6 and o3["wOwn"] == 2, str(o3))
         js4 = ("const fmtInt = x => x, escapeHtml = x => x; let SYM = 'NIFTY'; const state = { get symbol() { return SYM; }, lastData: { expiry: '03-Nov-2026', underlying_value: 25012, strikes: [] } };\n" +
               "const scChainOk = () => true; const SC = { spot: 25012, book: {}, pref: { selCE: 'o0' } }; const el = { style: {} }; const $sc = () => el; const scSet = (e, h) => { e.h = h; };\n" +
-              seg[seg.index("function scGridRows"):seg.index("\n  }\n", seg.index("function scRenderGridBody")) + 5] + """
-        for (let k = 24500; k <= 25500; k += 50) state.lastData.strikes.push({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k });
+              seg[seg.index("const SC_GRID_SYMS"):seg.index("\n  }\n", seg.index("function scRenderGridBody")) + 5] + """
+        for (let k = 24300; k <= 25700; k += 50) state.lastData.strikes.push({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k });
         SC.book = { C25000: [90000, 30000, 1], P25000: [30000, 90000, 1], C25100: [30000, 90000, 1], P25100: [90000, 30000, 1], C24900: [null, null, 1] };
         state.lastData.strikes.find(r => r.strike === 24800).ce_tbq = 12000; state.lastData.strikes.find(r => r.strike === 24800).ce_tsq = 6000;
         scRenderGrid(); const h = el.h; const order = [...h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]);
         const row = k => h.split('<tr class=').find(x => x.includes('data-k="' + k + '"')) || '';
         SC.spot = 25080; scRenderGrid(); const order2 = [...el.h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]);
-        SYM = 'BANKNIFTY'; const none = scGridRows();
-        console.log(JSON.stringify({ order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), 
+        SYM = 'BANKNIFTY'; const bank = scGridRows(); SYM = 'FINNIFTY'; const none = scGridRows(); SYM = 'NIFTY';
+        console.log(JSON.stringify({ order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
           atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× buyers/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length) }));""")
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
-        check("strike grid: ATM plus and minus 3 round-hundred strikes (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; hidden for any index but NIFTY",
-              o4["no50"] and o4["order"] == [25300, 25200, 25100, 25000, 24900, 24800, 24700] and o4["order2"] == [25400, 25300, 25200, 25100, 25000, 24900, 24800]
-              and o4["fallback"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["names"] == 14, str(o4))
+        check("strike grid: ATM plus and minus 5 round-hundred strikes (11 rows, no column headers) (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; shown for NIFTY and BANKNIFTY, hidden for the other indices",
+              o4["no50"] and o4["order"] == [25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600, 24500] and o4["order2"] == [25600, 25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600]
+              and o4["fallback"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
         check("chart indicators: EMA seeds with the SMA and follows 2/(n+1); the RSI average waits for a full window",
               o["e"][:2] == [None, None] and o["e"][2] == 2 and abs(o["e"][3] - 3) < 1e-9 and abs(o["e"][7] - 7) < 1e-9 and o["m"] == [None, None, None, 15, 25, 35], str(o))
     except Exception as ex:  # noqa: BLE001
         check("chart indicators: the maths runs in node", False, str(ex))
-    check("home chart: a NIFTY-only strike grid overlay (sibling of chartBody, never touches the SVG), round-hundred strikes only, fed by the chain's book totals, placed at the price chart's lower left",
-          'id="homeGrid"' in d and "function homeGridRender" in d and "r.strike % 100 === 0" in d and "getClientRects().length" in d
-          and "(state.symbol || 'NIFTY') !== 'NIFTY'" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d)
+    check("home chart: a NIFTY / BANKNIFTY strike grid overlay (sibling of chartBody, never touches the SVG), round-hundred strikes only, fed by the chain's book totals, placed at the price chart's lower left",
+          'id="homeGrid"' in d and "function homeGridRender" in d and "['NIFTY', 'BANKNIFTY'].includes(state.symbol" in d and "body.light-mode .sc-grid {" in d and ".sc-chartwrap, .sc-indmenu { --text: #e8ebf2;" in d and "r.strike % 100 === 0" in d and "getClientRects().length" in d
+          and "['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY')" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d)
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
           "location.protocol === 'file:'" in seg and "_source !== 'zerodha'" in seg)
     # ── the chart right-click mute item ──
