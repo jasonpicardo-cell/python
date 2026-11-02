@@ -11,7 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Opened by "Open at Login": run silently as a menu-bar item, no window or Dock icon.
         let launchedAtLogin = NSAppleEventManager.shared().currentAppleEvent?
             .paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem)
-        if launchedAtLogin {
+        // The login-item Apple event isn't always delivered (newer macOS): also treat a launch
+        // within a few minutes of boot as an automatic start.
+        var boot = timeval(); var size = MemoryLayout<timeval>.stride
+        let justBooted = sysctlbyname("kern.boottime", &boot, &size, nil, 0) == 0
+            && Date().timeIntervalSince1970 - TimeInterval(boot.tv_sec) < 300
+        if launchedAtLogin || justBooted {
             WindowOpener.startHidden = true
             NSApp.setActivationPolicy(.accessory)
         }
@@ -101,6 +106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showMenu() {
         model.refreshMonitors()
         let menu = NSMenu()
+        if !model.monitors.isEmpty {
+            addMonitorItems(to: menu)
+            menu.addItem(.separator())
+        }
         menu.addItem(withTitle: "Next Image as Wallpaper", action: #selector(menuNext), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Set Current Image as Wallpaper", action: #selector(menuCurrent), keyEquivalent: "").target = self
         let auto = menu.addItem(withTitle: "Auto-change Wallpaper", action: #selector(menuAuto), keyEquivalent: "")
@@ -109,10 +118,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let restore = menu.addItem(withTitle: "Restore System Wallpaper", action: #selector(menuRestore), keyEquivalent: "")
         restore.target = self
         restore.isEnabled = model.wallpaperIsActive
-        if !model.monitors.isEmpty {
-            menu.addItem(.separator())
-            addMonitorItems(to: menu)
-        }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Pixel Frame", action: #selector(menuOpen), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Quit Pixel Frame", action: #selector(menuQuit), keyEquivalent: "q").target = self

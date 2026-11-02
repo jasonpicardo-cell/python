@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(swift build *)",
+      "Bash(./build_app.sh)"
+    ]
+  }
+}
