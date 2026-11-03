@@ -12433,12 +12433,33 @@ body.compact-esoteric .lore-decorative { display: none !important; }
            `${now ? `, now ${Math.round(Number(now))}` : ''}.`;
   }
 
+  // With master mute on, a price alert makes no sound and the 2-second toast is
+  // easy to miss. Show a popup that stays until clicked (or 2 minutes).
+  function _mutedAlertPopup(msg, rule) {
+    let box = document.getElementById('mutedAlertBox');
+    if (!box) {
+      box = document.createElement('div'); box.id = 'mutedAlertBox';
+      box.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100000;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;';
+      document.body.appendChild(box);
+    }
+    const card = document.createElement('div');
+    card.style.cssText = 'pointer-events:auto;cursor:pointer;background:#1b1f27;color:#fff;border:2px solid #f5b301;border-radius:8px;padding:10px 16px;font:600 14px/1.35 "IBM Plex Mono",monospace;box-shadow:0 6px 24px rgba(0,0,0,.55);max-width:520px;';
+    const sym = (rule && rule.sym) || state.symbol || '';
+    card.innerHTML = '<div style="font-size:11px;color:#f5b301;margin-bottom:2px;">\u{1F514} PRICE ALERT \u00b7 muted \u00b7 click to dismiss</div>';
+    const t = document.createElement('div'); t.textContent = (sym ? sym + ': ' : '') + msg; card.appendChild(t);
+    const kill = () => { try { card.remove(); } catch (_) {} };
+    card.addEventListener('click', kill);
+    box.appendChild(card);
+    setTimeout(kill, 120000);
+  }
+
   function _caNotify(msg, rule) {
     if (typeof showToast === 'function') showToast('🔔 ' + msg);
     try { if ('Notification' in window && Notification.permission === 'granted') new Notification('1OPTIONS alert', { body: msg }); } catch (_) {}
     // price alerts get their own sound and their own phrasing
     const isPrice = !!rule && (rule.type === 'touch' || rule.type === 'cross' || rule.type === 'near');
     if (isPrice) _playPriceAlertSound();
+    if (isPrice && _masterMuted()) { try { _mutedAlertPopup(msg, rule); } catch (_) {} }
     const spoken = isPrice ? _priceAlertSpeech(msg, rule) : msg;
     if (isPrice) {
       // Voice has its own enable toggle, separate from the bell. Silence here
@@ -13055,6 +13076,34 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // token -> {sym, strike, side} map, refreshed with each chain response
   let _lastLevels = [];
   let _tokMap = {}, _tickRaf = 0, _tickStats = { n: 0, last: 0 };
+  // The header ticker and the active watchlist card showed the last chain POLL's
+  // spot, so they trailed the chart, which moves on every tick. Write the tick's
+  // spot into both, in place, from the same rAF that moves the chart.
+  function _liveHeaderSync(data) {
+    const sp = data && data.underlying_value;
+    if (!isFinite(sp) || sp <= 0) return;
+    if (els.tickerSpot) {
+      if (lastSpot !== null && sp !== lastSpot) {
+        els.tickerSpot.classList.remove('flash-up', 'flash-down');
+        void els.tickerSpot.offsetWidth;
+        els.tickerSpot.classList.add(sp > lastSpot ? 'flash-up' : 'flash-down');
+      }
+      lastSpot = sp;
+      const t = fmtPrice(sp);
+      if (els.tickerSpot.textContent !== t) els.tickerSpot.textContent = t;
+    }
+    const card = els.watchlistStrip && els.watchlistStrip.querySelector(`.watch-card[data-watch-symbol="${data.symbol || state.symbol}"]`);
+    if (card) {
+      const ws = card.querySelector('.wc-spot'), t = fmtPrice(sp);
+      if (ws && ws.textContent !== t) ws.textContent = t;
+      const pc = +(data.spot_prev_close || data.session_ohlc?.prev_close || 0);
+      const ch = card.querySelector('.wc-meta span');
+      if (ch && pc > 0) {
+        const chg = (sp - pc) / pc * 100, tx = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
+        if (ch.textContent !== tx) { ch.textContent = tx; ch.className = chg >= 0 ? 'pos-txt' : 'neg-txt'; }
+      }
+    }
+  }
   function _applyTicks(batch) {
     if (!batch) return;
     const data = state.lastData;
@@ -13106,7 +13155,12 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       _tickRaf = 0;
       try {
         if (spot != null) {
+          const nowTick = performance.now();
           _chartOnTick();          // forming candle + price line in place; full rebuild ≤1/s
+          _liveHeaderSync(data);
+          // Price alerts were judged once per chain poll, so a touch between two polls
+          // never fired. Judge them on the tick too (twice a second at most).
+          if (nowTick - (window._caTickAt || 0) >= 500) { window._caTickAt = nowTick; try { _alertsCheck(data); } catch (_) {} }
           // the pulse panel is a summary - once a second is plenty, and it
           // was the next-largest per-tick cost after the chart
           const nowP = performance.now();
@@ -37809,15 +37863,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // tile's own last refresh, which only looked like a day figure while
       // refreshes were 30s apart; at two minutes the same number would have
       // meant something quite different under the same label.
+      const liveSp = (sym === state.symbol && state.lastData && isFinite(state.lastData.underlying_value)) ? state.lastData.underlying_value : d.underlying_value;
       const pc = +(d.spot_prev_close || d.session_ohlc?.prev_close || 0);
-      const chg = pc > 0 ? ((d.underlying_value - pc) / pc * 100)
+      const chg = pc > 0 ? ((liveSp - pc) / pc * 100)
                 : d._prevSpot ? ((d.underlying_value - d._prevSpot) / d._prevSpot * 100) : 0;
       const sentimentLower = (d.sentiment || '').toLowerCase();
       const sentCls = sentimentLower.includes('bullish') ? 'pos-txt' : (sentimentLower.includes('bearish') ? 'neg-txt' : '');
       const isActive = sym === state.symbol;
       return `<div class="watch-card ${isActive ? 'active-watch' : ''}" data-watch-symbol="${sym}">
         <div class="wc-symbol">${sym}</div>
-        <div class="wc-spot">${fmtPrice(d.underlying_value)}</div>
+        <div class="wc-spot">${fmtPrice(liveSp)}</div>
         <div class="wc-meta">
           <span class="${chg>=0?'pos-txt':'neg-txt'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>
           <span class="wc-pcr">PCR ${d.pcr != null && isFinite(+d.pcr) ? (+d.pcr).toFixed(2) : '—'}</span>

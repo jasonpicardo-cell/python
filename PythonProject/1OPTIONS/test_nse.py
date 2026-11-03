@@ -4005,8 +4005,33 @@ console.log(JSON.stringify(R));
           "const visCs = _visMask && _visMask.some(Boolean) ? cs.filter((_, i) => _visMask[i]) : cs;" in d and "if (!_xzOn) for (const L of levels)" in d)
 
 
+def test_header_spot_follows_ticks():
+    """The header ticker and the active watchlist card take the live tick's spot
+    (the chart's own source), not only the last chain poll's."""
+    d = open(DASH, encoding="utf-8").read()
+    i = d.index("function _liveHeaderSync(")
+    body = d[i:d.index("function _applyTicks(", i)]
+    check("header sync: writes the ticker spot and the active card's spot and day change from the tick",
+          "els.tickerSpot.textContent" in body and "'.wc-spot'" in body and "spot_prev_close" in body)
+    j = d.index("_chartOnTick();          // forming candle")
+    check("header sync: runs in the same tick frame that moves the chart",
+          "_liveHeaderSync(data);" in d[j:j + 200])
+    k = d.index("function renderWatchlist()")
+    check("header sync: a watchlist rebuild uses the live spot for the active symbol",
+          "liveSp" in d[k:k + 1800] and "fmtPrice(liveSp)" in d[k:k + 3000])
+
+
+def test_muted_price_alert_popup():
+    """A price alert fired while master mute is on still shows a visible popup."""
+    d = open(DASH, encoding="utf-8").read()
+    i = d.index("function _caNotify(")
+    body = d[i:i + 900]
+    check("muted alert: a price alert under master mute opens a click-to-dismiss popup",
+          "isPrice && _masterMuted()" in body and "_alertsCheck(data)" in d[d.index("_liveHeaderSync(data);\n"):][:600] and "_mutedAlertPopup(msg, rule)" in body and "function _mutedAlertPopup(" in d)
+
+
 def main():
-    for fn in (test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
+    for fn in (test_muted_price_alert_popup, test_header_spot_follows_ticks, test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
                test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
