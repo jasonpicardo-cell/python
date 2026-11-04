@@ -7665,8 +7665,8 @@ class Handler(BaseHTTPRequestHandler):
                 _inst = (_qs.get("inst") or [""])[0]
                 _sym = (_qs.get("sym") or [""])[0].upper()
                 eng = _trade_engine()
-                if _tf not in (1, 3, 5, 10, 15):
-                    raise ValueError("tf must be 1, 3, 5, 10 or 15 minutes")
+                if _tf not in (1, 2, 3, 5, 10, 15):
+                    raise ValueError("tf must be 1, 2, 3, 5, 10 or 15 minutes")
                 if _inst:
                     if not eng or not eng.feed.meta(_inst):
                         raise ValueError("not a listed index option")

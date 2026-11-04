@@ -1933,9 +1933,9 @@ def fetch_bars(key: str, interval_min: int = 1, back_days: int = 9, sessions: in
     adds the live ticks to it and asks again only about once a minute."""
     if not connect() or _kite is None:
         return []
-    iv = _KITE_IV.get(int(interval_min))
-    if not iv or int(interval_min) not in (1, 3, 5, 10, 15):
-        raise ValueError("interval must be 1, 3, 5, 10 or 15 minutes")
+    iv = _KITE_IV.get(1 if int(interval_min) == 2 else int(interval_min))   # Kite has no 2-minute bar: built from 1-minute
+    if not iv or int(interval_min) not in (1, 2, 3, 5, 10, 15):
+        raise ValueError("interval must be 1, 2, 3, 5, 10 or 15 minutes")
     k = str(key)
     if ":" in k:
         _ensure_instruments([k.split(":")[0]])
@@ -1961,6 +1961,17 @@ def fetch_bars(key: str, interval_min: int = 1, back_days: int = 9, sessions: in
         g = time.gmtime(b["t"] + 19800)
         if _in_session(g.tm_hour * 60 + g.tm_min):
             out.append(b)
+    if int(interval_min) == 2:
+        agg: Dict[int, Dict[str, Any]] = {}
+        for b in out:   # 2-minute buckets anchored at 09:15 IST
+            lt = b["t"] + 19800
+            bt = (lt - (lt % 86400) + 33300) + ((lt % 86400) - 33300) // 120 * 120 - 19800
+            a = agg.get(bt)
+            if a is None:
+                agg[bt] = dict(b, t=bt)
+            else:
+                a["h"] = max(a["h"], b["h"]); a["l"] = min(a["l"], b["l"]); a["c"] = b["c"]; a["v"] += b["v"]
+        out = [agg[k] for k in sorted(agg)]
     days = sorted({(b["t"] + 19800) // 86400 for b in out})[-int(sessions):]
     out = [b for b in out if (b["t"] + 19800) // 86400 in days][-6000:]
     with _bars_lock:

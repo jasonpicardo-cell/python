@@ -1650,16 +1650,20 @@ def test_scalping_tab():
           "}, true);" in seg[seg.index("hotkeys:"):] and "e.stopImmediatePropagation()" in seg and "if (!panel.classList.contains('active')) return;" in seg)
     check("scalping: the positions dock is not rebuilt under a half-finished click",
           "if (SC.down && (tab === 'pos' || tab === 'pend')) return;" in seg and "body.addEventListener('mousedown', () => { SC.down = true; })" in seg)
-    check("chart timeframes follow Kite (1m 3m 5m 10m 15m), candles are anchored to the 09:15 open, history is fetched once per contract and interval, and an old saved 5s/15s/30s choice falls back to 1m",
-          "const SC_TFS = [[60, '1m'], [180, '3m'], [300, '5m'], [600, '10m'], [900, '15m']]" in seg and "const SC_ANCHOR = 13500000" in seg
+    check("chart timeframes follow Kite (1m 2m 3m 5m 10m 15m), candles are anchored to the 09:15 open, history is fetched once per contract and interval, and an old saved 5s/15s/30s choice falls back to 1m",
+          "const SC_TFS = [[60, '1m'], [120, '2m'], [180, '3m'], [300, '5m'], [600, '10m'], [900, '15m']]" in seg and "const SC_ANCHOR = 13500000" in seg
           and "(x.ms - SC_ANCHOR) / ms" in seg and "/api/trade/candles?" in seg and "if (!SC_TFS.some(x => x[0] === SC.pref.tf)) SC.pref.tf = 60" in seg)
-    check("scalping server: /api/trade/candles is GET, guarded, limited to 1/3/5/10/15 minutes and to listed options or the four indices",
-          'parsed.path == "/api/trade/candles"' in s_ and "tf must be 1, 3, 5, 10 or 15 minutes" in s_ and '"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"' in s_ and "not a listed index option" in s_)
+    check("scalping server: /api/trade/candles is GET, guarded, limited to 1/2/3/5/10/15 minutes and to listed options or the four indices",
+          'parsed.path == "/api/trade/candles"' in s_ and "tf must be 1, 2, 3, 5, 10 or 15 minutes" in s_ and '"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"' in s_ and "not a listed index option" in s_)
     check("strike grid: one element, directly below the chart box and its volume pane (HTML, so zoom cannot touch it), opaque, fed by the state poll's b= list",
           d.count('id="scGrid"') == 1 and '<div class="sc-grid sc-grid-below" id="scGrid"' in d and ".sc-grid.sc-grid-below { position: static;" in d and ".sc-grid { --g-bg: #0b0d12;" in d
           and "&b=${encodeURIComponent(bnames.join(','))}" in seg and 'parse_qs' in s_ and '(_qs.get("b") or [""])[0]' in s_ and "book_totals" in s_)
+    check("chart: 2m is built from Kite 1-minute bars (anchored 09:15) and EMA 50/100 are on by default",
+          "interval must be 1, 2, 3, 5, 10 or 15 minutes" in open("nse_adapter_zerodha.py").read() and "row('e50'" in seg and "row('e100'" in seg)
+    check("chart: VWAP is a thick blue line, and the EMA colours/values sit in a strip under the chart, above RSI",
+          "SC_VWAP = '#2f9bff'" in seg and 'stroke="${SC_VWAP}" stroke-width="2.4"' in seg and "const emaTop = yB; yB += emaH;" in seg and "lp.style.top = (emaTop + 1)" in seg)
     check("chart indicators: EMA 5/13 and RSI 14 with a 14-bar MA are on by default, and RSI draws 80, 70 (dotted), 50, 30 (dotted) and 20",
-          "ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14" in seg
+          "ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14" in seg
           and "[[80, SC_OB, '', .8], [70, SC_OB, '2,3', .65], [50, '#8b93a7', '', .55], [30, SC_OS, '2,3', .65], [20, SC_OS, '', .8]]" in seg)
     # the indicator maths, run for real in node against known values
     fn = "\n".join(seg[seg.index(k):seg.index("\n  }\n", seg.index(k)) + 5] for k in ("function scEmaArr", "function scRsiArr", "function scSmaArr"))

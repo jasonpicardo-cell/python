@@ -41372,7 +41372,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // ======================================================================
   const SC = {
     st: null, quotes: {}, spot: 0, busy: false, legs: { CE: null, PE: null }, tape: {},
-    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
+    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
             selCE: 'o0', selPE: 'o0', chart: 'CE', dock: 'pos', side: 'B', struct: 'single', sOff: 2, hedge: true, wing: 3,
             ladN: 5, ladH50: true, trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
     pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
@@ -41380,7 +41380,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     sLegs: null, wing: null, margin: null, notes: {}, hist: {}, book: {},
   };
   const SC_STRIKES = [['o-2', 'ITM 2'], ['o-1', 'ITM 1'], ['o0', 'ATM'], ['o1', 'OTM 1'], ['o2', 'OTM 2'], ['o3', 'OTM 3'], ['d0.4', 'Δ .40'], ['d0.3', 'Δ .30'], ['d0.2', 'Δ .20']];
-  const SC_TFS = [[60, '1m'], [180, '3m'], [300, '5m'], [600, '10m'], [900, '15m']];     // Kite's own intervals, anchored to the 09:15 open
+  const SC_TFS = [[60, '1m'], [120, '2m'], [180, '3m'], [300, '5m'], [600, '10m'], [900, '15m']];     // Kite's own intervals, anchored to the 09:15 open
   const SC_MAXROWS = 6000, SC_POLL_MS = 500;
   const SC_TAGS = ['Breakout', 'Reversal', 'Trend', 'Fade', 'Range', 'News', 'Expiry'];
   // [key, label buying, label selling, default buying, default selling, tip buying, tip selling, group]
@@ -41414,7 +41414,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   const scIsStruct = () => SC.pref.struct !== 'single';
   const scVerb = () => SC.pref.side === 'S' ? 'Sell' : 'Buy';
   const scPosSg = p => p.side === 'short' ? -1 : 1;
-  const SC_UP = '#2ecc8f', SC_DN = '#ff5d6c', SC_AMB = '#e8b339', SC_BLUE = '#7d9bff', SC_VIO = '#b794f6', SC_FLAT = '#6b7388';
+  const SC_UP = '#2ecc8f', SC_DN = '#ff5d6c', SC_AMB = '#e8b339', SC_BLUE = '#7d9bff', SC_VIO = '#b794f6', SC_VWAP = '#2f9bff', SC_FLAT = '#6b7388';
   const $sc = id => document.getElementById(id);
   const scBase = () => els.serverUrl.value.replace(/\/+$/, '');
   const scNum = (v, d = 2) => (v == null || !isFinite(v)) ? '–' : (+v).toFixed(d);
@@ -41768,7 +41768,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     return { out, step };
   }
   // ── indicators: EMA 5/13 crossover, RSI with a moving average ──
-  const SC_E200 = '#eb3b5a', SC_EF = '#40c4ff', SC_ES = '#ffab40', SC_RSI = '#d6dcea', SC_RMA = '#ffd54f', SC_OB = '#ef5350', SC_OS = '#26a69a';
+  const SC_E50 = '#b388ff', SC_E100 = '#69f0ae', SC_E200 = '#eb3b5a', SC_EF = '#40c4ff', SC_ES = '#ffab40', SC_RSI = '#d6dcea', SC_RMA = '#ffd54f', SC_OB = '#ef5350', SC_OS = '#26a69a';
   function scEmaArr(cl, n) {
     const out = new Array(cl.length).fill(null); if (cl.length < n || n < 1) return out;
     let e = 0; for (let i = 0; i < n; i++) e += cl[i]; e /= n; out[n - 1] = e;
@@ -41798,9 +41798,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   function scIndicators(all) {
     const P = SC.pref, cl = all.map(b => b.c), n = all.length;
     const ef = P.ema ? scEmaArr(cl, P.emaF) : null, es = P.ema ? scEmaArr(cl, P.emaS) : null;
-    const e2 = P.e200 ? scEmaArr(cl, 200) : null;
+    const e2 = P.e200 ? scEmaArr(cl, 200) : null, e5 = P.e50 ? scEmaArr(cl, 50) : null, e1 = P.e100 ? scEmaArr(cl, 100) : null;
     const rs = P.rsi ? scRsiArr(cl, P.rsiN) : null, rm = rs ? scSmaArr(rs, P.rsiM) : null, cross = [];
-    for (let i = 0; i < n; i++) { const b = all[i]; b.ef = ef ? ef[i] : null; b.es = es ? es[i] : null; b.e200 = e2 ? e2[i] : null; b.rsi = rs ? rs[i] : null; b.rma = rm ? rm[i] : null; }
+    for (let i = 0; i < n; i++) { const b = all[i]; b.ef = ef ? ef[i] : null; b.es = es ? es[i] : null; b.e200 = e2 ? e2[i] : null; b.e50 = e5 ? e5[i] : null; b.e100 = e1 ? e1[i] : null; b.rsi = rs ? rs[i] : null; b.rma = rm ? rm[i] : null; }
     if (ef && es) {
       let prev = 0;
       for (let i = 0; i < n; i++) {
@@ -41818,7 +41818,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   }
   function scRenderIndMenu(spot) {
     const P = SC.pref, menu = $sc('scIndMenu'), btn = $sc('scInd'); if (!menu) return;
-    const n = ['ema', 'e200', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
+    const n = ['ema', 'e50', 'e100', 'e200', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
     scSet(btn, `ƒx Indicators${n ? `<span class="cnt">${n}</span>` : ''}`);
     btn.classList.toggle('on', !!SC.indOpen); menu.style.display = SC.indOpen ? '' : 'none';
     if (!SC.indOpen) return;
@@ -41827,6 +41827,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     scSet(menu, `<div class="ih"><span>Indicators on this chart</span><button data-ind="reset" title="EMA 5/13 and RSI 14 on, everything else as it is">Defaults</button></div>` +
       row('ema', 'EMA crossover', 'A fast and a slow moving average of the close. ▲ marks where the fast one crosses above (bullish), ▼ where it crosses below (bearish). The band between them is green when fast is above, red when below.',
         `<span class="sw" style="background:${SC_EF}"></span>fast ${num('emaF', P.emaF)} <span class="sw" style="background:${SC_ES}"></span>slow ${num('emaS', P.emaS)}`) +
+      row('e50', 'EMA 50', 'The 50-period exponential moving average of the close.', `<span class="sw" style="background:${SC_E50}"></span>50`) +
+      row('e100', 'EMA 100', 'The 100-period exponential moving average of the close.', `<span class="sw" style="background:${SC_E100}"></span>100`) +
       row('e200', 'EMA 200', 'The 200-period exponential moving average of the close: the long-term trend line. Needs 200 bars of history to start.', `<span class="sw" style="background:${SC_E200}"></span>200`) +
       row('rsi', 'RSI with moving average', 'Momentum from 0 to 100 in its own pane. 80 and 20 are the overbought and oversold lines, 50 is the middle, and the dotted lines are 70 and 30. The yellow line is the average of the RSI.',
         `<span class="sw" style="background:${SC_RSI}"></span>RSI ${num('rsiN', P.rsiN)} <span class="sw" style="background:${SC_RMA}"></span>MA ${num('rsiM', P.rsiM)}`) +
@@ -41875,8 +41877,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const cap = Math.max(8, SC.pref.nvis), vis = all.slice(-cap), nv = vis.length, off = cap - nv;
     const R = 74, L = 6, TOP = 8, BOT = 18, gap = 6;
     const volH = (!isSpot && SC.pref.vol) ? 44 : 0, cvdH = (!isSpot && SC.pref.cvd) ? 56 : 0;
-    const rsiH = SC.pref.rsi ? 112 : 0;
-    const pH = Math.max(150, H - TOP - BOT - (rsiH ? rsiH + gap : 0) - (volH ? volH + gap : 0) - (cvdH ? cvdH + gap : 0));
+    const rsiH = SC.pref.rsi ? 112 : 0, emaH = (SC.pref.ema || SC.pref.e50 || SC.pref.e100 || SC.pref.e200) ? 18 : 0;   // emaH: strip of EMA colours and values under the chart, above RSI
+    const pH = Math.max(150, H - TOP - BOT - emaH - (rsiH ? rsiH + gap : 0) - (volH ? volH + gap : 0) - (cvdH ? cvdH + gap : 0));
     const x0 = L, x1 = W - R, step = (x1 - x0) / (cap + 4), bx = i => x0 + step * (off + i + 0.5), bw = Math.max(1, Math.min(14, step * 0.72));
     const q = T.inst ? (SC.quotes[T.inst] || {}) : {};
     let lo = Infinity, hi = -Infinity;
@@ -41906,6 +41908,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(b.h).toFixed(1)}" y2="${y(b.l).toFixed(1)}" stroke="${col}"/>` +
            `<rect x="${(cx - bw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, Math.abs(yo - yc)).toFixed(1)}" fill="${col}"/>`;
     });
+    if (SC.pref.e50 && nv > 1) s += `<g clip-path="url(#scClipP)"><path d="${scLinePath(vis, 'e50', bx, y)}" fill="none" stroke="${SC_E50}" stroke-width="1.5"/></g>`;
+    if (SC.pref.e100 && nv > 1) s += `<g clip-path="url(#scClipP)"><path d="${scLinePath(vis, 'e100', bx, y)}" fill="none" stroke="${SC_E100}" stroke-width="1.5"/></g>`;
     if (SC.pref.e200 && nv > 1) s += `<g clip-path="url(#scClipP)"><path d="${scLinePath(vis, 'e200', bx, y)}" fill="none" stroke="${SC_E200}" stroke-width="1.5"/></g>`;
     if (SC.pref.ema && nv > 1) {
       let up = '', dn = '';
@@ -41932,8 +41936,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     if (SC.pref.vwap && !isSpot) {
       let d = '', pen = false;
       vis.forEach((b, i) => { if (b.vw == null || b.vw < flo || b.vw > fhi) { pen = false; return; } d += `${pen ? 'L' : 'M'}${bx(i).toFixed(1)},${y(b.vw).toFixed(1)}`; pen = true; });
-      if (d) s += `<path d="${d}" fill="none" stroke="${SC_VIO}" stroke-width="1.3" opacity=".9"/>`;
-      const lb = vis[nv - 1].vw; if (lb != null && lb >= flo && lb <= fhi) s += `<text x="${x1 - 4}" y="${(y(lb) - 4).toFixed(1)}" text-anchor="end" fill="${SC_VIO}" font-size="9.5">VWAP ${lb.toFixed(2)}</text>`;
+      if (d) s += `<path d="${d}" fill="none" stroke="${SC_VWAP}" stroke-width="2.4"/>`;
+      const lb = vis[nv - 1].vw; if (lb != null && lb >= flo && lb <= fhi) s += `<text x="${x1 - 4}" y="${(y(lb) - 4).toFixed(1)}" text-anchor="end" fill="${SC_VWAP}" font-size="9.5">VWAP ${lb.toFixed(2)}</text>`;
     }
     if (q.bid) s += `<line x1="${x0}" x2="${x1}" y1="${y(q.bid).toFixed(1)}" y2="${y(q.bid).toFixed(1)}" stroke="${SC_UP}" opacity=".5" stroke-dasharray="1,3"/>`;
     if (q.ask) s += `<line x1="${x0}" x2="${x1}" y1="${y(q.ask).toFixed(1)}" y2="${y(q.ask).toFixed(1)}" stroke="${SC_DN}" opacity=".5" stroke-dasharray="1,3"/>`;
@@ -41984,6 +41988,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
     // volume (buyers over sellers) and cumulative delta
     let yB = TOP + pH + gap;
+    const emaTop = yB; yB += emaH;
     let rsiTop = 0;
     if (rsiH) {
       rsiTop = yB; const ry = v => rsiTop + 5 + (rsiH - 10) * (1 - v / 100), lv = [[80, SC_OB, '', .8], [70, SC_OB, '2,3', .65], [50, '#8b93a7', '', .55], [30, SC_OS, '2,3', .65], [20, SC_OS, '', .8]];
@@ -42048,13 +42053,15 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       else sig = `<span class="sig ${st > 0 ? 'up' : st < 0 ? 'dn' : 'wu'}">${st > 0 ? '▲ ' + P.emaF + ' over ' + P.emaS + ' · bullish' : st < 0 ? '▼ ' + P.emaF + ' under ' + P.emaS + ' · bearish' : 'flat'}${lc ? ` · crossed ${lastI - lc.i} bar${lastI - lc.i === 1 ? '' : 's'} ago` : ' · no cross yet'}</span>`;
       lgP = `<span class="sc-lg"><i style="background:${SC_EF}"></i>EMA ${P.emaF} <b>${f1(rb.ef)}</b></span><span class="sc-lg"><i style="background:${SC_ES}"></i>EMA ${P.emaS} <b>${f1(rb.es)}</b></span>${sig}<button class="sc-lgx" data-x="ema" title="Remove EMA ${P.emaF}/${P.emaS} from the chart" style="pointer-events:auto">✕</button>`;
     }
+    if (P.e50) lgP += `<span class="sc-lg"><i style="background:${SC_E50}"></i>EMA 50 <b>${f1(rb.e50)}</b></span><button class="sc-lgx" data-x="e50" title="Remove EMA 50 from the chart" style="pointer-events:auto">✕</button>`;
+    if (P.e100) lgP += `<span class="sc-lg"><i style="background:${SC_E100}"></i>EMA 100 <b>${f1(rb.e100)}</b></span><button class="sc-lgx" data-x="e100" title="Remove EMA 100 from the chart" style="pointer-events:auto">✕</button>`;
     if (P.e200) lgP += `<span class="sc-lg"><i style="background:${SC_E200}"></i>EMA 200 <b>${f1(rb.e200)}</b></span><button class="sc-lgx" data-x="e200" title="Remove EMA 200 from the chart" style="pointer-events:auto">✕</button>`;
     if (P.rsi) {
       const r = rb.rsi, zone = r == null ? '' : r >= 80 ? '<span class="sig dn">overbought</span>' : r <= 20 ? '<span class="sig up">oversold</span>' : r >= 70 ? '<span class="sig wu">above 70</span>' : r <= 30 ? '<span class="sig wu">below 30</span>' : '';
       lgR = `<span class="sc-lg"><i style="background:${SC_RSI}"></i>RSI ${P.rsiN} <b>${r == null ? '–' : r.toFixed(1)}</b></span><span class="sc-lg"><i style="background:${SC_RMA}"></i>MA ${P.rsiM} <b>${rb.rma == null ? '–' : rb.rma.toFixed(1)}</b></span>${lastB.rsi == null ? `<span class="sig wu">RSI warming up · ${Math.min(ind.n, P.rsiN + 1)}/${P.rsiN + 1} bars</span>` : zone}<button class="sc-lgx" data-x="rsi" title="Remove RSI from the chart" style="pointer-events:auto">✕</button>`;
     }
     const lp = $sc('scLegP'), lr2 = $sc('scLegR');
-    if (lp) { lp.style.top = (TOP - 2) + 'px'; scSet(lp, lgP); }
+    if (lp) { lp.style.top = (emaTop + 1) + 'px'; lp.style.display = emaH ? '' : 'none'; scSet(lp, lgP); }
     if (lr2) { lr2.style.top = (rsiTop + 2) + 'px'; lr2.style.display = rsiH ? '' : 'none'; scSet(lr2, lgR); }
     const dlt = rb.bv - rb.sv;
     scSet($sc('scReadout'), `<b>${scT(rb.t)}</b> &nbsp;O <b>${rb.o.toFixed(dec2)}</b> H <b>${rb.h.toFixed(dec2)}</b> L <b>${rb.l.toFixed(dec2)}</b> C <b>${rb.c.toFixed(dec2)}</b>` +
@@ -42783,7 +42790,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     $sc('scChTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; SC.pref.chart = b.dataset.c; scPrefSave(); scRenderAll(); });
     $sc('scTfs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('tf', +b.dataset.tf); scRenderAll(); });
     $sc('scInd').addEventListener('click', e => { e.stopPropagation(); SC.indOpen = !SC.indOpen; scRenderChrome(); });
-    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, e200: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14 }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
+    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, e50: true, e100: true, e200: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14 }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
     document.addEventListener('click', e => { if (SC.indOpen && !e.target.closest('#scOpts')) { SC.indOpen = false; scRenderChrome(); } });
     $sc('scIndMenu').addEventListener('change', e => {
       const o = e.target.dataset.o, nk = e.target.dataset.n;
