@@ -2260,6 +2260,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-grid tr.sel td.k { box-shadow: inset 3px 0 0 var(--accent); }
   .sc-grid td.up { color: var(--g-up); background: var(--g-upbg); font-weight: 600; } .sc-grid td.dn { color: var(--g-dn); background: var(--g-dnbg); font-weight: 600; }
   .sc-grid.sc-grid-below { position: static; display: block; width: max-content; max-width: 100%; margin: 6px 0 0; box-shadow: none; overflow-x: auto; }
+.sc-ladctl { float: right; font-size: 10px; font-weight: 400; } .sc-ladctl select { font-size: 10px; margin: 0 6px 0 2px; } .sc-ladctl label { cursor: pointer; }
+  .sc-grid .gctl { margin-right: 8px; color: var(--g-text); } .sc-grid .gctl select { font-size: 10px; background: var(--g-head); color: var(--g-text); border: 1px solid var(--g-line); } .sc-grid .gctl label { cursor: pointer; }
   .sc-grid .cap { font-size: 10px; color: var(--g-muted); padding: 3px 6px; border-bottom: 1px solid var(--g-line); }
   .sc-grid .cap.warn { color: var(--g-amber); }
   .sc-h { cursor: ns-resize; }
@@ -2685,7 +2687,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
               <div id="tlight" style="position:absolute;left:14px;top:10px;z-index:6;"></div>
               <!-- NIFTY strike grid, lower left of the price chart. A sibling of chartBody for the same reason as the
                    traffic light: the chart redraws wipe chartBody. It never touches the SVG, so zoom cannot move it. -->
-              <div id="homeGrid" class="sc-grid" style="display:none;pointer-events:none;bottom:auto;left:0;top:0;opacity:.96"></div>
+              <div id="homeGrid" class="sc-grid" style="display:none;pointer-events:none;bottom:auto;left:0;top:0;opacity:.96"><div class="gctl hgctl" style="pointer-events:auto;padding:3px 6px"><button id="hgCol" type="button" title="Collapse or expand the strike table" style="font-size:10px;margin-right:6px;cursor:pointer">▾</button><span id="hgCtlRest">Depth ±<select id="hgN"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>10</option><option>12</option><option>15</option><option>20</option></select> <label id="hgH50Wrap"><input type="checkbox" id="hgH50"> Hide 50</label></span></div><div id="homeGridBody"></div></div>
               <div id="chartBody" style="padding:4px 6px;">
                 <div class="movers-loading">Loading candles…</div>
               </div>
@@ -3370,7 +3372,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div class="sc-term">
             <aside class="sc-left">
               <section class="sc-sec">
-                <div class="sc-st">Strikes <span class="sc-dim" id="scLadHint">click a call or put to pick it</span></div>
+                <div class="sc-st">Strikes <span class="sc-dim" id="scLadHint">click a call or put to pick it</span>
+                  <span class="sc-ladctl" id="scLadCtl">Depth ±<select id="scLadN"><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>10</option><option>12</option><option>15</option><option>20</option></select><label id="scLadH50Wrap"><input type="checkbox" id="scLadH50"> Hide 50</label></span></div>
                 <div class="sc-seg" id="scStrikes"></div>
                 <table id="scLadder" class="sc-ladder"></table>
               </section>
@@ -28261,14 +28264,39 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ── NIFTY strike grid on the home chart: ATM +/- 3 round-hundred strikes with the total bid and offer
   // quantity of each CE and PE book. Buyers on a call and sellers on a put are green; the reverse is red.
   // Read from the chain payload (Zerodha's live book totals), so it costs no extra broker call. ──
-  let _hgLast = '';
+  const _hgPref = (() => { try { return Object.assign({ n: 5, h50: true }, JSON.parse(localStorage.getItem('homeGridPrefV1') || '{}')); } catch (_) { return { n: 5, h50: true }; } })();
+  document.addEventListener('click', e => {
+    if (!e.target.closest || !e.target.closest('#hgCol')) return;
+    _hgPref.c = !_hgPref.c; try { localStorage.setItem('homeGridPrefV1', JSON.stringify(_hgPref)); } catch (_) {}
+    homeGridRender();
+  });
+  document.addEventListener('change', e => {
+    if (e.target.id !== 'hgN' && e.target.id !== 'hgH50') return;
+    if (e.target.id === 'hgN') { _hgPref.n = +e.target.value; e.target.blur(); } else _hgPref.h50 = e.target.checked;
+    try { localStorage.setItem('homeGridPrefV1', JSON.stringify(_hgPref)); } catch (_) {}
+    _hgLast = ''; homeGridRender();
+  });
+  let _hgLast = '', _hgBook = {}, _hgBusy = false, _hgNames = [];
+  // Live totals: the local server's tick store (/api/trade/state?b=), memory only, no broker call.
+  // Skipped while the Scalper tab is open (it polls the same thing) or the page is hidden.
+  async function homeGridPoll() {
+    if (_hgBusy || document.hidden || !_hgNames.length || location.protocol === 'file:') return;
+    const sc = document.getElementById('tab-scalp'); if (sc && sc.classList.contains('active')) return;
+    _hgBusy = true;
+    try {
+      const r = await fetch(`${scBase()}/api/trade/state?b=${encodeURIComponent(_hgNames.join(','))}`, { signal: AbortSignal.timeout(3000) });
+      const j = await r.json(); _hgBook = j.book || {};
+    } catch (_) {} finally { _hgBusy = false; }
+  }
+  setInterval(homeGridPoll, 1500);
   function homeGridRender() {
     const el = document.getElementById('homeGrid'); if (!el) return;
     try {
       const svgEl = document.getElementById('chartSvg') || document.getElementById('renkoSvg');
       if (!['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY') || !svgEl || !svgEl.getClientRects().length) { el.style.display = 'none'; return; }   // an SVG has no offsetParent: ask for its boxes instead
       const d = state.lastData, n = v => v == null ? '–' : Math.round(v).toLocaleString('en-IN');
-      const rows = d && Array.isArray(d.strikes) ? d.strikes.filter(r => r.ce_symbol && r.pe_symbol && r.strike % 100 === 0).sort((a, b) => a.strike - b.strike) : [];
+      const isNf = (state.symbol || 'NIFTY') === 'NIFTY', h50 = isNf && _hgPref.h50 !== false, HN = (+_hgPref.n >= 1 && +_hgPref.n <= 20) ? Math.round(+_hgPref.n) : 5;
+      const rows = d && Array.isArray(d.strikes) ? d.strikes.filter(r => r.ce_symbol && r.pe_symbol && !(h50 && r.strike % 100 !== 0)).sort((a, b) => a.strike - b.strike) : [];
       let html;
       if (!rows.length) {
         const why = !d ? 'waiting for the option chain…' : d._source !== 'zerodha' ? `the chain is coming from "${escapeHtml(String(d._source || 'unknown'))}", not Zerodha. The grid needs the Zerodha feed.` : 'the chain has no tradable strikes yet.';
@@ -28276,21 +28304,27 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       } else {
         const spot = d.underlying_value || d.atm; let ai = 0, bd = 1e12;
         rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
-        const show = rows.slice(Math.max(0, ai - 5), ai + 6).reverse(), atm = rows[ai].strike;
+        const show = rows.slice(Math.max(0, ai - HN), ai + HN + 1).reverse(), atm = rows[ai].strike;
         const ratio = (b, o, put) => {
           if (!(b > 0) || !(o > 0)) return '<td>–</td>';
           const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers;
           return `<td class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}</td>`;
         };
-        const cell = (r, put) => { const p = put ? 'pe' : 'ce', b = r[p + '_tbq'], o = r[p + '_tsq']; return `<td>${n(b)}</td><td>${n(o)}</td>${ratio(b, o, put)}`; };
-        const any = show.some(r => (r.ce_tbq > 0) || (r.pe_tbq > 0));
+        _hgNames = show.flatMap(r => [r.ce_symbol, r.pe_symbol]);
+        const live = (r, p) => { const lv = _hgBook[r[p + '_symbol']]; return lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; };
+        const cell = (r, put) => { const [b, o] = live(r, put ? 'pe' : 'ce'); return `<td>${n(b)}</td><td>${n(o)}</td>${ratio(b, o, put)}`; };
+        const any = show.some(r => (live(r, 'ce')[0] > 0) || (live(r, 'pe')[0] > 0));
         html = `<div class="cap">${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(d.expiry || ''))} · CE bid · offer · ratio | strike | PE bid · offer · ratio · ATM ${fmtInt(atm)}</div>` +
           (any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30).</div>') +
           `<table>` +
           show.map(r => `<tr class="${r.strike === atm ? 'atm' : ''}">${cell(r, false)}<td class="k">${fmtInt(r.strike)}</td>${cell(r, true)}</tr>`).join('') + '</table>';
       }
       el.style.display = '';
-      if (html !== _hgLast) { el.innerHTML = html; _hgLast = html; }
+      { const ns = document.getElementById('hgN'), hc = document.getElementById('hgH50'); if (ns && document.activeElement !== ns) ns.value = String(HN); if (hc) hc.checked = h50; document.getElementById('hgH50Wrap').style.display = isNf ? '' : 'none'; }
+      if (html !== _hgLast) { document.getElementById('homeGridBody').innerHTML = html; _hgLast = html; }
+      document.getElementById('homeGridBody').style.display = _hgPref.c ? 'none' : '';
+      document.getElementById('hgCtlRest').style.display = _hgPref.c ? 'none' : '';
+      document.getElementById('hgCol').textContent = _hgPref.c ? '▸ Strikes' : '▾';
       const wrap = el.parentElement, a = wrap.getBoundingClientRect(), b = svgEl.getBoundingClientRect();
       const top = Math.max(b.top - a.top + 4, b.bottom - a.top - el.offsetHeight - 40);   // lower left of the price chart, above its time axis
       el.style.top = Math.round(top) + 'px'; el.style.left = Math.round(b.left - a.left + 8) + 'px';
@@ -41338,9 +41372,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // ======================================================================
   const SC = {
     st: null, quotes: {}, spot: 0, busy: false, legs: { CE: null, PE: null }, tape: {},
-    pref: { tf: 60, nvis: 70, ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
+    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
             selCE: 'o0', selPE: 'o0', chart: 'CE', dock: 'pos', side: 'B', struct: 'single', sOff: 2, hedge: true, wing: 3,
-            trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
+            ladN: 5, ladH50: true, trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
     pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
     exitsBy: { B: {}, S: {} }, exits: {}, drag: null, hover: null, geom: null, lines: [], lastOrdT: null, bgT: 0, raf: 0,
     sLegs: null, wing: null, margin: null, notes: {}, hist: {}, book: {},
@@ -41734,7 +41768,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     return { out, step };
   }
   // ── indicators: EMA 5/13 crossover, RSI with a moving average ──
-  const SC_EF = '#40c4ff', SC_ES = '#ffab40', SC_RSI = '#d6dcea', SC_RMA = '#ffd54f', SC_OB = '#ef5350', SC_OS = '#26a69a';
+  const SC_E200 = '#eb3b5a', SC_EF = '#40c4ff', SC_ES = '#ffab40', SC_RSI = '#d6dcea', SC_RMA = '#ffd54f', SC_OB = '#ef5350', SC_OS = '#26a69a';
   function scEmaArr(cl, n) {
     const out = new Array(cl.length).fill(null); if (cl.length < n || n < 1) return out;
     let e = 0; for (let i = 0; i < n; i++) e += cl[i]; e /= n; out[n - 1] = e;
@@ -41764,8 +41798,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   function scIndicators(all) {
     const P = SC.pref, cl = all.map(b => b.c), n = all.length;
     const ef = P.ema ? scEmaArr(cl, P.emaF) : null, es = P.ema ? scEmaArr(cl, P.emaS) : null;
+    const e2 = P.e200 ? scEmaArr(cl, 200) : null;
     const rs = P.rsi ? scRsiArr(cl, P.rsiN) : null, rm = rs ? scSmaArr(rs, P.rsiM) : null, cross = [];
-    for (let i = 0; i < n; i++) { const b = all[i]; b.ef = ef ? ef[i] : null; b.es = es ? es[i] : null; b.rsi = rs ? rs[i] : null; b.rma = rm ? rm[i] : null; }
+    for (let i = 0; i < n; i++) { const b = all[i]; b.ef = ef ? ef[i] : null; b.es = es ? es[i] : null; b.e200 = e2 ? e2[i] : null; b.rsi = rs ? rs[i] : null; b.rma = rm ? rm[i] : null; }
     if (ef && es) {
       let prev = 0;
       for (let i = 0; i < n; i++) {
@@ -41783,7 +41818,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   }
   function scRenderIndMenu(spot) {
     const P = SC.pref, menu = $sc('scIndMenu'), btn = $sc('scInd'); if (!menu) return;
-    const n = ['ema', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
+    const n = ['ema', 'e200', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
     scSet(btn, `ƒx Indicators${n ? `<span class="cnt">${n}</span>` : ''}`);
     btn.classList.toggle('on', !!SC.indOpen); menu.style.display = SC.indOpen ? '' : 'none';
     if (!SC.indOpen) return;
@@ -41792,6 +41827,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     scSet(menu, `<div class="ih"><span>Indicators on this chart</span><button data-ind="reset" title="EMA 5/13 and RSI 14 on, everything else as it is">Defaults</button></div>` +
       row('ema', 'EMA crossover', 'A fast and a slow moving average of the close. ▲ marks where the fast one crosses above (bullish), ▼ where it crosses below (bearish). The band between them is green when fast is above, red when below.',
         `<span class="sw" style="background:${SC_EF}"></span>fast ${num('emaF', P.emaF)} <span class="sw" style="background:${SC_ES}"></span>slow ${num('emaS', P.emaS)}`) +
+      row('e200', 'EMA 200', 'The 200-period exponential moving average of the close: the long-term trend line. Needs 200 bars of history to start.', `<span class="sw" style="background:${SC_E200}"></span>200`) +
       row('rsi', 'RSI with moving average', 'Momentum from 0 to 100 in its own pane. 80 and 20 are the overbought and oversold lines, 50 is the middle, and the dotted lines are 70 and 30. The yellow line is the average of the RSI.',
         `<span class="sw" style="background:${SC_RSI}"></span>RSI ${num('rsiN', P.rsiN)} <span class="sw" style="background:${SC_RMA}"></span>MA ${num('rsiM', P.rsiM)}`) +
       row('vwap', 'VWAP', 'Volume-weighted average price of this contract since the page started collecting.' + (spot ? ' Not available on the spot chart.' : ''), '', spot) +
@@ -41870,6 +41906,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       s += `<line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(b.h).toFixed(1)}" y2="${y(b.l).toFixed(1)}" stroke="${col}"/>` +
            `<rect x="${(cx - bw / 2).toFixed(1)}" y="${Math.min(yo, yc).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, Math.abs(yo - yc)).toFixed(1)}" fill="${col}"/>`;
     });
+    if (SC.pref.e200 && nv > 1) s += `<g clip-path="url(#scClipP)"><path d="${scLinePath(vis, 'e200', bx, y)}" fill="none" stroke="${SC_E200}" stroke-width="1.5"/></g>`;
     if (SC.pref.ema && nv > 1) {
       let up = '', dn = '';
       for (let i = 0; i < nv - 1; i++) {
@@ -42011,6 +42048,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       else sig = `<span class="sig ${st > 0 ? 'up' : st < 0 ? 'dn' : 'wu'}">${st > 0 ? '▲ ' + P.emaF + ' over ' + P.emaS + ' · bullish' : st < 0 ? '▼ ' + P.emaF + ' under ' + P.emaS + ' · bearish' : 'flat'}${lc ? ` · crossed ${lastI - lc.i} bar${lastI - lc.i === 1 ? '' : 's'} ago` : ' · no cross yet'}</span>`;
       lgP = `<span class="sc-lg"><i style="background:${SC_EF}"></i>EMA ${P.emaF} <b>${f1(rb.ef)}</b></span><span class="sc-lg"><i style="background:${SC_ES}"></i>EMA ${P.emaS} <b>${f1(rb.es)}</b></span>${sig}<button class="sc-lgx" data-x="ema" title="Remove EMA ${P.emaF}/${P.emaS} from the chart" style="pointer-events:auto">✕</button>`;
     }
+    if (P.e200) lgP += `<span class="sc-lg"><i style="background:${SC_E200}"></i>EMA 200 <b>${f1(rb.e200)}</b></span><button class="sc-lgx" data-x="e200" title="Remove EMA 200 from the chart" style="pointer-events:auto">✕</button>`;
     if (P.rsi) {
       const r = rb.rsi, zone = r == null ? '' : r >= 80 ? '<span class="sig dn">overbought</span>' : r <= 20 ? '<span class="sig up">oversold</span>' : r >= 70 ? '<span class="sig wu">above 70</span>' : r <= 30 ? '<span class="sig wu">below 30</span>' : '';
       lgR = `<span class="sc-lg"><i style="background:${SC_RSI}"></i>RSI ${P.rsiN} <b>${r == null ? '–' : r.toFixed(1)}</b></span><span class="sc-lg"><i style="background:${SC_RMA}"></i>MA ${P.rsiM} <b>${rb.rma == null ? '–' : rb.rma.toFixed(1)}</b></span>${lastB.rsi == null ? `<span class="sig wu">RSI warming up · ${Math.min(ind.n, P.rsiN + 1)}/${P.rsiN + 1} bars</span>` : zone}<button class="sc-lgx" data-x="rsi" title="Remove RSI from the chart" style="pointer-events:auto">✕</button>`;
@@ -42057,11 +42095,13 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   }
   function scRenderLadder() {
     const el = $sc('scLadder'), d = state.lastData;
+    { const ns = $sc('scLadN'), hc = $sc('scLadH50'), isN = (state.symbol || 'NIFTY') === 'NIFTY'; if (ns && document.activeElement !== ns) ns.value = String(SC.pref.ladN || 5); if (hc) hc.checked = SC.pref.ladH50 !== false; $sc('scLadH50Wrap').style.display = isN ? '' : 'none'; }
     scSet($sc('scStrikes'), SC_STRIKES.map(([k, l]) => `<button data-k="${k}" class="${(SC.pref.selCE === k && SC.pref.selPE === k) ? 'on' : ''}">${l}</button>`).join(''));
     if (!scChainOk()) { scSet(el, '<tr><td class="sc-empty">Waiting for the Zerodha option chain…</td></tr>'); return; }
-    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol).sort((a, b) => a.strike - b.strike);
+    const h50 = (state.symbol || 'NIFTY') === 'NIFTY' && SC.pref.ladH50 !== false, LN = (+SC.pref.ladN >= 1 && +SC.pref.ladN <= 20) ? Math.round(+SC.pref.ladN) : 5;
+    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol && !(h50 && r.strike % 100 !== 0)).sort((a, b) => a.strike - b.strike);
     let ai = 0, bd = 1e9; rows.forEach((r, i) => { const dd = Math.abs(r.strike - d.atm); if (dd < bd) { bd = dd; ai = i; } });
-    const sl = rows.slice(Math.max(0, ai - 6), Math.min(rows.length, ai + 7));
+    const sl = rows.slice(Math.max(0, ai - LN), Math.min(rows.length, ai + LN + 1));
     const mx = Math.max(1, ...sl.map(r => Math.max(Math.abs(r.ce_oi_chg || 0), Math.abs(r.pe_oi_chg || 0))));
     const T = scVolT(d), S = d.underlying_value, st = scIsStruct() && SC.sLegs;
     const selC = st ? SC.sLegs.CE.strike : SC.legs.CE && SC.legs.CE.strike, selP = st ? SC.sLegs.PE.strike : SC.legs.PE && SC.legs.PE.strike;
@@ -42460,12 +42500,14 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   }
   // ── strike grid: total bid and offer quantity of ATM +/- 3 strikes, NIFTY's chain expiry only ──
   const SC_GRID_SYMS = ['NIFTY', 'BANKNIFTY'];   // the indices whose option chain the strike grid reads
+  const scGridN = () => { const v = +SC.pref.gridN; return v >= 1 && v <= 20 ? Math.round(v) : 5; };
+  const scHide50 = () => (state.symbol || 'NIFTY') === 'NIFTY' && SC.pref.hide50 !== false;
   function scGridRows() {
     const d = state.lastData; if (!SC_GRID_SYMS.includes(state.symbol || 'NIFTY') || !d || !scChainOk()) return null;
-    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol && r.strike % 100 === 0).sort((a, b) => a.strike - b.strike); if (!rows.length) return null;   // the 50-strikes (22950, 22850…) are left out
+    const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol && !(scHide50() && r.strike % 100 !== 0)).sort((a, b) => a.strike - b.strike); if (!rows.length) return null;   // NIFTY with "Hide 50" on: the 50-strikes (22950, 22850…) are left out
     const spot = SC.spot || d.underlying_value || d.atm; let ai = 0, bd = 1e12;
     rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
-    return { rows: rows.slice(Math.max(0, ai - 5), ai + 6).reverse(), atm: rows[ai].strike, expiry: d.expiry };
+    const N = scGridN(); return { rows: rows.slice(Math.max(0, ai - N), ai + N + 1).reverse(), atm: rows[ai].strike, expiry: d.expiry };
   }
   function scGridNames() { const g = scGridRows(); return g ? g.rows.flatMap(r => [r.ce_symbol, r.pe_symbol]) : []; }
   function scRenderGrid() {
@@ -42473,6 +42515,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     try { scRenderGridBody(el); } catch (e) { el.style.display = ''; scSet(el, `<div class="cap" style="color:#ff5d6c">strike grid error: ${escapeHtml(String(e.message || e))}</div>`); console.error('scalp grid', e); }
   }
   function scRenderGridBody(el) {
+    if (typeof document !== 'undefined' && document.activeElement && document.activeElement.tagName === 'SELECT' && el.contains(document.activeElement)) return;   // rebuilding would close the open dropdown
     if (!SC_GRID_SYMS.includes(state.symbol || 'NIFTY')) { el.style.display = 'none'; return; }
     const g = scGridRows(); el.style.display = '';
     if (!g) {
@@ -42491,7 +42534,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const any = g.rows.some(r => ['ce', 'pe'].some(p => { const lv = SC.book[r[p + '_symbol']]; return ((lv ? lv[0] : r[p + '_tbq']) || 0) > 0; }));
     const selK = (SC.pref.selCE || '').slice(1);
     const body = g.rows.map(r => `<tr class="${r.strike === g.atm ? 'atm' : ''}${String(r.strike) === selK ? ' sel' : ''}">${cell(r, false)}<td class="k" data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart">${fmtInt(r.strike)}</td>${cell(r, true)}</tr>`).join('');
-    scSet(el, `<div class="cap">${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(g.expiry || ''))} · CE bid · offer · ratio | strike | PE bid · offer · ratio · ATM ${fmtInt(g.atm)} · grid v4</div>${any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table>${body}</table>`);
+    const ctl = `<span class="gctl">Depth ±<select data-g="n">${[3, 4, 5, 6, 7, 8, 10, 12, 15, 20].map(v => `<option value="${v}"${v === scGridN() ? ' selected' : ''}>${v}</option>`).join('')}</select>${(state.symbol || 'NIFTY') === 'NIFTY' ? ` <label><input type="checkbox" data-g="h50"${scHide50() ? ' checked' : ''}> Hide 50</label>` : ''}</span> `;
+    scSet(el, `<div class="cap">${ctl}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(g.expiry || ''))} · CE bid · offer · ratio | strike | PE bid · offer · ratio · ATM ${fmtInt(g.atm)} · grid v4</div>${any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table>${body}</table>`);
   }
   function scNote() {
     const el = $sc('scNote'); let msg = '', bad = false; const S = SC.st;
@@ -42739,13 +42783,20 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     $sc('scChTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; SC.pref.chart = b.dataset.c; scPrefSave(); scRenderAll(); });
     $sc('scTfs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('tf', +b.dataset.tf); scRenderAll(); });
     $sc('scInd').addEventListener('click', e => { e.stopPropagation(); SC.indOpen = !SC.indOpen; scRenderChrome(); });
-    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14 }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
+    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, e200: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14 }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
     document.addEventListener('click', e => { if (SC.indOpen && !e.target.closest('#scOpts')) { SC.indOpen = false; scRenderChrome(); } });
     $sc('scIndMenu').addEventListener('change', e => {
       const o = e.target.dataset.o, nk = e.target.dataset.n;
       if (o) save(o, e.target.checked);
       else if (nk) { const v = Math.max(1, Math.min(200, Math.round(+e.target.value) || SC.pref[nk])); save(nk, v); }
       scRenderChrome(); scQueueDraw();
+    });
+    $sc('scLadN').addEventListener('change', e => { SC.pref.ladN = +e.target.value; scPrefSave(); scRenderAll(); e.target.blur(); });
+    $sc('scLadH50').addEventListener('change', e => { SC.pref.ladH50 = e.target.checked; scPrefSave(); scRenderAll(); });
+    $sc('scGrid').addEventListener('change', e => {
+      const g = e.target.dataset.g; if (!g) return;
+      if (g === 'n') SC.pref.gridN = +e.target.value; else SC.pref.hide50 = e.target.checked;
+      scPrefSave(); if (e.target.blur) e.target.blur(); scRenderAll();
     });
     $sc('scGrid').addEventListener('click', e => { const td = e.target.closest('td.k'); if (!td) return; SC.pref.selCE = SC.pref.selPE = 'k' + td.dataset.k; SC.pref.chart = SC.pref.chart === 'PE' ? 'PE' : 'CE'; scPrefSave(); scClearPending(); scRenderAll(); });
     $sc('scZoom').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('nvis', Math.max(20, Math.min(240, Math.round(SC.pref.nvis * (b.dataset.z === 'in' ? 0.8 : 1.25))))); scQueueDraw(); });

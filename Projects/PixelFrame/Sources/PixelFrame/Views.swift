@@ -88,6 +88,12 @@ struct DisplayArea: View {
 /// Time (hh:mm:ss AM/PM) and date (dd-MM-yyyy). Hops to a new corner/edge with every new image.
 struct ClockOverlay: View {
     @EnvironmentObject var model: AppModel
+    /// Wallpaper style: one line "HH:mm:ss dd.MM.yy", fixed at the bottom left.
+    var fixedLine = false
+
+    private static let lineTimeFormat: DateFormatter = make("hh:mm:ss")      // 12-hour, no AM/PM
+    private static let lineDateFormat: DateFormatter = make("dd.MM.yy")
+    private static let lineDayFormat: DateFormatter = make("EEE")            // SUN/MON/TUE…
 
     private static let timeFormat: DateFormatter = make("hh:mm:ss a")
     private static let dateFormat: DateFormatter = make("dd-MM-yyyy")
@@ -103,16 +109,27 @@ struct ClockOverlay: View {
         GeometryReader { geo in
             let unit = min(geo.size.width, geo.size.height)
             let timeSize = max(16, unit * 0.075)            // scales with any window / screen size
-            let slot = model.clockSlot
+            let slot = fixedLine ? 6 : model.clockSlot
             // Idle (paused/asleep/hidden): no per-second redraw at all.
             TimelineView(.periodic(from: .now, by: model.suspendReasons.isEmpty ? 1 : 3600)) { ctx in
                 VStack(alignment: alignment(slot).horizontal == .leading ? .leading
                         : alignment(slot).horizontal == .trailing ? .trailing : .center,
                        spacing: timeSize * 0.08) {
-                    Text(Self.timeFormat.string(from: ctx.date))
-                        .font(.system(size: timeSize, weight: .bold, design: .monospaced))
-                    Text(Self.dateFormat.string(from: ctx.date))
-                        .font(.system(size: timeSize * 0.5, weight: .semibold, design: .monospaced))
+                    if fixedLine {
+                        HStack(alignment: .firstTextBaseline, spacing: timeSize * 0.2) {
+                            Text(Self.lineTimeFormat.string(from: ctx.date))
+                                .font(.system(size: timeSize * 0.6, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.white)
+                            Text(Self.lineDateFormat.string(from: ctx.date) + " " + Self.lineDayFormat.string(from: ctx.date).uppercased())
+                                .font(.system(size: timeSize * 0.3, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.gray)
+                        }
+                    } else {
+                        Text(Self.timeFormat.string(from: ctx.date))
+                            .font(.system(size: timeSize, weight: .bold, design: .monospaced))
+                        Text(Self.dateFormat.string(from: ctx.date))
+                            .font(.system(size: timeSize * 0.5, weight: .semibold, design: .monospaced))
+                    }
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, timeSize * 0.4)

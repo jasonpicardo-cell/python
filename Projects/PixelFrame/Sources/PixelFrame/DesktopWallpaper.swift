@@ -1,10 +1,11 @@
 import AppKit
+import SwiftUI
 
 /// One borderless, click-through window per screen at desktop level (below the icons), sized to the screen.
 private final class DesktopWindow: NSWindow {
     let pixelView = PixelNSView(frame: .zero)
 
-    init(screen: NSScreen) {
+    init(screen: NSScreen, model: AppModel?) {
         super.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
@@ -15,7 +16,21 @@ private final class DesktopWindow: NSWindow {
         isReleasedWhenClosed = false
         pixelView.autoresizingMask = [.width, .height]
         contentView = pixelView
+        if let model {                                   // time & date drawn over the wallpaper, click-through
+            let clock = NSHostingView(rootView: WallpaperClock().environmentObject(model))
+            clock.frame = pixelView.bounds
+            clock.autoresizingMask = [.width, .height]
+            pixelView.addSubview(clock)
+        }
         setFrame(screen.frame, display: false)
+    }
+}
+
+/// The same time & date overlay as the slideshow, shown only when "Show time & date" is on.
+private struct WallpaperClock: View {
+    @EnvironmentObject var model: AppModel
+    var body: some View {
+        if model.showClock { ClockOverlay(fixedLine: true) }
     }
 }
 
@@ -27,6 +42,7 @@ final class DesktopWallpaper {
     private var gap = 0.0
     private var integerScale = true
     private var itemID = 0
+    weak var model: AppModel?
 
     var isActive: Bool { !windows.isEmpty }
 
@@ -55,7 +71,7 @@ final class DesktopWallpaper {
 
     private func rebuild() {
         windows.forEach { $0.close() }
-        windows = NSScreen.screens.map { DesktopWindow(screen: $0) }
+        windows = NSScreen.screens.map { DesktopWindow(screen: $0, model: model) }
         windows.forEach { $0.orderFrontRegardless() }
     }
 

@@ -1710,11 +1710,16 @@ def test_scalping_tab():
         const row = k => h.split('<tr class=').find(x => x.includes('data-k="' + k + '"')) || '';
         SC.spot = 25080; scRenderGrid(); const order2 = [...el.h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]);
         SYM = 'BANKNIFTY'; const bank = scGridRows(); SYM = 'FINNIFTY'; const none = scGridRows(); SYM = 'NIFTY';
-        console.log(JSON.stringify({ order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
+        SC.spot = 25012; SC.pref.gridN = 2; SC.pref.hide50 = false; const d50 = scGridRows().rows.map(r => r.strike); SC.pref.hide50 = true; const d100 = scGridRows().rows.map(r => r.strike); SYM = 'BANKNIFTY'; const bk50 = scGridRows().rows.length; scRenderGrid(); const bkCtl = /data-g="h50"/.test(el.h); SYM = 'NIFTY'; SC.pref.gridN = 5; SC.pref.hide50 = true; scRenderGrid(); const niCtl = /data-g="h50"[^>]*checked/.test(el.h) && /<option value="5" selected>/.test(el.h);
+        const depth = JSON.stringify({ d50, d100, bk50, bkCtl, niCtl });
+        console.log(JSON.stringify({ depth, order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
           atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× buyers/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length) }));""")
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
+        check("strike grid controls: depth dropdown sets +-N strikes (default 5), 'Hide 50' (NIFTY only, default on) keeps 100-multiples; BANKNIFTY gets no checkbox",
+              o4["depth"] == json.dumps({"d50": [25100, 25050, 25000, 24950, 24900], "d100": [25200, 25100, 25000, 24900, 24800], "bk50": 5, "bkCtl": False, "niCtl": True}, separators=(",", ":")) or json.loads(o4["depth"]) == {"d50": [25100, 25050, 25000, 24950, 24900], "d100": [25200, 25100, 25000, 24900, 24800], "bk50": 5, "bkCtl": False, "niCtl": True}, o4["depth"])
+        check("chart indicators: EMA 200 is a menu item on by default (new pref key e200) and is drawn", "e200: true" in seg and "SC_E200" in seg and "b.e200 =" in seg)
         check("strike grid: ATM plus and minus 5 round-hundred strikes (11 rows, no column headers) (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; shown for NIFTY and BANKNIFTY, hidden for the other indices",
               o4["no50"] and o4["order"] == [25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600, 24500] and o4["order2"] == [25600, 25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600]
               and o4["fallback"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
@@ -1723,7 +1728,7 @@ def test_scalping_tab():
     except Exception as ex:  # noqa: BLE001
         check("chart indicators: the maths runs in node", False, str(ex))
     check("home chart: a NIFTY / BANKNIFTY strike grid overlay (sibling of chartBody, never touches the SVG), round-hundred strikes only, fed by the chain's book totals, placed at the price chart's lower left",
-          'id="homeGrid"' in d and "function homeGridRender" in d and "['NIFTY', 'BANKNIFTY'].includes(state.symbol" in d and "body.light-mode .sc-grid {" in d and ".sc-chartwrap, .sc-indmenu { --text: #e8ebf2;" in d and "r.strike % 100 === 0" in d and "getClientRects().length" in d
+          'id="homeGrid"' in d and "function homeGridRender" in d and "['NIFTY', 'BANKNIFTY'].includes(state.symbol" in d and "body.light-mode .sc-grid {" in d and ".sc-chartwrap, .sc-indmenu { --text: #e8ebf2;" in d and "h50 && r.strike % 100 !== 0" in d and 'id="hgN"' in d and "homeGridPrefV1" in d and "getClientRects().length" in d
           and "['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY')" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d)
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
           "location.protocol === 'file:'" in seg and "_source !== 'zerodha'" in seg)

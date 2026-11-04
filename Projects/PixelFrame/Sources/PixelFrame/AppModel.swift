@@ -813,6 +813,7 @@ final class AppModel: ObservableObject {
     private func showWallpaper(_ frame: CGImage, url: URL) {
         let wasActive = desktop.isActive
         defer { if !wasActive { ramNeedsChanged() } }
+        desktop.model = self
         desktop.show(frame, gap: manifest?.gap ?? gap, integerScale: manifest?.integerScale ?? integerScale)
         if !defaults.bool(forKey: "wallpaperSet") { defaults.set(true, forKey: "wallpaperSet") }
         let name = url.deletingPathExtension().lastPathComponent
