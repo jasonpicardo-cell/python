@@ -19523,7 +19523,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (nxt) { const gapDays = Math.round((new Date(nxt + 'T12:00:00') - new Date(day + 'T12:00:00')) / 86400000); if (gapDays > 1) ev.push(`next session ${_dayLabel(nxt)} (${gapDays - 1} day${gapDays > 2 ? 's' : ''} closed) — carry risk`); }
     const col = B.bias === 'BULLISH' ? 'var(--pos,#26a69a)' : B.bias === 'BEARISH' ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)';
     const lockCol = ent.bias === 'BULLISH' ? 'var(--pos,#26a69a)' : ent.bias === 'BEARISH' ? 'var(--neg,#ef5350)' : 'var(--gold,#d4af37)';
-    const collapsed = (() => { try { return localStorage.getItem('pdPrepCollapsed') === day; } catch (_) { return false; } })();
+    const collapsed = (() => { try { return localStorage.getItem('pdPrepOpen') !== day; } catch (_) { return true; } })();
     const zTxt = B.z ? `${B.z.name} ${Math.round(B.z.pct)}%` : '—';
     // The live bits (zone %, distances to liquidity) are patched in place;
     // the card is rebuilt only when its content really changes, so a tick
@@ -19577,8 +19577,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (!ev.target?.closest?.('[data-pdtoggle]')) return;
     const day = window._histDate || _istDayKey();
     try {
-      if (localStorage.getItem('pdPrepCollapsed') === day) localStorage.removeItem('pdPrepCollapsed');
-      else localStorage.setItem('pdPrepCollapsed', day);
+      if (localStorage.getItem('pdPrepOpen') === day) localStorage.removeItem('pdPrepOpen');
+      else localStorage.setItem('pdPrepOpen', day);
     } catch (_) {}
     renderPdPrep();
   });
@@ -21617,6 +21617,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     ? `<defs><clipPath id="${id}"><rect x="${padL}" y="0" width="${(W - padL - padR).toFixed(1)}" height="${H}"/></clipPath></defs>` : '';
   const _xClipAttr = id => _xzActive() ? ` clip-path="url(#${id})"` : '';
   function _timeGridSvg(W, padL, padR, top, bottom, labelY, cs, xOf) {
+    if (window._noTimeGrid) return '';
     const SESSION_MIN = 385, iv = _chart.interval || 1;
     const slots = Math.max(1, Math.ceil(SESSION_MIN / iv));
     const hm = m => { const t = 9 * 60 + 15 + m; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
@@ -34488,7 +34489,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'ctxChartCfg',         // which context series are drawn
     'ctxClockOpacity',     // context-pane clock watermark strength (default 30)
     'ctxSignals',          // Buy/Sell lines in the context pane (default on)
-    'pdPrepCollapsed',     // PD prep card collapsed for the day
+    'pdPrepCollapsed',     // (old) PD prep card collapsed for the day
+    'pdPrepOpen',          // PD prep card expanded for the day (collapsed by default)
     'ttrCfgV1',            // Trend Target Ribbon ⚙ settings
     'sqzCfgV1',            // Squeeze Momentum ⚙ settings
     'wtCfgV1',             // WaveTrend ⚙ settings
@@ -41372,7 +41374,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // ======================================================================
   const SC = {
     st: null, quotes: {}, spot: 0, busy: false, legs: { CE: null, PE: null }, tape: {},
-    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
+    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14, sqz: true, wt: true, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
             selCE: 'o0', selPE: 'o0', chart: 'CE', dock: 'pos', side: 'B', struct: 'single', sOff: 2, hedge: true, wing: 3,
             ladN: 5, ladH50: true, trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
     pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
@@ -41818,7 +41820,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   }
   function scRenderIndMenu(spot) {
     const P = SC.pref, menu = $sc('scIndMenu'), btn = $sc('scInd'); if (!menu) return;
-    const n = ['ema', 'e50', 'e100', 'e200', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
+    const n = ['ema', 'e50', 'e100', 'e200', 'sqz', 'wt', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
     scSet(btn, `ƒx Indicators${n ? `<span class="cnt">${n}</span>` : ''}`);
     btn.classList.toggle('on', !!SC.indOpen); menu.style.display = SC.indOpen ? '' : 'none';
     if (!SC.indOpen) return;
@@ -41830,6 +41832,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       row('e50', 'EMA 50', 'The 50-period exponential moving average of the close.', `<span class="sw" style="background:${SC_E50}"></span>50`) +
       row('e100', 'EMA 100', 'The 100-period exponential moving average of the close.', `<span class="sw" style="background:${SC_E100}"></span>100`) +
       row('e200', 'EMA 200', 'The 200-period exponential moving average of the close: the long-term trend line. Needs 200 bars of history to start.', `<span class="sw" style="background:${SC_E200}"></span>200`) +
+      row('sqz', 'Squeeze Momentum', 'LazyBear squeeze momentum in its own pane above the RSI: histogram is the momentum (bright = growing, dark = fading), dots on the zero line show the squeeze (white = coiling, grey = released, blue = none). Settings are shared with the Home tab pane.', `<span class="sw" style="background:#00ff00"></span>mom <span class="sw" style="background:#e8e8e8"></span>squeeze`) +
+      row('wt', 'WaveTrend', 'LazyBear WaveTrend (WT1 / WT2, overbought and oversold levels, divergence) sharing the squeeze pane. Settings are shared with the Home tab pane.', `<span class="sw" style="background:#00E676"></span>WT1 <span class="sw" style="background:#FF5252"></span>WT2`) +
       row('rsi', 'RSI with moving average', 'Momentum from 0 to 100 in its own pane. 80 and 20 are the overbought and oversold lines, 50 is the middle, and the dotted lines are 70 and 30. The yellow line is the average of the RSI.',
         `<span class="sw" style="background:${SC_RSI}"></span>RSI ${num('rsiN', P.rsiN)} <span class="sw" style="background:${SC_RMA}"></span>MA ${num('rsiM', P.rsiM)}`) +
       row('vwap', 'VWAP', 'Volume-weighted average price of this contract since the page started collecting.' + (spot ? ' Not available on the spot chart.' : ''), '', spot) +
@@ -41860,10 +41864,25 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
     return out;
   }
+  // Home-tab pane (_sqzPaneSvg) reused on the Scalper bars: ms -> s timestamps, Home state swapped in for the call, ids made unique.
+  function scSqzPane(all, bx, nv, padL, padR, W, top, H) {
+    const cs = all.map(b => ({ t: b.t / 1000, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })), sh = all.length - nv;
+    const sv = { s: _chart.show, iv: _chart.interval, lb: _chart.liveBar };
+    _chart.show = Object.assign({}, sv.s, { sqz: !!SC.pref.sqz, wt: !!SC.pref.wt }); _chart.interval = SC.pref.tf / 60; _chart.liveBar = true; window._noTimeGrid = true;
+    let svg;
+    try { svg = _sqzPaneSvg(cs, i => bx(i - sh), W, padL, padR, H); }
+    finally { _chart.show = sv.s; _chart.interval = sv.iv; _chart.liveBar = sv.lb; window._noTimeGrid = false; }
+    if (!svg) return '';
+    svg = svg.replace(/xclipQ/g, 'scXclipQ').replace(/sqzXM/g, 'scSqzXM').replace(/var\(--wash\)/g, '#0a0c11').replace(/var\(--muted,#789\)/g, '#7a8398');
+    return svg.replace(/^<svg viewBox="([^"]*)" style="[^"]*">/, `<svg x="0" y="${top}" width="${W}" height="${H}" viewBox="$1" overflow="hidden">`);
+  }
   function scQueueDraw() { if (!SC.raf) SC.raf = requestAnimationFrame(() => { SC.raf = 0; try { scDrawChart(); } catch (e) { console.log('[scalp] chart', e); } }); }
   function scDrawChart() {
     const svg = $sc('scChart'); if (!svg) return;
     const T = scChartTarget();
+    // the squeeze/WaveTrend pane adds to the chart's height instead of eating the price pane
+    const wrapEl = svg.parentElement, wantH = 620 + ((SC.pref.sqz || SC.pref.wt) ? ((SC.pref.sqz && SC.pref.wt ? 150 : 110) + 6) : 0);
+    if (wrapEl && wrapEl.dataset.h !== String(wantH)) { wrapEl.style.height = wantH + 'px'; wrapEl.dataset.h = String(wantH); }
     const W = Math.max(320, svg.clientWidth || 800), H = Math.max(280, svg.clientHeight || 480);
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     const note = t => { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="#7a8398" font-size="12" style="font-family:'IBM Plex Sans',sans-serif">${t}</text>`; SC.geom = null; };
@@ -41877,8 +41896,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const cap = Math.max(8, SC.pref.nvis), vis = all.slice(-cap), nv = vis.length, off = cap - nv;
     const R = 74, L = 6, TOP = 8, BOT = 18, gap = 6;
     const volH = (!isSpot && SC.pref.vol) ? 44 : 0, cvdH = (!isSpot && SC.pref.cvd) ? 56 : 0;
-    const rsiH = SC.pref.rsi ? 112 : 0, emaH = (SC.pref.ema || SC.pref.e50 || SC.pref.e100 || SC.pref.e200) ? 18 : 0;   // emaH: strip of EMA colours and values under the chart, above RSI
-    const pH = Math.max(150, H - TOP - BOT - emaH - (rsiH ? rsiH + gap : 0) - (volH ? volH + gap : 0) - (cvdH ? cvdH + gap : 0));
+    const sqzH = (SC.pref.sqz || SC.pref.wt) ? (SC.pref.sqz && SC.pref.wt ? 150 : 110) : 0, rsiH = SC.pref.rsi ? 112 : 0, emaH = (SC.pref.ema || SC.pref.e50 || SC.pref.e100 || SC.pref.e200) ? 18 : 0;   // emaH: strip of EMA colours and values under the chart, above RSI
+    const pH = Math.max(150, H - TOP - BOT - emaH - (sqzH ? sqzH + gap : 0) - (rsiH ? rsiH + gap : 0) - (volH ? volH + gap : 0) - (cvdH ? cvdH + gap : 0));
     const x0 = L, x1 = W - R, step = (x1 - x0) / (cap + 4), bx = i => x0 + step * (off + i + 0.5), bw = Math.max(1, Math.min(14, step * 0.72));
     const q = T.inst ? (SC.quotes[T.inst] || {}) : {};
     let lo = Infinity, hi = -Infinity;
@@ -41989,6 +42008,11 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // volume (buyers over sellers) and cumulative delta
     let yB = TOP + pH + gap;
     const emaTop = yB; yB += emaH;
+    if (sqzH) {
+      // the Home tab's own pane (Squeeze Momentum + WaveTrend), drawn from this chart's bars
+      try { s += scSqzPane(all, bx, nv, x0, W - x1, W, yB, sqzH); } catch (e) { console.log('[scalp] sqz', e); }
+      yB += sqzH + gap;
+    }
     let rsiTop = 0;
     if (rsiH) {
       rsiTop = yB; const ry = v => rsiTop + 5 + (rsiH - 10) * (1 - v / 100), lv = [[80, SC_OB, '', .8], [70, SC_OB, '2,3', .65], [50, '#8b93a7', '', .55], [30, SC_OS, '2,3', .65], [20, SC_OS, '', .8]];
@@ -42790,7 +42814,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     $sc('scChTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; SC.pref.chart = b.dataset.c; scPrefSave(); scRenderAll(); });
     $sc('scTfs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('tf', +b.dataset.tf); scRenderAll(); });
     $sc('scInd').addEventListener('click', e => { e.stopPropagation(); SC.indOpen = !SC.indOpen; scRenderChrome(); });
-    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, e50: true, e100: true, e200: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14 }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
+    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, e50: true, e100: true, e200: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14, wt: true, sqz: true }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
     document.addEventListener('click', e => { if (SC.indOpen && !e.target.closest('#scOpts')) { SC.indOpen = false; scRenderChrome(); } });
     $sc('scIndMenu').addEventListener('change', e => {
       const o = e.target.dataset.o, nk = e.target.dataset.n;

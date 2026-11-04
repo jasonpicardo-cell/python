@@ -53,6 +53,12 @@ def test_structure():
         check("dashboard present", False, DASH)
         return
     c = open(DASH, encoding="utf-8").read()
+    # Scalper squeeze pane sits above RSI; prep card collapsed by default
+    i_sq, i_rsi = c.find("if (sqzH) {"), c.find("let rsiTop = 0;")
+    check("scalper squeeze pane drawn above RSI", 0 < i_sq < i_rsi)
+    check("scalper reuses the Home squeeze+wavetrend pane", "_sqzPaneSvg(cs, i => bx(i - sh)" in c)
+    check("scalper chart grows by the squeeze pane height", "wrapEl.style.height = wantH" in c)
+    check("pdPrep collapsed by default", "getItem('pdPrepOpen') !== day" in c)
     blocks = re.findall(r"<script>(.*?)</script>", c, re.S)
 
     # JS syntax — node --check catches only syntax, never scope
