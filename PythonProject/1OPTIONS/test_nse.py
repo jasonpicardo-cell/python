@@ -638,6 +638,35 @@ def test_reset_defaults():
           "row.ts - (last.t0 || last.ts) < 400" in c)
     check("reset: unload save suspended during reset",
           "if (window._settingsResetting) return;" in c and "window._settingsResetting = true;" in c)
+    # Every saved key must be a decision. A key on neither list is how Reset
+    # Defaults silently stopped covering new settings (Home grid, Scalper prefs).
+    import re as _re
+    def _names(name):
+        m = _re.search(r"const %s = \[(.*?)\];" % name, c, _re.S)
+        body = _re.sub(r"//[^\n]*", "", m.group(1))
+        return _re.findall(r"'([^']+)'", body)
+    reset_keys, keep_keys = _names("_SETTINGS_KEYS"), _names("_KEEP_KEYS")
+    check("reset: no key is listed twice", len(reset_keys) == len(set(reset_keys)) and len(keep_keys) == len(set(keep_keys)))
+    check("reset: no key is on both lists", not set(reset_keys) & set(keep_keys), str(set(reset_keys) & set(keep_keys)))
+    used = set(_re.findall(r"localStorage\.(?:getItem|setItem)\(\s*'([^']+)'", c))
+    for v in _re.findall(r"localStorage\.(?:getItem|setItem)\(\s*(_[A-Z_0-9]+)\b", c):
+        m = _re.search(r"\b%s = '([^']+)'" % v, c)
+        if m:
+            used.add(m.group(1))
+    used |= set(_re.findall(r"\bkey: '(\w+Cfg\w*)'", c))
+    # the indicator-settings keys the Scalper registers in a loop
+    used |= set(_re.findall(r"'(sc[A-Z]\w+CfgV\d+)'", c))
+    decided = {"nse_theme", "nse_active_tab", "settingsResetSignal",    # see the note above _resetSettings
+               "nse_chain_cache_"}                                   # a cache, rebuilt on the next fetch
+    missing = sorted(used - set(reset_keys) - set(keep_keys) - decided)
+    check("reset: every saved localStorage key is on the reset list or the keep list", not missing, str(missing))
+    check("reset: orders' stop distances and desk limits are kept", "scalpExitsV2" in keep_keys and "deskGovV1" in keep_keys)
+    check("reset: new settings are covered", {"homeGridPrefV1", "scalpPrefsV2", "scalpAlertCfgV1", "scTtrCfgV1"} <= set(reset_keys))
+    check("reset: other open tabs reload, so they cannot save the old values back",
+          "ev.key !== 'settingsResetSignal'" in c and "localStorage.setItem('settingsResetSignal'" in c)
+    seg = c[c.index("async function homeGridPoll()"):][:400]
+    check("home grid: no polling while the grid is hidden or collapsed",
+          "_hgPref.c ||" in seg and "getElementById('homeGrid')?.style.display === 'none'" in seg)
 
 
 def test_units():
@@ -1937,6 +1966,86 @@ def test_remote_access():
     check("server: HTTPS is wired - handshake in the client's own thread, never plain http by mistake, own-loopback call follows the scheme",
           "_acc.wrap_listener(server, _acc.server_context(_cert, _key))" in ssrc and "_acc.handshake(request)" in ssrc
           and "exiting rather than serving plain http by mistake" in ssrc and "_ssl._create_unverified_context() if _tls else None" in ssrc)
+
+
+def test_http_transport():
+    """The real Handler and server on a spare port, with TLS: plain http is sent
+    to https, polls reuse one connection, the page revalidates and compresses."""
+    import gzip, http.client, shutil, socket as _s, ssl as _ssl, tempfile, threading as _t
+    sys.path.insert(0, HERE)
+    import nse_access as A
+    import nse_chain_server as S
+    tmp = tempfile.mkdtemp()
+    srv = S._QuietThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
+    try:
+        crt, key = os.path.join(tmp, "c.crt"), os.path.join(tmp, "c.key")
+        A.ensure_cert(crt, key)
+        A.wrap_listener(srv, A.server_context(crt, key))
+        srv._tls = True
+        port = srv.server_address[1]
+        _t.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+
+        def plain(req):
+            c = _s.create_connection(("127.0.0.1", port), timeout=5)
+            c.sendall(req)
+            out = b""
+            try:
+                while True:
+                    x = c.recv(4096)
+                    if not x:
+                        break
+                    out += x
+            except ConnectionResetError:
+                pass                        # dropped with our bytes unread: still "no answer"
+            c.close()
+            return out.decode("latin-1")
+        r = plain(b"GET /api/health?a=1 HTTP/1.1\r\nHost: my.box:8765\r\n\r\n")
+        check("http: GET is redirected to https, same host, port and path",
+              r.startswith("HTTP/1.1 307") and "Location: https://my.box:8765/api/health?a=1\r\n" in r, r[:120])
+        check("http: the redirect is temporary and not cached", "no-store" in r and "Strict-Transport" not in r)
+        r = plain(b"GET / HTTP/1.1\r\nHost: evil\r\nFoo: x\r\n\r\n")
+        check("http: a bare Host name is kept", "Location: https://evil/\r\n" in r, r[:120])
+        r = plain(b"GET / HTTP/1.1\r\nHost: a b<c>\r\n\r\n")
+        check("http: a junk Host is not echoed", "a b<c>" not in r and f"https://127.0.0.1:{port}/" in r, r[:160])
+        r = plain(b"POST /api/trade/order HTTP/1.1\r\nHost: x:1\r\nContent-Length: 5\r\n\r\nhello")
+        check("http: a POST is refused, never replayed", r.startswith("HTTP/1.1 403") and "Location" not in r, r[:120])
+        check("http: non-http bytes are just dropped", plain(b"\x00\x01garbage") == "")
+
+        ctx = _ssl._create_unverified_context()
+        conn = http.client.HTTPSConnection("127.0.0.1", port, context=ctx, timeout=5)
+        socks = set()
+        for _ in range(3):
+            conn.request("GET", "/api/no-such-route")
+            res = conn.getresponse(); res.read()
+            socks.add(id(conn.sock))
+        check("keep-alive: GET polls reuse one connection", res.status == 404 and len(socks) == 1 and conn.sock is not None)
+        conn.request("POST", "/api/no-such-route", body=b"{}", headers={"Content-Type": "application/json"})
+        res = conn.getresponse(); res.read()
+        check("keep-alive: a POST gives its connection up", (res.getheader("Connection") or "").lower() == "close")
+        conn.close()
+        conn = http.client.HTTPSConnection("127.0.0.1", port, context=ctx, timeout=20)
+        conn.request("GET", "/", headers={"Accept-Encoding": "gzip"})
+        res = conn.getresponse(); body = res.read()
+        etag = res.getheader("ETag")
+        disk = open(DASH, "rb").read()
+        check("page: compressed, and unchanged once unpacked",
+              res.getheader("Content-Encoding") == "gzip" and gzip.decompress(body) == disk and len(body) < len(disk) / 2)
+        check("page: revalidated on every load, so an edited file shows at once", res.getheader("Cache-Control") == "no-cache" and bool(etag))
+        conn.request("GET", "/", headers={"If-None-Match": etag})
+        res = conn.getresponse(); b2 = res.read()
+        check("page: an unchanged file costs a 304 and no body", res.status == 304 and b2 == b"")
+        conn.close()
+        chk = S.Handler.__new__(S.Handler)
+        chk.headers = {"Accept-Encoding": "gzip, br"}
+        chk.client_address = ("127.0.0.1", 1)
+        lo = chk._gzip_ok(100000)
+        chk.client_address = ("192.168.1.9", 1)
+        check("json: compressed on a real network, not on loopback, not when small",
+              not lo and chk._gzip_ok(100000) and not chk._gzip_ok(100))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_server_reachability():
@@ -4053,7 +4162,7 @@ def main():
     for fn in (test_muted_price_alert_popup, test_header_spot_follows_ticks, test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

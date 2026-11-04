@@ -91,6 +91,8 @@ from __future__ import annotations
 
 import argparse
 import csv as _csv_mod
+import gzip as _gzip
+import hashlib as _hashlib
 import io as _io_mod
 import json
 import sys
@@ -6909,13 +6911,88 @@ def _trade_post(h, path: str, body: dict) -> None:
     h._send_json(r)
 
 
+class _QuietThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    # The default listen backlog is 5. Several browsers on the LAN, each
+    # polling a dozen endpoints, burst past that and the extra connections
+    # are REFUSED - which a browser reports as "can't reach the server"
+    # although the server is up. Queued connections cost nothing.
+    request_queue_size = 128
+    _tls = False
+    def finish_request(self, request, client_address):
+        # TLS handshake in THIS client's thread (a slow or hostile client
+        # must not hold up accept()); a failed handshake is just a scan or
+        # a plain-http client knocking on the https port
+        if self._tls:
+            if _acc.redirect_plain_http(request):   # http:// typed at the https port
+                return
+            _acc.handshake(request)
+        super().finish_request(request, client_address)
+    def handle_error(self, request, client_address):
+        import sys as _s, ssl as _ssl_
+        exc = _s.exc_info()[1]
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, _ssl_.SSLError, TimeoutError)):
+            return                      # routine client disconnect / failed handshake
+        super().handle_error(request, client_address)
+
+
+# The dashboard page, once per version of the file: 2.9 MB read and sent on every
+# load was the slowest thing a remote browser did. A browser revalidates each
+# load (Cache-Control: no-cache), so an edited file is still picked up at once.
+_page_cache: dict = {}
+_page_lock = threading.Lock()
+
+
+def _page_load(fpath):
+    st = _os.stat(fpath)
+    sig = (st.st_mtime_ns, st.st_size)
+    with _page_lock:
+        if _page_cache.get("sig") != sig:
+            with open(fpath, "rb") as f:
+                raw = f.read()
+            _page_cache.update(sig=sig, raw=raw, gz=_gzip.compress(raw, 6),
+                               etag='"' + _hashlib.sha256(raw).hexdigest()[:24] + '"')
+        return dict(_page_cache)
+
+
 class Handler(BaseHTTPRequestHandler):
+    # Keep-alive. On HTTP/1.0 every poll paid for a new TCP connection and a new
+    # TLS handshake, twice a second on the Scalper tab. Every response below
+    # carries a Content-Length, except the SSE stream, which says Connection: close.
+    protocol_version = "HTTP/1.1"
+    timeout = 75            # an idle keep-alive connection must not hold a thread forever
+
     # Quiet the default per-request console spam; we print our own concise log line.
     def log_message(self, fmt, *args):
         pass
 
+    def send_response(self, *a, **k):
+        self._responded = True
+        super().send_response(*a, **k)
+
+    def end_headers(self):
+        # Not every POST route reads its body (a refused or unknown one), and
+        # the leftover bytes would be parsed as the next request on this
+        # connection. A POST is rare enough to give its connection up.
+        if self.command == "POST" and not self.close_connection:
+            self.send_header("Connection", "close")
+        super().end_headers()
+
+    def _gzip_ok(self, n):
+        # Worth it on a real network only: on loopback it just costs CPU.
+        return (n >= 8192 and "gzip" in (self.headers.get("Accept-Encoding") or "")
+                and not _acc.is_loopback(self.client_address[0]))
+
     def _send_json(self, payload: dict, status: int = 200):
+        # An error path answering after a route has already answered would put
+        # stray bytes on a connection that is about to be reused.
+        if getattr(self, "_responded", False):
+            self.close_connection = True
+            return
         body = json.dumps(payload).encode("utf-8")
+        _zipped = self._gzip_ok(len(body))
+        if _zipped:
+            body = _gzip.compress(body, 1)
         # A browser that navigated away, refreshed, or closed a tab leaves a
         # dead socket behind. Writing to it raises BrokenPipeError, which is
         # normal client behaviour rather than a server fault - swallow it (and
@@ -6925,6 +7002,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            if _zipped:
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -6943,9 +7023,14 @@ class Handler(BaseHTTPRequestHandler):
     # timer, that is routine (tab closed, page refreshed, laptop slept) and
     # floods the console. These overrides turn it into a one-line debug note.
     def handle_one_request(self):
+        self._responded = False
         try:
             super().handle_one_request()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.close_connection = True
+        # a route that returned without answering: on keep-alive the browser
+        # would wait for an answer that is never coming
+        if not self._responded:
             self.close_connection = True
 
     def handle(self):
@@ -6956,7 +7041,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_error(self, fmt, *args):
         msg = fmt % args if args else fmt
-        if any(s in str(msg) for s in ("Broken pipe", "Connection reset", "Errno 32", "Errno 54")):
+        if any(s in str(msg) for s in ("Broken pipe", "Connection reset", "Errno 32", "Errno 54", "timed out")):
             return
         print(f"[http] {msg}")
 
@@ -8261,7 +8346,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
+                self.send_header("Connection", "close")     # no length: the stream ends when the socket does
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
@@ -9978,12 +10063,23 @@ class Handler(BaseHTTPRequestHandler):
             fpath = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), fname)
             if _os.path.exists(fpath):
                 try:
-                    with open(fpath, "rb") as f:
-                        body = f.read()
+                    pg = _page_load(fpath)
+                    if self.headers.get("If-None-Match") == pg["etag"]:
+                        self.send_response(304)
+                        self.send_header("ETag", pg["etag"])
+                        self.send_header("Cache-Control", "no-cache")
+                        self.end_headers()
+                        return
+                    zipped = "gzip" in (self.headers.get("Accept-Encoding") or "")
+                    body = pg["gz"] if zipped else pg["raw"]
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", str(len(body)))
-                    self.send_header("Cache-Control", "no-store")
+                    if zipped:
+                        self.send_header("Content-Encoding", "gzip")
+                    self.send_header("Vary", "Accept-Encoding")
+                    self.send_header("ETag", pg["etag"])
+                    self.send_header("Cache-Control", "no-cache")
                     self.end_headers()
                     self.wfile.write(body)
                 except Exception as e:  # noqa: BLE001
@@ -10359,28 +10455,6 @@ def main():
     elif args.poll:
         _start_poller([s.strip() for s in args.poll.split(",")], args.poll_interval)
 
-    class _QuietThreadingHTTPServer(ThreadingHTTPServer):
-        daemon_threads = True
-        # The default listen backlog is 5. Several browsers on the LAN, each
-        # polling a dozen endpoints, burst past that and the extra connections
-        # are REFUSED - which a browser reports as "can't reach the server"
-        # although the server is up. Queued connections cost nothing.
-        request_queue_size = 128
-        _tls = False
-        def finish_request(self, request, client_address):
-            # TLS handshake in THIS client's thread (a slow or hostile client
-            # must not hold up accept()); a failed handshake is just a scan or
-            # a plain-http client knocking on the https port
-            if self._tls:
-                _acc.handshake(request)
-            super().finish_request(request, client_address)
-        def handle_error(self, request, client_address):
-            import sys as _s, ssl as _ssl_
-            exc = _s.exc_info()[1]
-            if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, _ssl_.SSLError, TimeoutError)):
-                return                      # routine client disconnect / failed handshake
-            super().handle_error(request, client_address)
-
     if _envbool("NSE_KEEP_AWAKE", RUN_KEEP_AWAKE):
         print(f"[i] Keep-awake: {_keep_awake(True)}")
         print("[i] Note: this prevents IDLE sleep. If you close a laptop lid or "
@@ -10429,6 +10503,7 @@ def main():
             _acc.wrap_listener(server, _acc.server_context(_cert, _key))
             server._tls = True
             _scheme = "https"
+            print(f"[tls] http://...:{args.port} redirects to https://...:{args.port}")
         except Exception as e:  # noqa: BLE001
             print(f"[tls] HTTPS could NOT be started ({type(e).__name__}: {e}) - exiting rather than serving plain http by mistake")
             raise SystemExit(1)
@@ -10467,7 +10542,7 @@ def main():
         print(f"[i] Started with no arguments (IDE Run) — using the RUN_* settings near the "
               f"top of this file: LAN={'on' if args.host == '0.0.0.0' else 'off'}, "
               f"port={args.port}, poll={args.poll or 'off'}. Edit those lines to change.")
-    print(f"[i] Try it: http://{args.host}:{args.port}/api/chain?symbol=NIFTY")
+    print(f"[i] Try it: {_scheme}://{args.host}:{args.port}/api/chain?symbol=NIFTY")
     print(f"[i] Telegram alerts: {alert_status}")
     print(f"[i] .jsonl history writes disabled — prev-day OHLC always fetched live from NSE")
     print(f"[i] Bhavcopy cache: {_BHAVCOPY_DIR}")

@@ -25,13 +25,15 @@ Rules (all enforced before any route runs):
 HTTPS: NSE_HTTPS=1 serves TLS 1.2+ with a certificate from tls/ (made for you
 on first start - self-signed, valid for localhost, this machine's LAN address
 and anything in NSE_PUBLIC_IP / NSE_PUBLIC_HOST), or with your own files via
-NSE_TLS_CERT / NSE_TLS_KEY (for example a Let's Encrypt certificate).
+NSE_TLS_CERT / NSE_TLS_KEY (for example a Let's Encrypt certificate). A plain
+http:// request on the same port is sent to https:// (see redirect_plain_http).
 """
 import hashlib
 import hmac
 import http.cookies
 import ipaddress
 import os
+import re
 import socket
 import ssl
 import subprocess
@@ -90,6 +92,14 @@ def is_private(ip):
         if a.version == 6 and a.ipv4_mapped:
             a = a.ipv4_mapped
         return any(a.version == n.version and a in n for n in _LAN_NETS)
+    except ValueError:
+        return False
+
+
+def is_loopback(ip):
+    try:
+        a = ipaddress.ip_address(str(ip).split("%")[0])
+        return (getattr(a, "ipv4_mapped", None) or a).is_loopback
     except ValueError:
         return False
 
@@ -355,6 +365,74 @@ def wrap_listener(server, ctx):
     for a slow or hostile client, so the handshake runs in that client's own
     thread (see handshake)."""
     server.socket = ctx.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
+
+
+_HOST_OK = re.compile(r"^[A-Za-z0-9.-]+(:[0-9]{1,5})?$")
+_PATH_OK = re.compile(r"^/[\x21-\x7e]*$")
+
+
+def _plain_answer(sock, head):
+    """Answer one plain-http request head with the https:// address."""
+    send = socket.socket.sendall
+    lines = head.decode("latin-1").split("\r\n")
+    parts = lines[0].split(" ")
+    if len(parts) != 3 or not parts[2].startswith("HTTP/"):
+        return
+    method, target = parts[0], parts[1]
+    host = ""
+    for ln in lines[1:]:
+        k, _, v = ln.partition(":")
+        if k.strip().lower() == "host":
+            host = v.strip()
+            break
+    if not _HOST_OK.match(host):                # missing or junk: use the address it reached
+        ip, port = sock.getsockname()[:2]
+        host = f"{ip}:{port}"
+    target = target if _PATH_OK.match(target) else "/"
+    # Temporary on purpose: a browser caches a permanent redirect, and would
+    # keep going to https after NSE_HTTPS is switched off. No HSTS for the same
+    # reason, and because it would remove the way past a self-signed warning.
+    if method in ("GET", "HEAD"):
+        status, extra = "307 Temporary Redirect", f"Location: https://{host}{target}\r\n"
+        body = f"This server uses https://{host}{target}\n".encode("latin-1")
+    else:
+        # A POST is not replayed: its body has just crossed the network in clear.
+        status, extra = "403 Forbidden", ""
+        body = f"Plain http is refused. Use https://{host}{target}\n".encode("latin-1")
+    head_out = (f"HTTP/1.1 {status}\r\n{extra}Content-Type: text/plain; charset=utf-8\r\n"
+                f"Content-Length: {len(body)}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n")
+    send(sock, head_out.encode("latin-1") + (b"" if method == "HEAD" else body))
+    # Unread request bytes would turn the close into a reset that can destroy
+    # the answer on its way to the client.
+    socket.socket.shutdown(sock, socket.SHUT_WR)
+    sock.settimeout(1)
+    while socket.socket.recv(sock, 4096):
+        pass
+
+
+def redirect_plain_http(sock, timeout=10):
+    """The https port also hears people typing http://. A TLS client opens with
+    byte 0x16; anything else is not TLS. True = not TLS, and it has been dealt
+    with here, so the caller drops the connection; False = go on and handshake.
+    The socket.socket calls step around SSLSocket, which refuses MSG_PEEK and
+    would otherwise try to read this data through TLS."""
+    sock.settimeout(timeout)
+    try:
+        first = socket.socket.recv(sock, 1, socket.MSG_PEEK)
+        if first == b"\x16":
+            return False
+        if not first.isalpha():                 # closed at once, or not http at all
+            return True
+        head = b""
+        while b"\r\n\r\n" not in head and len(head) < 16384:
+            chunk = socket.socket.recv(sock, 4096)
+            if not chunk:
+                return True
+            head += chunk
+        _plain_answer(sock, head.split(b"\r\n\r\n")[0])
+    except OSError:                             # includes the timeouts: a client gone quiet
+        pass
+    return True
 
 
 def handshake(sock, timeout=10):

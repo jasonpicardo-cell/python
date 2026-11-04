@@ -28279,9 +28279,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   });
   let _hgLast = '', _hgBook = {}, _hgBusy = false, _hgNames = [];
   // Live totals: the local server's tick store (/api/trade/state?b=), memory only, no broker call.
-  // Skipped while the Scalper tab is open (it polls the same thing) or the page is hidden.
+  // Skipped while the Scalper tab is open (it polls the same thing), the page is hidden,
+  // or nothing is showing the numbers: homeGridRender hides the grid on every other tab.
   async function homeGridPoll() {
     if (_hgBusy || document.hidden || !_hgNames.length || location.protocol === 'file:') return;
+    if (_hgPref.c || document.getElementById('homeGrid')?.style.display === 'none') return;
     const sc = document.getElementById('tab-scalp'); if (sc && sc.classList.contains('active')) return;
     _hgBusy = true;
     try {
@@ -34483,7 +34485,6 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'indexAlertFilter',    // which indices announce
     'alertsEnableAll',     // the master enable-all switch
     'emaCrossCfg',         // EMA crossover pairs and filters
-    'priceMaCrossCfg',     // price crossing an EMA or VWAP
     'pcrAlertCfg',         // near-band PCR change alert
     'grindCfg',            // slow-trend detector
     'ctxChartCfg',         // which context series are drawn
@@ -34499,23 +34500,22 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'scWtCfgV1',           // Scalper WaveTrend ⚙ settings
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
+    'homeGridPrefV1',      // Home strike grid: collapsed, strikes each side, hide 50s
+    'scalpPrefsV2',        // Scalper chart, grid and order-ticket preferences
+    'scalpAlertCfgV1',     // scalp entry alerts: on, voice, buy, sell
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
     'trendEngineCfg',      // trend engine threshold and agreement rule
     'scalpCalcCfg',        // scalp calculator view, risk and cost rates
     'audioToggles',        // bell and voice on/off — the pair that used to drift
     'priceMaCrossCfg',     // price crossing an EMA or VWAP
-    'scalpCalcCfg',        // scalp calculator view, risk and cost rates
     'alertSettings',       // legacy alert configuration
     'nse_dash_v2_settings',// dashboard layout and display options
     'nse_hidden_panels_v1',// which panels are collapsed or hidden
     'compactEsoteric',     // compact display toggle
     'dashZoom',            // page zoom level
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
-    'customAlerts',        // user-defined rules
-    'customAlertsFired',
     'voiceMode', 'masterMute', 'alertVolume', 'alertSound', 'alertDuration',
-    'm920Levels',          // today's frozen 9:20 lines (recomputed next tick)
     'sq9Conv', 'tvWlOpen',
   ];
   // Never cleared. These are YOUR DATA, not settings - losing them to a
@@ -34553,6 +34553,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
                       // today's announced-alert counts: a record, not a setting
                       'alertTallyV1',
                       'nse_checklist_v1', 'regimeHistory', 'lastBackupTs',
+                      // Your stop/target distances and desk limits decide what
+                      // happens to real orders. A chart-settings reset must
+                      // not quietly change them; edit them where they live.
+                      'scalpExitsV2', 'deskGovV1',
+                      // your own records
+                      'scalpEntryLogV1', 'scalpNotesV1', 'pdPrepLog',
+                      // today's measurements and what was already announced:
+                      // clearing them loses the session or repeats the voice
+                      'alertTallySeenV1', 'deskVoiceV1', 'leadFlowV1', 'turnResV1',
+                      'rr25V1', 'poiLast', 'bookImbalanceV1', 'renkoBoxLockV1',
                       // connection detail, not a preference: clearing it would
                       // point the dashboard at nothing and look like a crash
                       'serverUrl'];
@@ -34568,14 +34578,11 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       (found.length ? `Will be reset:\n  ${found.join(', ')}\n\n` : '') +
       (kept.length ? `Will be KEPT (your data):\n  ${kept.join(', ')}\n\n` : '') +
       `Every checkbox, selector and number box returns to its default (chart zoom and a historical date are kept).\n` +
-      `Other computers are unaffected. The page will reload.`;
+      `Other computers are unaffected. This page and any other open dashboard tab in this browser will reload.`;
     if (!confirm(msg)) return;
     window._settingsResetting = true;
-    let n = 0;
     for (const k of _SETTINGS_KEYS) {
-      // a key on both lists (m920Levels, customAlerts) is data: keep it
-      if (_KEEP_KEYS.includes(k)) continue;
-      try { if (localStorage.getItem(k) !== null) { localStorage.removeItem(k); n++; } } catch (_) {}
+      try { localStorage.removeItem(k); } catch (_) {}
     }
     // uiStateV1 replays every checkbox, selector and number box on load, so
     // keeping it whole meant the reset restored the old ticks straight back
@@ -34583,11 +34590,20 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // a historical date, which are where you are, not how it is set up.
     try {
       const ui = JSON.parse(localStorage.getItem('uiStateV1') || 'null');
-      if (ui) { localStorage.setItem('uiStateV1', JSON.stringify({ chk: {}, sel: {}, num: {}, zoom: ui.zoom || null, hist: ui.hist || '' })); n++; }
+      if (ui) localStorage.setItem('uiStateV1', JSON.stringify({ chk: {}, sel: {}, num: {}, zoom: ui.zoom || null, hist: ui.hist || '' }));
     } catch (_) {}
-    try { showToast(`↺ ${n} setting(s) reset — reloading`); } catch (_) {}
-    setTimeout(() => location.reload(), 400);
+    // Other open tabs still hold the old settings and would save them back
+    // (uiStateV1 every 20 s), undoing the reset. Tell them to reload too. The
+    // key only exists for this moment, so it needs no place in either list.
+    try { localStorage.setItem('settingsResetSignal', String(Date.now())); localStorage.removeItem('settingsResetSignal'); } catch (_) {}
+    // Reload now: a delay would leave a window for a timer to save old values.
+    location.reload();
   }
+  window.addEventListener('storage', ev => {
+    if (ev.key !== 'settingsResetSignal' || !ev.newValue) return;
+    window._settingsResetting = true;
+    location.reload();
+  });
 
   function _masterMuted() {
     try { return localStorage.getItem('masterMute') === '1'; } catch (_) { return false; }
@@ -43040,7 +43056,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
     'diag-tab':          '<strong>Diagnostics</strong>Shows only the source named in DATA_SOURCE (nse, fyers or zerodha): its login and token, the live stream (last ticks, subscriptions, reconnects, watchdog actions), API calls made today against that broker\'s limits, the caches that keep those calls down, and the recent stream events. Everything is read from the server\'s memory, so opening this tab costs no broker call. The data audit below runs the same checks as FEED CHECK for the index selected at the top. Green = fine, amber = worth a look, red = something is broken.',
-    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history and the fresh-flow log all survive. Only the settings keys are cleared. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources; context-pane clock watermark at 30; PD zones, FVG, liquidity and the prep card ON with the previous-day range, OTE / order blocks / signal filter OFF. The daily prep log (bias history and checklists) is kept.',
+    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history, the fresh-flow log, your Scalper notes and entry log all survive. So do your Scalper stop and target distances and the desk limits, because those decide what happens to real orders. Only the settings keys are cleared, including the Scalper chart and order-ticket preferences (lots return to 1) and the Home strike grid. Any other dashboard tab open in this browser reloads too. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources; context-pane clock watermark at 30; PD zones, FVG, liquidity and the prep card ON with the previous-day range, OTE / order blocks / signal filter OFF. The daily prep log (bias history and checklists) is kept.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',
