@@ -58,6 +58,10 @@ def test_structure():
     check("scalper squeeze pane drawn above RSI", 0 < i_sq < i_rsi)
     check("scalper reuses the Home squeeze+wavetrend pane", "_sqzPaneSvg(cs, i => bx(i - sh)" in c)
     check("scalper chart grows by the squeeze pane height", "wrapEl.style.height = wantH" in c)
+    check("scalper trend ribbon drawn from its own closed bars", "scTtrLayers(all, nv, bx, y, flo, fhi" in c and "_ttrSvg(i => bx(i)" in c)
+    check("scalper ribbon/squeeze/wavetrend have separate settings", all(k in c for k in ("'scTtrCfgV1'", "'scSqzCfgV1'", "'scWtCfgV1'")) and "_indRegister('sc_' + k" in c)
+    check("scalper pane gears open the scalper settings", "data-indset=\"sc_$1\"" in c)
+    check("scalper menu has a gear per ported indicator", "data-indset=\"sc_${k}\"" in c)
     check("pdPrep collapsed by default", "getItem('pdPrepOpen') !== day" in c)
     blocks = re.findall(r"<script>(.*?)</script>", c, re.S)
 

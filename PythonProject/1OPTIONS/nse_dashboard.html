@@ -18614,8 +18614,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return _ttrCache.v;
   }
   // xOfBar(i) for a bar index, xOfSlotAhead(k) for k bars past the last one
-  function _ttrSvg(xOfBar, xAhead, y, lo, hi, top, bottom, right) {
-    const st = _ttrState();
+  function _ttrSvg(xOfBar, xAhead, y, lo, hi, top, bottom, right, stIn) {
+    const st = stIn || _ttrState();      // stIn: the Scalper tab passes its own bars and result
     if (!st) return null;
     const { bars, r } = st, P = TTR, n = bars.length;
     const col = t => r.trend[t] === 1 ? P.buy : r.trend[t] === -1 ? P.sell : P.neutral;
@@ -18720,7 +18720,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const yy = f > 0 ? Math.min(bottom - 4, y(Math.max(lo, b.l)) + 9) : Math.max(top + 4, y(Math.min(hi, b.h)) - 9);
       const cl = f > 0 ? P.buy : P.sell;
       // PD filter: a signal against the zone is drawn faded, never removed
-      const pv = _pdFilterOn() ? _pdVerdict(f, t, b.c) : null, faded = pv && !pv.pass;
+      const pv = (!st.noPd && _pdFilterOn()) ? _pdVerdict(f, t, b.c) : null, faded = pv && !pv.pass;
       over += `<path class="ttr-flip${faded ? ' pd-filtered' : ''}" d="M${xx.toFixed(1)},${(yy - 4.5).toFixed(1)} L${(xx + 4).toFixed(1)},${yy.toFixed(1)} L${xx.toFixed(1)},${(yy + 4.5).toFixed(1)} L${(xx - 4).toFixed(1)},${yy.toFixed(1)} Z" fill="${cl}"${faded ? ' opacity="0.28"' : ''}><title>${f > 0 ? 'Bull' : 'Bear'} trend started (Trend Target Ribbon)${escapeHtml(_pdFilterNote(pv, f))}</title></path>`;
     }
     return { under, over };
@@ -34494,6 +34494,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'ttrCfgV1',            // Trend Target Ribbon ⚙ settings
     'sqzCfgV1',            // Squeeze Momentum ⚙ settings
     'wtCfgV1',             // WaveTrend ⚙ settings
+    'scTtrCfgV1',          // Scalper Trend Target Ribbon ⚙ settings
+    'scSqzCfgV1',          // Scalper Squeeze Momentum ⚙ settings
+    'scWtCfgV1',           // Scalper WaveTrend ⚙ settings
     'pvsraOn',             // PVSRA candle colouring
     'pvsraSpread',         // optional vol×spread climax rule
     'levelVoiceCfg',       // spoken wording for level touches
@@ -41374,7 +41377,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // ======================================================================
   const SC = {
     st: null, quotes: {}, spot: 0, busy: false, legs: { CE: null, PE: null }, tape: {},
-    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14, sqz: true, wt: true, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
+    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14, sqz: true, wt: true, ttr: true, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
             selCE: 'o0', selPE: 'o0', chart: 'CE', dock: 'pos', side: 'B', struct: 'single', sOff: 2, hedge: true, wing: 3,
             ladN: 5, ladH50: true, trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
     pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
@@ -41818,13 +41821,49 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     vis.forEach((b, i) => { const v = b[key]; if (v == null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${bx(i).toFixed(1)},${y(v).toFixed(1)}`; pen = true; });
     return d;
   }
+  // ── Scalper copies of the ported Home indicators ────────────────────
+  // Own settings (keys scTtrCfgV1 / scSqzCfgV1 / scWtCfgV1) that start from the
+  // script defaults and never touch the Home ones. The Home code reads the
+  // global TTR / SQZ / WT objects, so for the length of one draw their
+  // contents (and the squeeze / WaveTrend caches) are swapped for the Scalper
+  // copies and put back in a finally.
+  const SC_CFG = { ttr: _deepCopy(_IND.ttr.defaults), sqz: _deepCopy(_IND.sqz.defaults), wt: _deepCopy(_IND.wt.defaults) };
+  SC.cc = { ttr: { key: '' }, sqz: { key: '', dKey: '' }, wt: { key: '', dKey: '' } };
+  for (const [k, key, title] of [['ttr', 'scTtrCfgV1', 'Trend Target Ribbon [BOSWaves] · Scalper'], ['sqz', 'scSqzCfgV1', 'Squeeze Momentum [LazyBear] · Scalper'], ['wt', 'scWtCfgV1', 'WaveTrend Enhanced [LazyBear+] · Scalper']]) {
+    _indRegister('sc_' + k, {
+      title, key, cfg: SC_CFG[k], defaults: _IND[k].defaults, schema: _IND[k].schema,
+      apply: () => { SC.cc[k] = k === 'ttr' ? { key: '' } : { key: '', dKey: '' }; scQueueDraw(); },
+    });
+  }
+  function scWithCfg(fn) {
+    const cfgs = { ttr: TTR, sqz: SQZ, wt: WT }, caches = { sqz: _sqzCache, wt: _wtCache }, home = { cfg: {}, cache: {} };
+    for (const k in cfgs) { home.cfg[k] = _deepCopy(cfgs[k]); _cfgAssign(cfgs[k], SC_CFG[k]); }
+    const put = (o, src) => { for (const p of Object.keys(o)) delete o[p]; Object.assign(o, src); };
+    for (const k in caches) { home.cache[k] = Object.assign({}, caches[k]); put(caches[k], SC.cc[k]); }
+    try { return fn(); }
+    finally {
+      for (const k in caches) { SC.cc[k] = Object.assign({}, caches[k]); put(caches[k], home.cache[k]); }
+      for (const k in cfgs) _cfgAssign(cfgs[k], home.cfg[k]);
+    }
+  }
+  // Trend Target Ribbon on the Scalper bars (closed bars only, like Home); the
+  // result is cached per bar set and cleared when its settings change.
+  function scTtrLayers(all, nv, bx, y, lo, hi, top, bottom, right) {
+    return scWithCfg(() => {
+      const closed = all.slice(0, -1), sh = all.length - nv;
+      if (closed.length < TTR.almaLen + 2) return null;
+      const lb = closed[closed.length - 1], key = `${closed.length}|${closed[0].t}|${lb.t}|${lb.c}|${SC.pref.tf}|${sh}`, C = SC.cc.ttr;
+      if (C.key !== key) { C.key = key; C.v = { bars: closed.slice(sh), r: _ttrTrim(_ttrCompute(closed), sh), noPd: true }; }
+      return _ttrSvg(i => bx(i), k => bx(nv - 2 + k), y, lo, hi, top, bottom, right, C.v);
+    });
+  }
   function scRenderIndMenu(spot) {
     const P = SC.pref, menu = $sc('scIndMenu'), btn = $sc('scInd'); if (!menu) return;
-    const n = ['ema', 'e50', 'e100', 'e200', 'sqz', 'wt', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
+    const n = ['ema', 'e50', 'e100', 'e200', 'ttr', 'sqz', 'wt', 'rsi', 'vwap', 'vol', 'cvd'].filter(k => P[k] && !(spot && ['vwap', 'vol', 'cvd'].includes(k))).length;
     scSet(btn, `ƒx Indicators${n ? `<span class="cnt">${n}</span>` : ''}`);
     btn.classList.toggle('on', !!SC.indOpen); menu.style.display = SC.indOpen ? '' : 'none';
     if (!SC.indOpen) return;
-    const row = (k, name, desc, extra, dis) => `<div class="ir${P[k] && !dis ? '' : ' off'}"><input type="checkbox" data-o="${k}" id="scio_${k}" ${P[k] ? 'checked' : ''}${dis ? ' disabled' : ''}><label for="scio_${k}">${name}</label><div class="d">${desc}</div>${extra ? `<div class="p">${extra}</div>` : ''}</div>`;
+    const row = (k, name, desc, extra, dis) => `<div class="ir${P[k] && !dis ? '' : ' off'}"><input type="checkbox" data-o="${k}" id="scio_${k}" ${P[k] ? 'checked' : ''}${dis ? ' disabled' : ''}><label for="scio_${k}">${name}${_IND['sc_' + k] ? `<button type="button" class="ind-gear" data-indset="sc_${k}" title="${escapeHtml(name)} settings (Scalper only)">⚙</button>` : ''}</label><div class="d">${desc}</div>${extra ? `<div class="p">${extra}</div>` : ''}</div>`;
     const num = (k, v, mx) => `<input type="number" data-n="${k}" min="1" max="${mx || 200}" value="${v}">`;
     scSet(menu, `<div class="ih"><span>Indicators on this chart</span><button data-ind="reset" title="EMA 5/13 and RSI 14 on, everything else as it is">Defaults</button></div>` +
       row('ema', 'EMA crossover', 'A fast and a slow moving average of the close. ▲ marks where the fast one crosses above (bullish), ▼ where it crosses below (bearish). The band between them is green when fast is above, red when below.',
@@ -41832,8 +41871,9 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       row('e50', 'EMA 50', 'The 50-period exponential moving average of the close.', `<span class="sw" style="background:${SC_E50}"></span>50`) +
       row('e100', 'EMA 100', 'The 100-period exponential moving average of the close.', `<span class="sw" style="background:${SC_E100}"></span>100`) +
       row('e200', 'EMA 200', 'The 200-period exponential moving average of the close: the long-term trend line. Needs 200 bars of history to start.', `<span class="sw" style="background:${SC_E200}"></span>200`) +
-      row('sqz', 'Squeeze Momentum', 'LazyBear squeeze momentum in its own pane above the RSI: histogram is the momentum (bright = growing, dark = fading), dots on the zero line show the squeeze (white = coiling, grey = released, blue = none). Settings are shared with the Home tab pane.', `<span class="sw" style="background:#00ff00"></span>mom <span class="sw" style="background:#e8e8e8"></span>squeeze`) +
-      row('wt', 'WaveTrend', 'LazyBear WaveTrend (WT1 / WT2, overbought and oversold levels, divergence) sharing the squeeze pane. Settings are shared with the Home tab pane.', `<span class="sw" style="background:#00E676"></span>WT1 <span class="sw" style="background:#FF5252"></span>WT2`) +
+      row('ttr', 'Trend ribbon', 'Trend Target Ribbon (BOSWaves): ALMA trend ribbon with Trend Glow columns in the trend colour, flip diamonds, and the latest position\'s entry, stop and 1R-4R targets. Drawn on closed candles only. The gear opens its own Scalper settings.', `<span class="sw" style="background:#00FF00"></span>bull <span class="sw" style="background:#FF0066"></span>bear`) +
+      row('sqz', 'Squeeze Momentum', 'LazyBear squeeze momentum in its own pane above the RSI: histogram is the momentum (bright = growing, dark = fading), dots on the zero line show the squeeze (white = coiling, grey = released, blue = none). The gear opens its own Scalper settings, separate from Home.', `<span class="sw" style="background:#00ff00"></span>mom <span class="sw" style="background:#e8e8e8"></span>squeeze`) +
+      row('wt', 'WaveTrend', 'LazyBear WaveTrend (WT1 / WT2, overbought and oversold levels, divergence) sharing the squeeze pane. The gear opens its own Scalper settings, separate from Home.', `<span class="sw" style="background:#00E676"></span>WT1 <span class="sw" style="background:#FF5252"></span>WT2`) +
       row('rsi', 'RSI with moving average', 'Momentum from 0 to 100 in its own pane. 80 and 20 are the overbought and oversold lines, 50 is the middle, and the dotted lines are 70 and 30. The yellow line is the average of the RSI.',
         `<span class="sw" style="background:${SC_RSI}"></span>RSI ${num('rsiN', P.rsiN)} <span class="sw" style="background:${SC_RMA}"></span>MA ${num('rsiM', P.rsiM)}`) +
       row('vwap', 'VWAP', 'Volume-weighted average price of this contract since the page started collecting.' + (spot ? ' Not available on the spot chart.' : ''), '', spot) +
@@ -41870,10 +41910,10 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const sv = { s: _chart.show, iv: _chart.interval, lb: _chart.liveBar };
     _chart.show = Object.assign({}, sv.s, { sqz: !!SC.pref.sqz, wt: !!SC.pref.wt }); _chart.interval = SC.pref.tf / 60; _chart.liveBar = true; window._noTimeGrid = true;
     let svg;
-    try { svg = _sqzPaneSvg(cs, i => bx(i - sh), W, padL, padR, H); }
+    try { svg = scWithCfg(() => _sqzPaneSvg(cs, i => bx(i - sh), W, padL, padR, H)); }
     finally { _chart.show = sv.s; _chart.interval = sv.iv; _chart.liveBar = sv.lb; window._noTimeGrid = false; }
     if (!svg) return '';
-    svg = svg.replace(/xclipQ/g, 'scXclipQ').replace(/sqzXM/g, 'scSqzXM').replace(/var\(--wash\)/g, '#0a0c11').replace(/var\(--muted,#789\)/g, '#7a8398');
+    svg = svg.replace(/data-indset="(sqz|wt)"/g, 'data-indset="sc_$1"').replace(/xclipQ/g, 'scXclipQ').replace(/sqzXM/g, 'scSqzXM').replace(/var\(--wash\)/g, '#0a0c11').replace(/var\(--muted,#789\)/g, '#7a8398');
     return svg.replace(/^<svg viewBox="([^"]*)" style="[^"]*">/, `<svg x="0" y="${top}" width="${W}" height="${H}" viewBox="$1" overflow="hidden">`);
   }
   function scQueueDraw() { if (!SC.raf) SC.raf = requestAnimationFrame(() => { SC.raf = 0; try { scDrawChart(); } catch (e) { console.log('[scalp] chart', e); } }); }
@@ -41921,6 +41961,10 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const live = l => (SC.drag && SC.drag.id === l.id) ? SC.drag.price : l.price;
     if (E && SL && !SL.off) s += `<rect x="${x0}" y="${Math.min(y(E.price), y(live(SL))).toFixed(1)}" width="${x1 - x0}" height="${Math.abs(y(E.price) - y(live(SL))).toFixed(1)}" fill="${SC_DN}" opacity=".07"/>`;
     if (E && TP && !TP.off) s += `<rect x="${x0}" y="${Math.min(y(E.price), y(live(TP))).toFixed(1)}" width="${x1 - x0}" height="${Math.abs(y(E.price) - y(live(TP))).toFixed(1)}" fill="${SC_UP}" opacity=".07"/>`;
+    // Trend Target Ribbon: fills, glow and target zones under the candles, lines and diamonds over them
+    let ttrL = null;
+    if (SC.pref.ttr && nv > 2) { try { ttrL = scTtrLayers(all, nv, bx, y, flo, fhi, TOP, TOP + pH, x1); } catch (e) { console.log('[scalp] ttr', e); } }
+    if (ttrL) s += `<g clip-path="url(#scClipP)" pointer-events="none">${ttrL.under}</g>`;
     // candles
     vis.forEach((b, i) => {
       const cx = bx(i), col = b.v === 0 && b.o === b.c ? SC_FLAT : (b.c >= b.o ? SC_UP : SC_DN), yo = y(b.o), yc = y(b.c);
@@ -41958,6 +42002,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       if (d) s += `<path d="${d}" fill="none" stroke="${SC_VWAP}" stroke-width="2.4"/>`;
       const lb = vis[nv - 1].vw; if (lb != null && lb >= flo && lb <= fhi) s += `<text x="${x1 - 4}" y="${(y(lb) - 4).toFixed(1)}" text-anchor="end" fill="${SC_VWAP}" font-size="9.5">VWAP ${lb.toFixed(2)}</text>`;
     }
+    if (ttrL) s += `<g clip-path="url(#scClipP)" pointer-events="none">${ttrL.over}</g>`;
     if (q.bid) s += `<line x1="${x0}" x2="${x1}" y1="${y(q.bid).toFixed(1)}" y2="${y(q.bid).toFixed(1)}" stroke="${SC_UP}" opacity=".5" stroke-dasharray="1,3"/>`;
     if (q.ask) s += `<line x1="${x0}" x2="${x1}" y1="${y(q.ask).toFixed(1)}" y2="${y(q.ask).toFixed(1)}" stroke="${SC_DN}" opacity=".5" stroke-dasharray="1,3"/>`;
     // bracket / plan lines, each with its own label and axis tag
@@ -42814,7 +42859,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     $sc('scChTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; SC.pref.chart = b.dataset.c; scPrefSave(); scRenderAll(); });
     $sc('scTfs').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; save('tf', +b.dataset.tf); scRenderAll(); });
     $sc('scInd').addEventListener('click', e => { e.stopPropagation(); SC.indOpen = !SC.indOpen; scRenderChrome(); });
-    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, e50: true, e100: true, e200: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14, wt: true, sqz: true }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
+    $sc('scIndMenu').addEventListener('click', e => { e.stopPropagation(); if (e.target.dataset.ind === 'reset') { Object.assign(SC.pref, { ema: true, e50: true, e100: true, e200: true, emaF: 5, emaS: 13, rsi: true, rsiN: 14, rsiM: 14, wt: true, sqz: true, ttr: true }); scPrefSave(); scRenderChrome(); scQueueDraw(); } });
     document.addEventListener('click', e => { if (SC.indOpen && !e.target.closest('#scOpts')) { SC.indOpen = false; scRenderChrome(); } });
     $sc('scIndMenu').addEventListener('change', e => {
       const o = e.target.dataset.o, nk = e.target.dataset.n;
