@@ -4,6 +4,7 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let model = AppModel.shared
+    private let popover = NSPopover()
 
     // The menu-bar icon stays after the window is closed; quit from its menu (or ⌘Q).
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -28,7 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = item.button {
             button.image = NSImage(systemSymbolName: "square.grid.3x3.fill", accessibilityDescription: "Pixel Frame")
             button.image?.isTemplate = true
-            button.toolTip = "Click: next image as wallpaper · Right-click: menu"
+            button.toolTip = "Click: monitor volume · Right-click: menu (menu has next image)"
             button.target = self
             button.action = #selector(statusClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -63,8 +64,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true {
             showMenu()
         } else {
-            changeWallpaper(advance: true)
+            toggleVolumePopover()
         }
+    }
+
+    private func toggleVolumePopover() {
+        guard let button = statusItem?.button else { return }
+        if popover.isShown { popover.performClose(nil); return }
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: VolumePopover(onNext: { [weak self] in
+            self?.popover.performClose(nil)
+            self?.changeWallpaper(advance: true)
+        }))
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 
     /// Dock icon right-click menu: same monitor toggles as the menu-bar icon.
@@ -212,5 +224,36 @@ struct PixelFrameApp: App {
                     .keyboardShortcut("f", modifiers: [.command, .shift])
             }
         }
+    }
+}
+
+/// Shown when the menu-bar icon is clicked: external monitor volume slider.
+struct VolumePopover: View {
+    var onNext: () -> Void
+    @StateObject private var state = VolumeState()
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "speaker.fill")
+                Slider(value: $state.volume, in: 0...100, step: 1)
+                    .frame(width: 160)
+                Image(systemName: "speaker.wave.3.fill")
+                Text("\(Int(state.volume))%").monospacedDigit().frame(width: 40, alignment: .trailing)
+            }
+            if state.failed {
+                Text("No external monitor accepted the volume command.").font(.caption).foregroundStyle(.secondary)
+            }
+            Divider()
+            Button("Next Image as Wallpaper", action: onNext).buttonStyle(.link)
+        }
+        .padding(14)
+    }
+}
+
+final class VolumeState: ObservableObject {
+    @Published var failed = false
+    @Published var volume = Double(MonitorVolume.currentLevel()) {
+        didSet { failed = MonitorVolume.set(Int(volume)) == nil }
     }
 }
