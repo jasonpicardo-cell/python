@@ -85,68 +85,18 @@ struct DisplayArea: View {
     }
 }
 
-/// Time (hh:mm:ss AM/PM) and date (dd-MM-yyyy). Hops to a new corner/edge with every new image.
+/// Time (hh:mm:ss AM/PM) and date (dd-MMM-yyyy). Hops to a new corner/edge with every new image.
+/// Rendered by a layer-backed AppKit view (see ClockNSView) so the per-second tick never re-runs SwiftUI layout.
 struct ClockOverlay: View {
     @EnvironmentObject var model: AppModel
-    /// Wallpaper style: one line "HH:mm:ss dd.MM.yy", fixed at the bottom left.
+    /// Wallpaper style: one line "hh:mm:ss dd.MMM.yy EEE", fixed at the bottom left.
     var fixedLine = false
 
-    private static let lineTimeFormat: DateFormatter = make("hh:mm:ss")      // 12-hour, no AM/PM
-    private static let lineDateFormat: DateFormatter = make("dd.MM.yy")
-    private static let lineDayFormat: DateFormatter = make("EEE")            // SUN/MON/TUE…
-
-    private static let timeFormat: DateFormatter = make("hh:mm:ss a")
-    private static let dateFormat: DateFormatter = make("dd-MM-yyyy")
-
-    private static func make(_ format: String) -> DateFormatter {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = format
-        return f
-    }
-
     var body: some View {
-        GeometryReader { geo in
-            let unit = min(geo.size.width, geo.size.height)
-            let timeSize = max(16, unit * 0.075)            // scales with any window / screen size
-            let slot = fixedLine ? 6 : model.clockSlot
-            // Idle (paused/asleep/hidden): no per-second redraw at all.
-            TimelineView(.periodic(from: .now, by: model.suspendReasons.isEmpty ? 1 : 3600)) { ctx in
-                VStack(alignment: alignment(slot).horizontal == .leading ? .leading
-                        : alignment(slot).horizontal == .trailing ? .trailing : .center,
-                       spacing: timeSize * 0.08) {
-                    if fixedLine {
-                        HStack(alignment: .firstTextBaseline, spacing: timeSize * 0.2) {
-                            Text(Self.lineTimeFormat.string(from: ctx.date))
-                                .font(.system(size: timeSize * 0.6, weight: .bold, design: .monospaced))
-                                .foregroundStyle(.white)
-                            Text(Self.lineDateFormat.string(from: ctx.date) + " " + Self.lineDayFormat.string(from: ctx.date).uppercased())
-                                .font(.system(size: timeSize * 0.3, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(.gray)
-                        }
-                    } else {
-                        Text(Self.timeFormat.string(from: ctx.date))
-                            .font(.system(size: timeSize, weight: .bold, design: .monospaced))
-                        Text(Self.dateFormat.string(from: ctx.date))
-                            .font(.system(size: timeSize * 0.5, weight: .semibold, design: .monospaced))
-                    }
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, timeSize * 0.4)
-                .padding(.vertical, timeSize * 0.25)
-                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: timeSize * 0.2))
-                .shadow(color: .black.opacity(0.8), radius: 3)
-                .padding(unit * 0.04)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment(slot))
-            }
-        }
-        .allowsHitTesting(false)
-    }
-
-    private func alignment(_ slot: Int) -> Alignment {
-        let h: HorizontalAlignment = [.leading, .center, .trailing][slot % 3]
-        let v: VerticalAlignment = [.top, .center, .bottom][slot / 3]
-        return Alignment(horizontal: h, vertical: v)
+        ClockDisplay(slot: fixedLine ? 6 : model.clockSlot,
+                     fixedLine: fixedLine,
+                     running: model.suspendReasons.isEmpty)
+            .allowsHitTesting(false)
     }
 }
 

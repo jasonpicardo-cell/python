@@ -236,7 +236,7 @@ final class AppModel: ObservableObject {
         gridID = d.string(forKey: "gridID") ?? PixelGrid.autoID
         fit = FitMode(rawValue: d.string(forKey: "fit") ?? "") ?? .fit
         let savedInterval = d.double(forKey: "interval")
-        interval = savedInterval >= 1 ? savedInterval : 5          // default transition: 5 s
+        interval = savedInterval >= 1 ? savedInterval : 10         // default transition: 10 s
         shuffle = d.bool(forKey: "shuffle")
         fade = d.object(forKey: "fade") as? Bool ?? true
         gap = d.object(forKey: "gap") as? Double ?? 0.12
