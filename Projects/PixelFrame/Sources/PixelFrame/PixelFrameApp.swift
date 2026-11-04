@@ -1,3 +1,4 @@
+import CoreAudio
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -103,6 +104,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.monitors.filter { !$0.isOn }.forEach { model.setMonitor($0, on: true) }
     }
 
+    /// "Sound" section: one item per output device (ticked = current); choosing one routes sound to it.
+    private func addSoundItems(to menu: NSMenu) {
+        let devices = AudioOutput.outputDevices()
+        guard !devices.isEmpty else { return }
+        let header = NSMenuItem(title: "Sound", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        for d in devices {
+            let item = menu.addItem(withTitle: d.name, action: #selector(menuSelectSound(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = Int(d.id)
+            item.state = d.isDefault ? .on : .off
+        }
+    }
+
+    @objc private func menuSelectSound(_ sender: NSMenuItem) {
+        AudioOutput.setDefault(AudioDeviceID(sender.tag))
+    }
+
     private func showMenu() {
         model.refreshMonitors()
         let menu = NSMenu()
@@ -110,6 +130,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             addMonitorItems(to: menu)
             menu.addItem(.separator())
         }
+        addSoundItems(to: menu)
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Next Image as Wallpaper", action: #selector(menuNext), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Set Current Image as Wallpaper", action: #selector(menuCurrent), keyEquivalent: "").target = self
         let auto = menu.addItem(withTitle: "Auto-change Wallpaper", action: #selector(menuAuto), keyEquivalent: "")
