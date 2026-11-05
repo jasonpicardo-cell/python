@@ -3426,6 +3426,29 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <div class="sc-pin" id="scPinRow" style="display:none;"><span class="sc-dim">Trade PIN</span><input id="scPin" type="password" autocomplete="off" placeholder="NSE_TRADE_PIN"></div>
                 <div id="scMsg" class="sc-msg"></div>
               </section>
+              <section class="sc-sec sc-auto" id="scAuto">
+                <div class="sc-st">Auto Trade <span class="sc-dim">follows the Trend ribbon · run by the server, even if this tab closes</span></div>
+                <div class="sc-row" style="margin-top:0;">
+                  <label class="sc-chk sc-inl" title="Waits for the next signal flip on a closed candle, then trades it. Switching it on never trades the current trend."><input type="checkbox" id="scAutoOn"> Auto Trade</label>
+                  <label class="sc-chk sc-inl" title="Signal: the Trend Target Ribbon turning bullish / bearish. Only one strategy can be selected."><input type="checkbox" id="scAutoRib" checked> Trend ribbon</label>
+                  <label class="sc-chk sc-inl" title="Signal: the fast EMA crossing the slow EMA of the close. Only one strategy can be selected."><input type="checkbox" id="scAutoEma"> EMA crossover</label>
+                </div>
+                <div class="sc-row" id="scAutoEmaRow" style="display:none;"><span class="sc-dim">Fast EMA</span><input id="scAutoEF" type="number" min="1" max="199" step="1" value="5" class="sc-n" style="width:44px;">
+                  <span class="sc-dim">Slow EMA</span><input id="scAutoES" type="number" min="2" max="200" step="1" value="15" class="sc-n" style="width:44px;"></div>
+                <div class="sc-seg sc-seg-s" id="scAutoMode" title="Buy: bull buys a call, bear buys a put.  Sell: bear sells a call, bull sells a put."></div>
+                <div class="sc-row"><span class="sc-dim">CE</span><select id="scAutoCE" class="sc-sel" title="Call strike, from the money"></select>
+                  <span class="sc-dim">PE</span><select id="scAutoPE" class="sc-sel" title="Put strike, from the money"></select></div>
+                <div class="sc-row"><span class="sc-dim">Start</span><input id="scAutoStart" type="time" class="sc-sel sc-n" value="09:20">
+                  <span class="sc-dim">End</span><input id="scAutoEnd" type="time" class="sc-sel sc-n" value="15:15">
+                  <span class="sc-dim">Lots</span><input id="scAutoLots" type="number" min="1" step="1" value="2" class="sc-n" style="width:44px;"></div>
+                <div class="sc-row"><span class="sc-dim">Max trades</span><input id="scAutoMaxT" type="number" min="1" step="1" value="5" class="sc-n" style="width:44px;" title="Daily limit on entries (an entry and its exit count as one trade)">
+                  <span class="sc-dim">Max loss ₹</span><input id="scAutoMaxL" type="number" min="100" step="500" value="5000" class="sc-n" style="width:70px;" title="Daily loss of the auto trades (closed + open): every auto position is exited at once and no more are opened"></div>
+                <div class="sc-row"><button class="sc-btn" id="scAutoStart1" title="Enter now on the current signal - only if no auto trade is open. Also switches Auto Trade on."
+                    style="background:var(--sc-green,#1f9d55);color:#fff;font-weight:700;">START</button>
+                  <button class="sc-btn" id="scAutoExit" title="Force-exit the running auto trade now. Auto Trade stays on and waits for the next flip.">EXIT</button></div>
+                <div id="scAutoMsg" class="sc-dim sc-n" style="margin-top:6px;line-height:1.35;"></div>
+                <div id="scAutoLog" class="sc-dim sc-n" style="margin-top:4px;font-size:9.5px;line-height:1.35;"></div>
+              </section>
             </aside>
 
             <main class="sc-center">
@@ -3462,7 +3485,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
             <div id="scDockBody" class="sc-dbody"></div>
             <div id="scMod" class="sc-mod" style="display:none;"></div>
           </div>
-          <div class="sc-foot">Orders are marketable LIMIT, IOC, MIS on NFO. There are no size or risk limits: each order goes out as pressed. A short has no ceiling on its loss; set a stop, or hedge it with a wing. Stops, targets, trailing and the 15:14 square-off are watched by the server on the live tick feed, not placed at the exchange, so a gap can jump a stop. Waiting orders live in the server's memory only. Charges are an estimate.</div>
+          <div class="sc-foot">Orders are marketable LIMIT, IOC, MIS on NFO. There are no size or risk limits: each order goes out as pressed. A short has no ceiling on its loss; set a stop, or hedge it with a wing. Stops, targets, trailing and the 15:15 square-off are watched by the server on the live tick feed, not placed at the exchange, so a gap can jump a stop. Waiting orders live in the server's memory only. Charges are an estimate.</div>
         </section>
 
         <section id="tab-today" class="tab-panel">
@@ -34502,6 +34525,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'pvsraSpread',         // optional vol×spread climax rule
     'homeGridPrefV1',      // Home strike grid: collapsed, strikes each side, hide 50s
     'scalpPrefsV2',        // Scalper chart, grid and order-ticket preferences
+    'scalpAutoV2',         // Scalper Auto Trade settings (buy/sell, strikes, times, lots)
     'scalpAlertCfgV1',     // scalp entry alerts: on, voice, buy, sell
     'levelVoiceCfg',       // spoken wording for level touches
     'leadingSignalsCfg',   // leading-signal detectors and thresholds
@@ -42583,9 +42607,82 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     scMsg(r.msg || (r.ok ? 'exits updated' : 'failed'), !r.ok); if (r.ok) $sc('scMod').style.display = 'none';
     scRenderAll();
   }
+  // ── Auto Trade: the server runs it (nse_autotrade.py); this tab only sets it up and shows it ──
+  const SC_AUTO_KEY = 'scalpAutoV2';
+  SC.auto = { pref: { mode: 'B', ce: -300, pe: 300, start: '09:20', end: '15:15', lots: 2, maxT: 5, maxL: 5000, strat: 'RIBBON', emaF: 5, emaS: 15 }, synced: false, busy: false };
+  try { Object.assign(SC.auto.pref, JSON.parse(localStorage.getItem(SC_AUTO_KEY) || '{}') || {}); } catch (_) {}
+  const scAutoSave = () => { try { localStorage.setItem(SC_AUTO_KEY, JSON.stringify(SC.auto.pref)); } catch (_) {} };
+  const scAutoOff = o => `ATM${o === 0 ? '' : (o > 0 ? '+' : '\u2212') + Math.abs(o)}`;
+  async function scAutoSend(enabled, action) {
+    const P = SC.auto.pref, A0 = SC.st && SC.st.auto, keep = !!(A0 && A0.enabled && !action),      // editing a running setup never retargets the index or timeframe
+      body = { enabled, sym: keep ? undefined : (state.symbol || 'NIFTY').toUpperCase(), tf: keep ? undefined : Math.round(SC.pref.tf / 60), mode: P.mode === 'S' ? 'SELL' : 'BUY',
+      ce_off: +P.ce, pe_off: +P.pe, start: P.start, end: P.end, lots: Math.max(1, P.lots | 0), max_trades: Math.max(1, P.maxT | 0), action: action || undefined, max_loss: Math.max(100, +P.maxL || 5000),
+      strategy: P.strat === 'EMA' ? 'EMA' : 'RIBBON', ema_fast: Math.max(1, P.emaF | 0), ema_slow: Math.max(2, P.emaS | 0) };
+    if (enabled && action !== 'exit' && SC.st && SC.st.mode === 'live' && !(SC.st.auto && SC.st.auto.enabled) && !confirm('LIVE mode: Auto Trade will send real orders on every ribbon flip until the end time. Continue?')) { scAutoRender(); return; }
+    SC.auto.busy = true;
+    const j = await scApi('auto', body);
+    SC.auto.busy = false;
+    SC.auto.err = j.ok ? null : { m: j.msg || 'refused', until: Date.now() + 8000 };
+    scAutoRender();
+  }
+  function scAutoRender() {
+    const el = $sc('scAuto'); if (!el) return;
+    const A = SC.st && SC.st.auto, P = SC.auto.pref;
+    if (A && A.enabled && !SC.auto.synced) {                    // page opened while the server is already running it: show ITS settings
+      SC.auto.synced = true; const c = A.cfg || {};
+      P.mode = c.mode === 'SELL' ? 'S' : 'B'; P.ce = c.ce_off ?? P.ce; P.pe = c.pe_off ?? P.pe; P.start = c.start || P.start; P.end = c.end || P.end; P.lots = c.lots ?? P.lots; P.maxT = c.max_trades ?? P.maxT; P.maxL = c.max_loss ?? P.maxL; P.strat = c.strategy || P.strat; P.emaF = c.ema_fast ?? P.emaF; P.emaS = c.ema_slow ?? P.emaS; scAutoSave();
+    }
+    const on = !!(A && A.enabled), act = document.activeElement;
+    const chk = $sc('scAutoOn'); if (chk && !SC.auto.busy) chk.checked = on;
+    $sc('scAutoRib').checked = P.strat !== 'EMA'; $sc('scAutoEma').checked = P.strat === 'EMA'; $sc('scAutoEmaRow').style.display = P.strat === 'EMA' ? '' : 'none';
+    scSet($sc('scAutoMode'), [['B', 'Buy'], ['S', 'Sell']].map(([k, l]) => `<button data-m="${k}" class="${P.mode === k ? 'on ' + (k === 'S' ? 'sell' : 'buy') : ''}">${l}</button>`).join(''));
+    const list = (A && A.strikes && A.strikes.list) || [];
+    for (const [id, typ] of [['scAutoCE', 'ce'], ['scAutoPE', 'pe']]) {
+      const sel = $sc(id); if (!sel || act === sel) continue;
+      const offs = list.map(x => ({ o: x.off, k: x.strike }));
+      if (!offs.some(x => x.o === +P[typ])) offs.push({ o: +P[typ], k: null });
+      offs.sort((a, b) => a.o - b.o);
+      scSet(sel, offs.map(x => `<option value="${x.o}">${scAutoOff(x.o)}${x.k ? ' \u00b7 ' + x.k : ''}</option>`).join(''));
+      sel.value = String(+P[typ]);
+    }
+    for (const [id, v] of [['scAutoStart', P.start], ['scAutoEnd', P.end], ['scAutoLots', P.lots], ['scAutoMaxT', P.maxT], ['scAutoMaxL', P.maxL], ['scAutoEF', P.emaF], ['scAutoES', P.emaS]]) { const i = $sc(id); if (i && act !== i && String(i.value) !== String(v)) i.value = v; }
+    const msg = $sc('scAutoMsg'), log = $sc('scAutoLog');
+    if (!A) { scSet(msg, 'Needs the server in Zerodha mode.'); scSet(log, ''); return; }
+    if (SC.auto.busy) return;
+    const tr = A.trend > 0 ? '\u25B2 bullish' : A.trend < 0 ? '\u25BC bearish' : 'no trend yet';
+    const h = (A.holding || []).map(x => `${x.side === 'short' ? 'short' : 'long'} ${escapeHtml(String(x.strike))} ${x.typ} \u00d7${x.lots}`).join(', ');
+    const c = A.cfg || {};
+    let t = on ? `${c.mode} ${c.sym} ${c.tf}m \u00b7 ${c.strategy === 'EMA' ? `EMA ${c.ema_fast}/${c.ema_slow}` : 'ribbon'} ${tr} \u00b7 ` : '';
+    t += !on ? (h ? `Off \u00b7 still open: ${h}` : 'Off') : A.done_today ? 'done for the day' : h ? `holding ${h}` : A.pending_entry ? 'entering\u2026' : 'waiting for a flip';
+    t += ` \u00b7 trades ${A.entries}/${c.max_trades} \u00b7 P&L \u20b9${Math.round(A.pnl).toLocaleString('en-IN')}${A.loss_hit ? ' \u00b7 MAX LOSS HIT' : ''}`;
+    if (A.msg && /refused|cannot|abandoned/.test(A.msg)) t += ` \u00b7 ${escapeHtml(A.msg)}`;
+    if (SC.auto.err && Date.now() < SC.auto.err.until) t = `<b style="color:var(--sc-amber,#e6a700)">${escapeHtml(SC.auto.err.m)}</b><br>` + t;
+    scSet(msg, t);
+    scSet(log, (A.events || []).slice(-4).reverse().map(e => `${new Date(e.t * 1000).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false })} ${escapeHtml(e.msg)}`).join('<br>'));
+  }
+  function scAutoBind() {
+    const P = SC.auto.pref, resend = () => { scAutoSave(); const A = SC.st && SC.st.auto; if (A && A.enabled) scAutoSend(true); };
+    $sc('scAutoOn').addEventListener('change', e => scAutoSend(e.target.checked));
+    $sc('scAutoStart1').addEventListener('click', () => scAutoSend(true, 'start'));
+    $sc('scAutoExit').addEventListener('click', () => scAutoSend(true, 'exit'));
+    $sc('scAutoMode').addEventListener('click', e => { const b = e.target.closest('button[data-m]'); if (b && b.dataset.m !== P.mode) { P.mode = b.dataset.m; scAutoRender(); resend(); } });
+    $sc('scAutoCE').addEventListener('change', e => { P.ce = +e.target.value; resend(); });
+    $sc('scAutoPE').addEventListener('change', e => { P.pe = +e.target.value; resend(); });
+    $sc('scAutoStart').addEventListener('change', e => { P.start = e.target.value || '09:20'; resend(); });
+    $sc('scAutoEnd').addEventListener('change', e => { P.end = e.target.value || '15:15'; resend(); });
+    const pick = k => { if (P.strat !== k) { P.strat = k; scAutoRender(); resend(); } else scAutoRender(); };      // exactly one is always selected
+    $sc('scAutoRib').addEventListener('change', () => pick('RIBBON'));
+    $sc('scAutoEma').addEventListener('change', () => pick('EMA'));
+    $sc('scAutoEF').addEventListener('change', e => { P.emaF = Math.max(1, parseInt(e.target.value, 10) || 5); e.target.value = P.emaF; resend(); });
+    $sc('scAutoES').addEventListener('change', e => { P.emaS = Math.max(2, parseInt(e.target.value, 10) || 15); e.target.value = P.emaS; resend(); });
+    $sc('scAutoMaxT').addEventListener('change', e => { P.maxT = Math.max(1, parseInt(e.target.value, 10) || 5); e.target.value = P.maxT; resend(); });
+    $sc('scAutoMaxL').addEventListener('change', e => { P.maxL = Math.max(100, parseFloat(e.target.value) || 5000); e.target.value = P.maxL; resend(); });
+    $sc('scAutoLots').addEventListener('change', e => { P.lots = Math.max(1, parseInt(e.target.value, 10) || 2); e.target.value = P.lots; resend(); });
+  }
+
   function scRenderAll() {
     // each step is isolated: one failing panel must not stop the grid (or the chart) from drawing
-    for (const f of [scRenderGrid, scRenderLegs, scRenderBar, scRenderLadder, scRenderTicket, scRenderTurn, scRenderChrome, scRenderRight, scRenderDock]) {
+    for (const f of [scRenderGrid, scRenderLegs, scRenderBar, scRenderLadder, scRenderTicket, scRenderTurn, scRenderChrome, scRenderRight, scRenderDock, scAutoRender]) {
       try { f(); } catch (e) { SC.stepErr = `${f.name}: ${e.message || e}`; console.error('scalp ' + f.name, e); }
     }
     scQueueDraw();
@@ -42841,6 +42938,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     $sc('scTagList').innerHTML = SC_TAGS.map(t => `<option value="${t}">`).join('');
     try { $sc('scPin').value = scPin(); } catch (_) {}
     const save = (k, v) => { SC.pref[k] = v; scPrefSave(); };
+    scAutoBind();
     $sc('scPin').addEventListener('input', e => { try { sessionStorage.setItem('scalpPin', e.target.value); } catch (_) {} });
     $sc('scLinkTurn').addEventListener('change', e => save('link', e.target.checked));
     $sc('scConfirm').addEventListener('change', e => save('confirm', e.target.checked));

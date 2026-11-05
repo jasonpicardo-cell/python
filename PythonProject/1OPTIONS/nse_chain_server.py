@@ -105,6 +105,7 @@ from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import nse_access as _acc      # HTTPS + the login that outside (non-LAN) clients must pass
 import nse_trade as _trade_mod # the Scalping tab's order engine (paper by default)
+import nse_autotrade as _auto_mod # Auto Trade: follows the Trend Target Ribbon, server side
 from urllib.parse import urlparse, parse_qs
 
 try:
@@ -6670,6 +6671,52 @@ class _ZBroker:
         return _zmod().order_margin(orders)
 
 
+def _auto_ladder(sym):
+    """(chain {strike: {CE, PE}} for the nearest live expiry, expiry) - memory only."""
+    z = _zmod()
+    spec = z._INDEX_SPEC.get((sym or "").upper())
+    if not spec:
+        raise ValueError(f"no mapping for {sym}")
+    chains = z._opts.get((spec[2], spec[3])) or {}
+    now = time.time()
+    live = sorted(e for e in chains if e and z._settle_epoch(e) > now)
+    if not live:
+        raise ValueError(f"no live {sym} expiry in the instrument list")
+    return chains[live[0]], live[0]
+
+
+def _auto_pick(sym, typ, off):
+    """-> (inst, strike, atm): the contract at ATM + off points (snapped to a listed strike), nearest live expiry."""
+    ladder, _exp = _auto_ladder(sym)
+    spot = _ZFeed().spot(sym)
+    if not spot:
+        raise ValueError("no live index price")
+    ks = sorted(k for k in ladder if ladder[k].get(typ) and k % 100 == 0)      # round-hundred strikes only, never the 50s
+    if not ks:
+        raise ValueError("no strikes listed")
+    atm = min(ks, key=lambda k: abs(k - spot))
+    k = min(ks, key=lambda x: abs(x - (atm + off)))
+    inst = ladder[k][typ]
+    try:
+        _zmod()._subscribe([inst])
+    except Exception:
+        pass
+    return inst, k, atm
+
+
+def _auto_strikes(sym):
+    """ATM and strike offsets for the tab's drop-downs (memory only)."""
+    ladder, exp = _auto_ladder(sym)
+    spot = _ZFeed().spot(sym)
+    ks = sorted(k for k in ladder if k % 100 == 0)                          # round-hundred strikes only
+    if not ks or not spot:
+        return None
+    atm = min(ks, key=lambda k: abs(k - spot))
+    i = ks.index(atm)
+    return {"atm": atm, "spot": spot, "expiry": exp,
+            "list": [{"off": round(ks[j] - atm, 2), "strike": ks[j]} for j in range(max(0, i - 10), min(len(ks), i + 11))]}
+
+
 def _trade_engine():
     """The one engine, built on first use. None unless DATA_SOURCE=zerodha."""
     global _trade_eng
@@ -6683,6 +6730,8 @@ def _trade_engine():
             eng = _trade_mod.Engine(_ZFeed(), _ZBroker(), cfg,
                                     journal_dir=_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "trade_log"))
             eng.start()
+            eng.auto = _auto_mod.AutoTrader(eng, lambda sym, tf: _zmod().fetch_bars(sym, tf), _auto_pick, _auto_strikes)
+            eng.auto.start()
             _trade_eng = eng
             print(f"[trade] Scalping engine ready - {cfg.mode.upper()} mode"
                   + ("" if cfg.mode == "paper" else " (orders go to Zerodha once ARMed in the tab)")
@@ -6758,6 +6807,7 @@ def _trade_state_payload(q: str = "", u: str = "", t: str = "", b: str = "") -> 
     if eng is None:
         return {"enabled": False, "why": "The Scalping terminal needs DATA_SOURCE=zerodha (live option quotes and order calls)."}
     st = eng.state()
+    st["auto"] = eng.auto.state()
     z = _zmod()
     try:
         zs = z.status()
@@ -6895,6 +6945,8 @@ def _trade_post(h, path: str, body: dict) -> None:
             r = _trade_margin(eng, body)
         elif path == "flatten":
             r = eng.flatten("flatten all", wait=True)
+        elif path == "auto":
+            r = eng.auto.configure(body)
         elif path == "kill":
             r = eng.set_kill(bool(body.get("on")), flatten=bool(body.get("flatten")), why="manual (tab)")
         elif path == "arm":

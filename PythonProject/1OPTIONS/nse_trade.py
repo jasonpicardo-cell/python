@@ -18,10 +18,10 @@ Two modes
 
 Server-side, whatever the page does: an order-rate cap, a kill switch, de-duplication
 of double clicks, reduce-only exits, a fresh-quote check, and the entry window and
-15:14 square-off.
+15:15 square-off.
 
 Stops, targets, the trailing stop, the breakeven move, the partial target,
-the underlying-level exits, the time stop and the 15:14 square-off all run in
+the underlying-level exits, the time stop and the 15:15 square-off all run in
 the server's own loop on the live tick feed - they keep working if the browser
 tab is closed or the laptop's screen sleeps. They need NO broker call until
 they fire. If the feed goes stale the position says so: stops that cannot see
@@ -109,8 +109,8 @@ class Config:
         self.ops = 5                    # orders per second (Zerodha allows 10)
         self.stale_s = 6                # a quote older than this is flagged NO PRICE
         self.entry_from = 9 * 60 + 15
-        self.entry_to = 15 * 60 + 14
-        self.flatten_at = 15 * 60 + 14  # MIS is squared off here, before Zerodha's own 15:20 square-off
+        self.entry_to = 15 * 60 + 15
+        self.flatten_at = 15 * 60 + 15  # MIS is squared off here, before Zerodha's own 15:20 square-off
         self.reconcile_s = 20
 
     def public(self):

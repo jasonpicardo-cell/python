@@ -1499,7 +1499,7 @@ def test_trade_engine():
     f, e = mk(); e.buy(I, 1, {"time_stop_s": 60}); clk.t += 61; f.move(I, 99.0, 99.5); e.step()
     check("trade: the time stop closes a position held too long", I not in e.pos and e.trades[-1]["why"] == "time stop")
     f, e = mk(); e.buy(I, 1, {}); clk.t = _cal.timegm((2026, 10, 29, 9, 45, 0)); f.move(I, 99.0, 99.5); e.step()      # 15:15 IST
-    check("trade: everything is squared off at 15:14 even with no exits set", I not in e.pos and "end-of-day" in e.trades[-1]["why"])
+    check("trade: everything is squared off at 15:15 even with no exits set", I not in e.pos and "end-of-day" in e.trades[-1]["why"])
     f, e = mk(); e.buy(I, 1, {"sl_pts": 10}); clk.t += 20; e.step(); p = e.pos[I]
     check("trade: a stale feed is flagged on the position and no stop fires blind", p.stale and I in e.pos)
     # ── risk: daily loss, streak ──
@@ -4158,11 +4158,212 @@ def test_muted_price_alert_popup():
           "isPrice && _masterMuted()" in body and "_alertsCheck(data)" in d[d.index("_liveHeaderSync(data);\n"):][:600] and "_mutedAlertPopup(msg, rule)" in body and "function _mutedAlertPopup(" in d)
 
 
+def test_auto_trade():
+    """Auto Trade (nse_autotrade.py): the server-side ribbon matches the dashboard's maths, the first signal
+    waits for a flip, flips exit and reverse, buy/sell mapping, retries do not duplicate, 15:15 square-off."""
+    import importlib, calendar as _cal, random as _r
+    sys.path.insert(0, HERE)
+    N = importlib.import_module("nse_trade"); A = importlib.import_module("nse_autotrade")
+    _r.seed(5)
+    W, bars, p = 60, [], 25000.0
+    for i in range(W + 260):                      # warm-up chop, then up / down / up legs
+        j = i - W
+        drift = 0 if j < 0 else (3.0 if j < 70 else (-3.4 if j < 150 else (3.2 if j < 230 else -3.0)))
+        o = p; p = p + drift + _r.gauss(0, 3); hi = max(o, p) + abs(_r.gauss(0, 1.5)); lo = min(o, p) - abs(_r.gauss(0, 1.5))
+        bars.append({"t": 0, "o": o, "h": hi, "l": lo, "c": p})
+    T_OPEN = _cal.timegm((2026, 10, 29, 3, 45, 0))                 # Thu 09:15 IST
+    for i, b in enumerate(bars): b["t"] = T_OPEN + (i - W) * 60
+    tr = A.ttr_trend(bars); ref = _ttr_reference(bars)
+    flips = [(i, tr[i]) for i in range(len(tr)) if tr[i] != (tr[i - 1] if i else 0)]
+    check("auto: server ribbon flips are the same bars and sides as the reference Pine maths", flips == ref["flips"] and len(flips) >= 3, f"{flips} vs {ref['flips']}")
+    live = [f for f in flips if f[0] >= W + 5]
+    check("auto: the synthetic day has several flips to trade", len(live) >= 3, str(live))
+
+    class Clk:
+        t = T_OPEN
+        def __call__(self): return self.t
+    clk = Clk()
+    class Feed:
+        def __init__(self):
+            self.q, self.m, self.sp = {}, {}, {"NIFTY": 25000.0}
+            for typ in ("CE", "PE"):
+                for k in (24700, 25300):
+                    n = f"NFO:NIFTY{k}{typ}"; self.m[n] = dict(under="NIFTY", typ=typ, strike=k, expiry="2026-11-03", lot=65, ts=n.split(":")[-1])
+            self.fresh()
+        def fresh(self, stale=False):
+            for n in self.m: self.q[n] = dict(bid=99.0, ask=99.5, ltp=99.2, ts=clk() - (60 if stale else 0))
+        def quote(self, i): return self.q.get(i)
+        def meta(self, i): return self.m.get(i)
+        def spot(self, u): return self.sp.get(u)
+        def depth(self, i):
+            q = self.q[i]; return {"asks": [{"p": q["ask"], "q": 5000}], "bids": [{"p": q["bid"], "q": 5000}]}
+    def pick(sym, typ, off):
+        k = 24700 if typ == "CE" else 25300
+        assert off == (-300 if typ == "CE" else 300), off
+        return f"NFO:NIFTY{k}{typ}", k, 25000
+    def build(mode="BUY", enabled_at=None):
+        clk.t = T_OPEN
+        f = Feed(); e = N.Engine(f, None, N.Config(env={"NSE_TRADE_MODE": "paper"}), clock=clk, async_exits=False, sleep=lambda s: None)
+        a = A.AutoTrader(e, lambda sym, tf: [b for b in bars if b["t"] <= clk.t], pick, None, clock=clk)
+        return f, e, a
+    def run(a, f, e, until, log, tick=60):
+        i = W
+        while i < until:
+            clk.t = bars[i]["t"] + 62; f.fresh(); a.step()
+            log.append((i, sorted((p.meta["typ"], "long" if p.side > 0 else "short") for p in e.pos.values())))
+            i += 1
+    first_flip = live[0][0]
+    sv0 = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    f, e, a = build()
+    clk.t = bars[W]["t"] + 62
+    r = a.configure({"enabled": True, "mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2})
+    check("auto: switching it on is accepted", r["ok"] and a.enabled, str(r))
+    log = []; run(a, f, e, first_flip, log)
+    check("auto: enabling never trades the current trend - nothing is bought before the first flip", not e.pos and not e.trades and a.base is not None, str(log[-3:]))
+    run_to = live[1][0] + 3
+    log2 = []; i0 = first_flip
+    for i in range(first_flip, run_to):
+        clk.t = bars[i]["t"] + 62; f.fresh(); a.step(); log2.append((i, sorted((p.meta["typ"], "long" if p.side > 0 else "short", p.qty) for p in e.pos.values())))
+    f1, f2 = live[0], live[1]
+    want1 = ("CE" if f1[1] > 0 else "PE"); want2 = ("CE" if f2[1] > 0 else "PE")
+    at1 = dict(log2)[f1[0]]; at2 = dict(log2)[f2[0]]
+    check("auto BUY: the first flip buys 2 lots of the matching side (bull CE / bear PE)", at1 == [(want1, "long", 130)], str(at1))
+    check("auto BUY: the next flip sells it and buys the other side", at2 == [(want2, "long", 130)] and len(e.trades) == 1 and "ribbon turned" in e.trades[0]["why"], f"{at2} {e.trades[-1:] }")
+    n_orders = len(e.orders)
+    for _ in range(3): a.step()
+    check("auto: repeated steps on the same bar place no further orders (no duplicates)", len(e.orders) == n_orders)
+    st = a.state()
+    check("auto: state shows the holding for the tab", len(st["holding"]) == 1 and st["holding"][0]["typ"] == want2 and st["enabled"])
+    # end time: closed, and no re-entry afterwards
+    clk.t = _cal.timegm((2026, 10, 29, 9, 45, 5)); f.fresh(); a.step()
+    check("auto: at the end time (15:15) the auto position is squared off", not e.pos and a.done_today and "end time" in e.trades[-1]["why"], str(e.trades[-1:]))
+    n_orders = len(e.orders); a.base = -a.trend if a.trend else 1; a.bar_t = 0; a.next_fetch = 0; a.step()
+    check("auto: nothing is opened again after the end time", not e.pos and len(e.orders) == n_orders)
+    # SELL mode mapping
+    f, e, a = build()
+    clk.t = bars[W]["t"] + 62
+    a.configure({"enabled": True, "mode": "SELL", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2})
+    for i in range(W, first_flip + 1):
+        clk.t = bars[i]["t"] + 62; f.fresh(); a.step()
+    held = [(p.meta["typ"], p.side) for p in e.pos.values()]
+    check("auto SELL: bear sells a call, bull sells a put", held == [("PE", -1)] if f1[1] > 0 else held == [("CE", -1)], str(held))
+    # a refused entry is retried (fresh request id), once, and not stacked
+    f, e, a = build()
+    clk.t = bars[W]["t"] + 62
+    a.configure({"enabled": True, "mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2})
+    for i in range(W, first_flip):
+        clk.t = bars[i]["t"] + 62; f.fresh(); a.step()
+    clk.t = bars[first_flip]["t"] + 62; f.fresh(stale=True); a.step()
+    check("auto: a refused entry (no fresh quote) is kept pending, not dropped", not e.pos and a.state()["pending_entry"])
+    clk.t += 4; f.fresh(); a.step()
+    clk.t += 4; f.fresh(); a.step(); a.step()
+    check("auto: the retry enters exactly once", len(e.pos) == 1 and sum(1 for o in e.orders if o.get("ok", True)) >= 1 and not a.state()["pending_entry"], str(e.orders[-3:]))
+    # daily max trades: an entry and its exit are ONE trade; at the cap flips still exit but nothing new opens
+    f, e, a = build(); clk.t = bars[W]["t"] + 62
+    a.configure({"enabled": True, "mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2, "max_trades": 2})
+    for i in range(W, live[2][0] + 2):
+        clk.t = bars[i]["t"] + 62; f.fresh(); a.step()
+        if i == live[1][0]: two = (a.entries, len(e.pos))
+    check("auto max trades: 2 entries (one per flip, exits not counted) are allowed", two == (2, 1), str(two))
+    check("auto max trades: at the cap the next flip still exits but opens nothing", not e.pos and a.entries == 2 and len(e.trades) == 2, f"{a.entries} {e.pos}")
+    # daily max loss: exits at once between flips, then no entries
+    f, e, a = build(); clk.t = bars[W]["t"] + 62
+    a.configure({"enabled": True, "mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2, "max_loss": 5000})
+    for i in range(W, live[0][0] + 1):
+        clk.t = bars[i]["t"] + 62; f.fresh(); a.step()
+    held = list(e.pos)
+    clk.t += 5; f.fresh()
+    for n in held: f.q[n].update(bid=99.5 - 30, ask=99.5 - 29.5, ltp=70)          # -30 x 130 = Rs 3,900: inside the limit
+    a.step(); inside = bool(e.pos)
+    clk.t += 5; f.fresh()
+    for n in held: f.q[n].update(bid=99.5 - 45, ask=99.5 - 44.5, ltp=55)          # -45 x 130 = Rs 5,850: over it
+    a.step()
+    check("auto max loss: a loss inside the limit is left alone", inside)
+    check("auto max loss: over the limit every auto position is exited at once, between flips", not e.pos and "max loss" in e.trades[-1]["why"] and a.state()["loss_hit"], str(e.trades[-1:]))
+    n_ord = len(e.orders)
+    for i in range(live[0][0] + 1, live[2][0] + 2):
+        clk.t = bars[i]["t"] + 62; f.fresh(); a.step()
+    check("auto max loss: no further entries on later flips that day", not e.pos and len(e.orders) == n_ord)
+    check("auto: strikes are round hundreds only (the 50s are ignored)", sv0.count("k % 100 == 0") >= 2)
+    # EMA crossover strategy (fast 5 / slow 15): same maths as the dashboard's EMA crossover, and it drives the same flow
+    import subprocess, json as _json
+    dsrc = open(DASH, encoding="utf-8").read()
+    i0 = dsrc.index("function _emaSeries("); depth, j0 = 0, dsrc.index("{", i0)
+    for k in range(j0, len(dsrc)):
+        depth += dsrc[k] == "{"; depth -= dsrc[k] == "}"
+        if depth == 0: break
+    js = dsrc[i0:k + 1] + f"""
+const c = {_json.dumps([b['c'] for b in bars])}, f = _emaSeries(c, 5), s = _emaSeries(c, 15); let side = 0; const out = [];
+for (let j = 0; j < c.length; j++) {{ if (j >= 14 && f[j] != null && s[j] != null) {{ const d = f[j] - s[j]; side = d > 0 ? 1 : d < 0 ? -1 : side; }} out.push(side); }}
+console.log(JSON.stringify(out));"""
+    res = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+    check("auto EMA: server 5/15 crossover side equals the dashboard's EMA maths on every bar", _json.loads(res.stdout.strip().splitlines()[-1]) == A.ema_trend(bars, 5, 15), res.stderr[:200])
+    et = A.ema_trend(bars, 5, 15)
+    eflips = [i for i in range(W + 5, len(et)) if et[i] != et[i - 1] and et[i - 1] != 0]
+    f, e, a = build(); clk.t = bars[W]["t"] + 62
+    r = a.configure({"enabled": True, "mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2, "strategy": "EMA"})
+    for i in range(W, eflips[0] + 1):
+        clk.t = bars[i]["t"] + 62; f.fresh(); a.step()
+    held = [(p.meta["typ"], p.side) for p in e.pos.values()]
+    check("auto EMA: enabling waits for a crossover, then the first cross buys CE (fast above) or PE (fast below)",
+          r["ok"] and a.cfg["strategy"] == "EMA" and held == [("CE", 1) if et[eflips[0]] > 0 else ("PE", 1)] and a.state()["cfg"]["ema_fast"] == 5 and a.state()["cfg"]["ema_slow"] == 15, f"{held} {r}")
+    check("auto EMA: the log names the strategy", any("EMA 5/15 cross" in x["msg"] for x in a.events))
+    check("auto EMA: bad periods are refused (fast must be below slow)", not a.configure({"ema_fast": 15, "ema_slow": 5})["ok"] and not a.configure({"strategy": "MACD"})["ok"])
+    d2 = open(DASH, encoding="utf-8").read()
+    check("auto: Trend ribbon and EMA crossover checkboxes sit next to Auto Trade and exactly one stays selected",
+          d2.index('id="scAutoOn"') < d2.index('id="scAutoRib"') < d2.index('id="scAutoEma"') < d2.index('id="scAutoEmaRow"')
+          and "const pick = k =>" in d2 and "$sc('scAutoRib').checked = P.strat !== 'EMA'; $sc('scAutoEma').checked = P.strat === 'EMA'" in d2)
+    # START: enters on the current signal only if no auto trade is open; EXIT forces it out
+    mid = next(i for i in range(W + 10, len(tr) - 5) if len(set(tr[i - 3:i + 4])) == 1 and tr[i] != 0)      # a stretch with no flip around it
+    f, e, a = build(); clk.t = bars[mid]["t"] + 62; f.fresh()
+    cur = A.ttr_trend([b for b in bars if b["t"] <= clk.t - 62])[-1]
+    body = {"mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2}
+    r = a.configure(dict(body, action="start"))
+    held = [(p.meta["typ"], p.side) for p in e.pos.values()]
+    check("auto START: enters at once on the current trend (no flip needed) and switches Auto Trade on",
+          r["ok"] and a.enabled and held == [("CE", 1) if cur > 0 else ("PE", 1)] and a.entries == 1, f"{r} {held} cur={cur}")
+    r2 = a.configure(dict(body, action="start"))
+    check("auto START: refused while an auto trade is open - no second position", not r2["ok"] and "already open" in r2["msg"] and len(e.pos) == 1 and a.entries == 1, str(r2))
+    r3 = a.configure({"action": "exit"})
+    check("auto EXIT: forces the auto trade out at once; Auto Trade stays on", r3["ok"] and not e.pos and a.enabled and "forced exit" in e.trades[-1]["why"], str(r3))
+    n = len(e.orders); clk.t += 70; f.fresh(); a.step()
+    check("auto EXIT: it does not re-enter on the same trend afterwards", not e.pos and len(e.orders) == n)
+    r4 = a.configure(dict(body, action="start"))
+    check("auto START: after a forced exit it can enter again", r4["ok"] and len(e.pos) == 1 and a.entries == 2, str(r4))
+    check("auto EXIT: nothing to exit is reported, not an error", (a.configure({"action": "exit"}), a.configure({"action": "exit"}))[1]["ok"] is False)
+    f, e, a = build(); clk.t = _cal.timegm((2026, 10, 29, 9, 45, 5)); f.fresh()
+    check("auto START: refused outside the Start-End window", not a.configure(dict(body, action="start"))["ok"] and not e.pos)
+    # conflicts: a manual position in the same contract is never merged into; a failing candle feed backs off; no double count
+    f, e, a = build(); clk.t = bars[mid]["t"] + 62; f.fresh()
+    typ_ = "CE" if cur > 0 else "PE"; k_ = 24700 if typ_ == "CE" else 25300
+    e.buy(f"NFO:NIFTY{k_}{typ_}", 1, {}, src="manual")
+    a.configure(dict(body, action="start"))
+    check("auto: will not add to a position you hold manually in the same contract", [p.src for p in e.pos.values()] == ["manual"] and e.pos[f"NFO:NIFTY{k_}{typ_}"].qty == 65 and a.entries == 0, str(a.msg))
+    calls = []
+    def boom(sym, tf): calls.append(clk.t); raise RuntimeError("token expired")
+    f, e, a = build(); a.bars_fn = boom; clk.t = bars[mid]["t"] + 62
+    a.configure(dict(body, enabled=True))
+    for _ in range(10): a.step(); clk.t += 1
+    check("auto: a failing candle feed is retried every 15 s, not every second", len(calls) <= 2 and "candle feed failed" in a.msg, f"{len(calls)} {a.msg}")
+    f, e, a = build(); clk.t = bars[mid]["t"] + 62; f.fresh()
+    a.configure(dict(body, action="start")); bar_ = a.bar_t
+    e.exit(next(iter(e.pos)), 100, "test", wait=True)
+    a.want = {"trend": cur, "bar": bar_, "since": clk.t, "next": 0.0, "n": 0}; a._try_want(clk.t, 600)      # same request id within 15 s: the engine answers dup
+    check("auto: the same entry request answered twice is counted once and opens nothing", a.entries == 1 and not e.pos and a.want is None, f"{a.entries} {e.pos}")
+    # settings are validated; the window cannot pass 15:15
+    check("auto: bad settings are refused", not a.configure({"end": "15:30"})["ok"] and not a.configure({"lots": 0})["ok"] and not a.configure({"start": "10:00", "end": "09:30"})["ok"])
+    check("auto: the engine squares off at 15:15 and entries stop there", N.Config().flatten_at == 15 * 60 + 15 and N.Config().entry_to == 15 * 60 + 15)
+    d = open(DASH, encoding="utf-8").read(); sv = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+    check("auto: the Scalper tab has the Auto Trade section below the order ticket, wired to the server",
+          d.index('id="scOrder"') < d.index('id="scAuto"') < d.index("</aside>", d.index('id="scAuto"')) and "scApi('auto'" in d and "scAutoRender]" in d and "'scalpAutoV2'" in d
+          and 'path == "auto"' in sv and 'st["auto"]' in sv)
+
+
 def main():
     for fn in (test_muted_price_alert_popup, test_header_spot_follows_ticks, test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_auto_trade, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
