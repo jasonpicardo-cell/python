@@ -3921,6 +3921,15 @@ console.log(JSON.stringify(R));
           and "'wtCfgV1',             //" in d and "'ttr', 'sqz', 'wt', 'pdZones'" in d and d.count("sqz: true, wt: true }") == 2
           and "Math.round(k.H * (_chart.show.wt ? 0.34 : 0.25)) + 10" in d)
 
+    check("dashboard: γ-SUP/γ-RES have a toggle (default on) honoured by both the candle and Renko charts",
+          'id="chk_gamLadder"' in d and "'pdPrep', 'gamLadder']" in d and d.count("show.gamLadder") == 2 and "k === 'gamLadder' && _chart.show[k] === undefined" in d)
+
+    check("dashboard: VWAP σ, γ SUP/RES, HA marks, FVG, Liquidity and Fib default OFF (so Reset Defaults turns them off); Basic checkbox leaves only VWAP/Squeeze/WaveTrend/Zones/Prep card/Turn times on, and is not persisted",
+          "show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false," in d
+          and d.count("show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false,") == 2
+          and 'id="chkBasic" data-nopersist="1"' in d and "[id]:not([data-nopersist])" in d
+          and "const KEEP = ['vwap', 'sqz', 'wt', 'pdZones', 'pdPrep', 'turnTimes', 'ttr', 'ema100', 'ema200', 'orbFib'];" in d)
+
 
 _POI_SAMPLE = (
     '"Participant wise Open Interest (no. of contracts) in Equity Derivatives as on Oct 23, 2026",,,,,,,,,,,,,,\n'

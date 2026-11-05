@@ -2543,6 +2543,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
           <div class="level-panel" id="chartPanel" style="grid-column:1 / -1;">
             <div class="level-panel-head" style="flex-wrap:wrap;gap:8px;">
               <span class="skew-chart-title">📈 Live Chart &amp; Levels<i class="hi" data-h="price-chart">i</i></span>
+              <label title="Basic view: only VWAP, Squeeze, WaveTrend, Zones, Prep card, Turn times, Trend ribbon, EMA100, EMA200 and Fib are on; every other overlay is off. Untick to restore the previous set." style="font-size:10px;display:inline-flex;gap:3px;align-items:center;"><input type="checkbox" id="chkBasic" data-nopersist="1"> Basic</label>
               <span style="display:flex;gap:4px;align-items:center;">
                 <span style="font-size:9px;color:var(--muted,#789);">Zoom</span>
                 <button class="btn" id="chartZoomOutBtn" style="font-size:11px;padding:0 7px;line-height:16px;" title="Zoom out (or press -)">&minus;</button>
@@ -2602,7 +2603,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <label><input type="checkbox" id="chk_cpr"> CPR</label>
                 <label><input type="checkbox" id="chk_maxpain"> Max pain</label>
                 <label><input type="checkbox" id="chk_cone"> ±1σ</label>
-                <label><input type="checkbox" id="chk_pivots"> Pivots</label>
+                <label title="Gamma-weighted support and resistance lines (γ-SUP / γ-RES), traced across the session."><input type="checkbox" id="chk_gamLadder"> γ SUP/RES</label>
                 <label title="Gamma flip: the level where dealer hedging changes sign. Above it hedging DAMPS moves so ranges hold and fades work; below it hedging AMPLIFIES them so trends extend and fading is dangerous. Not a support or resistance - a regime boundary, and it moves during the session as open interest shifts."><input type="checkbox" id="chk_gflip"> γ flip</label>
                 <label title="Bollinger bands, 20-period with 2 standard deviations. Upper and lower only — the middle band is a 20 SMA, already covered by the moving averages."><input type="checkbox" id="chk_bb"> BB</label>
                 <label title="VWAP ±1σ / ±2σ / ±3σ bands, with the range-or-trend day read at 9:45. Range day: fade ±2σ back to VWAP. Trend day: never fade ±2σ; buy pullbacks that hold ±1σ."><input type="checkbox" id="chk_vwapBand"> VWAP σ</label>
@@ -2619,6 +2620,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                   <input type="date" id="chartHistDate" class="ohlc-inp" style="font-size:9px;padding:1px 3px;display:none;" title="Pick a past trading day">
                 </span>
                 <label title="Fibonacci retracements and 127.2/161.8 projections measured from the 09:15-09:20 body range — the same range as the opening-range box, so the two agree."><input type="checkbox" id="chk_orbFib"> Fib</label>
+                <label><input type="checkbox" id="chk_pivots"> Pivots</label>
                 <select id="chartPivotType" class="ohlc-inp" style="font-size:9px;padding:1px 4px;" title="Pivot formula drawn on the chart (independent of the Pivot Levels panel)">
                   <option value="classic">Classic</option>
                   <option value="fibonacci">Fibonacci</option>
@@ -18058,8 +18060,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, orbFib: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false, cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false, cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show, emaX: _chart.emaX })); } catch (_) {} }
 
@@ -22870,7 +22872,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     if (window._settingsResetting) return;
     try {
       const st = { chk: {}, sel: {}, num: {}, zoom: null, hist: window._histDate || '' };
-      document.querySelectorAll('input[type=checkbox][id]').forEach(e => { st.chk[e.id] = e.checked; });
+      document.querySelectorAll('input[type=checkbox][id]:not([data-nopersist])').forEach(e => { st.chk[e.id] = e.checked; });
       // the expiry is not a setting: restoring yesterday's pick would pin the
       // chain to a contract that may have expired
       document.querySelectorAll('select[id]').forEach(e => { if (e !== els.expirySelect) st.sel[e.id] = e.value; });
@@ -31295,7 +31297,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try {
       const d0 = state.lastData;
       const right = W - padR;
-      const L2 = d0 ? _strikeLadder(d0) : null;
+      const L2 = (d0 && _chart.show.gamLadder !== false) ? _strikeLadder(d0) : null;
       for (const [row, col, lab] of [[L2?.resistance, '#ef5350', 'γ-RES'], [L2?.support, '#26a69a', 'γ-SUP']]) {
         if (!row || row.k < lo || row.k > hi) continue;
         svg += `<line x1="${padL}" y1="${y(row.k).toFixed(1)}" x2="${right.toFixed(1)}" y2="${y(row.k).toFixed(1)}"
@@ -33590,6 +33592,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // red lines on one chart would need reading rather than seeing.
     let ladderSvg = '';
     try {
+      if (_chart.show.gamLadder === false) throw 0;
       const xOf = sl => _xs(sl + 0.5, slots, W, padL, padR);
       const slotOfSec = t => {
         const g2 = new Date(t * 1000);
@@ -34700,7 +34703,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       });
     });
     for (const k of ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz', 'wt',
-                     'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep']) {
+                     'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep', 'gamLadder']) {
       const el = document.getElementById('chk_' + k);
       if (!el) continue;
       // new overlays default ON: a saved config predates them, and its
@@ -34708,8 +34711,33 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       // (PD: zones, gaps, liquidity and the prep card on; OTE, order blocks
       // and the signal filter are opt-in)
       if (_chart.show[k] === undefined && ['vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz', 'wt', 'pdZones', 'pdFvg', 'pdLiq', 'pdPrep'].includes(k)) _chart.show[k] = true;
+      if (k === 'gamLadder' && _chart.show[k] === undefined) _chart.show[k] = true;
       el.checked = !!_chart.show[k];
-      el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); });
+      el.addEventListener('change', () => { _chart.show[k] = el.checked; _chartCfgSave(); renderPriceChart(); _basicSync(); });
+    }
+    // "Basic": ticked = ONLY VWAP, Squeeze, WaveTrend, Zones, Prep card and
+    // Turn times are on; every other overlay is off. It is derived from the
+    // overlay states (no saved state of its own). Unticking restores what was
+    // on before ticking, or everything when there is nothing to restore.
+    {
+      const KEEP = ['vwap', 'sqz', 'wt', 'pdZones', 'pdPrep', 'turnTimes', 'ttr', 'ema100', 'ema200', 'orbFib'];
+      const ALL = ['cpr', 'walls', 'maxpain', 'cone', 'm920', 'pivots', 'gflip', 'orbFib', 'bb', 'ema5', 'ema10', 'ema15', 'ema20', 'ema50', 'ema100', 'ema200', 'vwap', 'vwapBand', 'pdhl', 'vprof', 'haMarks', 'deskBox', 'turnTimes', 'emaX', 'ttr', 'sqz', 'wt', 'pdZones', 'pdOte', 'pdFvg', 'pdOb', 'pdLiq', 'pdFilter', 'pdPrep', 'gamLadder'];
+      let prev = null;
+      window._basicSync = () => {
+        const b = document.getElementById('chkBasic');
+        if (b) b.checked = ALL.every(k => !!_chart.show[k] === KEEP.includes(k));
+      };
+      const bEl = document.getElementById('chkBasic');
+      if (bEl) bEl.addEventListener('change', () => {
+        if (bEl.checked) prev = Object.assign({}, _chart.show);
+        for (const k of ALL) {
+          _chart.show[k] = bEl.checked ? KEEP.includes(k) : (prev ? !!prev[k] : true);
+          const c = document.getElementById('chk_' + k);
+          if (c) c.checked = !!_chart.show[k];
+        }
+        _chartCfgSave(); renderPriceChart(); _basicSync();
+      });
+      _basicSync();
     }
     {
       const pr = document.getElementById('pdRange');
