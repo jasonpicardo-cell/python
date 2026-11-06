@@ -42,6 +42,7 @@ institutional_signals.html
 /NSE_SYNC/zerodha_access_token.txt
 /1OPTIONS/warm_cache/
 /1OPTIONS/participant_oi/
+/1OPTIONS/book_ticks/
 /1OPTIONS/tls/
 /1OPTIONS/tls/
 /1OPTIONS/trade_log/

@@ -2247,15 +2247,36 @@ def _refresh_all_weights(symbols=("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"
 #   bhavcopy/ only yesterday's file is ever read, and every file is
 #             re-downloadable from NSE. The cheapest thing here to lose.
 #
-# Runs weekly rather than on the 5-minute janitor cycle: walking three
-# directories is wasted work at that frequency, and a retention policy that
-# fires 2,000 times a day is a policy nobody can reason about.
+#   book_ticks/     order-book ticks near the money (nse_tick_recorder), ~10-40 MB a day; the
+#                   raw material for testing short-horizon order flow, so weeks are needed.
+#   participant_oi/ NSE's daily participant-wise OI; the dashboard reads up to 30 sessions.
+#   turn_log/       the turn model's training rows: more days = a better model.
+#   history/        *.jsonl chain history (read 30 files back); *_<n>_<day>.json are one
+#                   day's broker-history caches, keyed by today's date, so only today's is used.
+#   warm_cache/     tomorrow's chart warm-up from today's bars (saves a broker call per symbol).
+#   zerodha_cache/  oi_close_<day>.json: yesterday's closing OI is today's OI-change baseline.
+#                   (instruments_* prunes itself when the day's list is downloaded.)
+#   trade_log/      the trade journal. NEVER deleted.
+#   replay/_mq/     a cache of move-quality results keyed to a replay file and its size;
+#                   entries whose replay file is gone or has changed are dead weight.
+#
+# Runs ONCE A DAY after the session (from 15:45 IST, once the closing snapshot, the closing OI
+# and the warm-up bars are written), and on start-up if that day's pass was missed. Only files
+# older than their window go; nothing today's or tomorrow's session needs is touched.
 # ══════════════════════════════════════════════════════════════════════
-RUN_CLEANUP = True                 # enable the weekly disk pass
-RUN_CLEANUP_REPLAY_DAYS = 60       # option-chain snapshots (Claims on Trial)
+RUN_CLEANUP = True                 # enable the daily post-close disk pass
+RUN_CLEANUP_AT_MIN = 15 * 60 + 45  # IST minute of the day from which it may run
+RUN_CLEANUP_REPLAY_DAYS = 60       # option-chain snapshots (Claims on Trial, IV rank: 30 sessions)
 RUN_CLEANUP_TICKS_DAYS = 365       # spot samples - tiny, kept generously
 RUN_CLEANUP_BHAV_DAYS = 30         # end-of-day files, re-downloadable
+RUN_CLEANUP_BOOK_DAYS = 90         # book_ticks/ order-book recordings
+RUN_CLEANUP_POI_DAYS = 60          # participant_oi/ (30 sessions read)
+RUN_CLEANUP_TURN_DAYS = 365        # turn_log/ training rows
+RUN_CLEANUP_HISTORY_DAYS = 45      # history/*.jsonl (30 files read)
+RUN_CLEANUP_WARM_DAYS = 15         # warm_cache/ (it also prunes itself at 15 days)
+RUN_CLEANUP_OI_CLOSE_DAYS = 10     # zerodha_cache/oi_close_* (only the latest is read)
 RUN_CLEANUP_DRY_RUN = False        # log what WOULD go, delete nothing
+_DATA_ROOT = _os.path.dirname(_os.path.abspath(__file__))   # the folders above live here (tests point it elsewhere)
 
 
 def _file_day(name: str):
@@ -2310,18 +2331,32 @@ def _cleanup_dir(path: str, keep_days: int, pattern: str, dry: bool) -> dict:
 
 def _run_cleanup(dry: bool = None) -> dict:
     dry = RUN_CLEANUP_DRY_RUN if dry is None else dry
+    here = _DATA_ROOT
+    keep = lambda env, dflt: int(_os.environ.get(env, dflt))
     jobs = [
-        (_REPLAY_DIR, int(_os.environ.get("NSE_KEEP_REPLAY_DAYS", RUN_CLEANUP_REPLAY_DAYS)), "*.jsonl"),
-        (_TICK_DIR, int(_os.environ.get("NSE_KEEP_TICKS_DAYS", RUN_CLEANUP_TICKS_DAYS)), "*.csv"),
-        (_BHAVCOPY_DIR, int(_os.environ.get("NSE_KEEP_BHAV_DAYS", RUN_CLEANUP_BHAV_DAYS)), "*"),
+        (_REPLAY_DIR, keep("NSE_KEEP_REPLAY_DAYS", RUN_CLEANUP_REPLAY_DAYS), "*.jsonl"),
+        (_TICK_DIR, keep("NSE_KEEP_TICKS_DAYS", RUN_CLEANUP_TICKS_DAYS), "*.csv"),
+        (str(_BHAVCOPY_DIR), keep("NSE_KEEP_BHAV_DAYS", RUN_CLEANUP_BHAV_DAYS), "*"),
+        (_os.path.join(here, "book_ticks"), keep("NSE_KEEP_BOOK_DAYS", RUN_CLEANUP_BOOK_DAYS), "*.csv.gz"),
+        (_POI_DIR, RUN_CLEANUP_POI_DAYS, "*.json"),
+        (_os.path.join(here, "turn_log"), RUN_CLEANUP_TURN_DAYS, "*.jsonl"),
+        (_os.path.join(here, "history"), RUN_CLEANUP_HISTORY_DAYS, "*.jsonl"),
+        (_os.path.join(here, "history"), 0, "*_*_*.json"),            # broker-history caches: only today's is read
+        (_WARM_DIR, RUN_CLEANUP_WARM_DAYS, "*.json"),
+        (_os.path.join(here, "zerodha_cache"), RUN_CLEANUP_OI_CLOSE_DAYS, "oi_close_*.json"),
     ]
     res, freed, removed = [], 0, 0
     for path, days, pat in jobs:
         r = _cleanup_dir(path, days, pat, dry)
         r["keep_days"] = days
+        r["dir"] = _os.path.relpath(path, here) if _os.path.isabs(str(path)) else str(path)
         res.append(r)
         freed += r["bytes"]
         removed += r["removed"]
+    r = _cleanup_mq(dry)
+    res.append(r)
+    freed += r["bytes"]
+    removed += r["removed"]
     if removed:
         print(f"[cleanup]{' DRY RUN -' if dry else ''} removed {removed} file(s), "
               f"freed {freed / 1048576:.1f} MB")
@@ -2335,38 +2370,78 @@ def _run_cleanup(dry: bool = None) -> dict:
             "detail": res, "ran": time.strftime("%Y-%m-%d %H:%M")}
 
 
-_cleanup_state = {"last": 0.0, "result": None}
+def _cleanup_mq(dry: bool) -> dict:
+    """replay/_mq/<replay file>.<size>.v2.json caches whose replay file is gone or has since grown."""
+    import glob as _glob
+    out = {"dir": "replay/_mq", "kept": 0, "removed": 0, "bytes": 0, "errors": 0, "keep_days": None}
+    for f in _glob.glob(_os.path.join(_REPLAY_DIR, "_mq", "*.json")):
+        name = _os.path.basename(f)
+        m = __import__("re").match(r"(.+\.jsonl)\.(\d+)\.v\d+\.json$", name)
+        src = _os.path.join(_REPLAY_DIR, m.group(1)) if m else None
+        try:
+            live = bool(m) and _os.path.exists(src) and _os.path.getsize(src) == int(m.group(2))
+        except Exception:
+            live = False
+        if live or not m:
+            out["kept"] += 1
+            continue
+        try:
+            sz = _os.path.getsize(f)
+            if not dry:
+                _os.remove(f)
+            out["removed"] += 1
+            out["bytes"] += sz
+        except Exception as e:  # noqa: BLE001
+            out["errors"] += 1
+            print(f"[cleanup] could not remove {f}: {e}")
+    return out
+
+
+_cleanup_state = {"last": 0.0, "result": None, "day": None}
+
+
+def _cleanup_due(stamp_day, now=None) -> bool:
+    """Once per IST day, from RUN_CLEANUP_AT_MIN on (after the session's last writes)."""
+    mins, today = _ist_minutes(now)
+    return mins >= RUN_CLEANUP_AT_MIN and stamp_day != today
 
 
 def _cleanup_loop():
-    """Weekly, and once shortly after startup if a week has passed."""
+    """Daily after the close. The stamp file holds the IST day of the last pass, so a restart
+    neither repeats it nor misses it (a server started after 15:45 runs it straight away)."""
     stamp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".last_cleanup")
     try:
         if _os.path.exists(stamp):
+            _cleanup_state["day"] = open(stamp).read().strip()[:10]
             _cleanup_state["last"] = _os.path.getmtime(stamp)
     except Exception:
         pass
-    WEEK = 7 * 86400
     while not _poller_stop.is_set():
-        due = time.time() - _cleanup_state["last"] >= WEEK
-        if due:
+        if _cleanup_due(_cleanup_state["day"]):
+            today = _ist_minutes()[1]
             try:
                 _cleanup_state["result"] = _run_cleanup()
                 _cleanup_state["last"] = time.time()
-                with open(stamp, "w") as f:
-                    f.write(time.strftime("%Y-%m-%d %H:%M"))
             except Exception as e:  # noqa: BLE001
                 print(f"[cleanup] failed: {e}")
-        _poller_stop.wait(3600)          # check hourly, act weekly
+            _cleanup_state["day"] = today            # one attempt a day, even a failed one: no retry storm
+            try:
+                with open(stamp, "w") as f:
+                    f.write(today + time.strftime(" %H:%M"))
+            except Exception:
+                pass
+        _poller_stop.wait(600)           # check every 10 minutes, act once a day
 
 
 def _start_cleanup():
     if not _envbool_g("NSE_CLEANUP", RUN_CLEANUP):
-        print("[i] Weekly disk cleanup DISABLED (NSE_CLEANUP=false)")
+        print("[i] Daily disk cleanup DISABLED (NSE_CLEANUP=false)")
         return
     threading.Thread(target=_cleanup_loop, daemon=True).start()
-    print(f"[i] Weekly disk cleanup: replay {RUN_CLEANUP_REPLAY_DAYS}d, "
-          f"ticks {RUN_CLEANUP_TICKS_DAYS}d, bhavcopy {RUN_CLEANUP_BHAV_DAYS}d")
+    print(f"[i] Daily disk cleanup after {RUN_CLEANUP_AT_MIN // 60}:{RUN_CLEANUP_AT_MIN % 60:02d} IST: replay {RUN_CLEANUP_REPLAY_DAYS}d, "
+          f"book_ticks {RUN_CLEANUP_BOOK_DAYS}d, participant_oi {RUN_CLEANUP_POI_DAYS}d, history {RUN_CLEANUP_HISTORY_DAYS}d, "
+          f"warm {RUN_CLEANUP_WARM_DAYS}d, oi_close {RUN_CLEANUP_OI_CLOSE_DAYS}d, bhavcopy {RUN_CLEANUP_BHAV_DAYS}d, "
+          f"turn_log {RUN_CLEANUP_TURN_DAYS}d, ticks {RUN_CLEANUP_TICKS_DAYS}d; trade_log is kept")
 
 
 def _prune_state() -> None:

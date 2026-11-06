@@ -646,6 +646,43 @@ def tape_since(key: str, after: int = 0, limit: int = 1500) -> Dict[str, Any]:
     return {"cur": last, "rows": [list(r) for r in out], "reset": reset}
 
 
+# ── book-tick recorder (nse_tick_recorder): the ticks above, near the money, to book_ticks/ for later study.
+# Taps this callback only: no subscription and no broker call of its own, and it can never break the stream.
+_fut_under: Dict[str, str] = {}
+
+
+def _rec_under(key: str, kind: str) -> Optional[str]:
+    if kind == "OPT":
+        return (_meta_of.get(key) or {}).get("under")
+    if kind == "IDX":
+        for sym, k in _idx_key.items():
+            if k == key:
+                return sym
+        return None
+    if key not in _fut_under:
+        for (_x, n), lst in list(_futs.items()):
+            for _e, k in lst:
+                _fut_under[k] = n
+        _fut_under.setdefault(key, None)                 # unknown: do not rescan on every tick
+    return _fut_under.get(key)
+
+
+def _rec_tick(now, t, key, kind, d, b5, a5, tbq, tsq) -> None:
+    try:
+        import nse_tick_recorder
+        rec = nse_tick_recorder.get()
+        if rec is None:
+            return
+        under = _rec_under(key, kind)
+        if not under:
+            return
+        ex = t.get("exchange_timestamp")
+        rec.note(now, ex.timestamp() if hasattr(ex, "timestamp") else None, key, kind, under, d,
+                 b5, a5, tbq, tsq, _meta_of.get(key) if kind == "OPT" else None)
+    except Exception:
+        pass
+
+
 def _on_ticks(_ws, ticks) -> None:
     now = time.time()
     push = False
@@ -674,6 +711,8 @@ def _on_ticks(_ws, ticks) -> None:
             tbq, tsq = d.pop("tbq", None), d.pop("tsq", None)
             d["ts"] = now
             kind = _kind.get(key, "")
+            if kind in ("OPT", "FUT", "IDX"):
+                _rec_tick(now, t, key, kind, d, b5, a5, tbq, tsq)
             with _lock:
                 if b5 is not None or a5 is not None or tbq is not None:
                     prev = _depth.get(key) or {}
@@ -1642,6 +1681,9 @@ def fetch_chain(symbol: str, expiry: Optional[str], band: int) -> Dict[str, Any]
             rec[f"{p}_tsq"] = d.get("tsq")
             rec[f"{p}_iv"] = 0.0
             rec[f"{p}_prev_close"] = float(d.get("prev_close") or 0)
+            rec[f"{p}_open"] = float(d.get("open") or 0)    # the exchange's day OHLC, carried on every FULL tick / quote: the strike grid's range column
+            rec[f"{p}_high"] = float(d.get("high") or 0)
+            rec[f"{p}_low"] = float(d.get("low") or 0)
             rec[f"{p}_symbol"] = key
     strikes = [by_strike[k] for k in sorted(by_strike)]
     if not strikes:

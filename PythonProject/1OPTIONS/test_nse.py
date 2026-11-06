@@ -1749,6 +1749,7 @@ def test_scalping_tab():
         for (let k = 24300; k <= 25700; k += 50) state.lastData.strikes.push({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k });
         SC.book = { C25000: [90000, 30000, 1], P25000: [30000, 90000, 1], C25100: [30000, 90000, 1], P25100: [90000, 30000, 1], C24900: [null, null, 1] };
         state.lastData.strikes.find(r => r.strike === 24800).ce_tbq = 12000; state.lastData.strikes.find(r => r.strike === 24800).ce_tsq = 6000;
+        Object.assign(state.lastData.strikes.find(r => r.strike === 25000), { ce_low: 50, ce_high: 150, ce_ltp: 125, ce_open: 60 });
         scRenderGrid(); const h = el.h; const order = [...h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]);
         const row = k => h.split('<tr class=').find(x => x.includes('data-k="' + k + '"')) || '';
         SC.spot = 25080; scRenderGrid(); const order2 = [...el.h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]);
@@ -1756,7 +1757,8 @@ def test_scalping_tab():
         SC.spot = 25012; SC.pref.gridN = 2; SC.pref.hide50 = false; const d50 = scGridRows().rows.map(r => r.strike); SC.pref.hide50 = true; const d100 = scGridRows().rows.map(r => r.strike); SYM = 'BANKNIFTY'; const bk50 = scGridRows().rows.length; scRenderGrid(); const bkCtl = /data-g="h50"/.test(el.h); SYM = 'NIFTY'; SC.pref.gridN = 5; SC.pref.hide50 = true; scRenderGrid(); const niCtl = /data-g="h50"[^>]*checked/.test(el.h) && /<option value="5" selected>/.test(el.h);
         const depth = JSON.stringify({ d50, d100, bk50, bkCtl, niCtl });
         console.log(JSON.stringify({ depth, order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
-          atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× buyers/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length) }));""")
+          atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× buyers/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length),
+          kq: row(25000).includes('<td title="90,000">90k</td><td title="30,000">30k</td>'), layout: /buyers[^]*?<\\/td><td class="rg ce" style="--p:75%"[^>]*>50\\.0–150 <b class="">75%<\\/b><\\/td><td class="k[^"]*" data-k="25000"[^]*?<\\/td><td class="rg">–<\\/td><td title="30,000">30k<\\/td>/.test(row(25000)) }));""")
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
@@ -1765,7 +1767,7 @@ def test_scalping_tab():
         check("chart indicators: EMA 200 is a menu item on by default (new pref key e200) and is drawn", "e200: true" in seg and "SC_E200" in seg and "b.e200 =" in seg)
         check("strike grid: ATM plus and minus 5 round-hundred strikes (11 rows, no column headers) (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; shown for NIFTY and BANKNIFTY, hidden for the other indices",
               o4["no50"] and o4["order"] == [25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600, 24500] and o4["order2"] == [25600, 25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600]
-              and o4["fallback"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
+              and o4["fallback"] and o4["kq"] and o4["layout"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
         check("chart indicators: EMA seeds with the SMA and follows 2/(n+1); the RSI average waits for a full window",
               o["e"][:2] == [None, None] and o["e"][2] == 2 and abs(o["e"][3] - 3) < 1e-9 and abs(o["e"][7] - 7) < 1e-9 and o["m"] == [None, None, None, 15, 25, 35], str(o))
     except Exception as ex:  # noqa: BLE001
@@ -1777,16 +1779,26 @@ def test_scalping_tab():
     blocks = re.findall(r"const _BF = \{.*?const _bfAgg = [^\n]*", d, re.S)
     check("strike grids: one identical _bfZ block in each grid, wired to the strike verdict and the caption average; no leftover level/premium/OI scoring",
           len(blocks) == 2 and [x.strip() for x in blocks[0].splitlines()] == [x.strip() for x in blocks[1].splitlines()] and d.count("_bfStrike(SCR[") == 2 and d.count("_bfAgg(Object.values(SCR))") == 2
-          and "_biasScore" not in d and 'td[data-s="u2"]' in d and ".bf.bu" in d and "td.k.kb" in d)
+          and "_biasScore" not in d and 'td[data-s="u2"]' in d and ".bf.bu" in d and "td.k.kb" in d
+          and "${_bfDesk(d, spot, now)}" in d and "${_bfDesk(state.lastData, SC.spot" in d and d.count("${_bfWall(") == 2 and ".sc-grid .wl {" in d)
     if blocks:
         seq = [[i * 10, 50000 + (i % 7) * 900, 50000 + (i % 5) * 800] for i in range(240)] + [[2400 + i * 10, 50000 + i * 4000, 50000] for i in range(13)]
         jsb = blocks[0] + """
         const seq = SEQ_JSON, zs = seq.map(([t, b, o]) => _bfZ('X', b, o, 1e6 + t));
         const flat = []; for (let i = 0; i < 60; i++) flat.push(_bfZ('F', i < 30 ? 1000 + (i % 3) * 200 : 1000, 500, 1e6 + i * 10));   // a book that moved, then sat still
         const gap = _bfZ('X', 1000, 500, 1e6 + 9000);
+        const fmtInt = x => String(x); let _computeGex = () => ({ total: 5, flip: 24180.4 });
+        const sp = []; for (let i = 0; i <= 200; i++) sp.push(_bfSpot('N', 24000 + i * 0.5, 2e6 + i * 5));   // +100 points over 1000 s
+        const D = { symbol: 'NIFTY', support: { strike: 24000 }, resistance: { strike: 24500 } };
+        const desk1 = _bfDesk(D, 24100, 2e6 + 1000); _computeGex = () => ({ total: -3, flip: null }); const desk2 = _bfDesk(D, 24100, 2e6 + 1000);
+        _computeGex = null; const desk0 = _bfDesk({ symbol: 'BANKNIFTY' }, 51000, 3e6);   // no GEX available
         console.log(JSON.stringify({ zs, first: zs[0], flat: flat[flat.length - 1], gap,
           ce: _bfCell(3000, 1000, false, 1.5), pe: _bfCell(1000, 3000, true, -0.7), none: _bfCell(3000, 1000, false, null),
-          k: [_bfStrike(1.6, 1.4), _bfStrike(-0.8, null), _bfStrike(1, -1), _bfStrike(null, undefined)], agg: [_bfAgg([0.5, 0.3]), _bfAgg([0.1, -0.2]), _bfAgg([null])] }));""".replace("SEQ_JSON", json.dumps(seq))
+          k: [_bfStrike(1.6, 1.4), _bfStrike(-0.8, null), _bfStrike(1, -1), _bfStrike(null, undefined)], agg: [_bfAgg([0.5, 0.3]), _bfAgg([0.1, -0.2]), _bfAgg([null])],
+          sp, desk1, desk2, desk0, walls: [_bfWall(D, 24000), _bfWall(D, 24500), _bfWall(D, 24200), _bfWall(null, 24000)],
+          kf: [0, 999, 1000, 1500, 9999, 10000, 100000, 2698865, null, NaN].map(_bfK), q: [_bfQ(100000), _bfQ(null)],
+          rg: [_bfRange({ ce_low: 50, ce_high: 150, ce_ltp: 150, ce_open: 60 }, 'ce'), _bfRange({ pe_low: 210.5, pe_high: 400, pe_ltp: 200 }, 'pe'),
+               _bfRange({ ce_low: 0, ce_high: 0, ce_ltp: 80 }, 'ce'), _bfRange({ ce_low: 80, ce_high: 80, ce_ltp: 0 }, 'ce'), _bfRange({ ce_low: 40, ce_high: 60, ce_ltp: 50 }, 'ce')] }));""".replace("SEQ_JSON", json.dumps(seq))
         try:
             ob = json.loads(subprocess.run(["node", "-e", jsb], capture_output=True, text=True, timeout=20).stdout)
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1800,6 +1812,23 @@ def test_scalping_tab():
                   'class="up">3.00× buyers <b class="bf bu">▲▲</b>' in ob["ce"] and 'data-s="u2"' in ob["ce"] and 'class="up">0.33× sellers <b class="bf be">▼</b>' in ob["pe"]
                   and ob["none"].endswith('class="up">3.00× buyers</td>') and "warming up" in ob["none"]
                   and ob["k"] == ["▲▲", "▼", "", ""] and "▲ bullish +0.40" in ob["agg"][0] and "flat -0.05" in ob["agg"][1] and "warming up" in ob["agg"][2], str(ob)[:600])
+            sm = bias_eval.SpotMove(); psp = [sm.bps("N", 24000 + i * 0.5, 2e6 + i * 5) for i in range(201)]
+            same_sp = all((x is None and y is None) or (x is not None and y is not None and abs(x - y) < 1e-9) for x, y in zip(ob["sp"], psp))
+            check("strike-grid desk context: 15-min move waits 15 minutes then reads bps (matches bias_eval.SpotMove), gamma regime and flip from _computeGex, OI walls in the caption and as P / C marks on their strikes; no trade call",
+                  ob["sp"][0] is None and ob["sp"][179] is None and ob["sp"][180] is not None and abs(ob["sp"][200] - (24100 / 24010 - 1) * 1e4) < 1e-6 and same_sp
+                  and "γ+ flip 24180" in ob["desk1"] and "walls P 24000 / C 24500" in ob["desk1"] and "15m: warming up" in ob["desk1"]
+                  and "γ−" in ob["desk2"] and "flip" not in ob["desk2"].split("γ−")[1][:6] and "γ" not in ob["desk0"] and "walls" not in ob["desk0"]
+                  and ob["walls"][0].endswith(">P</b>") and ob["walls"][1].endswith(">C</b>") and ob["walls"][2] == "" and ob["walls"][3] == ""
+                  and "_bfSetup" not in d and "SETUP" not in blocks[0], str({k: ob[k] for k in ("desk1", "desk2", "desk0", "walls")})[:700] + f" sp180={ob['sp'][180]} same={same_sp}")
+            check("strike grids: book quantities in thousands (100000 -> 100k, 2698865 -> 2,699k, exact figure in the tooltip); empty shows a dash",
+                  ob["kf"] == ["0", "999", "1k", "1.5k", "10k", "10k", "100k", "2,699k", "–", "–"] and ob["q"] == ['<td title="1,00,000">100k</td>', "<td>–</td>"], str(ob["kf"]) + str(ob["q"]))
+            rg = ob["rg"]
+            check("strike grids: day-range cell shows low–high, the LTP position as a % (HIGH / LOW within 5% of an end) and fills up to it, widened by a newer LTP; no range shows a dash",
+                  'style="--p:100%"' in rg[0] and rg[0].endswith('>50.0–150 <b class="hi">HIGH</b></td>') and "open 60.00" in rg[0] and "LTP 150.00 at 100%" in rg[0]
+                  and 'style="--p:0%"' in rg[1] and rg[1].endswith('><b class="lo">LOW</b> 200–400</td>') and rg[2] == '<td class="rg">–</td>'
+                  and "<b" not in rg[3] and "--p" not in rg[3] and rg[3].endswith(">80.0–80.0 </td>") and rg[4].endswith('>40.0–60.0 <b class="">50%</b></td>')
+                  and 'rec[f"{p}_high"] = float(d.get("high") or 0)' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_adapter_zerodha.py"), encoding="utf-8").read()
+                  and "var(--g-rg) var(--p, 0%), var(--g-rg2) var(--p, 0%)" in d and d.count("--g-rg2: rgba") == 2 and "day range | strike | PE day range" in d, str(rg)[:900])
         except Exception as ex:
             check("strike-grid bias: _bfZ runs in node", False, repr(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
@@ -2703,6 +2732,8 @@ def test_zerodha_adapter():
     every key, contracts not shares, OI change from the previous close,
     futures, depth and flow from FULL-mode ticks, zero REST once streaming."""
     import tempfile, ast as _ast, json as _json, shutil
+    hdir = os.path.join(HERE, "history")
+    real_hist = {f: os.path.getmtime(os.path.join(hdir, f)) for f in (os.listdir(hdir) if os.path.isdir(hdir) else []) if f.startswith("NIFTY_60_")}
     tmp = tempfile.mkdtemp(prefix="ztest")
     Z = _z_setup(tmp)
     try:
@@ -2824,9 +2855,10 @@ def test_zerodha_adapter():
     finally:
         Z.set_tick_sink(None)
         shutil.rmtree(tmp, ignore_errors=True)
-        for f in os.listdir(os.path.join(HERE, "history")) if os.path.isdir(os.path.join(HERE, "history")) else []:
-            if f.startswith("NIFTY_60_"):
-                try: os.remove(os.path.join(HERE, "history", f))
+        # remove only the fake-bar cache this test wrote; a real one that was already there stays
+        for f in os.listdir(hdir) if os.path.isdir(hdir) else []:
+            if f.startswith("NIFTY_60_") and real_hist.get(f) != os.path.getmtime(os.path.join(hdir, f)):
+                try: os.remove(os.path.join(hdir, f))
                 except Exception: pass
 
 
@@ -4397,11 +4429,149 @@ console.log(JSON.stringify(out));"""
           and 'path == "auto"' in sv and 'st["auto"]' in sv)
 
 
+def test_book_recorder_and_cleanup():
+    """nse_tick_recorder: what it keeps, the file it writes, restarts and crashes; the adapter hook; the daily cleanup."""
+    import importlib, tempfile, shutil, calendar as _cal, datetime as _dtm
+    sys.path.insert(0, HERE)
+    R = importlib.import_module("nse_tick_recorder")
+    ist = lambda d, h, m, s_=0: _cal.timegm((2026, 11, d, h, m, s_)) - 19800      # 2026-11-09 is a Monday
+    tmp = tempfile.mkdtemp()
+    try:
+        rec = R.Recorder(root=tmp)
+        t0 = ist(9, 10, 0)
+        cm = {"strike": 24500, "typ": "CE", "expiry": "2026-11-10"}
+        near = dict(ltp=100, volume=1000, oi=5000, bid=99.5, bid_qty=650, ask=100.0, ask_qty=325)
+        b5, a5 = [{"p": 99.5, "q": 650, "n": 3}, {"p": 99.45, "q": 130, "n": 1}], [{"p": 100.0, "q": 325, "n": 2}]
+        rec.note(t0, None, "NFO:CE_NEAR", "OPT", "NIFTY", near, meta=cm)                       # spot not known yet: skipped
+        rec.note(t0, t0 - 0.2, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 24480.5})
+        rec.note(t0 + 1, t0 + 0.9, "NFO:CE_NEAR", "OPT", "NIFTY", near, b5, a5, 90000, 30000, cm)
+        rec.note(t0 + 2, None, "NFO:CE_NEAR", "OPT", "NIFTY", near, b5, a5, 90000, 30000, cm)   # unchanged: skipped
+        rec.note(t0 + 3, None, "NFO:CE_FAR", "OPT", "NIFTY", near, meta=dict(cm, strike=25100))  # 620 points away: skipped
+        rec.note(t0 + 4, None, "NFO:NIFTYFUT", "FUT", "NIFTY", dict(ltp=24550, bid=24549, ask=24551))
+        rec.note(t0 + 5, None, "NFO:FIN", "OPT", "FINNIFTY", near, meta=cm)                      # not an index we keep
+        rec.note(ist(9, 8, 59), None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 1})                # before 09:00
+        rec.note(ist(9, 15, 31), None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 2})               # after 15:31
+        rec.note(ist(7, 10, 0), None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 3})                # Saturday
+        rec.note(t0 + 6, None, "NSE:NIFTY BANK", "IDX", "BANKNIFTY", {"ltp": 52000})
+        rec.drain(force_flush=True, now=t0 + 7)
+        path = os.path.join(tmp, "NIFTY_2026-11-09.csv.gz")
+        rows = R.read_day(path)                                  # still open: readable up to the last sync flush
+        ce = next((r for r in rows if r["inst"] == "NFO:CE_NEAR"), {})
+        check("book recorder: keeps the index, near-the-money options (within 500 points) and futures of NIFTY/BANKNIFTY, 09:00-15:31 on weekdays, only when something changed; readable mid-session",
+              [r["inst"] for r in rows] == ["NSE:NIFTY 50", "NFO:CE_NEAR", "NFO:NIFTYFUT"] and os.path.exists(os.path.join(tmp, "BANKNIFTY_2026-11-09.csv.gz"))
+              and ce.get("b5") == "99.5:650:3|99.45:130:1" and ce.get("a5") == "100:325:2" and ce.get("tbq") == "90000" and ce.get("strike") == "24500"
+              and ce.get("typ") == "CE" and ce.get("ex_ms") == str(int((t0 + 0.9) * 1000)) and rows[0]["ex_ms"] == str(int((t0 - 0.2) * 1000)) and ce.get("bq") == "650",
+              str(rows)[:400])
+        rec.drain(now=ist(9, 15, 33))
+        closed = not rec.files
+        rec2 = R.Recorder(root=tmp)                              # a restart the same day appends a gzip member, no second header
+        rec2.note(ist(9, 11, 0), None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 24490})
+        rec2.close()
+        rows2 = R.read_day(path)
+        raw = open(path, "rb").read()
+        cut = os.path.join(tmp, "cut.csv.gz")
+        open(cut, "wb").write(raw[:-9])                          # a crash before the gzip trailer
+        rows3 = R.read_day(cut)
+        check("book recorder: closes the day's files after the close; a same-day restart appends (one header, all rows); a truncated file still reads",
+              closed and [r["ltp"] for r in rows2] == ["24480.5", "100", "24550", "24490"] and 3 <= len(rows3) <= 4 and all(r["inst"] for r in rows3),
+              f"closed={closed} {[r['ltp'] for r in rows2]} cut={len(rows3)}")
+        boom = R.Recorder(root=tmp); boom.spot = None                # a broken recorder state must not raise into the stream
+        boom.note(t0, None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 1})
+        check("book recorder: an internal error is counted, never raised", boom.stats["errors"] == 1, str(boom.stats))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # the adapter hook: maps each key to its index and passes the tick on; a failing recorder cannot stop the stream
+    import nse_adapter_zerodha as Z
+    saved = (dict(Z._meta_of), dict(Z._idx_key), {k: list(v) for k, v in Z._futs.items()}, dict(Z._fut_under), R._rec)
+    try:
+        Z._meta_of["NFO:TSTREC24500CE"] = {"under": "NIFTY", "typ": "CE", "strike": 24500.0, "expiry": "2026-11-10"}
+        Z._idx_key["NIFTY"] = "NSE:NIFTY 50"
+        Z._futs[("NFO", "BANKNIFTY")] = [("2026-11-25", "NFO:TSTRECBNFUT")]
+        under = [Z._rec_under("NFO:TSTREC24500CE", "OPT"), Z._rec_under("NSE:NIFTY 50", "IDX"), Z._rec_under("NFO:TSTRECBNFUT", "FUT"), Z._rec_under("NFO:NOPE", "FUT")]
+        got = []
+
+        class Fake:
+            def note(self, *a, **k): got.append(a)
+        R._rec = Fake()
+        tok = 987654321
+        Z._tok2key[tok] = "NFO:TSTREC24500CE"; Z._kind["NFO:TSTREC24500CE"] = "OPT"
+        ex = _dtm.datetime(2026, 11, 9, 10, 0, 1)
+        tick = {"instrument_token": tok, "last_price": 101.5, "volume_traded": 2000, "exchange_timestamp": ex,
+                "depth": {"buy": [{"price": 101.0, "quantity": 650, "orders": 4}], "sell": [{"price": 101.5, "quantity": 130, "orders": 1}]},
+                "total_buy_quantity": 50000, "total_sell_quantity": 20000}
+        Z._on_ticks(None, [tick])
+        a = got[0] if got else ()
+
+        class Bad:
+            def note(self, *a, **k): raise RuntimeError("disk full")
+        R._rec = Bad()
+        Z._on_ticks(None, [dict(tick, last_price=102.0)])
+        still = (Z._ticks.get("NFO:TSTREC24500CE") or {}).get("ltp")
+        check("book recorder hook: options, index and futures are tied to their index; the adapter hands the tick (book, totals, exchange time) to the recorder and keeps streaming if it fails",
+              under == ["NIFTY", "NIFTY", "BANKNIFTY", None] and len(got) == 1 and a[2] == "NFO:TSTREC24500CE" and a[3] == "OPT" and a[4] == "NIFTY"
+              and a[5].get("ltp") == 101.5 and a[6] == [{"p": 101.0, "q": 650.0, "n": 4}] and a[8] == 50000.0 and a[9] == 20000.0 and a[10]["strike"] == 24500.0
+              and a[1] == ex.timestamp() and still == 102.0, f"{under} {a[:5] if a else None} still={still}")
+    finally:
+        Z._meta_of.clear(); Z._meta_of.update(saved[0]); Z._idx_key.clear(); Z._idx_key.update(saved[1])
+        Z._futs.clear(); Z._futs.update(saved[2]); Z._fut_under.clear(); Z._fut_under.update(saved[3]); R._rec = saved[4]
+        for k in ("NFO:TSTREC24500CE",):
+            for dct in (Z._ticks, Z._depth, Z._kind, Z._tape, Z._dirty):
+                dct.pop(k, None)
+        Z._tok2key.pop(987654321, None)
+
+    # the daily cleanup, on a scratch tree: every folder by its own window, trade_log untouched, dead _mq caches gone
+    import nse_chain_server as S
+    root = tempfile.mkdtemp()
+    saved = {k: getattr(S, k) for k in ("_DATA_ROOT", "_REPLAY_DIR", "_TICK_DIR", "_BHAVCOPY_DIR", "_POI_DIR", "_WARM_DIR")}
+    try:
+        day = lambda n: (_dtm.date.today() - _dtm.timedelta(days=n)).isoformat()
+        files = {
+            "replay/NIFTY_%s.jsonl" % day(61): False, "replay/NIFTY_%s.jsonl" % day(59): True,
+            "ticks/NIFTY_%s.csv" % day(366): False, "ticks/NIFTY_%s.csv" % day(300): True,
+            "nse_data_cache/bhavcopy/fo%s.csv" % day(31): False,
+            "book_ticks/NIFTY_%s.csv.gz" % day(91): False, "book_ticks/NIFTY_%s.csv.gz" % day(89): True, "book_ticks/NIFTY_%s.csv.gz" % day(0): True,
+            "participant_oi/%s.json" % day(61): False, "participant_oi/%s.json" % day(40): True,
+            "turn_log/NIFTY_%s.jsonl" % day(366): False, "turn_log/NIFTY_%s.jsonl" % day(364): True,
+            "history/NIFTY_%s.jsonl" % day(46): False, "history/NIFTY_%s.jsonl" % day(44): True,
+            "history/NIFTY_60_%s.json" % day(1): False, "history/NIFTY_60_%s.json" % day(0): True,
+            "warm_cache/NIFTY_%s.json" % day(16): False, "warm_cache/NIFTY_%s.json" % day(14): True,
+            "zerodha_cache/oi_close_%s.json" % day(11): False, "zerodha_cache/oi_close_%s.json" % day(9): True,
+            "zerodha_cache/instruments_NFO_%s.json" % day(30): True,
+            "trade_log/%s.jsonl" % day(400): True, "trade_log/%s.jsonl" % day(1): True,
+        }
+        for rel in files:
+            fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w").write("x")
+        live = "NIFTY_%s.jsonl" % day(59)
+        mq = {"replay/_mq/%s.1.v2.json" % live: True, "replay/_mq/%s.999.v2.json" % live: False, "replay/_mq/NIFTY_%s.jsonl.5.v2.json" % day(61): False}
+        for rel in mq:
+            fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w").write("{}")
+        files.update(mq)
+        S._DATA_ROOT = root; S._REPLAY_DIR = os.path.join(root, "replay"); S._TICK_DIR = os.path.join(root, "ticks")
+        S._BHAVCOPY_DIR = os.path.join(root, "nse_data_cache", "bhavcopy"); S._POI_DIR = os.path.join(root, "participant_oi"); S._WARM_DIR = os.path.join(root, "warm_cache")
+        import io as _io, contextlib as _cl
+        with _cl.redirect_stdout(_io.StringIO()):
+            dry = S._run_cleanup(dry=True)
+            untouched = all(os.path.exists(os.path.join(root, r)) for r in files)
+            res = S._run_cleanup(dry=False)
+        wrong = [r for r, keep in files.items() if os.path.exists(os.path.join(root, r)) != keep]
+        check("daily cleanup: prunes every data folder by its own window (replay 60, book_ticks 90, participant_oi 60, turn_log 365, history 45 / today's caches, warm 15, oi_close 10, ticks 365, bhavcopy 30), drops dead _mq caches, never touches trade_log; dry run deletes nothing",
+              not wrong and untouched and dry["removed"] == res["removed"] == sum(1 for k in files.values() if not k), f"wrong={wrong} dry={dry['removed']} real={res['removed']}")
+        due = S._cleanup_due
+        at = lambda h, m: _cal.timegm((2026, 11, 9, h, m, 0)) - 19800
+        check("daily cleanup: runs once per IST day from 15:45 (not before), and again the next day",
+              not due(None, at(15, 44)) and due(None, at(15, 45)) and not due("2026-11-09", at(16, 0)) and due("2026-11-08", at(9, 0) + 7 * 3600) and not due("2026-11-08", at(9, 0)))
+    finally:
+        for k, v in saved.items():
+            setattr(S, k, v)
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     for fn in (test_muted_price_alert_popup, test_header_spot_follows_ticks, test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_auto_trade, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env):
+               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_auto_trade, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env, test_book_recorder_and_cleanup):
         try:
             fn()
         except Exception as e:  # noqa: BLE001
