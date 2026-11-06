@@ -1773,6 +1773,35 @@ def test_scalping_tab():
     check("home chart: a NIFTY / BANKNIFTY strike grid overlay (sibling of chartBody, never touches the SVG), round-hundred strikes only, fed by the chain's book totals, placed at the price chart's lower left",
           'id="homeGrid"' in d and "function homeGridRender" in d and "['NIFTY', 'BANKNIFTY'].includes(state.symbol" in d and "body.light-mode .sc-grid {" in d and ".sc-chartwrap, .sc-indmenu { --text: #e8ebf2;" in d and "h50 && r.strike % 100 !== 0" in d and 'id="hgN"' in d and "homeGridPrefV1" in d and "getClientRects().length" in d
           and "['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY')" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d)
+    # strike-grid bias: the 2-minute book-shift z (_bfZ), backtested by bias_eval.py. Both grids carry the same block.
+    blocks = re.findall(r"const _BF = \{.*?const _bfAgg = [^\n]*", d, re.S)
+    check("strike grids: one identical _bfZ block in each grid, wired to the strike verdict and the caption average; no leftover level/premium/OI scoring",
+          len(blocks) == 2 and [x.strip() for x in blocks[0].splitlines()] == [x.strip() for x in blocks[1].splitlines()] and d.count("_bfStrike(SCR[") == 2 and d.count("_bfAgg(Object.values(SCR))") == 2
+          and "_biasScore" not in d and 'td[data-s="u2"]' in d and ".bf.bu" in d and "td.k.kb" in d)
+    if blocks:
+        seq = [[i * 10, 50000 + (i % 7) * 900, 50000 + (i % 5) * 800] for i in range(240)] + [[2400 + i * 10, 50000 + i * 4000, 50000] for i in range(13)]
+        jsb = blocks[0] + """
+        const seq = SEQ_JSON, zs = seq.map(([t, b, o]) => _bfZ('X', b, o, 1e6 + t));
+        const flat = []; for (let i = 0; i < 60; i++) flat.push(_bfZ('F', i < 30 ? 1000 + (i % 3) * 200 : 1000, 500, 1e6 + i * 10));   // a book that moved, then sat still
+        const gap = _bfZ('X', 1000, 500, 1e6 + 9000);
+        console.log(JSON.stringify({ zs, first: zs[0], flat: flat[flat.length - 1], gap,
+          ce: _bfCell(3000, 1000, false, 1.5), pe: _bfCell(1000, 3000, true, -0.7), none: _bfCell(3000, 1000, false, null),
+          k: [_bfStrike(1.6, 1.4), _bfStrike(-0.8, null), _bfStrike(1, -1), _bfStrike(null, undefined)], agg: [_bfAgg([0.5, 0.3]), _bfAgg([0.1, -0.2]), _bfAgg([null])] }));""".replace("SEQ_JSON", json.dumps(seq))
+        try:
+            ob = json.loads(subprocess.run(["node", "-e", jsb], capture_output=True, text=True, timeout=20).stdout)
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import bias_eval
+            sh = bias_eval.Shift(); pz = [sh.z("X", b, o, 1e6 + t) for t, b, o in seq]
+            same = all((a is None and b is None) or (a is not None and b is not None and abs(a - b) < 1e-9) for a, b in zip(ob["zs"], pz))
+            check("strike-grid bias: _bfZ waits for 2 minutes of book, scores a sudden bid build-up as a strong bullish shift, a still book as 0, restarts after a 30-min gap, and matches bias_eval.py's twin exactly",
+                  ob["first"] is None and ob["zs"][-1] >= 1.4 and ob["flat"] == 0 and ob["gap"] is None and same
+                  and bias_eval.tier(ob["zs"][-1]) == 2, str({k: ob[k] for k in ("first", "flat", "gap")}) + f" last={ob['zs'][-1]} py={pz[-1]} same={same}")
+            check("strike-grid bias: the ratio text keeps the level colour (CE buyers / PE sellers green), arrows show the shift (▲▲ strong, ▼ moderate, none while warming up); strike verdict averages CE and PE; caption shows the grid average",
+                  'class="up">3.00× buyers <b class="bf bu">▲▲</b>' in ob["ce"] and 'data-s="u2"' in ob["ce"] and 'class="up">0.33× sellers <b class="bf be">▼</b>' in ob["pe"]
+                  and ob["none"].endswith('class="up">3.00× buyers</td>') and "warming up" in ob["none"]
+                  and ob["k"] == ["▲▲", "▼", "", ""] and "▲ bullish +0.40" in ob["agg"][0] and "flat -0.05" in ob["agg"][1] and "warming up" in ob["agg"][2], str(ob)[:600])
+        except Exception as ex:
+            check("strike-grid bias: _bfZ runs in node", False, repr(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
           "location.protocol === 'file:'" in seg and "_source !== 'zerodha'" in seg)
     # ── the chart right-click mute item ──

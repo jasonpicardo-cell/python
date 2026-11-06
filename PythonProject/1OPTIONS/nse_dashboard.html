@@ -2259,6 +2259,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-grid tr.atm td { background: var(--g-atm); } .sc-grid tr.atm td.k { background: var(--g-atmk); color: var(--g-atmt); }
   .sc-grid tr.sel td.k { box-shadow: inset 3px 0 0 var(--accent); }
   .sc-grid td.up { color: var(--g-up); background: var(--g-upbg); font-weight: 600; } .sc-grid td.dn { color: var(--g-dn); background: var(--g-dnbg); font-weight: 600; }
+  .sc-grid td[data-s="u2"] { box-shadow: inset 3px 0 0 var(--g-up); } .sc-grid td[data-s="d2"] { box-shadow: inset 3px 0 0 var(--g-dn); }
+  .sc-grid .bf.bu { color: var(--g-up); } .sc-grid .bf.be { color: var(--g-dn); } .sc-grid td[data-s$="2"] .bf { font-weight: 900; }
+  .sc-grid td.k.kb { color: var(--g-up); } .sc-grid td.k.ks { color: var(--g-dn); }
   .sc-grid.sc-grid-below { position: static; display: block; width: max-content; max-width: 100%; margin: 6px 0 0; box-shadow: none; overflow-x: auto; }
 .sc-ladctl { float: right; font-size: 10px; font-weight: 400; } .sc-ladctl select { font-size: 10px; margin: 0 6px 0 2px; } .sc-ladctl label { cursor: pointer; }
   .sc-grid .gctl { margin-right: 8px; color: var(--g-text); } .sc-grid .gctl select { font-size: 10px; background: var(--g-head); color: var(--g-text); border: 1px solid var(--g-line); } .sc-grid .gctl label { cursor: pointer; }
@@ -28302,6 +28305,32 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     try { localStorage.setItem('homeGridPrefV1', JSON.stringify(_hgPref)); } catch (_) {}
     _hgLast = ''; homeGridRender();
   });
+  // Book-pressure shift, backtested on replay/ with bias_eval.py. The LEVEL of total bid vs offer did not predict the index
+  // (it leaned contrarian), nor did premium vs yesterday or the OI buildup tag. What held up, weakly, for the next 1-3 minutes
+  // is how fast the imbalance moved: z = 2-minute change in ln(bid/offer) over its own session spread (EWMA, ~28 min).
+  // Bullish = CE bids building or PE offers building. Per strike the edge is thin (~52-53% hits); the grid average is better (~55%).
+  // Keep _BF in step with bias_eval.py.
+  const _BF = { tau: 1680, lb: 120, mod: 0.6, strong: 1.4, agg: 0.35 };
+  const _bfZ = (key, b, o, now) => {
+    if (!key || !(b > 0) || !(o > 0)) return null;
+    const S = globalThis._bfSt || (globalThis._bfSt = {}), L = Math.log(b / o); let s = S[key];
+    if (!s || now - s.t > 1800 || now < s.t) s = S[key] = { m: L, v: 0, t: now, h: [[now, L]] };
+    else if (now - s.t >= 5) {
+      const a = 1 - Math.exp(-(now - s.t) / _BF.tau), dl = L - s.m; s.m += a * dl; s.v = (1 - a) * (s.v + a * dl * dl); s.t = now;
+      s.h.push([now, L]); while (s.h.length > 1 && now - s.h[0][0] > _BF.lb * 3) s.h.shift();
+    }
+    let old = null; for (const x of s.h) if (now - x[0] >= _BF.lb * 0.9) old = x;
+    return old && s.v > 1e-9 ? Math.max(-3, Math.min(3, (L - old[1]) / Math.sqrt(s.v))) : null;
+  };
+  const _bfTier = z => z == null ? 0 : Math.abs(z) >= _BF.strong ? 2 : Math.abs(z) >= _BF.mod ? 1 : 0;
+  const _bfCell = (b, o, put, z) => {   // z is bullish-oriented; the text colour stays the book level (CE buyers / PE sellers green), the arrows are the shift
+    const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers, t = _bfTier(z), u = z > 0;
+    const tip = `${buyers ? 'more bids than offers' : 'more offers than bids'} (the level alone is not a signal) · ` + (z == null ? '2-min shift: warming up' : `2-min shift z ${z >= 0 ? '+' : ''}${z.toFixed(2)}: ${t ? (u ? 'bullish' : 'bearish') + (t === 2 ? ', strong' : '') : 'no clear shift'}`);
+    return `<td data-s="${t ? (u ? 'u' : 'd') + t : '0'}" title="${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}${t ? ` <b class="bf ${u ? 'bu' : 'be'}">${(u ? '▲' : '▼').repeat(t)}</b>` : ''}</td>`;
+  };
+  const _bfMean = zs => { const v = zs.filter(z => z != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const _bfStrike = (zc, zp) => { const m = _bfMean([zc, zp]), t = _bfTier(m); return t ? (m > 0 ? '▲' : '▼').repeat(t) : ''; };
+  const _bfAgg = zs => { const m = _bfMean(zs); if (m == null) return ' · book shift: warming up'; const on = Math.abs(m) >= _BF.agg; return ` · book shift <b class="bf ${on ? (m > 0 ? 'bu' : 'be') : ''}" title="average 2-min shift over the grid (the more reliable read)">${on ? (m > 0 ? '▲ bullish' : '▼ bearish') : 'flat'} ${m >= 0 ? '+' : ''}${m.toFixed(2)}</b>`; };
   let _hgLast = '', _hgBook = {}, _hgBusy = false, _hgNames = [];
   // Live totals: the local server's tick store (/api/trade/state?b=), memory only, no broker call.
   // Skipped while the Scalper tab is open (it polls the same thing), the page is hidden,
@@ -28333,19 +28362,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         const spot = d.underlying_value || d.atm; let ai = 0, bd = 1e12;
         rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
         const show = rows.slice(Math.max(0, ai - HN), ai + HN + 1).reverse(), atm = rows[ai].strike;
-        const ratio = (b, o, put) => {
+        const SCR = {}, now = Date.now() / 1000;
+        const ratio = (b, o, put, r) => {
           if (!(b > 0) || !(o > 0)) return '<td>–</td>';
-          const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers;
-          return `<td class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}</td>`;
+          const z0 = _bfZ(r[(put ? 'pe' : 'ce') + '_symbol'], b, o, now), z = z0 == null ? null : put ? -z0 : z0; SCR[r.strike + (put ? 'p' : 'c')] = z; return _bfCell(b, o, put, z);
         };
         _hgNames = show.flatMap(r => [r.ce_symbol, r.pe_symbol]);
         const live = (r, p) => { const lv = _hgBook[r[p + '_symbol']]; return lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; };
-        const cell = (r, put) => { const [b, o] = live(r, put ? 'pe' : 'ce'); return `<td>${n(b)}</td><td>${n(o)}</td>${ratio(b, o, put)}`; };
+        const cell = (r, put) => { const [b, o] = live(r, put ? 'pe' : 'ce'); return `<td>${n(b)}</td><td>${n(o)}</td>${ratio(b, o, put, r)}`; };
         const any = show.some(r => (live(r, 'ce')[0] > 0) || (live(r, 'pe')[0] > 0));
-        html = `<div class="cap">${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(d.expiry || ''))} · CE bid · offer · ratio | strike | PE bid · offer · ratio · ATM ${fmtInt(atm)}</div>` +
+        const tbl = show.map(r => { const cc = cell(r, false), pc = cell(r, true), vd = _bfStrike(SCR[r.strike + 'c'], SCR[r.strike + 'p']); return `<tr class="${r.strike === atm ? 'atm' : ''}">${cc}<td class="k${vd ? (vd[0] === '▲' ? ' kb' : ' ks') : ''}">${fmtInt(r.strike)}${vd ? ' ' + vd : ''}</td>${pc}</tr>`; }).join('');
+        html = `<div class="cap">${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(d.expiry || ''))} · CE bid · offer · ratio | strike | PE bid · offer · ratio · ATM ${fmtInt(atm)}${any ? _bfAgg(Object.values(SCR)) : ''}</div>` +
           (any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30).</div>') +
-          `<table>` +
-          show.map(r => `<tr class="${r.strike === atm ? 'atm' : ''}">${cell(r, false)}<td class="k">${fmtInt(r.strike)}</td>${cell(r, true)}</tr>`).join('') + '</table>';
+          `<table>${tbl}</table>`;
       }
       el.style.display = '';
       { const ns = document.getElementById('hgN'), hc = document.getElementById('hgH50'); if (ns && document.activeElement !== ns) ns.value = String(HN); if (hc) hc.checked = h50; document.getElementById('hgH50Wrap').style.display = isNf ? '' : 'none'; }
@@ -42739,20 +42768,46 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       const d = state.lastData, why = !d ? 'waiting for the option chain…' : d._source !== 'zerodha' ? `the chain is coming from "${escapeHtml(String(d._source || 'unknown'))}", not Zerodha. The grid needs the Zerodha feed: run zerodha_login.py and restart the server.` : 'the chain has no tradable strikes yet.';
       scSet(el, `<div class="cap">${escapeHtml(state.symbol || 'NIFTY')} strike grid: ${why}</div>`); return;
     }
+    // Book-pressure shift, backtested on replay/ with bias_eval.py. The LEVEL of total bid vs offer did not predict the index
+    // (it leaned contrarian), nor did premium vs yesterday or the OI buildup tag. What held up, weakly, for the next 1-3 minutes
+    // is how fast the imbalance moved: z = 2-minute change in ln(bid/offer) over its own session spread (EWMA, ~28 min).
+    // Bullish = CE bids building or PE offers building. Per strike the edge is thin (~52-53% hits); the grid average is better (~55%).
+    // Keep _BF in step with bias_eval.py.
+    const _BF = { tau: 1680, lb: 120, mod: 0.6, strong: 1.4, agg: 0.35 };
+    const _bfZ = (key, b, o, now) => {
+      if (!key || !(b > 0) || !(o > 0)) return null;
+      const S = globalThis._bfSt || (globalThis._bfSt = {}), L = Math.log(b / o); let s = S[key];
+      if (!s || now - s.t > 1800 || now < s.t) s = S[key] = { m: L, v: 0, t: now, h: [[now, L]] };
+      else if (now - s.t >= 5) {
+        const a = 1 - Math.exp(-(now - s.t) / _BF.tau), dl = L - s.m; s.m += a * dl; s.v = (1 - a) * (s.v + a * dl * dl); s.t = now;
+        s.h.push([now, L]); while (s.h.length > 1 && now - s.h[0][0] > _BF.lb * 3) s.h.shift();
+      }
+      let old = null; for (const x of s.h) if (now - x[0] >= _BF.lb * 0.9) old = x;
+      return old && s.v > 1e-9 ? Math.max(-3, Math.min(3, (L - old[1]) / Math.sqrt(s.v))) : null;
+    };
+    const _bfTier = z => z == null ? 0 : Math.abs(z) >= _BF.strong ? 2 : Math.abs(z) >= _BF.mod ? 1 : 0;
+    const _bfCell = (b, o, put, z) => {   // z is bullish-oriented; the text colour stays the book level (CE buyers / PE sellers green), the arrows are the shift
+      const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers, t = _bfTier(z), u = z > 0;
+      const tip = `${buyers ? 'more bids than offers' : 'more offers than bids'} (the level alone is not a signal) · ` + (z == null ? '2-min shift: warming up' : `2-min shift z ${z >= 0 ? '+' : ''}${z.toFixed(2)}: ${t ? (u ? 'bullish' : 'bearish') + (t === 2 ? ', strong' : '') : 'no clear shift'}`);
+      return `<td data-s="${t ? (u ? 'u' : 'd') + t : '0'}" title="${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}${t ? ` <b class="bf ${u ? 'bu' : 'be'}">${(u ? '▲' : '▼').repeat(t)}</b>` : ''}</td>`;
+    };
+    const _bfMean = zs => { const v = zs.filter(z => z != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    const _bfStrike = (zc, zp) => { const m = _bfMean([zc, zp]), t = _bfTier(m); return t ? (m > 0 ? '▲' : '▼').repeat(t) : ''; };
+    const _bfAgg = zs => { const m = _bfMean(zs); if (m == null) return ' · book shift: warming up'; const on = Math.abs(m) >= _BF.agg; return ` · book shift <b class="bf ${on ? (m > 0 ? 'bu' : 'be') : ''}" title="average 2-min shift over the grid (the more reliable read)">${on ? (m > 0 ? '▲ bullish' : '▼ bearish') : 'flat'} ${m >= 0 ? '+' : ''}${m.toFixed(2)}</b>`; };
     const n = v => v == null ? '–' : Math.round(v).toLocaleString('en-IN');
-    // buyers over sellers = total bid / total offer. On a call, buyers are bullish (green); on a put, buyers are bearish (red) and sellers green.
-    const ratio = (b, o, put) => {
+    // buyers over sellers = total bid / total offer: text green for CE buyers / PE sellers (the book level); arrows = the 2-min shift (_bfZ)
+    const SCR = {}, now = Date.now() / 1000;
+    const ratio = (b, o, put, r) => {
       if (b == null || o == null || !(o > 0) || !(b > 0)) return '<td>–</td>';
-      const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers;
-      return `<td class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}</td>`;
+      const z0 = _bfZ(r[(put ? 'pe' : 'ce') + '_symbol'], b, o, now), z = z0 == null ? null : put ? -z0 : z0; SCR[r.strike + (put ? 'p' : 'c')] = z; return _bfCell(b, o, put, z);
     };
     // live totals from the tick stream; until it has them, the chain's own snapshot (Zerodha's quote) so the grid is never blank
-    const cell = (r, put) => { const p = put ? 'pe' : 'ce', lv = SC.book[r[p + '_symbol']], b = lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; return `<td>${n(b[0])}</td><td>${n(b[1])}</td>${ratio(b[0], b[1], put)}`; };
+    const cell = (r, put) => { const p = put ? 'pe' : 'ce', lv = SC.book[r[p + '_symbol']], b = lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; return `<td>${n(b[0])}</td><td>${n(b[1])}</td>${ratio(b[0], b[1], put, r)}`; };
     const any = g.rows.some(r => ['ce', 'pe'].some(p => { const lv = SC.book[r[p + '_symbol']]; return ((lv ? lv[0] : r[p + '_tbq']) || 0) > 0; }));
     const selK = (SC.pref.selCE || '').slice(1);
-    const body = g.rows.map(r => `<tr class="${r.strike === g.atm ? 'atm' : ''}${String(r.strike) === selK ? ' sel' : ''}">${cell(r, false)}<td class="k" data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart">${fmtInt(r.strike)}</td>${cell(r, true)}</tr>`).join('');
+    const body = g.rows.map(r => { const cc = cell(r, false), pc = cell(r, true), vd = _bfStrike(SCR[r.strike + 'c'], SCR[r.strike + 'p']); return `<tr class="${r.strike === g.atm ? 'atm' : ''}${String(r.strike) === selK ? ' sel' : ''}">${cc}<td class="k${vd ? (vd[0] === '▲' ? ' kb' : ' ks') : ''}" data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart">${fmtInt(r.strike)}${vd ? ' ' + vd : ''}</td>${pc}</tr>`; }).join('');
     const ctl = `<span class="gctl">Depth ±<select data-g="n">${[3, 4, 5, 6, 7, 8, 10, 12, 15, 20].map(v => `<option value="${v}"${v === scGridN() ? ' selected' : ''}>${v}</option>`).join('')}</select>${(state.symbol || 'NIFTY') === 'NIFTY' ? ` <label><input type="checkbox" data-g="h50"${scHide50() ? ' checked' : ''}> Hide 50</label>` : ''}</span> `;
-    scSet(el, `<div class="cap">${ctl}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(g.expiry || ''))} · CE bid · offer · ratio | strike | PE bid · offer · ratio · ATM ${fmtInt(g.atm)} · grid v4</div>${any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table>${body}</table>`);
+    scSet(el, `<div class="cap">${ctl}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(g.expiry || ''))} · CE bid · offer · ratio | strike | PE bid · offer · ratio · ATM ${fmtInt(g.atm)} · grid v4${any ? _bfAgg(Object.values(SCR)) : ''}</div>${any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table>${body}</table>`);
   }
   function scNote() {
     const el = $sc('scNote'); let msg = '', bad = false; const S = SC.st;
