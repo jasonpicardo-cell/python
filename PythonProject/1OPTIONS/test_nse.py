@@ -1763,10 +1763,10 @@ def test_scalping_tab():
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
         check("strike grid controls: depth dropdown sets +-N strikes (default 5), 'Hide 50' (NIFTY only, default on) keeps 100-multiples; BANKNIFTY gets no checkbox",
-              o4["depth"] == json.dumps({"d50": [25100, 25050, 25000, 24950, 24900], "d100": [25200, 25100, 25000, 24900, 24800], "bk50": 5, "bkCtl": False, "niCtl": True}, separators=(",", ":")) or json.loads(o4["depth"]) == {"d50": [25100, 25050, 25000, 24950, 24900], "d100": [25200, 25100, 25000, 24900, 24800], "bk50": 5, "bkCtl": False, "niCtl": True}, o4["depth"])
+              o4["depth"] == json.dumps({"d50": [24900, 24950, 25000, 25050, 25100], "d100": [24800, 24900, 25000, 25100, 25200], "bk50": 5, "bkCtl": False, "niCtl": True}, separators=(",", ":")) or json.loads(o4["depth"]) == {"d50": [24900, 24950, 25000, 25050, 25100], "d100": [24800, 24900, 25000, 25100, 25200], "bk50": 5, "bkCtl": False, "niCtl": True}, o4["depth"])
         check("chart indicators: EMA 200 is a menu item on by default (new pref key e200) and is drawn", "e200: true" in seg and "SC_E200" in seg and "b.e200 =" in seg)
         check("strike grid: ATM plus and minus 5 round-hundred strikes (11 rows, no column headers) (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; shown for NIFTY and BANKNIFTY, hidden for the other indices",
-              o4["no50"] and o4["order"] == [25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600, 24500] and o4["order2"] == [25600, 25500, 25400, 25300, 25200, 25100, 25000, 24900, 24800, 24700, 24600]
+              o4["no50"] and o4["order"] == [24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500] and o4["order2"] == [24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500, 25600]
               and o4["fallback"] and o4["kq"] and o4["layout"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
         check("chart indicators: EMA seeds with the SMA and follows 2/(n+1); the RSI average waits for a full window",
               o["e"][:2] == [None, None] and o["e"][2] == 2 and abs(o["e"][3] - 3) < 1e-9 and abs(o["e"][7] - 7) < 1e-9 and o["m"] == [None, None, None, 15, 25, 35], str(o))
@@ -1774,7 +1774,8 @@ def test_scalping_tab():
         check("chart indicators: the maths runs in node", False, str(ex))
     check("home chart: a NIFTY / BANKNIFTY strike grid overlay (sibling of chartBody, never touches the SVG), round-hundred strikes only, fed by the chain's book totals, placed at the price chart's lower left",
           'id="homeGrid"' in d and "function homeGridRender" in d and "['NIFTY', 'BANKNIFTY'].includes(state.symbol" in d and "body.light-mode .sc-grid {" in d and ".sc-chartwrap, .sc-indmenu { --text: #e8ebf2;" in d and "h50 && r.strike % 100 !== 0" in d and 'id="hgN"' in d and "homeGridPrefV1" in d and "getClientRects().length" in d
-          and "['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY')" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d)
+          and "['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY')" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d
+          and "ai + HN + 1), atm" in d and "ai + HN + 1).reverse()" not in d)
     # strike-grid bias: the 2-minute book-shift z (_bfZ), backtested by bias_eval.py. Both grids carry the same block.
     blocks = re.findall(r"const _BF = \{.*?const _bfAgg = [^\n]*", d, re.S)
     check("strike grids: one identical _bfZ block in each grid, wired to the strike verdict and the caption average; no leftover level/premium/OI scoring",
@@ -1823,12 +1824,13 @@ def test_scalping_tab():
             check("strike grids: book quantities in thousands (100000 -> 100k, 2698865 -> 2,699k, exact figure in the tooltip); empty shows a dash",
                   ob["kf"] == ["0", "999", "1k", "1.5k", "10k", "10k", "100k", "2,699k", "–", "–"] and ob["q"] == ['<td title="1,00,000">100k</td>', "<td>–</td>"], str(ob["kf"]) + str(ob["q"]))
             rg = ob["rg"]
-            check("strike grids: day-range cell shows low–high, the LTP position as a % (HIGH / LOW within 5% of an end) and fills up to it, widened by a newer LTP; no range shows a dash",
+            check("strike grids: day-range cell shows low–high, the LTP position as a % (HIGH / LOW within 5% of an end) and fills up to it in a heat colour (slate at the low, amber at the high, both themes), widened by a newer LTP; no range shows a dash",
                   'style="--p:100%"' in rg[0] and rg[0].endswith('>50.0–150 <b class="hi">HIGH</b></td>') and "open 60.00" in rg[0] and "LTP 150.00 at 100%" in rg[0]
                   and 'style="--p:0%"' in rg[1] and rg[1].endswith('><b class="lo">LOW</b> 200–400</td>') and rg[2] == '<td class="rg">–</td>'
                   and "<b" not in rg[3] and "--p" not in rg[3] and rg[3].endswith(">80.0–80.0 </td>") and rg[4].endswith('>40.0–60.0 <b class="">50%</b></td>')
                   and 'rec[f"{p}_high"] = float(d.get("high") or 0)' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_adapter_zerodha.py"), encoding="utf-8").read()
-                  and "var(--g-rg) var(--p, 0%), var(--g-rg2) var(--p, 0%)" in d and d.count("--g-rg2: rgba") == 2 and "day range | strike | PE day range" in d, str(rg)[:900])
+                  and "color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo))" in d and "linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%))" in d
+                  and d.count("--g-rglo: rgba") == 2 and d.count("--g-rghi: rgba") == 2 and d.count("--g-rgt: rgba") == 2 and "--g-rg2" not in d and "day range | strike | PE day range" in d, str(rg)[:900])
         except Exception as ex:
             check("strike-grid bias: _bfZ runs in node", False, repr(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
@@ -4382,7 +4384,7 @@ console.log(JSON.stringify(out));"""
     d2 = open(DASH, encoding="utf-8").read()
     check("auto: Trend ribbon and EMA crossover checkboxes sit next to Auto Trade and exactly one stays selected",
           d2.index('id="scAutoOn"') < d2.index('id="scAutoRib"') < d2.index('id="scAutoEma"') < d2.index('id="scAutoEmaRow"')
-          and "const pick = k =>" in d2 and "$sc('scAutoRib').checked = P.strat !== 'EMA'; $sc('scAutoEma').checked = P.strat === 'EMA'" in d2)
+          and "const pick = k =>" in d2 and "for (const [id, k] of SC_AUTO_STRATS) $sc(id).checked = strat === k;" in d2)
     # START: enters on the current signal only if no auto trade is open; EXIT forces it out
     mid = next(i for i in range(W + 10, len(tr) - 5) if len(set(tr[i - 3:i + 4])) == 1 and tr[i] != 0)      # a stretch with no flip around it
     f, e, a = build(); clk.t = bars[mid]["t"] + 62; f.fresh()
@@ -4429,6 +4431,455 @@ console.log(JSON.stringify(out));"""
           and 'path == "auto"' in sv and 'st["auto"]' in sv)
 
 
+def _js_func(src, name):
+    """The source of `function name(...) {...}` sliced out of the dashboard by brace matching."""
+    i0 = src.index("function " + name + "(")
+    depth, j0 = 0, src.index("{", i0)
+    for k in range(j0, len(src)):
+        depth += src[k] == "{"; depth -= src[k] == "}"
+        if depth == 0:
+            return src[i0:k + 1]
+    raise ValueError(name)
+
+
+def test_auto_enhancements():
+    """Auto Trade desk upgrades: VWAP / day-type twins of the dashboard, the ORB / VWAP sigma / PDH-PDL trap signals,
+    the entry filters (day type, dealer gamma, book shift, VWAP side, other index), the exits (flat, time stop,
+    scale-out), strikes by delta, settings, the tab, and the replay evaluator (auto_eval.py)."""
+    import importlib, calendar as _cal, random as _r, tempfile, shutil
+    sys.path.insert(0, HERE)
+    N = importlib.import_module("nse_trade"); A = importlib.import_module("nse_autotrade")
+    d = open(DASH, encoding="utf-8").read(); sv = open(SRV, encoding="utf-8").read()
+    T0 = _cal.timegm((2026, 10, 29, 3, 45, 0))                     # Thu 09:15 IST
+    def mk(prices, t0=T0, step=60):
+        out, prev = [], prices[0]
+        for i, p in enumerate(prices):
+            out.append({"t": t0 + i * step, "o": prev, "h": max(prev, p) + 0.5, "l": min(prev, p) - 0.5, "c": p, "v": 0}); prev = p
+        return out
+    _r.seed(11)
+    trend_up = [25000 + 1.2 * i + _r.gauss(0, 1.0) for i in range(150)]
+    rng = [25000 + 6 * math.sin(i / 4.0) + _r.gauss(0, 1.0) for i in range(150)]
+    # 1. VWAP bands and day type: bar-for-bar the same as the dashboard's _vwapBands / _dayType
+    js = "const _chart = { hasVolume: false }; const _hm = t => '';\n" + _js_func(d, "_vwapBands") + "\n" + _js_func(d, "_dayType") + f"""
+const out = [];
+for (const cs of {json.dumps([mk(trend_up), mk(rng), mk(trend_up[:20]), mk(trend_up, T0 + 1200)])}) {{
+  const b = _vwapBands(cs), k = [];
+  for (let i = 0; i < cs.length; i++) {{ const t = _dayType(cs.slice(0, i + 1)); k.push([t.kind, t.dir || 0]); }}
+  out.push({{ vw: b.vw, sd: b.sd, k }});
+}}
+console.log(JSON.stringify(out));"""
+    res = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+    try:
+        ref = json.loads(res.stdout.strip().splitlines()[-1])
+    except Exception:
+        ref = None
+    ok_vw = ok_dt = ref is not None
+    for j, prices in enumerate([trend_up, rng, trend_up[:20]] if ref else []):
+        cs = mk(prices)
+        vw, sd = A.vwap_bands(cs)
+        ok_vw = ok_vw and all(abs(a - b) < 1e-6 for a, b in zip(vw, ref[j]["vw"])) and all(abs(a - b) < 1e-6 for a, b in zip(sd, ref[j]["sd"]))
+        ok_dt = ok_dt and [list(x) for x in A.day_type_series(cs)] == ref[j]["k"]
+    ok_dt = ok_dt and ref and [list(x) for x in A.day_type_series(mk(trend_up, T0 + 1200))] == ref[3]["k"]
+    check("auto+: session VWAP and sigma equal the dashboard's _vwapBands on every bar", ok_vw, res.stderr[:300])
+    check("auto+: day type after every bar equals the dashboard's _dayType (forming / range / trend / broken / unknown)", ok_dt, res.stderr[:300])
+    kinds = {k for k, _ in A.day_type_series(mk(trend_up))} | {k for k, _ in A.day_type_series(mk(rng))}
+    check("auto+: the synthetic days read as one trend day and one range day", A.day_type_series(mk(trend_up))[-1] == ("trend", 1)
+          and A.day_type_series(mk(rng))[-1][0] == "range" and "forming" in kinds, str(kinds))
+    # 2. ORB: break of the 15-minute range, once per side, flat through the middle
+    orb = [105 + (5 if i % 2 else -5) * 0.9 for i in range(15)] + [112, 113, 104, 103, 98, 97, 112, 113, 104, 101, 99]
+    ob = mk(orb); sg = A.orb_series(ob, 15, 1)
+    check("auto+ ORB: a close above the 09:15-09:30 range goes long, back through its middle goes flat, a close below goes short",
+          sg[15] == 1 and sg[16] == 1 and sg[17] == 0 and sg[19] == -1, str(sg[15:]))
+    check("auto+ ORB: once per side per day (a second break the same way is not traded)", sg[21] == 0 and sg[22] == 0 and -1 not in sg[23:], str(sg[15:]))
+    late = mk([105 + (5 if i % 2 else -5) * 0.9 for i in range(15)] + [104] * 100 + [130])
+    check("auto+ ORB: no new break after 11:00", A.orb_series(late, 15, 1)[-1] == 0)
+    check("auto+ ORB: nothing without the 09:15 bar loaded", set(A.orb_series(mk(orb, T0 + 600), 15, 1)) == {0})
+    # 3. PDH/PDL trap: yesterday 90-120; today pokes above 120 and closes back under it, above VWAP -> short; flat at VWAP
+    yday = mk([100, 120, 90, 110], T0 - 86400)
+    today = mk([112, 114, 116, 118, 117])
+    today.append({"t": today[-1]["t"] + 60, "o": 117, "h": 121.5, "l": 116.5, "c": 119, "v": 0})
+    today += mk([116, 114, 111, 108, 125, 126], today[-1]["t"] + 60)
+    tb = yday + today; ts_ = A.trap_series(tb)
+    i_trap = len(yday) + 5
+    check("auto+ trap: a failed break of yesterday's high (closes back below it, above VWAP) goes short",
+          ts_[i_trap] == -1 and ts_[i_trap - 1] == 0, str(ts_[len(yday):]))
+    check("auto+ trap: flat at VWAP (target), and once per side per day", 0 in ts_[i_trap + 1:] and ts_[-1] == 0 and ts_[-2] == 0, str(ts_[len(yday):]))
+    check("auto+ trap: nothing without yesterday's bars", set(A.trap_series(today)) == {0})
+    # 4. VWAP sigma playbook: trend day -> pullback long only; range day -> fades only
+    tp = list(trend_up)
+    while True:                                                         # pull back to the +1 sigma band ...
+        cs_ = mk(tp); vw_, sd_ = A.vwap_bands(cs_)
+        if tp[-1] - 3 < vw_[-1] + sd_[-1] + 1: break
+        tp.append(tp[-1] - 3)
+    vb = mk(tp)
+    band = vw_[-1] + sd_[-1]
+    vb.append({"t": vb[-1]["t"] + 60, "o": tp[-1], "h": band + 6, "l": band - 1, "c": band + 4, "v": 0})     # ... and hold it
+    vs, vst = A.vwap_series(vb)
+    check("auto+ VWAP: a trend-up day trades pullbacks long (style trend) and never shorts", 1 in vs and -1 not in vs and "fade" not in vst, str(vs[30:]))
+    spike = [25000 + 6 * math.sin(i / 4.0) for i in range(60)] + [25012, 25020, 25026, 25018, 25008, 25003, 24999, 24996]
+    vs2, vst2 = A.vwap_series(mk(spike))
+    check("auto+ VWAP: a range day fades a close back inside +2 sigma (short, style fade) and goes flat at VWAP",
+          -1 in vs2 and "fade" in vst2 and "trend" not in vst2 and vs2[-1] == 0, str(vs2[55:]))
+    # 5. options maths: delta strike, dealer-gamma sign, grid book rows
+    def chain(spot=25000, ce_oi=1000, pe_oi=1000, big=None):
+        rows = []
+        for k in range(24000, 26050, 50):
+            r = {"strike": k, "ce_symbol": f"NIFTY{k}CE", "pe_symbol": f"NIFTY{k}PE", "ce_iv": 14, "pe_iv": 14, "ce_oi": ce_oi, "pe_oi": pe_oi,
+                 "ce_tbq": 1000, "ce_tsq": 1000, "pe_tbq": 1000, "pe_tsq": 1000}
+            if big and k == 25000:
+                r[big + "_oi"] = 10 ** 6
+            rows.append(r)
+        return {"underlying_value": spot, "dte": 3, "atm_iv": 14, "strikes": rows}
+    check("auto+ delta strike: 0.5 picks ATM, 0.25 an OTM round hundred (CE above, PE below), never a 50",
+          A.pick_by_delta(chain(), "CE", 0.5) == 25000 and A.pick_by_delta(chain(), "CE", 0.25) > 25000 and A.pick_by_delta(chain(), "PE", 0.25) < 25000
+          and A.pick_by_delta(chain(), "CE", 0.25) % 100 == 0 and A.pick_by_delta({}, "CE", 0.5) is None)
+    check("auto+ gamma: heavy call OI at the money = dealers long gamma (+), heavy put OI = short (-), no chain = None",
+          A.gex_total(chain(big="ce")) > 0 and A.gex_total(chain(big="pe")) < 0 and A.gex_total(None) is None)
+    gb = A.grid_book(chain())
+    check("auto+ book rows: ATM +-5 round-hundred strikes, CE +1 and PE -1", len(gb) == 22 and {x[1] for x in gb} == {1, -1} and all(int(x[0][5:10]) % 100 == 0 for x in gb), str(gb[:2]))
+    BE = importlib.import_module("bias_eval")
+    s1, s2 = A.Shift(), BE.Shift(); same = True
+    for i in range(80):
+        b_, o_ = 1000 + 300 * math.sin(i / 5) + _r.uniform(0, 50), 1000
+        same = same and s1.z("k", b_, o_, 1000 + 7 * i) == s2.z("k", b_, o_, 1000 + 7 * i)
+    check("auto+ book shift: the server twin equals bias_eval's (both twins of _bfZ) and _BF matches the dashboard",
+          same and A.bf_from_html(DASH) == BE.BF and set(A.BF) == set(BE.BF))
+    # 6. the trader: filters hold back entries, START ignores them, exits close, setups go flat
+    clkv = [T0]
+    clk = lambda: clkv[0]
+    class Feed:
+        def __init__(self):
+            self.m = {f"NFO:NIFTY{k}{t}": dict(under="NIFTY", typ=t, strike=k, expiry="2026-11-03", lot=65, ts=f"NIFTY{k}{t}") for k in (24700, 25300) for t in ("CE", "PE")}
+        def quote(self, i): return dict(bid=99.0, ask=99.5, ltp=99.2, ts=clk())
+        def meta(self, i): return self.m.get(i)
+        def spot(self, u): return 25000.0
+        def depth(self, i): return {"asks": [{"p": 99.5, "q": 5000}], "bids": [{"p": 99.0, "q": 5000}]}
+    picks = []
+    def pick(sym, typ, off, delta=None):
+        picks.append(delta); k = 24700 if typ == "CE" else 25300
+        return f"NFO:NIFTY{k}{typ}", k, 25000
+    def build(bars, other=None, **kw):
+        clkv[0] = bars[0]["t"]
+        e = N.Engine(Feed(), None, N.Config(env={"NSE_TRADE_MODE": "paper"}), clock=clk, async_exits=False, sleep=lambda s: None)
+        src = lambda sym: bars if sym == "NIFTY" or other is None else other            # noqa: E731
+        a = A.AutoTrader(e, lambda sym, tf: [b for b in src(sym) if b["t"] <= clkv[0]], pick, None, clock=clk, **kw)
+        return e, a
+    base = {"enabled": True, "mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2}
+    # a day that flips the ribbon bullish late in a down move (40 down, then up)
+    _r.seed(3)
+    px = [25200 - 3 * i + _r.gauss(0, 1) for i in range(70)] + [25000 + 4 * i + _r.gauss(0, 1) for i in range(1, 60)]
+    fb = mk(px)
+    tr = A.ttr_trend(fb)
+    i_up = next(i for i in range(71, len(tr)) if tr[i] == 1 and tr[i - 1] == -1)
+    def run(a, upto, every=20):
+        i = 0
+        while fb[i]["t"] + 62 <= fb[upto]["t"] + 62:
+            for dt in range(62, 122, every):
+                clkv[0] = fb[i]["t"] + dt; a.step()
+            i += 1
+            if i >= len(fb): break
+    e, a = build(fb); a.configure(dict(base, gate_book=True))
+    a.book_z = None
+    run(a, i_up)
+    check("auto+ filter: a flip whose book shift is not ready waits (no order) and says why", not e.pos and a.want and "book shift not ready" in a.msg, a.msg)
+    run(a, i_up + A.CONFIRM_BARS + 2)
+    check("auto+ filter: still unconfirmed after the confirm window the entry is skipped (logged), nothing is bought",
+          not e.pos and a.want is None and any("entry skipped" in x["msg"] for x in a.events), str(a.events[-2:]))
+    e, a = build(fb); a.configure(dict(base, gate_book=True)); a.book_z = -1.0
+    run(a, i_up)
+    held_neg = bool(e.pos)
+    a.book_z = 1.0; run(a, i_up + 1)
+    check("auto+ filter: a bull flip waits while the book shift is bearish and enters once it turns bullish (within the window)",
+          not held_neg and [(p.meta["typ"], p.side) for p in e.pos.values()] == [("CE", 1)], f"{held_neg} {a.msg}")
+    e, a = build(fb, gex_fn=lambda s: 5.0); a.configure(dict(base, gate_gex=True)); run(a, i_up + 1)
+    check("auto+ filter: dealers long gamma hold back a trend entry", not e.pos and "long gamma" in a.msg, a.msg)
+    e, a = build(fb, gex_fn=lambda s: -5.0); a.configure(dict(base, gate_gex=True)); run(a, i_up + 1)
+    check("auto+ filter: dealers short gamma let it through", len(e.pos) == 1)
+    e, a = build(fb); a.configure(dict(base, gate_day=True)); run(a, i_up + 1)
+    check("auto+ filter: the day-type filter holds back a ribbon flip that is not with a trend day", not e.pos and ("day type" in a.msg or "trend day" in a.msg), a.msg)
+    e, a = build(fb, other=[]); a.configure(dict(base, gate_lead=True)); run(a, i_up + 1)
+    check("auto+ filter: the other-index filter needs that index's candles (none here: held back)", not e.pos and "BANKNIFTY" in a.msg, a.msg)
+    e, a = build(fb, other=[dict(b, c=2 * fb[0]["c"] - b["c"], h=2 * fb[0]["c"] - b["l"], l=2 * fb[0]["c"] - b["h"]) for b in fb]); a.configure(dict(base, gate_lead=True)); run(a, i_up + 1)
+    check("auto+ filter: BANKNIFTY trending the other way holds back a NIFTY bull flip", not e.pos and "does not agree" in a.msg, a.msg)
+    e, a = build(fb, other=fb); a.configure(dict(base, gate_lead=True)); run(a, i_up + 1)
+    check("auto+ filter: BANKNIFTY agreeing lets it through", len(e.pos) == 1, a.msg)
+    e, a = build(fb); a.configure(dict(base, gate_vwap=True)); a._bars_last = [b for b in fb if b["t"] <= fb[i_up]["t"]]
+    vw_ = A.vwap_bands(a._bars_last)[0][-1]
+    ok_, why_ = a._gates(1, "trend", clkv[0])
+    check("auto+ filter: VWAP side passes a bull entry only with the close above session VWAP", ok_ == (a._bars_last[-1]["c"] > vw_) and (ok_ or "VWAP" in why_), why_)
+    e, a = build(fb, gex_fn=lambda s: 5.0); a.configure(dict(base, gate_gex=True, gate_book=True, enabled=False))
+    clkv[0] = fb[i_up + 2]["t"] + 62; r = a.configure(dict(base, gate_gex=True, gate_book=True, action="start"))
+    check("auto+ START: enters on the current signal even with filters that would block it", r["ok"] and len(e.pos) == 1, str(r))
+    # exits: time stop, flat exit, scale-out
+    def held(bars_, side=1, **cfg):
+        e, a = build(bars_); a.configure(dict(base, **cfg))
+        e.buy("NFO:NIFTY24700CE", 2, {}, src="auto")
+        a.entry = {"t": bars_[40]["t"], "px": bars_[40]["c"], "atr": 10.0, "side": side, "scaled": False}
+        return e, a
+    flat = mk([25000 + _r.gauss(0, 1) for _ in range(60)])
+    e, a = held(flat, time_stop=5); a._manage(flat[:45])
+    still = bool(e.pos); a._manage(flat[:46])
+    check("auto+ exit: time stop closes a trade with no 1-ATR move after N candles (not before)", still and not e.pos and "time stop" in e.trades[-1]["why"], str(e.trades[-1:]))
+    run_up = mk([25000 + 3 * i for i in range(60)])
+    e, a = held(run_up, time_stop=5); a._manage(run_up[:50])
+    check("auto+ exit: the time stop leaves a trade that moved 1 ATR alone", bool(e.pos))
+    e, a = held(run_up, scale_out=True); a._manage(run_up[:45])
+    lots_left = sum(p.qty for p in e.pos.values()) // 65; a._manage(run_up[:50])
+    check("auto+ exit: scale-out closes half (1 of 2 lots) once, at 1 ATR in favour", lots_left == 1 and sum(p.qty for p in e.pos.values()) // 65 == 1
+          and "scale-out" in e.trades[-1]["why"] and len(e.trades) == 1, f"{lots_left} {e.trades}")
+    dip = mk([25000 + 3 * i for i in range(50)] + [25150 - 25 * i for i in range(1, 6)])
+    e, a = held(dip, flat_exit=True); a._manage(dip[:48])
+    in_ = bool(e.pos); a._manage(dip)
+    check("auto+ exit: flat exit closes when a close goes back through the ribbon midline, not before", in_ and not e.pos and "flat exit" in e.trades[-1]["why"], str(e.trades[-1:]))
+    e, a = held(dip); a._manage(dip)
+    check("auto+ exit: all exits off by default (nothing closes)", bool(e.pos))
+    # a setup strategy goes flat on its own signal
+    ob2 = mk([105 + (5 if i % 2 else -5) * 0.9 for i in range(15)] + [104, 104, 112, 113, 114, 104, 104, 104], T0)
+    clkv[0] = ob2[0]["t"]
+    e = N.Engine(Feed(), None, N.Config(env={"NSE_TRADE_MODE": "paper"}), clock=clk, async_exits=False, sleep=lambda s: None)
+    warm = mk([105] * 40, T0 - 86400)
+    a = A.AutoTrader(e, lambda sym, tf: warm + [b for b in ob2 if b["t"] <= clkv[0]], pick, None, clock=clk)
+    a.configure(dict(base, strategy="ORB"))
+    log = []
+    for i in range(len(ob2)):
+        for dt in (62, 66, 70):
+            clkv[0] = ob2[i]["t"] + dt; a.step()
+        log.append(len(e.pos))
+    check("auto+ ORB trade: enters on the break and exits when the signal goes flat", log[17] == 1 and log[-1] == 0 and "ORB 15m exit" in e.trades[-1]["why"], f"{log} {e.trades[-1:]}")
+    # delta strike, settings, state
+    e, a = build(fb); a.configure(dict(base, strike="DELTA", delta=0.55)); clkv[0] = fb[i_up]["t"] + 62
+    a.configure(dict(base, strike="DELTA", delta=0.55, action="start"))
+    check("auto+ strike by delta: the pick asks for the target delta", picks[-1] == 0.55 and len(e.pos) == 1, str(picks[-3:]))
+    bad = [{"strategy": "MACD"}, {"orb_min": 20}, {"time_stop": -1}, {"time_stop": 500}, {"strike": "ITM"}, {"delta": 1.2}]
+    check("auto+ settings: bad strategy / ORB minutes / time stop / strike mode / delta are refused", not any(a.configure(b_)["ok"] for b_ in bad))
+    st = a.state()
+    check("auto+ state: every new setting and the filter readings are reported to the tab",
+          all(k in st["cfg"] for k in ("orb_min", "gate_day", "gate_gex", "gate_book", "gate_vwap", "gate_lead", "flat_exit", "time_stop", "scale_out", "strike", "delta"))
+          and {"day", "book", "gex", "style"} <= set(st["ctx"]))
+    check("auto+ defaults: every filter and exit is off, strikes by offset (existing behaviour unchanged)",
+          A.AutoTrader(None, None, None).cfg["strike"] == "OFFSET" and not any(A.AutoTrader(None, None, None).cfg[k] for k in A.GATES + ("flat_exit", "time_stop", "scale_out")))
+    # tab and server wiring
+    check("auto+ tab: ORB / VWAP sigma / trap strategies, filter and exit checkboxes, delta strike, sent to the server",
+          all(f'id="{x}"' in d for x in ("scAutoOrb", "scAutoVw", "scAutoTrap", "scAutoOrbM", "scAutoDel", "scAutoDv", "scAutoGDay", "scAutoGGex", "scAutoGBook", "scAutoGVwap", "scAutoGLead", "scAutoFlat", "scAutoTS", "scAutoScale"))
+          and "for (const [, k, sk] of SC_AUTO_FLAGS) if (sk) body[sk] = !!P[k];" in d and "strike: P.byDelta ? 'DELTA' : 'OFFSET'" in d and "orb_min:" in d)
+    check("auto+ server: the trader gets dealer gamma and book samples from memory, delta strikes from the cached chain, _BF from the dashboard",
+          "gex_fn=_auto_gex, book_fn=_auto_book" in sv and "def _auto_chain(" in sv and "_auto_mod.pick_by_delta(_auto_chain(sym)" in sv and "_auto_mod.bf_from_html(" in sv
+          and "z.book_totals(" in sv[sv.index("def _auto_book("):sv.index("def _auto_pick(")])
+    # the replay evaluator runs the real engine and trader over recorded snapshots
+    E = importlib.import_module("auto_eval")
+    tmp = tempfile.mkdtemp()
+    try:
+        def snap_file(path, day, prices):
+            with open(path, "w") as fh:
+                for i, p in enumerate(prices):
+                    hh, mm = divmod(9 * 60 + 15 + i, 60)
+                    rows = []
+                    for k in range(int(p // 100) * 100 - 500, int(p // 100) * 100 + 600, 100):
+                        rows.append({"strike": k, "ce_symbol": f"NFO:NIFTY{k}CE", "pe_symbol": f"NFO:NIFTY{k}PE", "ce_iv": 14, "pe_iv": 14, "ce_oi": 5000, "pe_oi": 5000,
+                                     "ce_bid": max(1, p - k + 50) - 0.5, "ce_ask": max(1, p - k + 50), "ce_ltp": max(1, p - k + 50),
+                                     "pe_bid": max(1, k - p + 50) - 0.5, "pe_ask": max(1, k - p + 50), "pe_ltp": max(1, k - p + 50),
+                                     "ce_tbq": 1000, "ce_tsq": 1000, "pe_tbq": 1000, "pe_tsq": 1000})
+                    fh.write(json.dumps({"timestamp": f"{day} {hh:02d}:{mm:02d}:05", "underlying_value": p, "dte": 3, "atm_iv": 14, "lot_size": 65,
+                                         "expiry": "10-Nov-2026", "symbol": "NIFTY", "strikes": rows, "pad": "x" * 3000}) + "\n")
+        snap_file(os.path.join(tmp, "NIFTY_2026-11-02.jsonl"), "02-Nov-2026", [25000 + 5 * math.sin(i / 6) for i in range(300)])
+        snap_file(os.path.join(tmp, "NIFTY_2026-11-03.jsonl"), "03-Nov-2026", px + [px[-1] - 4 * i for i in range(1, 80)] + [px[-1] - 320 + 4 * i for i in range(1, 80)])
+        k_ = "NIFTY_2026-11-03"
+        sn = E.load(os.path.join(tmp, k_ + ".jsonl")); warm_ = E.minute_bars(E.load(os.path.join(tmp, "NIFTY_2026-11-02.jsonl")))
+        trs, cut, n_ent = E.run_day("NIFTY", sn, warm_, [], {"strategy": "RIBBON"})
+        check("auto_eval: a replayed day trades the ribbon through the paper engine (entries, closes with net P&L, closed at the end)",
+              n_ent >= 2 and trs and all("net" in t for t in trs), f"{n_ent} {len(trs)} {cut}")
+        out = subprocess.run([sys.executable, os.path.join(HERE, "auto_eval.py"), "--sym", "NIFTY", "--dir", tmp, "--only", "RIBBON +VWAP"], capture_output=True, text=True, timeout=300)
+        check("auto_eval: the command line runs and prints the config table", out.returncode == 0 and "RIBBON +VWAP side" in out.stdout and "Traceback" not in out.stderr, out.stderr[-400:])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_auto_pro():
+    """Auto Trade pro features: premium selling (iron fly / straddle at the pin, expiry pin, tent exit, cooldown),
+    the RV/IV, futures-flow and option-writer filters, ATR stop / trail / breakeven armed on the engine, one
+    re-entry after a stop, the day profit lock, settings, tab and server wiring, and their replay configs."""
+    import importlib, calendar as _cal, random as _r
+    sys.path.insert(0, HERE)
+    N = importlib.import_module("nse_trade"); A = importlib.import_module("nse_autotrade"); E = importlib.import_module("auto_eval")
+    d = open(DASH, encoding="utf-8").read(); sv = open(SRV, encoding="utf-8").read()
+    T0 = _cal.timegm((2026, 10, 29, 3, 45, 0))                     # Thu 09:15 IST
+    def mk(prices, t0=T0, step=60):
+        out, prev = [], prices[0]
+        for i, p in enumerate(prices):
+            out.append({"t": t0 + i * step, "o": prev, "h": max(prev, p) + 0.5, "l": min(prev, p) - 0.5, "c": p, "v": 0}); prev = p
+        return out
+    def chain(spot=25000, big=None, o15=None, dte=3, iv=14):
+        rows = []
+        for k in range(24000, 26050, 50):
+            r = {"strike": k, "ce_symbol": f"NIFTY{k}CE", "pe_symbol": f"NIFTY{k}PE", "ce_iv": iv, "pe_iv": iv, "ce_oi": 1000, "pe_oi": 1000}
+            if big and k == big[0]:
+                r[big[1] + "_oi"] = 10 ** 6
+            if o15:
+                r["ce_oi_15m"], r["pe_oi_15m"] = o15
+            rows.append(r)
+        return {"underlying_value": spot, "dte": dte, "atm_iv": iv, "strikes": rows}
+    # 1. pure reads
+    flat = mk([25000.0] * 30)
+    zig = mk([25000 * (1.001 if i % 2 else 1.0) for i in range(30)])
+    rv = A.realised_vol(zig, 1)
+    check("pro: realised vol is 0 on a flat tape, ~annualised stdev on a zig-zag, None with too few bars",
+          A.realised_vol(flat, 1) == 0 and rv and 20 < rv < 40 and A.realised_vol(flat[:5], 1) is None, str(rv))
+    check("pro: ATM IV from the chain (atm_iv, else the ATM row)", A.atm_iv(chain(iv=17)) == 17 and A.atm_iv(dict(chain(iv=17), atm_iv=None)) == 17 and A.atm_iv(None) is None)
+    check("pro: option writers - puts written = bullish (+), calls written = bearish (-), no 15-min change = None",
+          A.writer_read(chain(o15=(0, 5000))) > 0.9 and A.writer_read(chain(o15=(5000, 0))) < -0.9 and A.writer_read(chain()) is None)
+    check("pro: futures taker flow imbalance", A.flow_imbalance({"b5": 300, "s5": 100}) == 0.5 and A.flow_imbalance({"b5": 0, "s5": 0}) is None and A.flow_imbalance(None) is None)
+    check("pro: pin = the near-the-money round hundred with the most OI", A.pin_strike(chain(big=(25200, "pe"))) == 25200 and A.pin_strike(chain()) == 25000
+          and A.pin_strike(chain(big=(25700, "ce"))) == 25000)
+    check("pro: contract delta from the chain", 0.45 < A.option_delta(chain(), 25000, "CE") < 0.6 and A.option_delta(chain(), 25500, "PE") > 0.8 and A.option_delta({}, 1, "CE") is None)
+    # 2. harness
+    clkv = [T0]
+    clk = lambda: clkv[0]
+    class Feed:
+        def __init__(self): self.px, self.ref = {}, lambda: 25000.0
+        def quote(self, i):
+            m = re.match(r"NFO:NIFTY(\d+)", i)
+            p = self.px.get(i, max(5.0, 100.0 - abs(int(m.group(1)) - self.ref()) / 5) if m else 100.0)   # wings cheaper than the shorts at the money
+            return dict(bid=p - 0.25, ask=p + 0.25, ltp=p, ts=clk())
+        def meta(self, i):
+            m = re.match(r"NFO:NIFTY(\d+)(CE|PE)$", i)
+            return dict(under="NIFTY", typ=m.group(2), strike=int(m.group(1)), expiry="2026-11-03", lot=65, ts=i[4:]) if m else None
+        def spot(self, u): return 25000.0
+        def depth(self, i): q = self.quote(i); return {"asks": [{"p": q["ask"], "q": 9999}], "bids": [{"p": q["bid"], "q": 9999}]}
+    def pick(sym, typ, off, delta=None):
+        k = int(25000 + off); return f"NFO:NIFTY{k}{typ}", k, 25000
+    def build(bars, **kw):
+        clkv[0] = bars[0]["t"]
+        f = Feed()
+        e = N.Engine(f, None, N.Config(env={"NSE_TRADE_MODE": "paper"}), clock=clk, async_exits=False, sleep=lambda s: None)
+        a = A.AutoTrader(e, lambda sym, tf: [b for b in bars if b["t"] <= clkv[0]], pick, None, clock=clk, **kw)
+        return f, e, a
+    base = {"enabled": True, "mode": "BUY", "sym": "NIFTY", "tf": 1, "ce_off": -300, "pe_off": 300, "start": "09:15", "end": "15:15", "lots": 2}
+    def run(a, e, bars, upto, frm=0):
+        for i in range(frm, upto + 1):
+            for dt in (62, 66, 70):
+                clkv[0] = bars[i]["t"] + dt; e.step(); a.step()
+    # 3. filters on the ribbon flip (same flip day as the enhancements test)
+    _r.seed(3)
+    px = [25200 - 3 * i + _r.gauss(0, 1) for i in range(70)] + [25000 + 4 * i + _r.gauss(0, 1) for i in range(1, 60)]
+    fb = mk(px); tr = A.ttr_trend(fb)
+    i_up = next(i for i in range(71, len(tr)) if tr[i] == 1 and tr[i - 1] == -1)
+    for name, kw, cfg, want_in in (
+            ("RV/IV: a buyer is held back when realised vol is far under IV", {"chain_fn": lambda s: chain(iv=200)}, {"gate_vol": True}, False),
+            ("RV/IV: a buyer goes when realised vol pays for the premium", {"chain_fn": lambda s: chain(iv=1)}, {"gate_vol": True}, True),
+            ("RV/IV: a seller is held back when realised vol is lively", {"chain_fn": lambda s: chain(iv=1)}, {"gate_vol": True, "mode": "SELL"}, False),
+            ("fut flow: sellers aggressive holds back a bull entry", {"flow_fn": lambda s: {"b5": 100, "s5": 300}}, {"gate_flow": True}, False),
+            ("fut flow: buyers aggressive lets it through", {"flow_fn": lambda s: {"b5": 300, "s5": 100}}, {"gate_flow": True}, True),
+            ("fut flow: no flow yet holds it back", {"flow_fn": lambda s: None}, {"gate_flow": True}, False),
+            ("OI writers: call writing holds back a bull entry", {"chain_fn": lambda s: chain(o15=(5000, 0))}, {"gate_oi": True}, False),
+            ("OI writers: put writing lets it through", {"chain_fn": lambda s: chain(o15=(0, 5000))}, {"gate_oi": True}, True)):
+        f, e, a = build(fb, **kw); a.configure(dict(base, **cfg)); run(a, e, fb, i_up + 1)
+        check("pro filter: " + name, bool(e.pos) == want_in, a.msg)
+    # 4. ATR stop / trail / breakeven are armed on the engine position, in option points (ATR x delta)
+    f, e, a = build(fb); a.configure(dict(base, tm_sl_atr=1.0, tm_trail_atr=1.5, tm_be_atr=0.5)); run(a, e, fb, i_up)
+    p = next(iter(e.pos.values()), None)
+    atr = A.atr_series([b for b in fb if b["t"] <= fb[i_up]["t"]])[-1]
+    check("pro manage: entry carries a stop 1 ATR x 0.5 delta under, a 1.5 ATR trail and breakeven at 0.5 ATR",
+          p is not None and abs((p.avg - p.sl) - atr * 0.5) < 0.6 and abs(p.trail - 1.5 * atr * 0.5) < 0.02 and abs((p.be_at - p.avg) - 0.5 * atr * 0.5) < 0.06,
+          f"{p and p.exits()} atr={atr}")
+    f, e, a = build(fb, chain_fn=lambda s: chain()); a.configure(dict(base, tm_trail_atr=2.0)); run(a, e, fb, i_up)
+    p = next(iter(e.pos.values()), None)
+    dl = A.option_delta(chain(), p.meta["strike"], "CE") if p else 0
+    check("pro manage: with a chain the points use the contract's own delta", p is not None and abs(p.trail - 2.0 * atr * dl) < 0.02, f"{p and p.trail} {dl}")
+    f, e, a = build(fb); a.configure(base); run(a, e, fb, i_up)
+    check("pro manage: off by default (no exits armed)", all(v in (None, False, 50) for k, v in next(iter(e.pos.values())).exits().items() if k != "u_dir"))
+    # 5. one re-entry after a stop, while the signal holds
+    f, e, a = build(fb); a.configure(dict(base, reentry=True)); run(a, e, fb, i_up)
+    inst = next(iter(e.pos))
+    e.exit(inst, 100, "stop 95.00", wait=True)
+    n0 = a.entries
+    j = next(k for k in range(i_up + 1, len(fb)) if fb[k]["c"] > fb[k - 1]["c"] and tr[k] == 1)
+    run(a, e, fb, j, i_up + 1)
+    check("pro re-entry: after an engine stop, the next candle closing with the signal re-enters once", a.entries == n0 + 1 and len(e.pos) == 1
+          and any("re-entry" in x["msg"] for x in a.events), f"{a.entries} {a.msg}")
+    e.exit(next(iter(e.pos)), 100, "stop 94.00", wait=True)
+    run(a, e, fb, min(len(fb) - 1, j + 6), j + 1)
+    check("pro re-entry: only once per signal (a second stop is final)", a.entries == n0 + 1 and not e.pos, str(a.entries))
+    f, e, a = build(fb); a.configure(dict(base, reentry=True)); run(a, e, fb, i_up)
+    e.exit(next(iter(e.pos)), 100, "manual", wait=True); n0 = a.entries; run(a, e, fb, min(len(fb) - 1, i_up + 8), i_up + 1)
+    check("pro re-entry: not after a manual / non-stop exit", a.entries == n0 and not e.pos)
+    # 6. profit lock
+    f, e, a = build(fb); a.configure(dict(base, lock_at=2000, lock_give=50)); run(a, e, fb, i_up)
+    inst = next(iter(e.pos))
+    avg = e.pos[inst].avg
+    f.px[inst] = avg + 30.5; clkv[0] += 1; a.step(); up_ok = bool(e.pos) and a.peak > 3000          # +30 x 130 = Rs 3,900 peak
+    f.px[inst] = avg + 10.5; clkv[0] += 1; a.step()                                                  # back to ~Rs 1,300: over half given back
+    check("pro lock: a profit past the lock level is left to run", up_ok, str(a.peak))
+    check("pro lock: giving back half of the peak closes it and ends the day; START is refused",
+          not e.pos and a.locked and "profit lock" in e.trades[-1]["why"] and not a.configure(dict(base, action="start"))["ok"], f"{e.trades[-1:]} {a.locked}")
+    # 7. PREMIUM
+    rng = [25000 + 6 * math.sin(i / 4.0) for i in range(80)]
+    rb = mk(rng)
+    long_g = lambda s: chain(big=(25000, "ce"))                                       # pin 25000, dealers long gamma
+    f, e, a = build(rb, chain_fn=long_g); a.configure(dict(base, strategy="PREMIUM", prem_wing=300)); run(a, e, rb, 25)
+    check("pro premium: nothing before 9:45 (day type still forming)", not e.pos and a.entries == 0, a.msg)
+    run(a, e, rb, 40, 26)
+    legs = sorted((p.meta["strike"], p.meta["typ"], p.side) for p in e.pos.values())
+    g = next(iter(e.groups.values()), {})
+    check("pro premium: on a range day with dealers long gamma it sells an iron fly at the pin (shorts 25000, wings +-300)",
+          legs == [(24700, "PE", 1), (25000, "CE", -1), (25000, "PE", -1), (25300, "CE", 1)] and a.entries == 1, str(legs))
+    credit = sum(-p.side * p.avg * p.qty for p in e.pos.values())
+    check("pro premium: combined stop and target are 50% of the credit, on the engine's structure", g.get("sl") and abs(g["sl"] - credit * 0.5) < 1 and abs(g["tp"] - credit * 0.5) < 1, str(g))
+    run(a, e, rb, 45, 41)
+    check("pro premium: one structure at a time", a.entries == 1 and len(e.pos) == 4)
+    tent = rb[:46] + mk([25200, 25220, 25230], rb[45]["t"] + 60)
+    a.bars_fn = lambda sym, tf: [b for b in tent if b["t"] <= clkv[0]]
+    run(a, e, tent, 47, 46)
+    order = [t["side"] for t in e.trades[-4:]]
+    check("pro premium: the index leaving the tent (half the wing) closes all legs, shorts first", not e.pos and order[:2] == ["short", "short"] and "tent" in e.trades[-1]["why"], str(order))
+    run(a, e, tent, 48, 48)
+    check("pro premium: no new structure inside the 15-minute pause", not e.pos and "pause" in a.msg, a.msg)
+    f, e, a = build(rb, chain_fn=lambda s: chain(big=(25000, "pe"))); a.configure(dict(base, strategy="PREMIUM")); run(a, e, rb, 40)
+    check("pro premium: dealers short gamma - no selling", not e.pos and "short gamma" in a.msg, a.msg)
+    f, e, a = build(rb, chain_fn=long_g); a.configure(dict(base, strategy="PREMIUM", prem_kind="STRADDLE", prem_center="ATM")); run(a, e, rb, 40)
+    check("pro premium: straddle = the two ATM shorts only", sorted((p.meta["typ"], p.side) for p in e.pos.values()) == [("CE", -1), ("PE", -1)])
+    up = [25000 + 2 * i for i in range(300)]
+    ub = mk(up)
+    def live_chain(dte=0.3):                                       # the chain follows the index; the pin is the nearest hundred
+        sp = [b for b in ub if b["t"] <= clkv[0] - 60][-1]["c"]
+        return chain(spot=sp, big=(round(sp / 100) * 100, "ce"), dte=dte)
+    f, e, a = build(ub, chain_fn=lambda s: live_chain()); a.configure(dict(base, strategy="PREMIUM", prem_wing=1000))
+    f.ref = lambda: [b for b in ub if b["t"] <= clkv[0] - 60][-1]["c"]
+    run(a, e, ub, 200); before = bool(e.pos)
+    run(a, e, ub, 260, 201)
+    check("pro premium: expiry day pin mode - nothing on a trend day before 13:30, sells at the pin after it", not before and len(e.pos) == 4 and "expiry pin" in " ".join(x["msg"] for x in a.events), a.msg)
+    f, e, a = build(ub, chain_fn=lambda s: live_chain()); a.configure(dict(base, strategy="PREMIUM", prem_expiry=False, prem_wing=1000)); run(a, e, ub, 260)
+    f, e, a = build(ub, chain_fn=lambda s: chain(big=(25000, "ce"), dte=0.3)); a.configure(dict(base, strategy="PREMIUM", prem_wing=1000)); run(a, e, ub, 260)
+    check("pro premium: never centred so far from the index that it would open half-way to its tent exit", not e.pos and "too far" in a.msg, a.msg)
+    f, e, a = build(rb, chain_fn=long_g); a.configure(dict(base, strategy="PREMIUM")); f.ref = lambda: 26000.0     # every leg prices the same: no credit
+    run(a, e, rb, 40)
+    capped = any("order-rate cap" in x["msg"] for x in a.events)
+    check("pro premium: a structure filled for no net credit is closed, retrying through the order-rate cap until flat",
+          capped and not e.pos and any("no net credit" in x["msg"] for x in a.events) and sum(1 for t in e.trades if "no net credit" in t["why"]) == 4,
+          f"{capped} {len(e.pos)} {a.msg}")
+    check("pro premium: expiry pin can be switched off", not e.pos)
+    f, e, a = build(ub, chain_fn=long_g); a.configure(dict(base, strategy="PREMIUM", enabled=False)); clkv[0] = ub[20]["t"] + 62
+    r = a.configure(dict(base, strategy="PREMIUM", action="start"))
+    check("pro premium: START sells at once, whatever the setup says", r["ok"] and len(e.pos) == 4, str(r))
+    # 8. settings, tab, server, replay configs
+    bad = [{"vol_ratio": 0.1}, {"tm_sl_atr": -1}, {"tm_trail_atr": 11}, {"lock_at": -5}, {"lock_give": 99}, {"prem_kind": "CONDOR"}, {"prem_center": "MAXPAIN"},
+           {"prem_wing": 250}, {"prem_wing": 50}, {"prem_sl_pct": 5}, {"prem_tp_pct": 150}]
+    check("pro settings: out-of-range values are refused", not any(a.configure(b_)["ok"] for b_ in bad))
+    cfg0 = A.AutoTrader(None, None, None).cfg
+    check("pro defaults: new filters and management off, premium defaults iron fly at the pin",
+          not any(cfg0[k] for k in ("gate_vol", "gate_flow", "gate_oi", "tm_sl_atr", "tm_trail_atr", "tm_be_atr", "reentry", "lock_at"))
+          and (cfg0["prem_kind"], cfg0["prem_center"], cfg0["prem_wing"]) == ("FLY", "PIN", 300))
+    check("pro tab: premium row, RV/IV / flow / writer filters, management and lock inputs, all sent to the server",
+          all(f'id="{x}"' in d for x in ("scAutoPrem", "scAutoPremRow", "scAutoPK", "scAutoPC", "scAutoPW", "scAutoPSL", "scAutoPTP", "scAutoPX", "scAutoGVol", "scAutoVR",
+                                          "scAutoGFlow", "scAutoGOi", "scAutoSL", "scAutoTR", "scAutoBE", "scAutoRe", "scAutoLock", "scAutoGive"))
+          and "for (const n of SC_AUTO_NUMS) body[n[2]] = scAutoNum(n, P[n[1]]);" in d and "['scAutoPrem', 'PREMIUM']" in d)
+    check("pro server: the trader gets the cached chain and the future's taker flow (memory only)",
+          "chain_fn=_auto_chain, flow_fn=_auto_flow" in sv and "z._flow_read(key)" in sv[sv.index("def _auto_flow("):sv.index("def _auto_book(")])
+    names = [n for n, _ in E.CONFIGS]
+    check("pro replay: auto_eval covers every new feature", all(any(n.startswith(x) for n in names) for x in
+          ("RIBBON +RV/IV", "RIBBON +fut flow", "RIBBON +OI writers", "RIBBON +stop", "RIBBON +B/E", "RIBBON +stop +re-entry", "RIBBON +profit lock", "PREMIUM iron fly", "PREMIUM straddle"))
+          and "eng.step()" in open(os.path.join(HERE, "auto_eval.py"), encoding="utf-8").read())
+
+
 def test_book_recorder_and_cleanup():
     """nse_tick_recorder: what it keeps, the file it writes, restarts and crashes; the adapter hook; the daily cleanup."""
     import importlib, tempfile, shutil, calendar as _cal, datetime as _dtm
@@ -4457,8 +4908,8 @@ def test_book_recorder_and_cleanup():
         path = os.path.join(tmp, "NIFTY_2026-11-09.csv.gz")
         rows = R.read_day(path)                                  # still open: readable up to the last sync flush
         ce = next((r for r in rows if r["inst"] == "NFO:CE_NEAR"), {})
-        check("book recorder: keeps the index, near-the-money options (within 500 points) and futures of NIFTY/BANKNIFTY, 09:00-15:31 on weekdays, only when something changed; readable mid-session",
-              [r["inst"] for r in rows] == ["NSE:NIFTY 50", "NFO:CE_NEAR", "NFO:NIFTYFUT"] and os.path.exists(os.path.join(tmp, "BANKNIFTY_2026-11-09.csv.gz"))
+        check("book recorder: keeps the index, near-the-money options (within 500 points) and futures of NIFTY only (no BANKNIFTY), 09:00-15:31 on weekdays, only when something changed; readable mid-session",
+              R.UNDERS == ("NIFTY",) and [r["inst"] for r in rows] == ["NSE:NIFTY 50", "NFO:CE_NEAR", "NFO:NIFTYFUT"] and not os.path.exists(os.path.join(tmp, "BANKNIFTY_2026-11-09.csv.gz"))
               and ce.get("b5") == "99.5:650:3|99.45:130:1" and ce.get("a5") == "100:325:2" and ce.get("tbq") == "90000" and ce.get("strike") == "24500"
               and ce.get("typ") == "CE" and ce.get("ex_ms") == str(int((t0 + 0.9) * 1000)) and rows[0]["ex_ms"] == str(int((t0 - 0.2) * 1000)) and ce.get("bq") == "650",
               str(rows)[:400])
@@ -4527,10 +4978,10 @@ def test_book_recorder_and_cleanup():
     try:
         day = lambda n: (_dtm.date.today() - _dtm.timedelta(days=n)).isoformat()
         files = {
-            "replay/NIFTY_%s.jsonl" % day(61): False, "replay/NIFTY_%s.jsonl" % day(59): True,
+            "replay/NIFTY_%s.jsonl" % day(366): False, "replay/NIFTY_%s.jsonl" % day(364): True,
             "ticks/NIFTY_%s.csv" % day(366): False, "ticks/NIFTY_%s.csv" % day(300): True,
             "nse_data_cache/bhavcopy/fo%s.csv" % day(31): False,
-            "book_ticks/NIFTY_%s.csv.gz" % day(91): False, "book_ticks/NIFTY_%s.csv.gz" % day(89): True, "book_ticks/NIFTY_%s.csv.gz" % day(0): True,
+            "book_ticks/NIFTY_%s.csv.gz" % day(731): False, "book_ticks/NIFTY_%s.csv.gz" % day(729): True, "book_ticks/NIFTY_%s.csv.gz" % day(0): True,
             "participant_oi/%s.json" % day(61): False, "participant_oi/%s.json" % day(40): True,
             "turn_log/NIFTY_%s.jsonl" % day(366): False, "turn_log/NIFTY_%s.jsonl" % day(364): True,
             "history/NIFTY_%s.jsonl" % day(46): False, "history/NIFTY_%s.jsonl" % day(44): True,
@@ -4542,20 +4993,22 @@ def test_book_recorder_and_cleanup():
         }
         for rel in files:
             fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w").write("x")
-        live = "NIFTY_%s.jsonl" % day(59)
-        mq = {"replay/_mq/%s.1.v2.json" % live: True, "replay/_mq/%s.999.v2.json" % live: False, "replay/_mq/NIFTY_%s.jsonl.5.v2.json" % day(61): False}
+        live = "NIFTY_%s.jsonl" % day(364)
+        mq = {"replay/_mq/%s.1.v2.json" % live: True, "replay/_mq/%s.999.v2.json" % live: False, "replay/_mq/NIFTY_%s.jsonl.5.v2.json" % day(366): False}
         for rel in mq:
             fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w").write("{}")
         files.update(mq)
         S._DATA_ROOT = root; S._REPLAY_DIR = os.path.join(root, "replay"); S._TICK_DIR = os.path.join(root, "ticks")
         S._BHAVCOPY_DIR = os.path.join(root, "nse_data_cache", "bhavcopy"); S._POI_DIR = os.path.join(root, "participant_oi"); S._WARM_DIR = os.path.join(root, "warm_cache")
         import io as _io, contextlib as _cl
+        env_keep = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("NSE_KEEP_")}   # test the code defaults, not this machine's env
         with _cl.redirect_stdout(_io.StringIO()):
             dry = S._run_cleanup(dry=True)
             untouched = all(os.path.exists(os.path.join(root, r)) for r in files)
             res = S._run_cleanup(dry=False)
+        os.environ.update(env_keep)
         wrong = [r for r, keep in files.items() if os.path.exists(os.path.join(root, r)) != keep]
-        check("daily cleanup: prunes every data folder by its own window (replay 60, book_ticks 90, participant_oi 60, turn_log 365, history 45 / today's caches, warm 15, oi_close 10, ticks 365, bhavcopy 30), drops dead _mq caches, never touches trade_log; dry run deletes nothing",
+        check("daily cleanup: prunes every data folder by its own window (replay 365, book_ticks 730, participant_oi 60, turn_log 365, history 45 / today's caches, warm 15, oi_close 10, ticks 365, bhavcopy 30), drops dead _mq caches, never touches trade_log; dry run deletes nothing",
               not wrong and untouched and dry["removed"] == res["removed"] == sum(1 for k in files.values() if not k), f"wrong={wrong} dry={dry['removed']} real={res['removed']}")
         due = S._cleanup_due
         at = lambda h, m: _cal.timegm((2026, 11, 9, h, m, 0)) - 19800
@@ -4571,7 +5024,7 @@ def main():
     for fn in (test_muted_price_alert_popup, test_header_spot_follows_ticks, test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_auto_trade, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env, test_book_recorder_and_cleanup):
+               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_auto_trade, test_auto_enhancements, test_auto_pro, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env, test_book_recorder_and_cleanup):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

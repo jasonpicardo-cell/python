@@ -2250,9 +2250,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-chartwrap svg .sc-mk, .sc-chartwrap svg .sc-mk * { pointer-events: all; cursor: default; }
   /* the strike grid sits on the chart's lower left as ordinary page content: opaque, so nothing the chart or its indicators draw shows through, and it never scales with the chart */
   /* strike grid: its own palette per theme (the Home chart and the Scalper page are light in light mode) */
-  .sc-grid { --g-bg: #0b0d12; --g-line: #1b1f29; --g-head: #10131a; --g-text: #e8ebf2; --g-muted: #8b93a7; --g-up: #2ecc8f; --g-dn: #ff5d6c; --g-upbg: rgba(46,204,143,.12); --g-dnbg: rgba(255,93,108,.12); --g-atm: rgba(232,179,57,.10); --g-atmk: rgba(232,179,57,.22); --g-atmt: #ffd780; --g-amber: #e8b339; --g-rg: rgba(90,140,235,.30); --g-rg2: rgba(170,120,230,.13);
+  .sc-grid { --g-bg: #0b0d12; --g-line: #1b1f29; --g-head: #10131a; --g-text: #e8ebf2; --g-muted: #8b93a7; --g-up: #2ecc8f; --g-dn: #ff5d6c; --g-upbg: rgba(46,204,143,.12); --g-dnbg: rgba(255,93,108,.12); --g-atm: rgba(232,179,57,.10); --g-atmk: rgba(232,179,57,.22); --g-atmt: #ffd780; --g-amber: #e8b339; --g-rglo: rgba(120,138,168,.32); --g-rghi: rgba(232,179,57,.46); --g-rgt: rgba(255,255,255,.035);
     position: absolute; left: 8px; bottom: 24px; z-index: 6; background: var(--g-bg); border: 1px solid var(--g-line); border-radius: 4px; padding: 0; box-shadow: 0 2px 10px rgba(0,0,0,.5); color: var(--g-text); }
-  body.light-mode .sc-grid { --g-bg: #ffffff; --g-line: #d9dce1; --g-head: #f3f4f6; --g-text: #111827; --g-muted: #4b5563; --g-up: #047857; --g-dn: #b91c1c; --g-upbg: rgba(5,150,105,.13); --g-dnbg: rgba(220,38,38,.11); --g-atm: rgba(217,119,6,.12); --g-atmk: rgba(217,119,6,.26); --g-atmt: #92400e; --g-amber: #b45309; --g-rg: rgba(37,99,235,.18); --g-rg2: rgba(147,51,234,.08); box-shadow: 0 2px 10px rgba(15,23,42,.18); }
+  body.light-mode .sc-grid { --g-bg: #ffffff; --g-line: #d9dce1; --g-head: #f3f4f6; --g-text: #111827; --g-muted: #4b5563; --g-up: #047857; --g-dn: #b91c1c; --g-upbg: rgba(5,150,105,.13); --g-dnbg: rgba(220,38,38,.11); --g-atm: rgba(217,119,6,.12); --g-atmk: rgba(217,119,6,.26); --g-atmt: #92400e; --g-amber: #b45309; --g-rglo: rgba(100,116,139,.24); --g-rghi: rgba(217,119,6,.34); --g-rgt: rgba(15,23,42,.035); box-shadow: 0 2px 10px rgba(15,23,42,.18); }
   .sc-grid table { border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: var(--g-text); }
   .sc-grid th, .sc-grid td { border: 1px solid var(--g-line); padding: 2px 6px; text-align: right; white-space: nowrap; }
   .sc-grid td.k { text-align: center; font-weight: 700; cursor: pointer; background: var(--g-head); } .sc-grid td.k:hover { color: var(--accent); }
@@ -2260,7 +2260,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-grid tr.sel td.k { box-shadow: inset 3px 0 0 var(--accent); }
   .sc-grid td.up { color: var(--g-up); background: var(--g-upbg); font-weight: 600; } .sc-grid td.dn { color: var(--g-dn); background: var(--g-dnbg); font-weight: 600; }
   .sc-grid td[data-s="u2"] { box-shadow: inset 3px 0 0 var(--g-up); } .sc-grid td[data-s="d2"] { box-shadow: inset 3px 0 0 var(--g-dn); }
-  .sc-grid td.rg { color: var(--g-muted); } .sc-grid td.rg[style*="--p"] { background: linear-gradient(to right, var(--g-rg) var(--p, 0%), var(--g-rg2) var(--p, 0%)); }   /* low → price filled blue, price → high violet */ .sc-grid td.rg.pe { text-align: left; }
+  .sc-grid td.rg { color: var(--g-muted); } .sc-grid td.rg[style*="--p"] { --g-rgc: color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo)); background: linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%)); }   /* heat by position: filled to the LTP, slate near the day low turning amber near the high; the rest a faint track */ .sc-grid td.rg.pe { text-align: left; }
   .sc-grid td.rg b { display: inline-block; min-width: 3.4em; text-align: center; color: var(--g-text); font-weight: 700; } .sc-grid td.rg b.hi, .sc-grid td.rg b.lo { color: var(--g-amber); font-weight: 800; }
   .sc-grid .wl { font-size: 8.5px; font-weight: 800; padding: 0 2px; border-radius: 2px; border: 1px solid currentColor; opacity: .8; }
   .sc-grid .bf.bu { color: var(--g-up); } .sc-grid .bf.be { color: var(--g-dn); } .sc-grid td[data-s$="2"] .bf { font-weight: 900; }
@@ -3435,17 +3435,52 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <div id="scMsg" class="sc-msg"></div>
               </section>
               <section class="sc-sec sc-auto" id="scAuto">
-                <div class="sc-st">Auto Trade <span class="sc-dim">follows the Trend ribbon · run by the server, even if this tab closes</span></div>
+                <div class="sc-st">Auto Trade <span class="sc-dim">signal + optional desk filters · run by the server, even if this tab closes</span></div>
                 <div class="sc-row" style="margin-top:0;">
                   <label class="sc-chk sc-inl" title="Waits for the next signal flip on a closed candle, then trades it. Switching it on never trades the current trend."><input type="checkbox" id="scAutoOn"> Auto Trade</label>
                   <label class="sc-chk sc-inl" title="Signal: the Trend Target Ribbon turning bullish / bearish. Only one strategy can be selected."><input type="checkbox" id="scAutoRib" checked> Trend ribbon</label>
                   <label class="sc-chk sc-inl" title="Signal: the fast EMA crossing the slow EMA of the close. Only one strategy can be selected."><input type="checkbox" id="scAutoEma"> EMA crossover</label>
                 </div>
+                <div class="sc-row" style="margin-top:0;">
+                  <label class="sc-chk sc-inl" title="Opening-range break: a close beyond the 09:15 range (15 or 30 min) goes that way, once per side, before 11:00. A close back through the range's middle goes flat. Only one strategy can be selected."><input type="checkbox" id="scAutoOrb"> ORB</label>
+                  <label class="sc-chk sc-inl" title="VWAP sigma playbook by the 9:45 day type. Trend day: buy a pullback that holds +1σ (sell one that fails at −1σ), flat on a close through VWAP. Range day: fade a close back inside ±2σ toward VWAP, flat at VWAP or 0.5σ beyond the band. Only one strategy can be selected."><input type="checkbox" id="scAutoVw"> VWAP σ</label>
+                  <label class="sc-chk sc-inl" title="Failed break of yesterday's high / low: trades above PDH but closes back below it (above VWAP) = short; the mirror at PDL = long. Once per side, before 14:30. Flat beyond the trap bar's extreme (stop) or at VWAP (target). Only one strategy can be selected."><input type="checkbox" id="scAutoTrap"> PDH/PDL trap</label>
+                  <label class="sc-chk sc-inl" title="Premium selling, not directional: sells an iron fly (or straddle) at the pin strike on a range day with dealers long gamma, or on expiry day after 13:30. Combined stop / target as a % of the credit; closed when the index leaves the tent (half the wing from the centre). Buy / Sell and the CE / PE strikes do not apply. Only one strategy can be selected."><input type="checkbox" id="scAutoPrem"> Premium sell</label>
+                </div>
+                <div class="sc-row" id="scAutoPremRow" style="display:none;"><select id="scAutoPK" class="sc-sel" title="Iron fly: short ATM call + put with bought wings (defined risk, lower margin). Straddle: the two shorts only."><option value="FLY">Iron fly</option><option value="STRADDLE">Straddle</option></select>
+                  <select id="scAutoPC" class="sc-sel" title="Centre: the strike near the money with the most open interest (where long-gamma dealers pin the index), or plain ATM"><option value="PIN">at pin</option><option value="ATM">at ATM</option></select>
+                  <span class="sc-dim" title="Wing distance in points (also the tent: the structure is closed when the index is half of it from the centre)">Wing</span><input id="scAutoPW" type="number" min="100" max="3000" step="100" value="300" class="sc-n" style="width:54px;">
+                  <span class="sc-dim" title="Combined stop: loss as % of the credit taken in">Stop %</span><input id="scAutoPSL" type="number" min="10" max="300" step="5" value="50" class="sc-n" style="width:44px;">
+                  <span class="sc-dim" title="Combined target: profit as % of the credit taken in">Tgt %</span><input id="scAutoPTP" type="number" min="10" max="100" step="5" value="50" class="sc-n" style="width:44px;">
+                  <label class="sc-chk sc-inl" title="On expiry day, from 13:30, sell at the pin even on a trend day (dealers must still be long gamma)"><input type="checkbox" id="scAutoPX" checked> Expiry pin</label></div>
+                <div class="sc-row" id="scAutoOrbRow" style="display:none;"><span class="sc-dim">Opening range</span><select id="scAutoOrbM" class="sc-sel"><option value="15">15 min</option><option value="30">30 min</option></select></div>
                 <div class="sc-row" id="scAutoEmaRow" style="display:none;"><span class="sc-dim">Fast EMA</span><input id="scAutoEF" type="number" min="1" max="199" step="1" value="5" class="sc-n" style="width:44px;">
                   <span class="sc-dim">Slow EMA</span><input id="scAutoES" type="number" min="2" max="200" step="1" value="15" class="sc-n" style="width:44px;"></div>
                 <div class="sc-seg sc-seg-s" id="scAutoMode" title="Buy: bull buys a call, bear buys a put.  Sell: bear sells a call, bull sells a put."></div>
                 <div class="sc-row"><span class="sc-dim">CE</span><select id="scAutoCE" class="sc-sel" title="Call strike, from the money"></select>
                   <span class="sc-dim">PE</span><select id="scAutoPE" class="sc-sel" title="Put strike, from the money"></select></div>
+                <div class="sc-row"><label class="sc-chk sc-inl" title="Pick the round-hundred strike whose |delta| (from the option chain's IVs) is nearest the target, instead of the CE / PE offsets. Buyers: ~0.5-0.6. Sellers: ~0.2-0.3."><input type="checkbox" id="scAutoDel"> Strike by delta</label>
+                  <span class="sc-dim">Δ</span><input id="scAutoDv" type="number" min="0.05" max="0.95" step="0.05" value="0.5" class="sc-n" style="width:50px;"></div>
+                <div class="sc-row" id="scAutoGates" title="Filters only hold back an ENTRY (up to 3 more candles, then it is skipped); they never close a position. START ignores them."><span class="sc-dim">Filters</span>
+                  <label class="sc-chk sc-inl" title="Day type (9:45 VWAP read): trend signals only on a trend day and in its direction; the trap fade only on a range day."><input type="checkbox" id="scAutoGDay"> Day type</label>
+                  <label class="sc-chk sc-inl" title="Dealer gamma from the option chain: trend signals only when dealers are short gamma (moves extend); fades only when they are long gamma (moves get pinned)."><input type="checkbox" id="scAutoGGex"> γ regime</label>
+                  <label class="sc-chk sc-inl" title="The strike grid's book shift (2-min change in ln(bid/offer), z-scored, ATM ±5) must agree with the entry by at least the grid's 'agg' threshold."><input type="checkbox" id="scAutoGBook"> Book shift</label>
+                  <label class="sc-chk sc-inl" title="Trend signals only with the close on the same side of session VWAP."><input type="checkbox" id="scAutoGVwap"> VWAP side</label>
+                  <label class="sc-chk sc-inl" title="Trend signals only when the other index (NIFTY ↔ BANKNIFTY) has the same ribbon / EMA side."><input type="checkbox" id="scAutoGLead"> Other index</label>
+                  <label class="sc-chk sc-inl" title="Realised vol (last 15 min, annualised) against ATM IV. Buying: needs realised/implied at or above the ratio (the move is paying for the premium). Selling (Sell mode, Premium sell): needs it below."><input type="checkbox" id="scAutoGVol"> RV/IV</label><input id="scAutoVR" type="number" min="0.2" max="3" step="0.1" value="0.8" class="sc-n" style="width:54px;" title="Realised / implied vol ratio">
+                  <label class="sc-chk sc-inl" title="Near-month future's 5-minute taker flow (aggressive buys vs sells, from the tick feed) must lean with the trade by at least 10%."><input type="checkbox" id="scAutoGFlow"> Fut flow</label>
+                  <label class="sc-chk sc-inl" title="Option writers over 15 minutes, ATM ±5, delta-weighted: a long needs puts being written more than calls, a short the reverse."><input type="checkbox" id="scAutoGOi"> OI writers</label></div>
+                <div class="sc-row" title="Exits on the open auto trade, checked on every closed candle. None of them re-enters: the next entry needs a new signal."><span class="sc-dim">Exits</span>
+                  <label class="sc-chk sc-inl" title="Ribbon / EMA only: exit when a close goes back through the ribbon midline (or the slow EMA) instead of waiting for the opposite flip."><input type="checkbox" id="scAutoFlat"> Flat exit</label>
+                  <span class="sc-dim" title="Exit when the index has not moved 1 ATR in favour within this many candles (0 = off)">Time stop</span><input id="scAutoTS" type="number" min="0" max="120" step="1" value="0" class="sc-n" style="width:44px;" title="Candles; 0 = off">
+                  <label class="sc-chk sc-inl" title="Close half (whole lots, needs 2+ lots) once the index has moved 1 ATR in favour; the rest rides the signal."><input type="checkbox" id="scAutoScale"> Scale ½ at 1 ATR</label></div>
+                <div class="sc-row" title="Trade management. Stop / trail / breakeven are in index ATRs, turned into option points with the contract's delta and armed on the engine, so they are watched on every tick. 0 = off."><span class="sc-dim">Manage</span>
+                  <span class="sc-dim">Stop</span><input id="scAutoSL" type="number" min="0" max="10" step="0.25" value="0" class="sc-n" style="width:44px;" title="Stop, in index ATRs (0 = off)">
+                  <span class="sc-dim">Trail</span><input id="scAutoTR" type="number" min="0" max="10" step="0.25" value="0" class="sc-n" style="width:44px;" title="Trailing stop distance, in index ATRs (0 = off)">
+                  <span class="sc-dim">B/E at</span><input id="scAutoBE" type="number" min="0" max="10" step="0.25" value="0" class="sc-n" style="width:44px;" title="Move the stop to breakeven after this many ATRs in favour (0 = off)">
+                  <label class="sc-chk sc-inl" title="After the engine stops a trade out, enter once more if the signal still points the same way and the next candle closes with it (filters apply)."><input type="checkbox" id="scAutoRe"> Re-entry</label></div>
+                <div class="sc-row"><span class="sc-dim" title="Day profit lock: once Auto Trade's P&L reaches this amount, giving back the % below of its peak closes everything and ends the day (0 = off)">Lock at ₹</span><input id="scAutoLock" type="number" min="0" step="500" value="0" class="sc-n" style="width:64px;">
+                  <span class="sc-dim">give back %</span><input id="scAutoGive" type="number" min="5" max="95" step="5" value="50" class="sc-n" style="width:44px;"></div>
                 <div class="sc-row"><span class="sc-dim">Start</span><input id="scAutoStart" type="time" class="sc-sel sc-n" value="09:20">
                   <span class="sc-dim">End</span><input id="scAutoEnd" type="time" class="sc-sel sc-n" value="15:15">
                   <span class="sc-dim">Lots</span><input id="scAutoLots" type="number" min="1" step="1" value="2" class="sc-n" style="width:44px;"></div>
@@ -28401,7 +28436,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       } else {
         const spot = d.underlying_value || d.atm; let ai = 0, bd = 1e12;
         rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
-        const show = rows.slice(Math.max(0, ai - HN), ai + HN + 1).reverse(), atm = rows[ai].strike;
+        const show = rows.slice(Math.max(0, ai - HN), ai + HN + 1), atm = rows[ai].strike;   // low to high
         const SCR = {}, now = Date.now() / 1000;
         const ratio = (b, o, put, r) => {
           if (!(b > 0) || !(o > 0)) return '<td>–</td>';
@@ -42706,7 +42741,21 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   }
   // ── Auto Trade: the server runs it (nse_autotrade.py); this tab only sets it up and shows it ──
   const SC_AUTO_KEY = 'scalpAutoV2';
-  SC.auto = { pref: { mode: 'B', ce: -300, pe: 300, start: '09:20', end: '15:15', lots: 2, maxT: 5, maxL: 5000, strat: 'RIBBON', emaF: 5, emaS: 15 }, synced: false, busy: false };
+  SC.auto = { pref: { mode: 'B', ce: -300, pe: 300, start: '09:20', end: '15:15', lots: 2, maxT: 5, maxL: 5000, strat: 'RIBBON', emaF: 5, emaS: 15,
+    orbM: 15, gDay: false, gGex: false, gBook: false, gVwap: false, gLead: false, flat: false, ts: 0, scale: false, byDelta: false, dlt: 0.5,
+    gVol: false, vr: 0.8, gFlow: false, gOi: false, slA: 0, trA: 0, beA: 0, re: false, lockAt: 0, give: 50,
+    pK: 'FLY', pC: 'PIN', pW: 300, pSl: 50, pTp: 50, pX: true }, synced: false, busy: false };
+  const SC_AUTO_STRATS = [['scAutoRib', 'RIBBON'], ['scAutoEma', 'EMA'], ['scAutoOrb', 'ORB'], ['scAutoVw', 'VWAP'], ['scAutoTrap', 'TRAP'], ['scAutoPrem', 'PREMIUM']];
+  // [input id, pref, server key, min, max, default, snap to hundreds]
+  const SC_AUTO_NUMS = [['scAutoVR', 'vr', 'vol_ratio', 0.2, 3, 0.8, false], ['scAutoSL', 'slA', 'tm_sl_atr', 0, 10, 0, false], ['scAutoTR', 'trA', 'tm_trail_atr', 0, 10, 0, false],
+    ['scAutoBE', 'beA', 'tm_be_atr', 0, 10, 0, false], ['scAutoLock', 'lockAt', 'lock_at', 0, 1e9, 0, false], ['scAutoGive', 'give', 'lock_give', 5, 95, 50, false],
+    ['scAutoPW', 'pW', 'prem_wing', 100, 3000, 300, true], ['scAutoPSL', 'pSl', 'prem_sl_pct', 10, 300, 50, false], ['scAutoPTP', 'pTp', 'prem_tp_pct', 10, 100, 50, false]];
+  const SC_AUTO_SELS = [['scAutoPK', 'pK', 'prem_kind', ['FLY', 'STRADDLE']], ['scAutoPC', 'pC', 'prem_center', ['PIN', 'ATM']]];
+  const scAutoNum = (n, v) => { let x = +v; if (!isFinite(x)) x = n[5]; x = Math.max(n[3], Math.min(n[4], x)); if (n[6]) x = Math.round(x / 100) * 100 || n[5]; return x; };
+  const SC_AUTO_FLAGS = [['scAutoGDay', 'gDay', 'gate_day'], ['scAutoGGex', 'gGex', 'gate_gex'], ['scAutoGBook', 'gBook', 'gate_book'], ['scAutoGVwap', 'gVwap', 'gate_vwap'],
+    ['scAutoGLead', 'gLead', 'gate_lead'], ['scAutoFlat', 'flat', 'flat_exit'], ['scAutoScale', 'scale', 'scale_out'], ['scAutoDel', 'byDelta', null],
+    ['scAutoGVol', 'gVol', 'gate_vol'], ['scAutoGFlow', 'gFlow', 'gate_flow'], ['scAutoGOi', 'gOi', 'gate_oi'], ['scAutoRe', 're', 'reentry'], ['scAutoPX', 'pX', 'prem_expiry']];
+  const scAutoName = c => ({ EMA: `EMA ${c.ema_fast}/${c.ema_slow}`, ORB: `ORB ${c.orb_min || 15}m`, VWAP: 'VWAP σ', TRAP: 'PDH/PDL trap', PREMIUM: `premium ${String(c.prem_kind || 'FLY').toLowerCase() === 'fly' ? 'iron fly' : 'straddle'}` })[c.strategy] || 'ribbon';
   try { Object.assign(SC.auto.pref, JSON.parse(localStorage.getItem(SC_AUTO_KEY) || '{}') || {}); } catch (_) {}
   const scAutoSave = () => { try { localStorage.setItem(SC_AUTO_KEY, JSON.stringify(SC.auto.pref)); } catch (_) {} };
   const scAutoOff = o => `ATM${o === 0 ? '' : (o > 0 ? '+' : '\u2212') + Math.abs(o)}`;
@@ -42714,8 +42763,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const P = SC.auto.pref, A0 = SC.st && SC.st.auto, keep = !!(A0 && A0.enabled && !action),      // editing a running setup never retargets the index or timeframe
       body = { enabled, sym: keep ? undefined : (state.symbol || 'NIFTY').toUpperCase(), tf: keep ? undefined : Math.round(SC.pref.tf / 60), mode: P.mode === 'S' ? 'SELL' : 'BUY',
       ce_off: +P.ce, pe_off: +P.pe, start: P.start, end: P.end, lots: Math.max(1, P.lots | 0), max_trades: Math.max(1, P.maxT | 0), action: action || undefined, max_loss: Math.max(100, +P.maxL || 5000),
-      strategy: P.strat === 'EMA' ? 'EMA' : 'RIBBON', ema_fast: Math.max(1, P.emaF | 0), ema_slow: Math.max(2, P.emaS | 0) };
-    if (enabled && action !== 'exit' && SC.st && SC.st.mode === 'live' && !(SC.st.auto && SC.st.auto.enabled) && !confirm('LIVE mode: Auto Trade will send real orders on every ribbon flip until the end time. Continue?')) { scAutoRender(); return; }
+      strategy: SC_AUTO_STRATS.some(x => x[1] === P.strat) ? P.strat : 'RIBBON', ema_fast: Math.max(1, P.emaF | 0), ema_slow: Math.max(2, P.emaS | 0),
+      orb_min: +P.orbM === 30 ? 30 : 15, time_stop: Math.max(0, Math.min(120, P.ts | 0)), strike: P.byDelta ? 'DELTA' : 'OFFSET', delta: Math.max(0.05, Math.min(0.95, +P.dlt || 0.5)) };
+    for (const [, k, sk] of SC_AUTO_FLAGS) if (sk) body[sk] = !!P[k];
+    for (const n of SC_AUTO_NUMS) body[n[2]] = scAutoNum(n, P[n[1]]);
+    for (const [, k, sk, vals] of SC_AUTO_SELS) body[sk] = vals.includes(P[k]) ? P[k] : vals[0];
+    if (enabled && action !== 'exit' && SC.st && SC.st.mode === 'live' && !(SC.st.auto && SC.st.auto.enabled) && !confirm('LIVE mode: Auto Trade will send real orders on every signal until the end time. Continue?')) { scAutoRender(); return; }
     SC.auto.busy = true;
     const j = await scApi('auto', body);
     SC.auto.busy = false;
@@ -42727,11 +42780,23 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const A = SC.st && SC.st.auto, P = SC.auto.pref;
     if (A && A.enabled && !SC.auto.synced) {                    // page opened while the server is already running it: show ITS settings
       SC.auto.synced = true; const c = A.cfg || {};
-      P.mode = c.mode === 'SELL' ? 'S' : 'B'; P.ce = c.ce_off ?? P.ce; P.pe = c.pe_off ?? P.pe; P.start = c.start || P.start; P.end = c.end || P.end; P.lots = c.lots ?? P.lots; P.maxT = c.max_trades ?? P.maxT; P.maxL = c.max_loss ?? P.maxL; P.strat = c.strategy || P.strat; P.emaF = c.ema_fast ?? P.emaF; P.emaS = c.ema_slow ?? P.emaS; scAutoSave();
+      P.mode = c.mode === 'SELL' ? 'S' : 'B'; P.ce = c.ce_off ?? P.ce; P.pe = c.pe_off ?? P.pe; P.start = c.start || P.start; P.end = c.end || P.end; P.lots = c.lots ?? P.lots; P.maxT = c.max_trades ?? P.maxT; P.maxL = c.max_loss ?? P.maxL; P.strat = c.strategy || P.strat; P.emaF = c.ema_fast ?? P.emaF; P.emaS = c.ema_slow ?? P.emaS;
+      P.orbM = c.orb_min ?? P.orbM; P.ts = c.time_stop ?? P.ts; P.dlt = c.delta ?? P.dlt; if (c.strike) P.byDelta = c.strike === 'DELTA';
+      for (const [, k, sk] of SC_AUTO_FLAGS) if (sk && sk in c) P[k] = !!c[sk];
+      for (const n of SC_AUTO_NUMS) if (n[2] in c) P[n[1]] = c[n[2]];
+      for (const [, k, sk] of SC_AUTO_SELS) if (c[sk]) P[k] = c[sk];
+      scAutoSave();
     }
     const on = !!(A && A.enabled), act = document.activeElement;
     const chk = $sc('scAutoOn'); if (chk && !SC.auto.busy) chk.checked = on;
-    $sc('scAutoRib').checked = P.strat !== 'EMA'; $sc('scAutoEma').checked = P.strat === 'EMA'; $sc('scAutoEmaRow').style.display = P.strat === 'EMA' ? '' : 'none';
+    const strat = SC_AUTO_STRATS.some(x => x[1] === P.strat) ? P.strat : 'RIBBON';
+    for (const [id, k] of SC_AUTO_STRATS) $sc(id).checked = strat === k;
+    $sc('scAutoEmaRow').style.display = strat === 'EMA' ? '' : 'none'; $sc('scAutoOrbRow').style.display = strat === 'ORB' ? '' : 'none';
+    $sc('scAutoPremRow').style.display = strat === 'PREMIUM' ? '' : 'none';
+    for (const n of SC_AUTO_NUMS) { const i = $sc(n[0]); if (i && act !== i && String(i.value) !== String(P[n[1]])) i.value = P[n[1]]; }
+    for (const [id, k] of SC_AUTO_SELS) { const i = $sc(id); if (i && act !== i && i.value !== P[k]) i.value = P[k]; }
+    for (const [id, k] of SC_AUTO_FLAGS) $sc(id).checked = !!P[k];
+    $sc('scAutoCE').disabled = $sc('scAutoPE').disabled = !!P.byDelta; $sc('scAutoDv').disabled = !P.byDelta;
     scSet($sc('scAutoMode'), [['B', 'Buy'], ['S', 'Sell']].map(([k, l]) => `<button data-m="${k}" class="${P.mode === k ? 'on ' + (k === 'S' ? 'sell' : 'buy') : ''}">${l}</button>`).join(''));
     const list = (A && A.strikes && A.strikes.list) || [];
     for (const [id, typ] of [['scAutoCE', 'ce'], ['scAutoPE', 'pe']]) {
@@ -42742,17 +42807,24 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       scSet(sel, offs.map(x => `<option value="${x.o}">${scAutoOff(x.o)}${x.k ? ' \u00b7 ' + x.k : ''}</option>`).join(''));
       sel.value = String(+P[typ]);
     }
-    for (const [id, v] of [['scAutoStart', P.start], ['scAutoEnd', P.end], ['scAutoLots', P.lots], ['scAutoMaxT', P.maxT], ['scAutoMaxL', P.maxL], ['scAutoEF', P.emaF], ['scAutoES', P.emaS]]) { const i = $sc(id); if (i && act !== i && String(i.value) !== String(v)) i.value = v; }
+    for (const [id, v] of [['scAutoStart', P.start], ['scAutoEnd', P.end], ['scAutoLots', P.lots], ['scAutoMaxT', P.maxT], ['scAutoMaxL', P.maxL], ['scAutoEF', P.emaF], ['scAutoES', P.emaS], ['scAutoOrbM', P.orbM], ['scAutoTS', P.ts], ['scAutoDv', P.dlt]]) { const i = $sc(id); if (i && act !== i && String(i.value) !== String(v)) i.value = v; }
     const msg = $sc('scAutoMsg'), log = $sc('scAutoLog');
     if (!A) { scSet(msg, 'Needs the server in Zerodha mode.'); scSet(log, ''); return; }
     if (SC.auto.busy) return;
     const tr = A.trend > 0 ? '\u25B2 bullish' : A.trend < 0 ? '\u25BC bearish' : 'no trend yet';
     const h = (A.holding || []).map(x => `${x.side === 'short' ? 'short' : 'long'} ${escapeHtml(String(x.strike))} ${x.typ} \u00d7${x.lots}`).join(', ');
     const c = A.cfg || {};
-    let t = on ? `${c.mode} ${c.sym} ${c.tf}m \u00b7 ${c.strategy === 'EMA' ? `EMA ${c.ema_fast}/${c.ema_slow}` : 'ribbon'} ${tr} \u00b7 ` : '';
-    t += !on ? (h ? `Off \u00b7 still open: ${h}` : 'Off') : A.done_today ? 'done for the day' : h ? `holding ${h}` : A.pending_entry ? 'entering\u2026' : 'waiting for a flip';
+    const classic = !c.strategy || c.strategy === 'RIBBON' || c.strategy === 'EMA';
+    const tr2 = c.strategy === 'PREMIUM' ? '' : classic ? tr : A.trend > 0 ? '\u25B2 long signal' : A.trend < 0 ? '\u25BC short signal' : 'no signal';
+    let t = on ? `${c.mode} ${c.sym} ${c.tf}m \u00b7 ${scAutoName(c)} ${tr2} \u00b7 ` : '';
+    t += !on ? (h ? `Off \u00b7 still open: ${h}` : 'Off') : A.done_today ? 'done for the day' : h ? `holding ${h}` : A.pending_entry ? 'entering\u2026' : c.strategy === 'PREMIUM' ? 'waiting for its setup' : classic ? 'waiting for a flip' : 'waiting for a signal';
     t += ` \u00b7 trades ${A.entries}/${c.max_trades} \u00b7 P&L \u20b9${Math.round(A.pnl).toLocaleString('en-IN')}${A.loss_hit ? ' \u00b7 MAX LOSS HIT' : ''}`;
-    if (A.msg && /refused|cannot|abandoned/.test(A.msg)) t += ` \u00b7 ${escapeHtml(A.msg)}`;
+    if (A.msg && /refused|cannot|abandoned|waiting for confirmation|skipped|premium: waiting|already hold/.test(A.msg)) t += ` \u00b7 ${escapeHtml(A.msg)}`;
+    const X = A.ctx || {};
+    if (on && X.day) {
+      const dayTxt = X.day === 'trend' ? `trend day ${X.day_dir > 0 ? '\u25B2' : '\u25BC'}` : X.day === 'trend-broken' ? 'trend broken' : X.day === 'range' ? 'range day' : X.day === 'forming' ? 'day type forming' : 'day type unknown';
+      t += `<br><span style="opacity:.8">${dayTxt}${X.book != null ? ` \u00b7 book shift ${X.book > 0 ? '+' : ''}${X.book}` : ''}${X.gex != null ? ` \u00b7 dealers ${X.gex > 0 ? 'long' : 'short'} \u03b3` : ''}${X.locked ? ' \u00b7 PROFIT LOCKED' : ''}</span>`;
+    }
     if (SC.auto.err && Date.now() < SC.auto.err.until) t = `<b style="color:var(--sc-amber,#e6a700)">${escapeHtml(SC.auto.err.m)}</b><br>` + t;
     scSet(msg, t);
     scSet(log, (A.events || []).slice(-4).reverse().map(e => `${new Date(e.t * 1000).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false })} ${escapeHtml(e.msg)}`).join('<br>'));
@@ -42768,8 +42840,13 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     $sc('scAutoStart').addEventListener('change', e => { P.start = e.target.value || '09:20'; resend(); });
     $sc('scAutoEnd').addEventListener('change', e => { P.end = e.target.value || '15:15'; resend(); });
     const pick = k => { if (P.strat !== k) { P.strat = k; scAutoRender(); resend(); } else scAutoRender(); };      // exactly one is always selected
-    $sc('scAutoRib').addEventListener('change', () => pick('RIBBON'));
-    $sc('scAutoEma').addEventListener('change', () => pick('EMA'));
+    for (const [id, k] of SC_AUTO_STRATS) $sc(id).addEventListener('change', () => pick(k));
+    for (const [id, k] of SC_AUTO_FLAGS) $sc(id).addEventListener('change', e => { P[k] = e.target.checked; scAutoRender(); resend(); });
+    $sc('scAutoOrbM').addEventListener('change', e => { P.orbM = +e.target.value === 30 ? 30 : 15; resend(); });
+    for (const n of SC_AUTO_NUMS) $sc(n[0]).addEventListener('change', e => { P[n[1]] = scAutoNum(n, e.target.value); e.target.value = P[n[1]]; resend(); });
+    for (const [id, k, , vals] of SC_AUTO_SELS) $sc(id).addEventListener('change', e => { P[k] = vals.includes(e.target.value) ? e.target.value : vals[0]; resend(); });
+    $sc('scAutoTS').addEventListener('change', e => { P.ts = Math.max(0, Math.min(120, parseInt(e.target.value, 10) || 0)); e.target.value = P.ts; resend(); });
+    $sc('scAutoDv').addEventListener('change', e => { P.dlt = Math.max(0.05, Math.min(0.95, parseFloat(e.target.value) || 0.5)); e.target.value = P.dlt; resend(); });
     $sc('scAutoEF').addEventListener('change', e => { P.emaF = Math.max(1, parseInt(e.target.value, 10) || 5); e.target.value = P.emaF; resend(); });
     $sc('scAutoES').addEventListener('change', e => { P.emaS = Math.max(2, parseInt(e.target.value, 10) || 15); e.target.value = P.emaS; resend(); });
     $sc('scAutoMaxT').addEventListener('change', e => { P.maxT = Math.max(1, parseInt(e.target.value, 10) || 5); e.target.value = P.maxT; resend(); });
@@ -42793,7 +42870,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol && !(scHide50() && r.strike % 100 !== 0)).sort((a, b) => a.strike - b.strike); if (!rows.length) return null;   // NIFTY with "Hide 50" on: the 50-strikes (22950, 22850…) are left out
     const spot = SC.spot || d.underlying_value || d.atm; let ai = 0, bd = 1e12;
     rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
-    const N = scGridN(); return { rows: rows.slice(Math.max(0, ai - N), ai + N + 1).reverse(), atm: rows[ai].strike, expiry: d.expiry };
+    const N = scGridN(); return { rows: rows.slice(Math.max(0, ai - N), ai + N + 1), atm: rows[ai].strike, expiry: d.expiry };   // low to high
   }
   function scGridNames() { const g = scGridRows(); return g ? g.rows.flatMap(r => [r.ce_symbol, r.pe_symbol]) : []; }
   function scRenderGrid() {

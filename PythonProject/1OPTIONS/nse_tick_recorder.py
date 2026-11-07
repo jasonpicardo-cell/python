@@ -9,7 +9,7 @@ Cost: no broker call. It taps the ticks the adapter already receives (FULL mode)
 subscribed; it never subscribes anything. Rows go to an in-memory queue from the tick callback (append only) and a
 background thread writes them, so a slow disk cannot stall the stream. A recorder failure never reaches the stream.
 
-What is kept: NIFTY and BANKNIFTY (UNDERS) options whose strike is within SPAN points of the index (the strike grid
+What is kept: NIFTY (UNDERS) options whose strike is within SPAN points of the index (the strike grid
 shows ATM +/- 5 round hundreds = 500 points), every future of those indices, and the index itself; 09:00-15:31 IST.
 A row is written only when something in it changed.
 
@@ -24,7 +24,8 @@ Files are gzip, flushed every FLUSH_S seconds with a sync flush, so a crash lose
 readable up to the last flush; read them with read_day(), which tolerates a truncated tail. A restart on the same day
 appends a new gzip member, which every gzip reader accepts.
 
-Retention: the server's daily post-close cleanup prunes book_ticks/ by age (see nse_chain_server._run_cleanup).
+Size: NIFTY only is roughly 5-20 MB a day, 1.5-5 GB a year.
+Retention: the server's daily post-close cleanup prunes book_ticks/ by age, 730 days (see nse_chain_server._run_cleanup).
 """
 import collections
 import csv
@@ -38,7 +39,7 @@ from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIR = os.path.join(HERE, "book_ticks")
-UNDERS = ("NIFTY", "BANKNIFTY")
+UNDERS = ("NIFTY",)               # NIFTY only: BANKNIFTY is not traded
 SPAN = 500                      # points either side of the index
 OPEN_MIN, CLOSE_MIN = 9 * 60, 15 * 60 + 31
 FLUSH_S = 5.0

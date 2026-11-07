@@ -2240,15 +2240,17 @@ def _refresh_all_weights(symbols=("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"
 # The retention differs per folder because the DATA differs:
 #   replay/   the only record of what the chain looked like minute by minute,
 #             and unreconstructable once gone. Claims on Trial reads across
-#             dates, so this needs weeks, not days. Deleted last and kept
-#             longest, because NSE will not sell it back to you.
+#             dates, and auto_eval.py / bias_eval.py backtest on it, so a year is
+#             kept. Readers take only the last 30 files, so more costs disk, not time.
+#             NSE will not sell it back to you.
 #   ticks/    20 KB a day. Deleting it saves nothing and costs restart
 #             recovery, so it is kept far longer than it needs to be.
 #   bhavcopy/ only yesterday's file is ever read, and every file is
 #             re-downloadable from NSE. The cheapest thing here to lose.
 #
-#   book_ticks/     order-book ticks near the money (nse_tick_recorder), ~10-40 MB a day; the
-#                   raw material for testing short-horizon order flow, so weeks are needed.
+#   book_ticks/     NIFTY order-book ticks near the money (nse_tick_recorder), ~5-20 MB a day; the
+#                   raw material for testing short-horizon order flow. Kite sells no historical depth,
+#                   so it is unreconstructable: two years covers several vol regimes and expiry rules.
 #   participant_oi/ NSE's daily participant-wise OI; the dashboard reads up to 30 sessions.
 #   turn_log/       the turn model's training rows: more days = a better model.
 #   history/        *.jsonl chain history (read 30 files back); *_<n>_<day>.json are one
@@ -2266,10 +2268,10 @@ def _refresh_all_weights(symbols=("NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"
 # ══════════════════════════════════════════════════════════════════════
 RUN_CLEANUP = True                 # enable the daily post-close disk pass
 RUN_CLEANUP_AT_MIN = 15 * 60 + 45  # IST minute of the day from which it may run
-RUN_CLEANUP_REPLAY_DAYS = 60       # option-chain snapshots (Claims on Trial, IV rank: 30 sessions)
+RUN_CLEANUP_REPLAY_DAYS = 365      # option-chain snapshots: auto_eval.py / bias_eval.py backtest on them (~8 GB a year)
 RUN_CLEANUP_TICKS_DAYS = 365       # spot samples - tiny, kept generously
 RUN_CLEANUP_BHAV_DAYS = 30         # end-of-day files, re-downloadable
-RUN_CLEANUP_BOOK_DAYS = 90         # book_ticks/ order-book recordings
+RUN_CLEANUP_BOOK_DAYS = 730        # book_ticks/ order-book recordings (~1.5-5 GB a year)
 RUN_CLEANUP_POI_DAYS = 60          # participant_oi/ (30 sessions read)
 RUN_CLEANUP_TURN_DAYS = 365        # turn_log/ training rows
 RUN_CLEANUP_HISTORY_DAYS = 45      # history/*.jsonl (30 files read)
@@ -6760,8 +6762,79 @@ def _auto_ladder(sym):
     return chains[live[0]], live[0]
 
 
-def _auto_pick(sym, typ, off):
-    """-> (inst, strike, atm): the contract at ATM + off points (snapped to a listed strike), nearest live expiry."""
+def _auto_chain(sym, max_age=300.0):
+    """Newest cached option-chain payload of `sym` (any band) for Auto Trade's gamma filter and delta strikes.
+    Memory first; only when nothing under max_age is cached does it ask _cached_chain (shared, coalesced), so
+    the filter costs at most one chain build per 5 minutes and nothing while the page keeps the chain warm."""
+    sym = (sym or "").upper()
+    now, best = time.time(), None
+    with _chain_meta_lock:
+        for k, e in _chain_cache.items():
+            if k.split("|", 1)[0].upper() == sym and isinstance(e.get("data"), dict) and e["data"].get("strikes") \
+                    and now - e["ts"] < max_age and (best is None or e["ts"] > best["ts"]):
+                best = e
+    if best is not None:
+        return best["data"]
+    try:
+        d, _m = _cached_chain(sym, None, 12, client="auto", max_age=max_age)
+        return d if isinstance(d, dict) and d.get("strikes") else None
+    except Exception:
+        return None
+
+
+def _auto_gex(sym):
+    """Dealer gamma total (+ long / - short) from the cached chain, same sign rule as the GEX panel."""
+    return _auto_mod.gex_total(_auto_chain(sym))
+
+
+def _auto_flow(sym):
+    """Near-month future's taker flow (aggressive buys / sells per minute) from the tick stream - memory only."""
+    z = _zmod()
+    pair = z._futures_pair((sym or "").upper())
+    if not pair:
+        return None
+    key = pair[0][1]
+    try:
+        z._subscribe([key])
+    except Exception:
+        pass
+    return z._flow_read(key)
+
+
+def _auto_book(sym):
+    """Grid book samples for the book-shift filter: total bid / offer of ATM +-5 round-hundred CE and PE from the
+    full-mode tick stream (subscribed here, no REST call); the cached chain's totals fill any contract without ticks."""
+    ladder, _exp = _auto_ladder(sym)
+    spot = _ZFeed().spot(sym)
+    ks = sorted(k for k in ladder if k % 100 == 0 and ladder[k].get("CE") and ladder[k].get("PE"))
+    if not ks or not spot:
+        return []
+    i = min(range(len(ks)), key=lambda j: abs(ks[j] - spot))
+    keys = [(ladder[k][t], 1 if t == "CE" else -1, k, t) for k in ks[max(0, i - 5): i + 6] for t in ("CE", "PE")]
+    z = _zmod()
+    try:
+        z._subscribe([x[0] for x in keys])
+    except Exception:
+        pass
+    tot = z.book_totals([x[0] for x in keys])
+    chain = None
+    out = []
+    for inst, sg, k, t in keys:
+        v = tot.get(inst)
+        if v and v[0] and v[1] and (v[2] or 0) < 60:
+            out.append((inst, sg, v[0], v[1]))
+            continue
+        if chain is None:
+            chain = {r["strike"]: r for r in ((_auto_chain(sym) or {}).get("strikes") or [])}
+        r = chain.get(k) or {}
+        p = t.lower()
+        out.append((inst, sg, r.get(p + "_tbq"), r.get(p + "_tsq")))
+    return out
+
+
+def _auto_pick(sym, typ, off, delta=None):
+    """-> (inst, strike, atm): the contract at ATM + off points (snapped to a listed strike), nearest live expiry.
+    With `delta`, the round-hundred strike whose |delta| (from the cached chain's IVs) is nearest it instead."""
     ladder, _exp = _auto_ladder(sym)
     spot = _ZFeed().spot(sym)
     if not spot:
@@ -6770,6 +6843,11 @@ def _auto_pick(sym, typ, off):
     if not ks:
         raise ValueError("no strikes listed")
     atm = min(ks, key=lambda k: abs(k - spot))
+    if delta is not None:
+        kd = _auto_mod.pick_by_delta(_auto_chain(sym), typ, float(delta))
+        if kd is None:
+            raise ValueError("no option chain with IVs for a delta strike")
+        off = kd - atm
     k = min(ks, key=lambda x: abs(x - (atm + off)))
     inst = ladder[k][typ]
     try:
@@ -6805,7 +6883,12 @@ def _trade_engine():
             eng = _trade_mod.Engine(_ZFeed(), _ZBroker(), cfg,
                                     journal_dir=_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "trade_log"))
             eng.start()
-            eng.auto = _auto_mod.AutoTrader(eng, lambda sym, tf: _zmod().fetch_bars(sym, tf), _auto_pick, _auto_strikes)
+            try:
+                _auto_mod.BF.update(_auto_mod.bf_from_html(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "nse_dashboard.html")))       # book-shift maths follows the dashboard's _BF
+            except Exception as e:  # noqa: BLE001
+                print(f"[auto] _BF not read from the dashboard ({e}); using the built-in copy")
+            eng.auto = _auto_mod.AutoTrader(eng, lambda sym, tf: _zmod().fetch_bars(sym, tf), _auto_pick, _auto_strikes,
+                                            gex_fn=_auto_gex, book_fn=_auto_book, chain_fn=_auto_chain, flow_fn=_auto_flow)
             eng.auto.start()
             _trade_eng = eng
             print(f"[trade] Scalping engine ready - {cfg.mode.upper()} mode"
