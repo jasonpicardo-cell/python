@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nifty Derivatives Manual</title><link rel="stylesheet" href="nifty.css"><script src="nifty.js"></script></head><body>
+<div class="bar"><b>Nifty Derivatives Manual</b>
+<label>Spot <input id="gS" type="number" value="24500" step="50" onchange="setG()"></label>
+<label>IV % <input id="gV" type="number" value="13" step="0.5" onchange="setG()"></label>
+<label>Lot <input id="gL" type="number" value="65" onchange="setG()"></label>
+<span class="mu">every chart and number below recomputes</span>
+<button class="thm">Theme</button><button onclick="print()">Print / PDF</button></div>
+<main>
+<h1>Nifty 50 Derivatives: the A–Z Trader's Manual</h1>
+<p class="sub">Futures, options, Greeks, volatility, India VIX, order flow (CVD, VWAP, profile), positioning (OI, PCR, participant data, gamma), 40 strategies with live payoff charts, playbooks, risk, costs, tax and process. Worked examples use Nifty ≈ 24,500, IV 13%, lot 65. Change the inputs above to re-price everything.</p>
+
+<div class="box warn"><b>Rules that change. Verify before you rely on them.</b>Lot size (65 since the Jan 2026 revision; NSE revises lot sizes every six months), weekly expiry day (Tuesday since Sep 2025), STT rates (raised in Budget 2026: futures 0.05%, options sale 0.15% of premium, effective 1 Apr 2026), margin add-ons and position-limit rules all come from SEBI/NSE circulars and change. Your contract note and the NSE circulars page are the source of truth.</div>
+
+<nav class="toc">
+<a href="#s0">0. Read this first: where money is made</a><a href="#s1">1. The underlying: Nifty 50</a><a href="#s2">2. Contracts, margins, rules</a><a href="#s3">3. Futures in depth</a><a href="#s4">4. Options and pricing</a><a href="#s5">5. The Greeks (1st and 2nd order)</a><a href="#s6">6. Volatility and India VIX</a><a href="#s7">7. Order flow: CVD, VWAP, profile, book</a><a href="#s8">8. Positioning: OI, PCR, FII data, gamma</a><a href="#s9">9. Levels and price action</a><a href="#s10">10. Strategy encyclopedia (charts)</a><a href="#s11">11. Strategy selection matrix</a><a href="#s12">12. Playbooks</a><a href="#s13">13. Adjustments and trade management</a><a href="#s14">14. Risk and position sizing</a><a href="#s15">15. Execution and costs</a><a href="#s16">16. Tax</a><a href="#s17">17. Process, journal, psychology</a><a href="#s18">18. Building and testing an edge</a><a href="#s19">19. 30 insights you won't find in books</a><a href="#s20">20. Daily routine</a><a href="#s21">21. Formulas and calculator</a><a href="#s22">22. Glossary A–Z</a>
+</nav>
+
+<h2 id="s0">0. Read this first: where the money actually comes from</h2>
+<p>SEBI's studies of individual F&amp;O traders found that about 9 in 10 lose money. The FY22–FY24 study put the share at 93%, with an average loss of about ₹2 lakh per trader, and the FY25 update found roughly 91%. Transaction costs alone were a large fraction of the losses. Index options are a <b>negative-sum game after costs</b>: every rupee you make comes from another participant, and the counterparties are prop desks, market makers and FPIs with better data, faster execution and lower costs. You need a specific, repeatable reason to be paid. There are only six:</p>
+<div class="tw"><table><tr><th>Edge source</th><th>Who pays you</th><th>How it shows up</th><th>Failure mode</th></tr>
+<tr><td><b>Volatility risk premium</b></td><td>Hedgers and lottery-ticket buyers who overpay for options</td><td>Implied vol is above later realised vol most of the time. Sellers collect it.</td><td>Rare crashes (gaps of 5–13%) take months of premium in a day</td></tr>
+<tr><td><b>Momentum / trend</b></td><td>Late participants, forced stop-outs, short-gamma hedgers</td><td>Trend days, breakouts with flow confirmation</td><td>Chop: many small losses. Low win rate needs big winners.</td></tr>
+<tr><td><b>Mean reversion</b></td><td>Over-reacting aggressive orders</td><td>Fades of VWAP σ-band extremes on balance days</td><td>Fading a trend day</td></tr>
+<tr><td><b>Flow / positioning</b></td><td>Trapped participants (shorts at highs, stops below PDL)</td><td>Short-covering rallies, OI-wall breaks, failed breakouts</td><td>Reading OI naively. Every contract has two sides.</td></tr>
+<tr><td><b>Structural / calendar</b></td><td>Mechanical flows: expiry hedging, rebalances, index close</td><td>Expiry pinning, closing-window effects, event-vol crush</td><td>Crowding; rule changes (expiry-day shifts)</td></tr>
+<tr><td><b>Execution and cost</b></td><td>The spread</td><td>Limit orders and liquid strikes. Avoiding costs <i>is</i> an edge.</td><td>Over-trading: costs compound per trade</td></tr></table></div>
+<div class="box edge"><b>The one-line philosophy</b>Buy options when you expect <i>realised</i> movement greater than what is <i>implied</i> (straddle price). Sell options when you expect less. Trade direction only when location, trend and flow agree. Size every trade so that the worst plausible gap costs no more than about 2% of capital. Everything below expands on this.</div>
+
+<h2 id="s1">1. The underlying: Nifty 50</h2>
+<ul>
+<li><b>Construction:</b> 50 large-cap NSE stocks, free-float market-cap weighted, base 1000 (Nov 1995). Rebalanced semi-annually (Mar/Sep), with weight caps. <b>Financials ≈ 35–38%</b>, IT ≈ 10–12%, oil &amp; gas, autos, FMCG, metals, pharma after that.</li>
+<li><b>Concentration:</b> top-10 ≈ 55–58% of the index. HDFC Bank (~11%), Reliance (~9%), ICICI Bank (~8%), Infosys (~5.6%), TCS, Bharti, ITC, L&amp;T, Kotak, Axis. <b>A 1% move in HDFC Bank ≈ 0.11% ≈ 27 Nifty points.</b> HDFC Bank, ICICI Bank and Reliance together are ~28%. On results days of these three, Nifty implied vol carries a mini-event.</li>
+<li><b>Bank Nifty link:</b> HDFC Bank and ICICI Bank are ~41% of Bank Nifty, and banks are about a third of Nifty. Bank Nifty leading Nifty (or diverging from it) is information. Holding both is not diversification: correlation is typically 0.8–0.9.</li>
+<li><b>The index has no volume.</b> For order flow on "Nifty", use near-month <b>futures</b> volume and CVD, plus option volumes. The spot index is a computed number.</li>
+<li><b>Official close:</b> NSE's closing price for each stock is the <b>volume-weighted average of the last 30 minutes (15:00–15:30)</b>. The Nifty close is computed from those prices, so <b>expiry settlement is effectively a 30-minute average, not the 15:30 tick.</b> See insight #4 in §19.</li>
+<li><b>Sessions (IST):</b> pre-open call auction 09:00–09:08 (equities, and since Dec 2025 current-month futures too), continuous 09:15–15:30. <b>GIFT Nifty</b> (NSE IX, USD-denominated) trades ~21 hours and is the overnight price signal. The gap between GIFT Nifty and the prior Nifty close, adjusted for its normal premium, approximates the opening gap.</li>
+<li><b>Global hours that matter:</b> Asia open (05:30–07:00), Europe open (~12:30 in the northern winter, 13:30 in summer), US data (18:00–19:00 IST), US open (19:00/20:00 IST). Overnight risk sits in the US session.</li>
+</ul>
+
+<h2 id="s2">2. Contracts, margins, settlement and rules</h2>
+<div class="tw"><table><tr><th>Item</th><th>Nifty futures</th><th>Nifty options</th></tr>
+<tr><td>Lot size</td><td colspan="2">65 (verify; revised semi-annually based on the ₹15–20 lakh minimum contract value)</td></tr>
+<tr><td>Expiries</td><td>3 serial months: near, next, far. Expire on the last Tuesday.</td><td>Weekly every Tuesday; monthly on the last Tuesday; quarterly and half-yearly long-dated series</td></tr>
+<tr><td>Style / settlement</td><td>Cash-settled. Daily MTM against the settlement price.</td><td>European; cash-settled to intrinsic value at the final settlement price</td></tr>
+<tr><td>Final settlement price</td><td colspan="2">Nifty closing value on expiry day. If Tuesday is a holiday, expiry moves to the previous trading day.</td></tr>
+<tr><td>Tick / strikes</td><td>₹0.05</td><td>50-point strikes near the money (wider far out); ₹0.05 tick</td></tr>
+<tr><td>Margin</td><td>SPAN + exposure (~10–12% of notional in calm markets)</td><td>Buyer: premium paid upfront. Writer: SPAN + exposure (ELM ~2% of notional) + extra 2% ELM on expiry day for short options expiring that day</td></tr></table></div>
+<h4>SEBI's 2024–25 retail F&amp;O measures and what they changed</h4>
+<ul><li>Minimum contract value ₹15 lakh, which is why lots went up.</li><li>One weekly expiry per exchange, on its benchmark index. NSE kept only Nifty weekly; Bank Nifty and Fin Nifty weeklies ended in Nov 2024. Weekly expiry moved to <b>Tuesday</b> in Sep 2025.</li><li>Option premium collected upfront from buyers; no intraday leverage beyond the premium.</li><li>The calendar-spread margin benefit is removed on expiry day: a short weekly against a long monthly is margined as a naked short on the expiry day.</li><li>Index position limits monitored intraday (from 2025).</li></ul>
+<div class="box"><b>Margin mechanics that save money</b>(1) A hedged position (iron fly or condor) needs a fraction of the margin of a naked straddle, because SPAN scenarios cap the loss. (2) <b>Buy the hedge leg first</b>, then sell; reversing the order blocks the full naked margin for a moment and can be rejected. (3) Collateral from pledged stocks or liquid funds counts after a haircut, but SEBI's 50:50 rule means at least half of margin must be cash or cash-equivalent. (4) A long option ITM at expiry is settled to intrinsic value. Square off before 15:30 if the intrinsic is tiny, to avoid paying the exercise STT on it.</div>
+
+<h2 id="s3">3. Futures in depth</h2>
+<h3>Fair value and basis</h3>
+<p><b>F = S·e<sup>(r−q)T</sup></b>, where r is the funding rate (~6–7%) and q is the dividend yield (~1.2–1.4%). For 30 days at 24,500: F − S ≈ 24,500 × 0.052 × 30/365 ≈ <b>105 points</b> of "fair premium". The <b>basis</b> (F − S) shrinks to 0 at expiry, which is <b>cost-of-carry decay</b>: a long futures position pays it and a short collects it.</p>
+<ul><li><b>Basis above fair value</b>: leveraged longs paying up. Bullish, but crowded at extremes.</li><li><b>Basis below fair value or a discount</b>: heavy shorting or hedging, or a dividend cluster (May–Aug). A discount during a fall plus rising OI means aggressive shorting.</li><li><b>Intraday:</b> futures premium <i>compressing</i> while spot rises means futures longs are unwinding or arbitrageurs are selling futures and buying cash. The rally is spot-led and often weaker.</li></ul>
+<h3>Open interest: the four quadrants (futures)</h3>
+<div class="tw"><table><tr><th></th><th>OI ↑ (new positions)</th><th>OI ↓ (positions closing)</th></tr>
+<tr><td><b>Price ↑</b></td><td>Long build-up: trend fuel, strongest bullish</td><td>Short covering: sharp but short-lived, fades when covering is done</td></tr>
+<tr><td><b>Price ↓</b></td><td>Short build-up: strongest bearish</td><td>Long unwinding: weak, drifting decline</td></tr></table></div>
+<p class="mu">Caveat: every contract has a buyer and a seller. The quadrant tells you which side was <i>aggressive</i> only when you combine it with CVD (§7). Read OI change over the day and at closing, not tick by tick.</p>
+<h3>Rollover</h3>
+<p>In the last week of the month positions move from near to next month. <b>Rollover %</b> = next+far OI / total OI after expiry. High rollover with a rising <b>roll cost</b> (next − near spread above fair carry) means longs are carrying conviction forward. High rollover at a cheap roll means shorts are rolling. Compare with the 3-month average for the same series.</p>
+<h3>Uses of futures</h3>
+<ul><li><b>Directional:</b> delta 1, no theta, no vega. The cleanest way to trade a level break when IV is high and options are expensive.</li><li><b>Portfolio hedge:</b> lots to short = β × portfolio value / (F × lot). A ₹50L portfolio with β 1.1 → 50L × 1.1 / (24,600 × 65) ≈ 3.4 lots.</li><li><b>Synthetic future</b> = +call −put at the same strike. Its price is K + C − P. Compare it with the futures price: a deviation beyond costs is a conversion/reversal arbitrage, and arbitrage desks close it in milliseconds. Use it as a <b>fair-value check on option prices</b>, not as a trade.</li><li><b>Hedged futures:</b> long futures + long put = synthetic call with no time-decay cliff, and you choose the floor.</li></ul>
+
+<h2 id="s4">4. Options: mechanics and pricing</h2>
+<div class="tw"><table><tr><th>Term</th><th>Meaning</th></tr>
+<tr><td>Call (CE) / Put (PE)</td><td>Right to buy / sell the index at strike K at expiry (European). The buyer pays premium; the writer takes the obligation and the margin.</td></tr>
+<tr><td>Moneyness</td><td>ITM (has intrinsic value), ATM (strike ≈ spot), OTM (only time value)</td></tr>
+<tr><td>Premium</td><td>Intrinsic value + time value (extrinsic). Only extrinsic value decays.</td></tr>
+<tr><td>Put–call parity</td><td>C − P = S·e<sup>−qT</sup> − K·e<sup>−rT</sup> ≈ F − K (discounted). ATM-forward call and put are worth the same.</td></tr></table></div>
+<h3>Black–Scholes in one paragraph</h3>
+<p>C = S·N(d1) − K·e<sup>−rT</sup>·N(d2), with d1 = [ln(S/K) + (r + σ²/2)T]/(σ√T) and d2 = d1 − σ√T. The only unobservable input is σ, so the market quotes options in <b>implied volatility</b>. The model's assumptions (constant vol, no jumps, lognormal returns) are wrong, and the market corrects for that through the <b>skew</b> (§6). Treat BS as a <i>translation layer</i> between price and vol, not as a truth.</p>
+<h3>Three shortcuts that matter more than the formula</h3>
+<ol><li><b>ATM straddle ≈ 0.8 × S × σ × √T</b> (0.8 ≈ √(2/π)). At 24,500, IV 13%, 7 days: 0.8 × 24,500 × 0.13 × √(7/365) ≈ <b>353 points</b>. This is the market's price for the expected absolute move to expiry.</li>
+<li><b>Delta ≈ probability of finishing ITM</b> (strictly N(d2) for the risk-neutral probability). A 0.20-delta call has roughly a 20% chance of expiring ITM.</li>
+<li><b>Probability of touching ≈ 2 × probability of expiring ITM.</b> Your 0.20-delta short strike will be <i>touched</i> about 40% of the time before expiry. Plan stops and adjustments around that, not around the 80% "win rate".</li></ol>
+
+<h2 id="s5">5. The Greeks: what they really mean for a Nifty trader</h2>
+<div class="tw"><table><tr><th>Greek</th><th>Definition</th><th>Nifty rule of thumb (24,500, IV 13%)</th><th>Trader's meaning</th></tr>
+<tr><td><b>Delta Δ</b></td><td>∂V/∂S</td><td>ATM ≈ 0.5; 0.16Δ ≈ 1σ OTM; 0.20Δ ≈ one straddle-width OTM</td><td>Your directional exposure in "Nifty units". Position Δ × lot = point-value per Nifty point.</td></tr>
+<tr><td><b>Gamma Γ</b></td><td>∂Δ/∂S</td><td>ATM Γ ≈ 0.4/(S·σ·√T): 7 DTE ≈ 9e-4; 1 DTE ≈ 24e-4</td><td>How fast your direction changes. Long Γ profits from movement; short Γ pays for it.</td></tr>
+<tr><td><b>Theta Θ</b></td><td>∂V/∂t</td><td>ATM straddle ≈ V/(2T): 7 DTE ≈ −25 pts/day; 1 DTE ≈ −65 pts/day, though the whole ~130 pts goes on the last day</td><td>The rent a long-gamma holder pays the short-gamma holder.</td></tr>
+<tr><td><b>Vega ν</b></td><td>∂V/∂σ per 1 vol pt</td><td>ATM ≈ 0.4·S·√T/100: 7 DTE ≈ 13.6 pts; 30 DTE ≈ 28 pts</td><td>Exposure to IV changes. Dominates monthly and longer positions.</td></tr>
+<tr><td><b>Rho ρ</b></td><td>∂V/∂r</td><td>Negligible for weeklies</td><td>Matters only for LEAPS-style long-dated series</td></tr></table></div>
+<div class="fig"><div data-c="delta"></div><div class="cap">Delta of the ATM call against spot. Near expiry delta becomes a step function: the option is "all or nothing" and a small move flips it from 0.2 to 0.8.</div></div>
+<div class="fig"><div data-c="gamma"></div><div class="cap">Gamma concentrates at the strike and grows as 1/√T. This is why expiry-day (0DTE) shorts are a gamma trade: the same 100-point move changes delta about 2.6× more at 1 DTE than at 7 DTE.</div></div>
+<h3>The gamma–theta identity: the single most important equation</h3>
+<p>For a delta-hedged option, <b>Θ ≈ −½·Γ·S²·σ²</b> (per year). The P&amp;L over a short interval is</p>
+<p style="text-align:center"><b>P&amp;L ≈ ½·Γ·(ΔS)² + Θ·Δt = ½·Γ·[(ΔS)² − S²σ²Δt]</b></p>
+<p>The long-gamma holder wins if and only if the <b>realised move squared exceeds the implied move squared</b>. The break-even daily move is S·σ/√252. At VIX 13 that is <b>≈ 200 Nifty points per day</b>. Option buying and option selling are therefore not bets on direction. They are bets on <b>realised versus implied volatility</b>, and direction is a second layer on top.</p>
+<div class="fig"><div data-c="decay"></div><div class="cap">The ATM straddle decays like √T. <b>When DTE quarters, time value halves:</b> a 28-day straddle keeps half its value at 7 days. The dashed line is the 0.8·S·σ·√T shortcut; it matches BS almost exactly.</div></div>
+<div class="fig"><div data-c="theta"></div><div class="cap">Theta per day explodes in the final 2–3 days for ATM. Far-OTM strangles earn most of their theta early and almost nothing in the last day, because they are already near zero. So OTM sellers should enter earlier and ATM sellers later.</div></div>
+<div class="fig"><div data-c="gv"></div><div class="cap">Vega shrinks and gamma grows as expiry approaches. <b>Weekly shorts are gamma bets (fear a move); monthly shorts are vega bets (fear an IV spike).</b> Choose the DTE that matches the risk you are being paid for.</div></div>
+<h3>Second-order Greeks: where the hidden P&amp;L comes from</h3>
+<div class="tw"><table><tr><th>Greek</th><th>Is</th><th>Why you care</th></tr>
+<tr><td><b>Vanna</b></td><td>∂Δ/∂σ</td><td>When IV collapses after an event, OTM put deltas shrink. Hedgers who sold futures against them buy back, which supports a "post-event drift up". Your short-strangle delta also changes with IV, not only with spot.</td></tr>
+<tr><td><b>Charm</b></td><td>∂Δ/∂t (delta bleed)</td><td>Overnight, OTM deltas decay toward 0 and ITM deltas toward ±1. A delta-neutral short strangle opens Monday with a delta you never traded.</td></tr>
+<tr><td><b>Vomma (volga)</b></td><td>∂ν/∂σ</td><td>OTM wings gain vega as vol rises. Short strangles lose <i>accelerating</i> amounts in a vol spike, which is why wings are priced richer than BS suggests.</td></tr>
+<tr><td><b>Speed</b></td><td>∂Γ/∂S</td><td>Gamma changes as you move. A strangle turns into an ATM short-gamma position the moment spot reaches a strike.</td></tr>
+<tr><td><b>Color</b></td><td>∂Γ/∂t</td><td>ATM gamma rises into expiry and OTM gamma falls. A "safe" short becomes dangerous after 13:00 on expiry day if spot drifts to it.</td></tr></table></div>
+
+<h2 id="s6">6. Volatility: IV, realised vol, skew, term structure, India VIX</h2>
+<h3>Realised (historical) volatility: measure it properly</h3>
+<div class="tw"><table><tr><th>Estimator</th><th>Formula idea</th><th>Use</th></tr>
+<tr><td>Close-to-close</td><td>stdev(ln C<sub>t</sub>/C<sub>t−1</sub>)·√252</td><td>Standard, but noisy and blind to intraday range</td></tr>
+<tr><td>Parkinson</td><td>uses ln(H/L)</td><td>About 5× more efficient; ignores gaps</td></tr>
+<tr><td>Garman–Klass / Yang–Zhang</td><td>O, H, L, C (Yang–Zhang adds overnight gaps)</td><td>Best daily estimator for Nifty, which gaps often</td></tr>
+<tr><td>Intraday RV</td><td>√(Σ r²) over 5-minute returns, annualised</td><td><b>Decide mid-session</b> whether today is realising above or below the implied daily move</td></tr></table></div>
+<h3>Implied vol and the volatility risk premium (VRP)</h3>
+<p>IV is the market's forecast plus a risk premium. On Nifty, front-month IV usually sits <b>1–3 vol points above</b> the realised vol that follows. That gap is what option sellers harvest. It turns sharply negative in shocks: realised vol of 40% against an implied 15%. <b>The VRP is paid for bearing crash risk, so it cannot be collected without that risk.</b></p>
+<ul><li><b>IV Rank</b> = (IV − 52w low)/(52w high − 52w low). <b>IV Percentile</b> = % of days in the past year with IV below today's. Prefer percentile, since a single spike distorts rank.</li>
+<li><b>Sell premium</b> when IV percentile is above 50 <i>and</i> IV is above your RV forecast, and there is no unpriced event. <b>Buy premium</b> when IV percentile is below 20, realised vol is waking up, or there is a scheduled catalyst the market under-prices.</li></ul>
+<h3>Term structure</h3>
+<p>Normally <b>upward sloping (contango)</b>: weekly IV is below monthly. <b>Inverted (backwardation)</b>, with weekly above monthly, means stress now or an event inside the week. An inversion that resolves (front IV falling back below back IV) is a classic "all-clear" signal for sellers. Calendars profit when the front falls relative to the back.</p>
+<h3>Skew: the shape of fear</h3>
+<div class="fig"><div data-c="smile"></div><div class="cap">Nifty has a <b>put skew (smirk)</b>: OTM puts trade at higher IV than equidistant calls, because the index crashes down and grinds up. In a sell-off the whole curve lifts and steepens. "Spot down, vol up" is the normal correlation.</div></div>
+<ul><li><b>Sticky strike vs sticky delta:</b> in a grind-up market, IV per strike tends to stay put (sticky strike), so ATM IV falls as spot rises into lower-IV strikes. Calls gain less than delta implies, and long calls in a slow rally disappoint.</li>
+<li><b>Risk reversal (25Δ put IV − 25Δ call IV)</b> is the market's fear gauge. A widening RR with spot flat means someone is buying protection, often a warning before the price shows it.</li>
+<li>Selling OTM puts collects the skew premium, but you are selling the exact insurance the market fears most. Size accordingly.</li></ul>
+<h3>Event volatility: extract the implied event move</h3>
+<p>Total variance to expiry = normal-day variance + event variance. With the weekly series pricing IV<sub>f</sub> over D days and a "clean" base IV<sub>b</sub>:</p>
+<p style="text-align:center"><b>Implied event move ≈ √( IV<sub>f</sub>²·D/365 − IV<sub>b</sub>²·(D−1)/365 )</b></p>
+<p>Example: a weekly at 18% IV with 5 days to expiry including Budget day, base IV 13%. Then √(0.18²·5/365 − 0.13²·4/365) ≈ <b>1.6% ≈ 395 points</b>. Compare it with the <b>average absolute move on past occurrences of the same event</b> (measure Budget, RBI and election days from your own history). If implied is above historical, sell the event (defined risk). If it is below, buy it. Either way, <b>IV crush</b> after the event removes most of the event premium within minutes of the announcement.</p>
+<h3>India VIX</h3>
+<p>Computed by NSE from the order book (best bid/ask) of near- and next-month Nifty options using the CBOE VIX methodology. It is the market's <b>30-day expected annualised volatility</b>. It is <b>not</b> a directional indicator, although it is inversely correlated with Nifty because crashes come with vol spikes.</p>
+<div class="tw"><table data-vix></table></div>
+<p class="mu">*Approximate straddle from 0.8·S·σ·√T at the chart's spot. Daily 1σ ≈ VIX/16 in % (√252 ≈ 15.9). Roughly 68% of days close inside ±1σ, but Nifty's fat tails produce more 3σ days than the normal distribution predicts.</p>
+<div class="tw"><table><tr><th>VIX regime</th><th>Typical behaviour</th><th>Bias</th></tr>
+<tr><td>&lt; 11</td><td>Complacent, tight ranges, cheap options</td><td>Buy cheap premium: calendars, debit spreads. Naked short premium pays little for its gap risk.</td></tr>
+<tr><td>11–15</td><td>Normal</td><td>Balanced. Use the realised-vs-implied test daily.</td></tr>
+<tr><td>15–20</td><td>Elevated, trending or event-laden</td><td>Defined-risk premium selling pays well; directional trades need wider stops</td></tr>
+<tr><td>20–30</td><td>Stress (election results, global sell-offs)</td><td>Reduce size by half. Credit spreads only. Expect 2–4% days.</td></tr>
+<tr><td>&gt; 30</td><td>Crisis (VIX peaked near 84 in March 2020)</td><td>Survival mode. Small, defined-risk positions. Mean reversion of VIX is the eventual edge.</td></tr></table></div>
+<div class="box"><b>VIX nuances</b>(1) <b>Nifty up and VIX up together</b> means call buying or hedge demand into a rally, which is fragile and often precedes reversals. (2) VIX is 30-day, while weekly ATM IV can diverge strongly near events. Trade the series you hold. (3) VIX rises mechanically into events and falls after them, so do not read a post-event VIX drop as "bullish". (4) VIX mean-reverts, but timing a spike's top is as hard as timing a price top. Sell VIX spikes only with defined risk.</div>
+
+<h2 id="s7">7. Order flow: CVD, footprint, VWAP, volume and market profile, order book</h2>
+<h3>Cumulative volume delta (CVD)</h3>
+<p>Each trade is classed as <b>buyer-initiated</b> (it lifts the offer) or <b>seller-initiated</b> (it hits the bid). The tick rule or quote rule is used when the aggressor flag is not in the data. Delta per bar = buy volume − sell volume, and CVD is its running sum. On Nifty, compute it on <b>near-month futures</b>, since the index has no volume. Optionally build a second CVD from ATM options (call delta minus put delta).</p>
+<div class="fig"><div data-c="cvd"></div><div class="cap"><b>Bearish divergence:</b> price makes a higher high on weaker aggressive buying. Passive sellers (limit orders) are absorbing. Mirror it for bullish divergence at lows.</div></div>
+<div class="tw"><table><tr><th>Pattern</th><th>Reading</th><th>Action</th></tr>
+<tr><td>Price ↑, CVD ↑</td><td>Healthy, aggressor-driven trend</td><td>Trade pullbacks with the trend</td></tr>
+<tr><td>Price ↑, CVD flat or ↓</td><td>Absorption at highs, or passive buying lifting price (short covering)</td><td>Fade at resistance with a tight stop; or take profits</td></tr>
+<tr><td>Large delta, no price progress</td><td><b>Absorption</b>: an iceberg or big passive player</td><td>Trade with the absorber once price moves away from the level</td></tr>
+<tr><td>Price ↓, CVD ↑</td><td>Aggressive buyers being absorbed (bearish), or passive selling</td><td>Context decides. Look at location.</td></tr>
+<tr><td>Delta spike at a level, then reversal</td><td>Stop run / exhaustion</td><td>Reversal entry once the bar after the spike fails to extend</td></tr></table></div>
+<p class="mu">Caveats: index futures flow includes arbitrage and option writers' delta hedging, which is mechanical rather than informed. CVD works best at <b>pre-defined levels</b> (PDH/PDL, VWAP bands, VAH/VAL), not in the middle of nowhere. A footprint chart (bid×ask volume per price) shows stacked imbalances (3+ levels of 3:1 ask over bid is a strong initiative-buying signature) and unfinished auctions.</p>
+<h3>VWAP and anchored VWAP</h3>
+<ul><li><b>Session VWAP</b> is the average price paid today and the institutional benchmark. Above a rising VWAP is long-only territory; below a falling one is short-only. Flat VWAP with price crossing it repeatedly means a balance day: fade the bands.</li>
+<li><b>σ bands</b>: ±1σ is normal rotation, ±2σ stretched (fade on balance days, trail on trend days), ±3σ rare.</li>
+<li><b>Anchored VWAP</b> from a swing low or high, an event (Budget, RBI, results) or the week's open shows the average cost of everyone who traded since then. A first retest of an anchored VWAP is a high-quality level.</li></ul>
+<h3>Volume profile and market profile</h3>
+<ul><li><b>POC</b> is the price with the most volume (fair value). The <b>value area</b> covers 70% of volume (VAH/VAL). <b>HVN</b> = acceptance (price slows down); <b>LVN</b> = rejection (price moves fast through it).</li>
+<li><b>80% rule:</b> if price opens outside the prior value area, re-enters it and holds two 30-minute periods, it tends to traverse to the other side.</li>
+<li><b>Initial balance (IB)</b> is the 09:15–10:15 range. IB extension with flow means trend; an IB under ~0.6× its 20-day average sets up a breakout day.</li>
+<li><b>Day types</b>: <i>Trend</i> (one-directional, closes at the extreme, IB small relative to the day), <i>Normal variation</i> (one IB extension), <i>Neutral</i> (both sides extended, closes mid), <i>Double distribution</i> (two value areas joined by a single-print LVN), <i>Non-trend</i> (tight, before events).</li>
+<li><b>Opening types</b>: Open-Drive (strongest, do not fade), Open-Test-Drive, Open-Rejection-Reverse, Open-Auction (rotational, fade the edges).</li></ul>
+<h3>Order book</h3>
+<p>Total bid quantity (TBQ) against total offer quantity (TSQ) is easy to spoof and, as a <i>level</i>, tends to be contrarian or useless. The <b>change</b> in book balance is informative. Your dashboard's z-scored 2-minute change in ln(bid/offer) tested predictive while the level tested anti-predictive. Read the book as a <b>flow</b>, never as a snapshot. Large resting orders that are pulled as price approaches are spoof tells; orders that keep refilling are icebergs (real absorption).</p>
+
+<h2 id="s8">8. Positioning: option chain, OI, PCR, max pain, FII data, gamma</h2>
+<h3>Reading the option chain</h3>
+<ul><li><b>Highest call OI strike</b> marks resistance where writers defend; <b>highest put OI strike</b> marks support. In India most OI is <i>written</i> by stronger hands (prop and FPI desks), while retail buys.</li>
+<li><b>Change in OI matters more than the OI level.</b> Fresh put writing at higher strikes as price rises means support is shifting up (bullish). Call writing moving down means the ceiling is dropping (bearish). Call OI unwinding at the resistance strike while price approaches it means writers are fleeing, which is a breakout tell.</li>
+<li><b>Straddle/strangle concentration:</b> heavy combined CE+PE OI at one strike close to expiry makes that strike a <b>magnet</b> (pin candidate).</li>
+<li><b>Premium behaviour:</b> if a call's premium stays bid while spot falls, someone is buying it (the delta is not explaining the price). That is often an early tell.</li></ul>
+<h3>PCR (put–call ratio)</h3>
+<p>PCR (OI) = total put OI / total call OI. Because Indian OI is mostly written, a <b>rising PCR = put writing = support building = bullish</b>, up to an extreme. Typical Nifty range ≈ 0.7–1.4. <b>Above ~1.4–1.5</b> means crowded bullish positioning (contrarian caution). <b>Below ~0.7</b> means heavy call writing and oversold conditions (watch for short covering). Use the <i>change</i> and the extremes relative to the last 3 months, not fixed thresholds. Volume PCR is noisier and is an intraday sentiment gauge.</p>
+<h3>Max pain</h3>
+<p>The strike where option buyers in aggregate lose the most at expiry. Evidence for "price gravitates to max pain" is weak. When it seems to work, the mechanism is <b>gamma pinning</b> by hedgers around large OI strikes, so trade the OI concentration and gamma, not the max-pain number.</p>
+<h3>Participant-wise OI (NSE, published daily after the close)</h3>
+<div class="tw"><table><tr><th>Metric</th><th>Compute</th><th>Read</th></tr>
+<tr><td>FII index-futures long ratio</td><td>FII long / (long + short) index futures</td><td>Below ~20% means FIIs are extremely short (short-covering fuel; contrarian bullish). Above ~70% means heavily long (complacent). Track the direction over 5 days.</td></tr>
+<tr><td>FII index options net</td><td>Long calls − short calls, long puts − short puts</td><td>Net long puts plus short calls is a protective or bearish stance. Watch big day-on-day shifts.</td></tr>
+<tr><td>Client (retail) positioning</td><td>Same split for Clients</td><td>Often the contrarian side at extremes</td></tr>
+<tr><td>Pro (prop) positioning</td><td>Net short options most days</td><td>They are the premium sellers; their exits from shorts precede vol expansions</td></tr>
+<tr><td>FII/DII cash (provisional, ~18:00)</td><td>Net buy/sell ₹ crore</td><td>Persistent FII selling with DII absorbing means a range with downside skew. Single days are noise.</td></tr></table></div>
+<h3>Gamma exposure (GEX) and the gamma flip</h3>
+<div class="fig"><div data-c="gex"></div><div class="cap">Illustrative net gamma of the hedging community by strike. Where hedgers are <b>long gamma</b> (green) they sell rallies and buy dips, which suppresses volatility and pins price. Where they are <b>short gamma</b> (red) they buy rallies and sell dips, which amplifies moves. The strike where net gamma changes sign is the <b>gamma flip</b>: above it markets mean-revert, below it they trend and gap.</div></div>
+<p>India-specific: retail are net option <i>buyers</i>, so the writing community (prop and FPI) is net <b>short gamma</b> in aggregate. When spot runs into a strike with huge short OI, writers who delta-hedge must chase, which is the short-covering-style acceleration through OI walls on expiry afternoons. When spot sits between two heavy strikes with falling IV, hedge flows pin it. Treat any GEX model as a <i>regime</i> indicator (trend vs. revert), not a level oracle. Your dashboard's tests found it informative as context but not better than book shift as a direction call.</p>
+
+<h2 id="s9">9. Levels, price action and time of day</h2>
+<h3>Level hierarchy (strongest first)</h3>
+<ol><li>Prior week's and month's high/low; all-time high; major round numbers (24,000 / 24,500 / 25,000), which also carry the biggest OI.</li><li>Prior day's high (PDH), low (PDL) and close (PDC); prior day's VAH/VAL/POC.</li><li>Today's opening range (first 15 or 30 minutes), IB high and low, VWAP and its bands.</li><li><b>CPR (central pivot range):</b> P = (H+L+C)/3, BC = (H+L)/2, TC = 2P − BC. A <b>narrow CPR</b> (width under ~0.15% of price) predicts a trending or expansion day; a <b>wide CPR</b> predicts a range. Opening above CPR is a bullish bias, below it bearish.</li><li>Classic pivots (R1/S1 = 2P − L / 2P − H) and Camarilla (H3/L3 fade, H4/L4 breakout). Use them only where they coincide with other levels.</li></ol>
+<h3>Gaps</h3>
+<ul><li><b>Gap inside the prior day's range</b>: higher chance of filling. Fade toward PDC once the first 15-minute bar fails to extend.</li><li><b>Gap outside the prior range</b> that holds the first 15–30 minutes (above PDH for gap-ups): gap-and-go. Do not fade it; buy the first pullback to VWAP.</li><li>Large gaps (over 1%) re-price IV at the open. Option premium stops set overnight get hit by spread and IV, not by the thesis.</li></ul>
+<h3>Nifty's intraday clock</h3>
+<div class="tw"><table><tr><th>IST</th><th>Character</th><th>What to do</th></tr>
+<tr><td>09:15–09:30</td><td>Price discovery, widest spreads, the most range per minute</td><td>Observe, mark the opening range. Avoid market orders.</td></tr>
+<tr><td>09:30–10:15</td><td>Initial balance forms; opening type becomes clear</td><td>ORB and opening-drive entries; decide the day type</td></tr>
+<tr><td>10:15–11:30</td><td>Trend continuation or IB failure</td><td>Best risk:reward pullback entries</td></tr>
+<tr><td>11:30–13:00</td><td>Lunch lull, low volume, false breaks</td><td>Premium sellers' window; avoid new breakouts</td></tr>
+<tr><td>12:30/13:30–14:30</td><td>Europe opens; fresh flows</td><td>Second trend leg or reversal of the morning</td></tr>
+<tr><td>14:30–15:00</td><td>Positioning and expiry hedging</td><td>Expiry: gamma at its peak, so pins and breaks happen here</td></tr>
+<tr><td>15:00–15:30</td><td>Closing-price window (30-minute VWAP)</td><td>Square-offs; settlement is being averaged in</td></tr></table></div>
+<h3>Day-type call by 10:15</h3>
+<p><b>Likely trend day</b>: open outside the prior value area, open-drive, IB extension within the first hour, futures CVD aligned, price on one side of a sloping VWAP, narrow CPR, and VIX rising if down or falling if up. → Trade with the trend, buy options or futures on pullbacks, and <b>do not sell premium against it</b>. <b>Likely balance day</b>: open inside the prior value area, overlapping bars, flat VWAP, wide CPR, CVD oscillating. → Fade the VWAP 2σ bands, sell premium, take quick targets.</p>
+<h3>Indicators: what each is for</h3>
+<div class="tw"><table><tr><th>Tool</th><th>Best use on Nifty</th><th>Trap</th></tr>
+<tr><td>EMA 9/21 or a ribbon (5-minute)</td><td>Trend filter and trailing exit</td><td>Whipsaws in balance</td></tr>
+<tr><td>Supertrend (10,3)</td><td>Trailing stop on trend days</td><td>Late entries</td></tr>
+<tr><td>ATR(14)</td><td>Stop and target sizing (1–1.5 ATR stop)</td><td>None; use it everywhere</td></tr>
+<tr><td>RSI(14) divergence</td><td>Exhaustion at levels</td><td>"Overbought" persists on trend days</td></tr>
+<tr><td>ADX(14)</td><td>Regime: above 25 trend, below 20 range</td><td>Lags</td></tr>
+<tr><td>Bollinger / Keltner squeeze</td><td>Volatility expansion is coming, so buy gamma</td><td>Does not give direction</td></tr></table></div>
+
+<h2 id="s10">10. Strategy encyclopedia</h2>
+<p>Every chart below is computed with Black–Scholes at the spot, IV and lot set at the top (put skew included). The <b>solid line is the payoff at the nearest expiry</b> and the <b>dashed line is today's mark-to-market</b>. The stats line shows the exact legs, credit or debit, max profit and loss in the plotted ±6% range ("open" = keeps growing), break-evens and position Greeks. Legs default to 7 DTE; "(35d)" marks a monthly leg. Tags: Δ direction, Θ (+ means you earn decay), V (+ means you gain if IV rises).</p>
+
+<h3>Bullish</h3><div class="sg">
+<div class="st"><h4>Long call</h4><div class="meta"><span class="tag">Δ+ Γ+ Θ− V+</span>Strong, fast up-move expected; IV low</div><div class="fig" data-l="c0:1"></div><ul><li>Use slightly ITM (0.6Δ) for intraday direction: less theta per unit of delta, tighter spread.</li><li>Exit on time: if the move has not come by mid-session, theta and IV drift kill it.</li></ul></div>
+<div class="st"><h4>Bull call spread (debit)</h4><div class="meta"><span class="tag">Δ+ Θ≈0 V≈0</span>Moderate rise to a target</div><div class="fig" data-l="c0:1 c300:-1"></div><ul><li>Put the short strike at your target or resistance (call OI wall). Vega and theta largely cancel.</li><li>Best when IV is high but you are still bullish; buy-side cost is roughly halved.</li></ul></div>
+<div class="st"><h4>Bull put spread (credit)</h4><div class="meta"><span class="tag">Δ+ Θ+ V−</span>Not falling below support; IV high</div><div class="fig" data-l="p0:-1 p-300:1"></div><ul><li>Short strike at or below the put OI wall or VWAP −1σ. Profits from time and IV crush even if flat.</li><li>Close at 50–70% of max profit; the last part carries all the gamma risk.</li></ul></div>
+<div class="st"><h4>Call ratio backspread (1×2)</h4><div class="meta"><span class="tag">Δ+ Γ+ V+</span>Explosive upside; limited loss if wrong</div><div class="fig" data-l="c0:-1 c200:2"></div><ul><li>Worst case is spot finishing <i>at</i> the long strike. Enter for a small credit to profit even on a fall.</li><li>Ideal before events when you lean bullish but fear being wrong.</li></ul></div>
+<div class="st"><h4>Risk reversal (bullish)</h4><div class="meta"><span class="tag">Δ+ V≈0</span>Strong bullish view, wants cheap upside</div><div class="fig" data-l="c300:1 p-300:-1"></div><ul><li>Sells the expensive skew (puts) to fund calls, which is efficient after sell-offs when put IV is elevated.</li><li>Downside is naked: put a stop on spot below support.</li></ul></div>
+<div class="st"><h4>Synthetic long</h4><div class="meta"><span class="tag">Δ≈+1</span>Futures equivalent</div><div class="fig" data-l="c0:1 p0:-1"></div><ul><li>Equal to long futures via parity. Use it when futures margin or basis is unattractive.</li></ul></div>
+<div class="st"><h4>Long futures + protective put</h4><div class="meta"><span class="tag">Δ+ Γ+</span>Trend position with a hard floor</div><div class="fig" data-l="f:1 p-200:1"></div><ul><li>Behaves like a call (synthetic call) but you pick the floor and can roll the put alone.</li></ul></div>
+<div class="st"><h4>Covered call (futures + short call)</h4><div class="meta"><span class="tag">Δ+ Θ+</span>Mildly bullish, cap accepted</div><div class="fig" data-l="f:1 c300:-1"></div><ul><li>Sell weekly calls against a long position at resistance. The downside is still futures-sized.</li></ul></div>
+<div class="st"><h4>Jade lizard (monthly)</h4><div class="meta"><span class="tag">Δ+ Θ+ V−</span>Neutral-to-bullish, no upside risk</div><div class="fig" data-l="p-300:-1@30 c300:-1@30 c500:1@30"></div><ul><li>Short put + short call spread. When the total credit exceeds the call-spread width, there is <b>no risk above</b>.</li><li>All the risk is a crash below the put. Fits best after a sell-off when put IV is rich.</li></ul></div>
+<div class="st"><h4>Call diagonal (poor man's covered call)</h4><div class="meta"><span class="tag">Δ+ Θ+ V+</span>Slow grind up</div><div class="fig" data-l="c-300:1@35 c200:-1@7"></div><ul><li>Long ITM monthly call with a weekly OTM call sold against it, rolled every week. Likes rising IV and a slow uptrend.</li></ul></div>
+</div>
+
+<h3>Bearish</h3><div class="sg">
+<div class="st"><h4>Long put</h4><div class="meta"><span class="tag">Δ− Γ+ V+</span>Fast fall expected</div><div class="fig" data-l="p0:1"></div><ul><li>Falls come with rising IV, so puts get a vega tailwind that calls do not get in rallies. Buying puts is structurally better than buying calls for the same move.</li></ul></div>
+<div class="st"><h4>Bear put spread (debit)</h4><div class="meta"><span class="tag">Δ− Θ≈0</span>Moderate fall to support</div><div class="fig" data-l="p0:1 p-300:-1"></div><ul><li>Short strike at the put OI wall or PDL. Skew makes the short put rich, which improves the price.</li></ul></div>
+<div class="st"><h4>Bear call spread (credit)</h4><div class="meta"><span class="tag">Δ− Θ+ V−</span>Not rising above resistance</div><div class="fig" data-l="c0:-1 c300:1"></div><ul><li>Short strike at the call OI wall. Grind-ups are slow (sticky strike), which favours call-credit sellers.</li></ul></div>
+<div class="st"><h4>Put ratio backspread (1×2)</h4><div class="meta"><span class="tag">Δ− Γ+ V+</span>Crash hedge that pays a small credit</div><div class="fig" data-l="p0:-1 p-200:2"></div><ul><li>Benefits from IV expansion in a crash. Valley of loss at the long strike.</li></ul></div>
+<div class="st"><h4>Risk reversal (bearish)</h4><div class="meta"><span class="tag">Δ− V±</span>Strong bearish view</div><div class="fig" data-l="p-300:1 c300:-1"></div><ul><li>Expensive in calm markets because you buy the skew. Better after a rally when call IV is bid.</li></ul></div>
+<div class="st"><h4>Put diagonal</h4><div class="meta"><span class="tag">Δ− Θ+</span>Slow drift down</div><div class="fig" data-l="p300:1@35 p-200:-1@7"></div><ul><li>Long ITM monthly put, sell weekly OTM puts. The roll income lowers the cost basis.</li></ul></div>
+</div>
+
+<h3>Neutral / range-bound (short volatility)</h3><div class="sg">
+<div class="st"><h4>Short straddle</h4><div class="meta"><span class="tag">Δ0 Γ−− Θ++ V−</span>Pin / range; IV above expected RV</div><div class="fig" data-l="c0:-1 p0:-1"></div><ul><li>Maximum theta, maximum gamma risk. Unlimited loss both ways, so <b>never run it without wings on expiry day</b>.</li><li>Stops: combined premium +25–40%, or spot leaving the straddle break-even zone.</li></ul></div>
+<div class="st"><h4>Short strangle</h4><div class="meta"><span class="tag">Δ0 Γ− Θ+ V−</span>Wide range expected</div><div class="fig" data-l="c400:-1 p-400:-1"></div><ul><li>Shorts near 0.15–0.20Δ. Touch probability is about 2× delta per side, so plan adjustments up front.</li><li>Vomma risk: the wings explode in IV spikes.</li></ul></div>
+<div class="st"><h4>Iron condor</h4><div class="meta"><span class="tag">Δ0 Γ− Θ+ V−</span>Range with defined risk</div><div class="fig" data-l="c400:-1 c600:1 p-400:-1 p-600:1"></div><ul><li>Margin is a fraction of a strangle's. Credit ≈ ⅓ of wing width is a fair target.</li><li>Monthly (30–45 DTE): take profit at 50%, exit by 21 DTE.</li></ul></div>
+<div class="st"><h4>Iron fly</h4><div class="meta"><span class="tag">Δ0 Γ−− Θ++ V−</span>Strong pin expected</div><div class="fig" data-l="c0:-1 p0:-1 c400:1 p-400:1"></div><ul><li>Hedged straddle. The standard expiry-day structure: margin-efficient, with a capped worst case.</li><li>Centre it on the heaviest-OI strike when price is rotating around it after 13:00.</li></ul></div>
+<div class="st"><h4>Long call butterfly</h4><div class="meta"><span class="tag">Δ0 Γ− Θ+</span>Cheap pin bet at a target</div><div class="fig" data-l="c-200:1 c0:-2 c200:1"></div><ul><li>Debit-limited. Best risk:reward on expiry day when it is centred on a magnet strike.</li></ul></div>
+<div class="st"><h4>Broken-wing put butterfly</h4><div class="meta"><span class="tag">Δ+ Θ+</span>Neutral-bullish, no upside risk</div><div class="fig" data-l="p-200:1 p-300:-2 p-500:1"></div><ul><li>Entered for a credit, so nothing is lost if the market rallies. Risk sits below the shorts.</li></ul></div>
+<div class="st"><h4>Call ratio spread (1×2)</h4><div class="meta"><span class="tag">Δ± Θ+ V−</span>Mild rise, capped</div><div class="fig" data-l="c0:1 c300:-2"></div><ul><li>Profit peaks at the short strike; naked above it. Use it when you expect resistance to hold.</li></ul></div>
+<div class="st"><h4>Put ratio spread (1×2)</h4><div class="meta"><span class="tag">Δ± Θ+</span>Mild dip to support</div><div class="fig" data-l="p0:1 p-300:-2"></div><ul><li>Sells rich skew. A crash is the risk, so add a far OTM put to cap it.</li></ul></div>
+<div class="st"><h4>Calendar (time) spread</h4><div class="meta"><span class="tag">Δ0 Θ+ V+</span>Pin now, vol later</div><div class="fig" data-l="c0:-1@7 c0:1@35"></div><ul><li>Long vega, short gamma. Best when the term structure is flat or inverted and front IV is high.</li><li>SEBI removed the calendar margin offset on expiry day, so close or roll before it.</li></ul></div>
+<div class="st"><h4>Double calendar</h4><div class="meta"><span class="tag">Δ0 Θ+ V+</span>Wider range, rising IV</div><div class="fig" data-l="c300:-1@7 c300:1@35 p-300:-1@7 p-300:1@35"></div><ul><li>A wider profit tent than a single calendar. A good low-IV alternative to the iron condor.</li></ul></div>
+</div>
+
+<h3>Volatile / breakout (long volatility)</h3><div class="sg">
+<div class="st"><h4>Long straddle</h4><div class="meta"><span class="tag">Δ0 Γ++ Θ−− V+</span>Big move, unsure of direction</div><div class="fig" data-l="c0:1 p0:1"></div><ul><li>Profitable only if the realised move exceeds the straddle price (§5). Buy it when IV percentile is low and a squeeze is visible.</li><li>Scalp gamma: re-hedge delta with futures at fixed point bands to lock in movement.</li></ul></div>
+<div class="st"><h4>Long strangle</h4><div class="meta"><span class="tag">Γ+ Θ− V+</span>Very big move</div><div class="fig" data-l="c300:1 p-300:1"></div><ul><li>Cheaper, but needs a larger move. Usually poor for weeklies unless a gap is expected.</li></ul></div>
+<div class="st"><h4>Strip (2 puts + 1 call)</h4><div class="meta"><span class="tag">Γ+ Δ−</span>Big move, bearish lean</div><div class="fig" data-l="p0:2 c0:1"></div></div>
+<div class="st"><h4>Strap (2 calls + 1 put)</h4><div class="meta"><span class="tag">Γ+ Δ+</span>Big move, bullish lean</div><div class="fig" data-l="c0:2 p0:1"></div></div>
+<div class="st"><h4>Reverse iron condor</h4><div class="meta"><span class="tag">Γ+ V+</span>Breakout from a range, capped cost</div><div class="fig" data-l="c300:1 c500:-1 p-300:1 p-500:-1"></div><ul><li>Pay for the breakout from a narrow CPR or squeeze, with a defined payoff.</li></ul></div>
+</div>
+
+<h3>Hedges (for positions and portfolios)</h3><div class="sg">
+<div class="st"><h4>Collar</h4><div class="meta"><span class="tag">Δ+ capped</span>Protect a long at low cost</div><div class="fig" data-l="f:1 p-300:1 c300:-1"></div><ul><li>The short call funds the put. Typical portfolio hedge before events.</li></ul></div>
+<div class="st"><h4>Put-spread hedge (monthly)</h4><div class="meta"><span class="tag">Δ+ hedged</span>Cheap protection for a 2–6% fall</div><div class="fig" data-l="f:1 p-200:1@30 p-800:-1@30" data-r="0.08"></div><ul><li>Covers the likely drawdown band at a fraction of a naked put's cost. Accept tail exposure below the short put.</li></ul></div>
+<div class="st"><h4>Financed crash hedge</h4><div class="meta"><span class="tag">Γ+ V+ tail</span>Pays in crashes, near-zero cost otherwise</div><div class="fig" data-l="p-300:-1@30 p-800:2@30" data-r="0.1"></div><ul><li>Pairs with a short-premium book: it gains vega and gamma exactly when the book bleeds.</li></ul></div>
+</div>
+
+<h2 id="s11">11. Strategy selection matrix</h2>
+<div class="tw"><table><tr><th>View ↓ / IV →</th><th>IV low (percentile &lt; 30)</th><th>IV normal</th><th>IV high (percentile &gt; 70)</th></tr>
+<tr><td><b>Strongly bullish</b></td><td>Long call (0.6Δ), call backspread</td><td>Bull call spread, long futures</td><td>Long futures, bull put spread, risk reversal</td></tr>
+<tr><td><b>Mildly bullish</b></td><td>Call diagonal, bull call spread</td><td>Bull put spread, BWB put fly</td><td>Bull put spread, jade lizard</td></tr>
+<tr><td><b>Neutral</b></td><td>Calendar, double calendar, long butterfly</td><td>Iron condor, iron fly</td><td>Short strangle (hedged), iron condor, ratio spreads</td></tr>
+<tr><td><b>Mildly bearish</b></td><td>Put diagonal, bear put spread</td><td>Bear call spread</td><td>Bear call spread, call ratio spread</td></tr>
+<tr><td><b>Strongly bearish</b></td><td>Long put, put backspread</td><td>Bear put spread, short futures</td><td>Short futures + call hedge, bear call spread</td></tr>
+<tr><td><b>Big move, unknown direction</b></td><td>Long straddle/strangle, reverse IC</td><td>Long straddle (only before a catalyst)</td><td>Avoid buying: IV crush risk. Use backspreads.</td></tr></table></div>
+<div class="tw"><table><tr><th>Horizon</th><th>Dominant Greek</th><th>Best structures</th><th>Main risk</th></tr>
+<tr><td>Expiry day (0DTE, Tuesday)</td><td>Gamma</td><td>Iron fly, butterflies, defined-risk directional</td><td>A 150–300 pt move in the afternoon</td></tr>
+<tr><td>1–3 DTE</td><td>Gamma + theta</td><td>Strangles/condors at 1σ, credit spreads</td><td>Overnight gap</td></tr>
+<tr><td>Weekly (4–7 DTE)</td><td>Theta + gamma</td><td>Condors, credit spreads, directional debit spreads</td><td>Trend weeks</td></tr>
+<tr><td>Monthly (20–45 DTE)</td><td>Vega + theta</td><td>Condors (exit 21 DTE), calendars, diagonals, jade lizards</td><td>IV spike</td></tr>
+<tr><td>Positional (1–3 months)</td><td>Delta + vega</td><td>Futures + puts, collars, debit spreads, LEAPS-style diagonals</td><td>Regime change</td></tr></table></div>
+
+<h2 id="s12">12. Playbooks (rule templates: backtest them on your own data first)</h2>
+<div class="box warn"><b>These are starting templates, not proven systems.</b>Each lists the logic, entry, exit and sizing so it can be coded and replayed (your <code>auto_eval.py</code> replay harness is built for exactly this). Do not trade any of them live until it has 100+ replayed trades with costs and slippage included.</div>
+<h3>P1 — Expiry-day premium harvest (Tuesday)</h3>
+<ul><li><b>Filter:</b> VIX not spiking (under +8% on the day), gap under 0.7%, no event that day, the first 30 minutes inside the prior day's range.</li>
+<li><b>Entry 09:30–10:00:</b> iron fly on the ATM/heaviest-OI strike with wings at about 1.2× the straddle price, or a 0.15Δ iron condor. <b>Buy the wings first.</b></li>
+<li><b>Exit:</b> stop when combined premium is up 30%, or spot moves outside the straddle break-evens. Target 40–60% of credit. Always flat by 15:00–15:15; the closing-window averaging means there is little left to earn.</li>
+<li><b>Sizing:</b> max loss (wing width − credit) × lots ≤ 1% of capital. Expiry-day ELM increases margin.</li>
+<li><b>Re-entry:</b> once, after a stop, only if the price re-enters balance (back inside VWAP ±1σ for 15 minutes).</li></ul>
+<h3>P2 — Expiry afternoon gamma break</h3>
+<ul><li><b>Setup:</b> after 13:30, price compresses for 45+ minutes near a high-OI strike, intraday RV is falling and the ATM straddle is cheap (below about 0.4× the day's average range).</li>
+<li><b>Entry:</b> buy 1-strike OTM options in the direction of the break of the compression range, confirmed by futures CVD and book shift. Risk only the premium (≤0.3% of capital).</li>
+<li><b>Exit:</b> scale out at 2× and 4× premium. Hard time stop at 15:10. Expect a 25–35% win rate; it pays only through big winners.</li></ul>
+<h3>P3 — Opening-range breakout with flow confirmation</h3>
+<ul><li><b>Range:</b> 09:15–09:30. Breakout candle (5-minute) closes beyond the range <b>and</b> futures volume is above 1.5× the 20-day average for that slot <b>and</b> CVD makes a new high (or low) <b>and</b> price is on the right side of VWAP.</li>
+<li><b>Instrument:</b> 0.6–0.7Δ ITM option (less theta, cheaper STT per unit of delta than futures) or futures.</li>
+<li><b>Stop:</b> range midpoint or 1 ATR(5-minute ×3). Targets: 1R take half; trail the rest on the 9-EMA or VWAP. Abort if back inside the range for two bars.</li></ul>
+<h3>P4 — VWAP-band mean reversion (balance days only)</h3>
+<ul><li><b>Qualify:</b> opened inside the prior value area, flat VWAP, wide CPR, IB under its average.</li>
+<li><b>Entry:</b> price touches VWAP ±2σ <b>and</b> CVD diverges <b>and</b> the book shift turns against the push. Sell a credit spread with the short strike beyond the band, or buy an option toward VWAP.</li>
+<li><b>Exit:</b> at VWAP. Stop on a 5-minute close beyond 2.5σ. If the day turns into a trend day (IB extension with CVD), stop trading this setup.</li></ul>
+<h3>P5 — Positional directional with defined risk</h3>
+<ul><li><b>Trigger:</b> daily close above or below a weekly level with a rising (or falling) 20-day futures OI build-up and FII long ratio turning in the same direction.</li>
+<li><b>Structure by IV:</b> low IV → debit spread 2–4 weeks out; high IV → credit spread at the level. Risk ≤1% per position, three positions at most in the same direction (they are one bet).</li>
+<li><b>Exit:</b> 70% of max profit, a daily close back through the level, or 50% of the time elapsed with no progress.</li></ul>
+<h3>P6 — Monthly iron condor (vol-premium harvest)</h3>
+<ul><li><b>Entry:</b> 30–45 DTE, IV percentile above 50, short strikes at 0.15–0.20Δ outside major OI walls, wings 300–500 pts, credit ≥ ⅓ of the width.</li>
+<li><b>Management:</b> take 50% profit; roll the untested side closer when a short strike reaches 0.30Δ; close everything at 21 DTE (gamma rises from there).</li>
+<li><b>Never</b> hold through Budget, election results or a central-bank surprise without cutting size.</li></ul>
+<h3>P7 — Event volatility</h3>
+<ul><li><b>Before the event (IV ramp):</b> buy a calendar or straddle 3–7 days ahead when implied event move &lt; historical event move; exit <b>before</b> the announcement to capture the IV ramp.</li>
+<li><b>Into the event:</b> if implied move &gt; historical, sell an iron fly or condor with wings at about 1.5× the implied move; the post-event IV crush pays.</li>
+<li><b>After:</b> trade the direction only once the first 15-minute range breaks with flow. The first spike often reverses.</li></ul>
+<h3>P8 — Gap protocol</h3>
+<ul><li>Gap inside the prior range: wait for the first 15-minute bar; fade toward PDC if it fails to extend.</li><li>Gap outside the prior range, holding for 30 minutes: buy the first pullback to VWAP in the gap's direction.</li><li>Gap over 1.2%: no premium selling until 10:00; IV and spreads normalise first.</li></ul>
+<h3>P9 — Portfolio hedge rotation</h3>
+<ul><li>Hold a rolling 1–2 month put spread (5% to 12% OTM) sized to beta-adjusted exposure. Finance it with OTM call sales only when the market is extended (RSI over 70 on the daily chart, VIX under 11).</li></ul>
+
+<h2 id="s13">13. Adjustments and trade management</h2>
+<ul><li><b>Spot-based stops beat premium-based stops for sellers.</b> Premium spikes from IV jumps and spread widening (09:15, news) trigger premium stops without the thesis being wrong. Define the invalidating spot level and execute when it trades.</li>
+<li><b>Short strangle tested:</b> (a) roll the untested side toward spot to collect more credit (keep the total delta near 0), (b) convert to an iron fly or condor by buying wings, (c) close the tested side and re-sell further out. Limit yourself to <b>two adjustments</b>, then close. Adjusting forever is how accounts die.</li>
+<li><b>Delta bands:</b> for delta-neutral books, rebalance when |position Δ| exceeds 0.15 × lots. Rebalance with futures (no extra vega) or by rolling strikes (it changes vega).</li>
+<li><b>Long options:</b> never average down. Time stop: if the expected move has not happened within ⅓ of the planned holding time, exit.</li>
+<li><b>Winners:</b> scale out (½ at 1R), trail the rest. For credit trades, buy back at 50–70%: the remaining credit carries most of the gamma risk for little reward.</li>
+<li><b>Roll vs. close:</b> roll only if you would open the new position from scratch today. Otherwise close.</li>
+<li><b>Legging:</b> leg into spreads only in the direction that improves risk. Buying the protective leg first never adds risk.</li></ul>
+
+<h2 id="s14">14. Risk and position sizing</h2>
+<h3>Sizing formulas</h3>
+<ul><li><b>Fixed-fractional:</b> lots = (capital × risk%) / (stop distance in pts × lot size). Risk 0.5–1% per trade; 0.25–0.5% while learning or in drawdown.</li>
+<li><b>Option buyers:</b> premium at risk is the stop. For a full premium-loss trade, risk% applies to the entire premium.</li>
+<li><b>Option sellers:</b> size on the <b>stress loss</b>, not on margin. Stress = position P&amp;L at spot ±3% (weekly) or ±6% (monthly) with IV +8 points. Keep the stress loss ≤ 3–5% of capital and margin use ≤ 50%.</li>
+<li><b>Kelly:</b> f* = W − (1−W)/R (W = win rate, R = avg win/avg loss). Example W 0.55, R 1.2 → f* = 0.55 − 0.45/1.2 = 0.175. <b>Use ¼–½ Kelly</b>: estimates are noisy, and full Kelly gives roughly 50% drawdowns.</li></ul>
+<h3>Expectancy and streaks</h3>
+<div class="tw"><table><tr><th>Win rate</th><th>R needed to break even</th><th>Expected longest losing streak in 250 trades</th></tr>
+<tr><td>30%</td><td>2.33</td><td>≈ 15</td></tr><tr><td>40%</td><td>1.50</td><td>≈ 11</td></tr><tr><td>50%</td><td>1.00</td><td>≈ 8</td></tr><tr><td>60%</td><td>0.67</td><td>≈ 6</td></tr><tr><td>70%</td><td>0.43</td><td>≈ 5</td></tr></table></div>
+<p class="mu">Streak ≈ ln(N)/ln(1/(1−W)). At 1% risk, a 50% strategy will see a run of about 8 losses (−8%) in a year. That is normal variance, not a broken system. Decide this before it happens.</p>
+<h3>Circuit breakers</h3>
+<ul><li>Daily loss limit 2% → stop trading for the day. Weekly 4–5% → half size next week. Monthly 8–10% → paper-trade until the review is done.</li><li>Two consecutive full stop-outs in a session → stop (tilt protection).</li><li>After a large win, keep the same size. Euphoria trades are the expensive ones.</li></ul>
+<h3>Tail events that should shape every short-premium book</h3>
+<div class="tw"><table><tr><th>Event</th><th>Nifty move</th><th>Lesson</th></tr>
+<tr><td>23 Mar 2020 (COVID)</td><td>≈ −13% in a day; VIX near 84 that week</td><td>Naked shorts are unbounded. Margin calls arrive at the worst moment.</td></tr>
+<tr><td>4 Jun 2024 (election results)</td><td>≈ −6% close, −8% intraday</td><td>Scheduled binary events need defined risk or no position</td></tr>
+<tr><td>1 Feb 2021 (Budget)</td><td>≈ +4.7%</td><td>Upside shocks hurt call writers too</td></tr>
+<tr><td>Aug 2024 (yen carry unwind) / Apr 2025 (tariff shock)</td><td>−2.5% to −3%+ gap days</td><td>Global overnight gaps skip your stops</td></tr></table></div>
+<p><b>Overnight rule:</b> carry no naked short options overnight that a 3% gap would turn into a loss above 3% of capital. Gaps happen before your stop can act.</p>
+
+<h2 id="s15">15. Execution and costs</h2>
+<h3>Execution rules</h3>
+<ul><li>Limit orders always; marketable limits (a few ticks through) for urgency. Avoid market orders in the first 2 minutes and on OTM strikes with thin books.</li><li>Trade liquid strikes: ATM ±10 strikes on the weekly. Check the bid–ask spread as a % of premium (aim under 0.5%).</li><li>Large orders: respect the exchange <b>freeze quantity</b> (orders above it are rejected; slice them, or use your broker's iceberg orders).</li><li>Multi-leg: basket orders or buy-first sequencing. Record slippage (fill vs. mid at signal) and review it weekly. It is often the largest hidden cost.</li><li>API/algo trading by retail falls under SEBI's 2025 framework (broker-registered algos, static IP and order-rate thresholds). Confirm your status with your broker.</li></ul>
+<h3>Cost of a round trip (1 lot, ₹20/order brokerage)</h3>
+<div class="tw"><table><tr><th>Charge</th><th>Option (premium 150, 65 qty)</th><th>Futures (24,500, 65 qty)</th></tr>
+<tr><td>Brokerage (both sides)</td><td>₹40</td><td>₹40</td></tr>
+<tr><td>STT</td><td>0.15% of sell premium ≈ ₹14.6</td><td>0.05% of sell value ≈ ₹796</td></tr>
+<tr><td>Exchange txn (NSE)</td><td>0.03503% of premium turnover ≈ ₹6.8</td><td>0.00173% of turnover ≈ ₹55</td></tr>
+<tr><td>Stamp duty (buy side)</td><td>0.003% ≈ ₹0.3</td><td>0.002% ≈ ₹32</td></tr>
+<tr><td>SEBI fee + GST 18% on (brokerage + txn)</td><td>≈ ₹8.4</td><td>≈ ₹21</td></tr>
+<tr><td><b>Total ≈</b></td><td><b>₹70 ≈ 1.1 pts</b></td><td><b>₹945 ≈ 14.5 pts</b></td></tr></table></div>
+<p class="mu">Add the spread: about 0.5–1 pt on ATM weeklies, 0.5–2 pts on futures. A scalper targeting 5 pts on options gives up about 30–40% to friction. Rates as of the Budget 2026 changes; check your contract note.</p>
+
+<h2 id="s16">16. Tax (India), in outline</h2>
+<ul><li>F&amp;O profit is <b>non-speculative business income</b>, taxed at your slab rate. File <b>ITR-3</b>.</li><li><b>Turnover</b> for audit purposes = the sum of absolute profits and losses of each trade (ICAI guidance), not the contract value. A tax audit is required when turnover exceeds the threshold (₹10 crore when cash transactions are ≤5%), or when you declare a profit below 6% of turnover with income above the basic exemption (and opted out of presumptive taxation earlier).</li><li>Losses can be set off against other non-salary income in the year, and carried forward for <b>8 years</b> against business income if you file on time.</li><li>Deductible: brokerage and charges (<b>not STT</b>), data and software subscriptions, internet, hardware depreciation, advisory fees, a proportionate office cost.</li><li>Pay advance tax quarterly (15 Jun/Sep/Dec/Mar). Keep a P&amp;L statement and ledger from the broker. <span class="mu">Consult a CA; rules change annually.</span></li></ul>
+
+<h2 id="s17">17. Process, journal and psychology</h2>
+<h3>Metrics to compute monthly</h3>
+<div class="tw"><table><tr><th>Metric</th><th>Formula</th><th>Healthy</th></tr>
+<tr><td>Expectancy (R)</td><td>W·avgWin − (1−W)·avgLoss, in R</td><td>&gt; 0.15R after costs</td></tr>
+<tr><td>Profit factor</td><td>gross profit / gross loss</td><td>&gt; 1.3 (sellers 1.2+ with small DD)</td></tr>
+<tr><td>Max drawdown / recovery factor</td><td>peak-to-trough; net profit / max DD</td><td>Recovery &gt; 3 per year</td></tr>
+<tr><td>Sharpe / Sortino (daily)</td><td>mean/std ×√252; downside std only for Sortino</td><td>&gt; 1.5 / &gt; 2</td></tr>
+<tr><td>MAE / MFE</td><td>Worst and best excursion during each trade</td><td>Tune stops (MAE) and targets (MFE)</td></tr>
+<tr><td>Cost ratio</td><td>Total charges / gross profit</td><td>&lt; 25%</td></tr></table></div>
+<h3>Journal fields</h3>
+<p>Date, setup name (P1–P9), regime (VIX, day type, IV percentile), entry reason (level + flow), instrument and strikes, size and risk ₹, planned stop and target, exit reason, MAE/MFE, slippage, emotion (1–5), rule followed (Y/N), a screenshot. <b>Review weekly by setup</b>: drop setups with negative expectancy after 30 trades and size up the ones that work.</p>
+<h3>Psychology: failure patterns and the fix</h3>
+<div class="tw"><table><tr><th>Pattern</th><th>Fix</th></tr>
+<tr><td>Revenge trading after a loss</td><td>Hard daily stop; a two-loss rule; walk away for 30 minutes</td></tr>
+<tr><td>Moving stops / averaging losers</td><td>Bracket orders entered with the position; server-side stops</td></tr>
+<tr><td>Cutting winners early</td><td>Pre-defined scale-out; trail only the remainder</td></tr>
+<tr><td>Overtrading in chop</td><td>Day-type filter by 10:15; maximum trades per day</td></tr>
+<tr><td>Recency bias (one strategy "stopped working")</td><td>Judge on 30+ trades; compare with its historical drawdown</td></tr>
+<tr><td>Selling premium "because it always works"</td><td>Stress-test the book daily; respect the tail table</td></tr></table></div>
+
+<h2 id="s18">18. Building and validating an edge</h2>
+<ol><li><b>Hypothesis</b> with a mechanism ("writers hedge into OI walls on expiry afternoons, so breaks extend"), not a pattern alone.</li>
+<li><b>Data:</b> tick or 1-minute futures and option chain snapshots, including bid/ask. Your <code>book_ticks/</code> recorder and <code>replay/*.jsonl</code> are exactly that.</li>
+<li><b>Backtest honestly:</b> fills at bid/ask, not LTP; costs from §15; no look-ahead (decide on bar close, fill on the next bar); account for the regime shifts (weekly expiry was Thursday until Aug 2025; lot sizes changed; Bank Nifty weeklies ended Nov 2024).</li>
+<li><b>Robustness:</b> parameter plateaus rather than peaks; walk-forward (fit on 6 months, test on the next 2, roll); Monte Carlo reshuffle of the trade order for drawdown distributions; out-of-sample holdout untouched until the end.</li>
+<li><b>Multiple-testing discount:</b> testing 20 variants will produce one "significant" result by luck. Require t-stat &gt; 3 or a deflated Sharpe.</li>
+<li><b>Paper → small live → scale:</b> 1 lot until 50 live trades match the backtest's expectancy within its confidence band.</li></ol>
+
+<h2 id="s19">19. Thirty insights you won't find in books</h2>
+<ol>
+<li><b>The straddle is the market's forecast.</b> ATM straddle ≈ 0.8·S·σ·√T. Compare it with the realised daily range every day; that one comparison tells you whether to be a buyer or seller.</li>
+<li><b>Time value halves when DTE quarters</b> (√T). A 28-DTE straddle is still half-priced at 7 DTE, so weekly sellers earn the steepest part of the curve.</li>
+<li><b>Daily break-even for long gamma = S·IV/√252 ≈ VIX/16 %.</b> If Nifty is not moving that much, buyers are paying rent for nothing.</li>
+<li><b>Expiry settles on a 30-minute average.</b> After 15:00, every minute locks in about 1/30 of the settlement. Expiring options trade toward the <i>expected average</i>, not the live index, so gamma effectively decays through the closing window and late "hero" moves pay less than they appear to.</li>
+<li><b>Probability of touch ≈ 2 × delta.</b> Your "80% win-rate" 0.20Δ short gets tested 40% of the time. Your adjustment plan matters more than your entry.</li>
+<li><b>Weekend theta is priced in on Friday.</b> Market makers mark IV down into Friday's close, so the "free weekend decay" is mostly gone before you sell. Monday's open re-marks it.</li>
+<li><b>Puts are structurally better long-directional vehicles than calls.</b> Falls bring IV expansion (vega tailwind); rallies bring IV compression (sticky strike).</li>
+<li><b>Weekly shorts are gamma trades; monthly shorts are vega trades.</b> Hedge the right risk: futures for gamma, long back-month options for vega.</li>
+<li><b>Intraday direction is cheaper through ITM options than futures after the 2026 STT changes.</b> STT per unit of delta on a 0.65Δ option is about 0.15% × premium / 0.65 against 0.05% × the full index value for futures, often 5–10× less, though the option spread is wider. Compute both for your size.</li>
+<li><b>OI levels lie; OI changes speak.</b> Put writers shifting up a strike while price holds tells you more than the biggest OI number.</li>
+<li><b>The order book as a level is noise; as a 2-minute change it is a signal.</b> Spoofers move levels; they cannot fake sustained net shifts cheaply.</li>
+<li><b>Nifty and VIX rising together is a warning</b>: someone is paying up for upside or protection into strength.</li>
+<li><b>Implied event move = √(front variance − base variance).</b> Price every Budget, RBI or result day this way instead of guessing.</li>
+<li><b>Three stocks are ~28% of Nifty.</b> HDFC Bank, ICICI Bank and Reliance order flow and results are index events. Their divergence from Nifty predicts index catch-up.</li>
+<li><b>Futures premium shrinking in a rally</b> = spot-led, arbitrage-fed or long-unwinding move, which is usually weaker. Premium expanding in a rally means leveraged conviction.</li>
+<li><b>Buy wings first.</b> Margin for an iron fly can be a fraction of a naked straddle's, so the same capital supports a safer structure.</li>
+<li><b>Calendar margin relief vanishes on expiry day.</b> Close or roll the short weekly the day before or you face naked margin.</li>
+<li><b>Charm moves your delta while you sleep.</b> Re-check position delta at 09:10, not at 15:30 the previous day.</li>
+<li><b>Vanna drift after events:</b> once IV is crushed, hedgers' short-put hedges unwind, which often lifts the index in the first hour or two after a "non-event".</li>
+<li><b>Theta is not income; it is the price of short gamma.</b> Sell premium only when your forecast realised vol is below the implied.</li>
+<li><b>OTM strangles earn early; ATM straddles earn late</b> (see the theta chart). Enter OTM sells with more DTE and ATM sells close to expiry.</li>
+<li><b>Skew is a sentiment indicator.</b> Widening put-minus-call IV with flat spot usually precedes downside by hours to days.</li>
+<li><b>The first spike after news reverses more often than not.</b> Trade the first 15-minute range break, not the headline candle.</li>
+<li><b>Narrow CPR plus a squeeze plus low IV percentile</b> is the cheapest long-gamma setup: buy the straddle or reverse condor the day before.</li>
+<li><b>FII index futures long ratio below about 20%</b> stores short-covering fuel. Combined with put writing moving up, it is the classic bear-trap reversal.</li>
+<li><b>Gamma flip as regime:</b> above it fade extremes, below it follow breaks. One number tells you which playbook to run today.</li>
+<li><b>The longest losing streak is predictable</b> (ln N / ln(1/(1−W))). Pre-commit to it so variance does not make you abandon a working system.</li>
+<li><b>Costs per trade are fixed; edge per trade is not.</b> Halving trade frequency on marginal setups often raises net P&amp;L.</li>
+<li><b>Spot stops for sellers, premium stops for buyers.</b> Each matches what actually invalidates that trade.</li>
+<li><b>Any backtest before Sep 2025 is a different market</b> (Thursday expiries, different lots, Bank Nifty weeklies, no upfront premium margin). Weight recent data heavily.</li>
+</ol>
+
+<h2 id="s20">20. Daily routine</h2>
+<div class="tw"><table><tr><th>When</th><th>Checklist</th></tr>
+<tr><td><b>Evening before</b></td><td>Participant-wise OI and FII/DII cash; option chain OI shifts; tomorrow's events (domestic and US); mark PDH/PDL/PDC, VAH/VAL/POC, weekly levels, CPR width; IV percentile and term structure; book stress test.</td></tr>
+<tr><td><b>08:30–09:10</b></td><td>GIFT Nifty vs. fair premium (gap estimate), US close and futures, Asia, crude, USDINR, US yields; news on heavyweights; plan A/B for gap up, flat and gap down; size limits for the day.</td></tr>
+<tr><td><b>09:15–10:15</b></td><td>Opening type, opening range, IB; CVD and book shift; VIX direction; day-type call by 10:15 → choose a playbook. No trades in the first 5 minutes unless it is a planned ORB.</td></tr>
+<tr><td><b>Session</b></td><td>Only playbook setups at levels; log each entry; check stops are placed. Re-check position Greeks hourly (and after 13:00 on expiry day, every 15 minutes).</td></tr>
+<tr><td><b>15:00–15:30</b></td><td>Close intraday positions; decide overnight holdings against the 3% gap rule.</td></tr>
+<tr><td><b>Post-market</b></td><td>Journal, screenshots, slippage, rules followed. Weekly: stats by setup. Monthly: metrics table, size adjustments.</td></tr></table></div>
+
+<h2 id="s21">21. Formulas and quick calculator</h2>
+<div class="fig noprint"><div class="calc"><label>Spot <input id="cS" type="number" value="24500" oninput="calc()"></label><label>IV/VIX % <input id="cV" type="number" value="13" oninput="calc()"></label><label>DTE <input id="cD" type="number" value="7" step="0.5" oninput="calc()"></label></div><p id="cO" style="margin:8px 0 0"></p></div>
+<div class="fig"><div data-c="cone"></div><div class="cap">Expected-move cone at the IV set above. Strikes outside the 2σ band are what "far OTM" really means.</div></div>
+<div class="tw"><table><tr><th>Quantity</th><th>Formula</th></tr>
+<tr><td>Futures fair value</td><td>F = S·e<sup>(r−q)T</sup></td></tr>
+<tr><td>Put–call parity</td><td>C − P = (F − K)·e<sup>−rT</sup></td></tr>
+<tr><td>ATM straddle</td><td>≈ 0.8·S·σ·√T</td></tr>
+<tr><td>Expected 1σ move</td><td>S·σ·√(days/365); daily ≈ S·σ/√252</td></tr>
+<tr><td>ATM gamma / vega / theta</td><td>Γ ≈ 0.4/(S·σ·√T); ν ≈ 0.4·S·√T/100; Θ<sub>straddle</sub> ≈ −V/(2T)</td></tr>
+<tr><td>Gamma–theta</td><td>Θ ≈ −½·Γ·S²·σ²; P&amp;L ≈ ½Γ[(ΔS)² − S²σ²Δt]</td></tr>
+<tr><td>Event move</td><td>√(σ<sub>f</sub>²·D/365 − σ<sub>b</sub>²·(D−1)/365)</td></tr>
+<tr><td>Prob ITM / touch</td><td>≈ |Δ| ; ≈ 2|Δ|</td></tr>
+<tr><td>Beta hedge (lots)</td><td>β·Portfolio / (F·lot)</td></tr>
+<tr><td>Kelly</td><td>f* = W − (1−W)/R</td></tr>
+<tr><td>Expectancy</td><td>W·avgW − (1−W)·avgL</td></tr>
+<tr><td>CPR</td><td>P=(H+L+C)/3; BC=(H+L)/2; TC=2P−BC</td></tr>
+<tr><td>IV rank / percentile</td><td>(IV−min)/(max−min); % of days with IV below today's</td></tr></table></div>
+
+<h2 id="s22">22. Glossary A–Z</h2>
+<div class="tw"><table>
+<tr><td><b>Absorption</b></td><td>Passive limit orders soaking up aggressive flow without price moving</td></tr>
+<tr><td><b>ATM / ITM / OTM</b></td><td>At / in / out of the money</td></tr>
+<tr><td><b>Basis</b></td><td>Futures − spot</td></tr>
+<tr><td><b>Butterfly</b></td><td>+1/−2/+1 strikes; pin bet</td></tr>
+<tr><td><b>Calendar</b></td><td>Short near / long far expiry, same strike</td></tr>
+<tr><td><b>Charm</b></td><td>Delta change with time</td></tr>
+<tr><td><b>CPR</b></td><td>Central pivot range</td></tr>
+<tr><td><b>CVD</b></td><td>Cumulative (buy − sell) aggressor volume</td></tr>
+<tr><td><b>Delta-neutral</b></td><td>Net Δ ≈ 0 position</td></tr>
+<tr><td><b>ELM</b></td><td>Extreme loss margin (exposure margin)</td></tr>
+<tr><td><b>Expiry pin</b></td><td>Price held near a big-OI strike into settlement</td></tr>
+<tr><td><b>Freeze qty</b></td><td>Max quantity per order allowed by the exchange</td></tr>
+<tr><td><b>GEX / gamma flip</b></td><td>Hedgers' net gamma; the level where it changes sign</td></tr>
+<tr><td><b>GIFT Nifty</b></td><td>Nifty futures on NSE IX, near round-the-clock</td></tr>
+<tr><td><b>HV / RV</b></td><td>Historical / realised volatility</td></tr>
+<tr><td><b>IB</b></td><td>Initial balance (first hour's range)</td></tr>
+<tr><td><b>Iron condor / fly</b></td><td>Short strangle / straddle with long wings</td></tr>
+<tr><td><b>IV crush</b></td><td>IV collapse after an event</td></tr>
+<tr><td><b>Jade lizard</b></td><td>Short put + short call spread, no upside risk</td></tr>
+<tr><td><b>Kelly</b></td><td>Growth-optimal bet fraction</td></tr>
+<tr><td><b>LVN / HVN</b></td><td>Low / high volume node</td></tr>
+<tr><td><b>Max pain</b></td><td>Strike of maximum aggregate buyer loss</td></tr>
+<tr><td><b>MAE / MFE</b></td><td>Max adverse / favourable excursion</td></tr>
+<tr><td><b>Naked</b></td><td>Unhedged short option</td></tr>
+<tr><td><b>OI</b></td><td>Open contracts outstanding</td></tr>
+<tr><td><b>PCR</b></td><td>Put/call ratio (OI or volume)</td></tr>
+<tr><td><b>POC / VA</b></td><td>Point of control / value area (70% of volume)</td></tr>
+<tr><td><b>Ratio spread</b></td><td>Unequal long/short quantities</td></tr>
+<tr><td><b>Risk reversal</b></td><td>Long OTM call, short OTM put (or reverse); also the skew quote</td></tr>
+<tr><td><b>Rollover</b></td><td>Moving positions to the next expiry</td></tr>
+<tr><td><b>SPAN</b></td><td>Scenario-based margin model</td></tr>
+<tr><td><b>Skew</b></td><td>IV difference across strikes</td></tr>
+<tr><td><b>Straddle / strangle</b></td><td>Call + put at the same / different strikes</td></tr>
+<tr><td><b>STT</b></td><td>Securities transaction tax</td></tr>
+<tr><td><b>Term structure</b></td><td>IV across expiries</td></tr>
+<tr><td><b>Theta</b></td><td>Time decay</td></tr>
+<tr><td><b>Vanna / vomma</b></td><td>∂Δ/∂σ / ∂ν/∂σ</td></tr>
+<tr><td><b>VIX</b></td><td>30-day implied vol index</td></tr>
+<tr><td><b>VRP</b></td><td>Implied − realised vol premium</td></tr>
+<tr><td><b>VWAP</b></td><td>Volume-weighted average price</td></tr>
+<tr><td><b>Writer</b></td><td>Option seller</td></tr>
+<tr><td><b>Zero-DTE</b></td><td>Options on their expiry day</td></tr></table></div>
+<p class="mu" style="margin-top:30px">Educational material, not investment advice. Regulatory, tax and cost figures as understood in Nov 2026; verify against NSE/SEBI circulars and your contract notes.</p>
+</main></body></html>
