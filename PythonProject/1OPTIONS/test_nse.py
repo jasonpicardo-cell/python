@@ -1756,9 +1756,9 @@ def test_scalping_tab():
         SYM = 'BANKNIFTY'; const bank = scGridRows(); SYM = 'FINNIFTY'; const none = scGridRows(); SYM = 'NIFTY';
         SC.spot = 25012; SC.pref.gridN = 2; SC.pref.hide50 = false; const d50 = scGridRows().rows.map(r => r.strike); SC.pref.hide50 = true; const d100 = scGridRows().rows.map(r => r.strike); SYM = 'BANKNIFTY'; const bk50 = scGridRows().rows.length; scRenderGrid(); const bkCtl = /data-g="h50"/.test(el.h); SYM = 'NIFTY'; SC.pref.gridN = 5; SC.pref.hide50 = true; scRenderGrid(); const niCtl = /data-g="h50"[^>]*checked/.test(el.h) && /<option value="5" selected>/.test(el.h);
         const depth = JSON.stringify({ d50, d100, bk50, bkCtl, niCtl });
-        console.log(JSON.stringify({ depth, order, order2, ceBuyers: /class="up">3.00× buyers/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× sellers/.test(row(25000)), ceSellers: /class="dn">0.33× sellers/.test(row(25100)), peBuyers: /class="dn">3.00× buyers/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
-          atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× buyers/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length),
-          kq: row(25000).includes('<td title="90,000">90k</td><td title="30,000">30k</td>'), layout: /buyers[^]*?<\\/td><td class="rg ce" style="--p:75%"[^>]*>50\\.0–150 <b class="">75%<\\/b><\\/td><td class="k[^"]*" data-k="25000"[^]*?<\\/td><td class="rg">–<\\/td><td title="30,000">30k<\\/td>/.test(row(25000)) }));""")
+        console.log(JSON.stringify({ depth, order, order2, ceBuyers: /class="up">3.00× B/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× S/.test(row(25000)), ceSellers: /class="dn">0.33× S/.test(row(25100)), peBuyers: /class="dn">3.00× B/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
+          atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× B/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length),
+          kq: row(25000).includes('<td title="90,000">90k</td><td title="30,000">30k</td>'), layout: /× B[^]*?<\\/td><td class="rg ce" style="--p:75%"[^>]*>50\\.0–150 <b class="">75%<\\/b><\\/td><td class="oi"><\\/td><td class="k[^"]*" data-k="25000"[^]*?<\\/td><td class="oi"><\\/td><td class="rg">–<\\/td><td title="30,000">30k<\\/td>/.test(row(25000)) }));""")
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
@@ -1810,8 +1810,8 @@ def test_scalping_tab():
                   ob["first"] is None and ob["zs"][-1] >= 1.4 and ob["flat"] == 0 and ob["gap"] is None and same
                   and bias_eval.tier(ob["zs"][-1]) == 2, str({k: ob[k] for k in ("first", "flat", "gap")}) + f" last={ob['zs'][-1]} py={pz[-1]} same={same}")
             check("strike-grid bias: the ratio text keeps the level colour (CE buyers / PE sellers green), arrows show the shift (▲▲ strong, ▼ moderate, none while warming up); strike verdict averages CE and PE; caption shows the grid average",
-                  'class="up">3.00× buyers <b class="bf bu">▲▲</b>' in ob["ce"] and 'data-s="u2"' in ob["ce"] and 'class="up">0.33× sellers <b class="bf be">▼</b>' in ob["pe"]
-                  and ob["none"].endswith('class="up">3.00× buyers</td>') and "warming up" in ob["none"]
+                  'class="up">3.00× B <b class="bf bu">▲▲</b>' in ob["ce"] and 'data-s="u2"' in ob["ce"] and 'class="up">0.33× S <b class="bf be">▼</b>' in ob["pe"]
+                  and ob["none"].endswith('class="up">3.00× B</td>') and "warming up" in ob["none"]
                   and ob["k"] == ["▲▲", "▼", "", ""] and "▲ bullish +0.40" in ob["agg"][0] and "flat -0.05" in ob["agg"][1] and "warming up" in ob["agg"][2], str(ob)[:600])
             sm = bias_eval.SpotMove(); psp = [sm.bps("N", 24000 + i * 0.5, 2e6 + i * 5) for i in range(201)]
             same_sp = all((x is None and y is None) or (x is not None and y is not None and abs(x - y) < 1e-9) for x, y in zip(ob["sp"], psp))
@@ -1830,7 +1830,22 @@ def test_scalping_tab():
                   and "<b" not in rg[3] and "--p" not in rg[3] and rg[3].endswith(">80.0–80.0 </td>") and rg[4].endswith('>40.0–60.0 <b class="">50%</b></td>')
                   and 'rec[f"{p}_high"] = float(d.get("high") or 0)' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_adapter_zerodha.py"), encoding="utf-8").read()
                   and "color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo))" in d and "linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%))" in d
-                  and d.count("--g-rglo: rgba") == 2 and d.count("--g-rghi: rgba") == 2 and d.count("--g-rgt: rgba") == 2 and "--g-rg2" not in d and "day range | strike | PE day range" in d, str(rg)[:900])
+                  and d.count("--g-rglo: rgba") == 2 and d.count("--g-rghi: rgba") == 2 and d.count("--g-rgt: rgba") == 2 and "--g-rg2" not in d and "day range · OI | strike | PE OI · day range" in d, str(rg)[:900])
+            # OI tag (_bfOi): 15-min OI change x 15-min taker side, context only; bias_eval.oi_tag is its twin
+            cases = [(100000, 5000, 700, 300), (100000, 5000, 300, 700), (100000, -5000, 700, 300), (100000, -5000, 300, 700),
+                     (100000, 500, 700, 300), (100000, 5000, 540, 460), (100000, 5000, 0, 0), (0, 5000, 700, 300), (100000, 1000, 575, 425)]
+            jso = blocks[0] + """
+            const C = CASES; console.log(JSON.stringify({ tags: C.map(([oi, dO, b, s]) => _bfOi({ flow: { strikes: { '25000CE': { b15: b, s15: s } } } }, { strike: 25000, ce_oi: oi, ce_oi_15m: dO }, 'ce')),
+              pe: _bfOi({ flow: { strikes: { '25000PE': { b15: 300, s15: 700 } } } }, { strike: 25000, pe_oi: 200000, pe_oi_15m: 8000 }, 'pe'), none: _bfOi(null, { strike: 25000 }, 'ce') }));""".replace("CASES", json.dumps(cases))
+            oo = json.loads(subprocess.run(["node", "-e", jso], capture_output=True, text=True, timeout=20).stdout)
+            got = [(re.search(r">([A-Z]*)</td>$", h) or [None, None])[1] or None for h in oo["tags"]]
+            want = [bias_eval.oi_tag(*c) for c in cases]
+            check("strike grids: OI tag beside the day range (CE before the strike, PE after it) reads WRITE / BUY / COVER / DUMP from the 15-min OI change and taker side, blank under 1% OI or a 15% lean, uncoloured, and matches bias_eval.oi_tag; bias_eval re-tests it ('oitag') with the aggressor-confirmed writer read ('wconf')",
+                  got == want == ["BUY", "WRITE", "COVER", "DUMP", None, None, None, None, "BUY"]
+                  and 'class="oi" title="PE last 15 min: writers opening · OI +8,000 (+4.0%) · taker volume 30% buyers.' in oo["pe"] and oo["none"] == '<td class="oi"></td>'
+                  and d.count("_bfOi(d, r, p)") == 2 and d.count("_bfOi(state.lastData, r, p)") == 2 and ".sc-grid td.oi { color: var(--g-muted);" in d
+                  and "oiMin: 0.01, oiImb: 0.15" in blocks[0] and '"wconf", "oitag"' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bias_eval.py"), encoding="utf-8").read(),
+                  str(got) + " " + str(want) + " " + oo["pe"][:200])
         except Exception as ex:
             check("strike-grid bias: _bfZ runs in node", False, repr(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
@@ -5020,11 +5035,367 @@ def test_book_recorder_and_cleanup():
         shutil.rmtree(root, ignore_errors=True)
 
 
+
+def test_pro_calibrate():
+    """pro_calibrate.py (Pro guide calibration): Black-76 IV, SVI/SABR/Merton fits, BKM moments, the variance clock and
+    its frozen-feed handling, variance units, an end-to-end run on synthetic files, and the guide JS agreeing with Python."""
+    import importlib, tempfile, shutil, random as _r, datetime as _dt
+    import numpy as np
+    sys.path.insert(0, HERE)
+    P = importlib.import_module("pro_calibrate")
+    F, T = 24000.0, 5 / 365
+    K = np.linspace(22800, 25200, 25)
+    vol = 0.12 + 0.6 * (np.log(K / F)) ** 2 - 0.25 * np.log(K / F)
+    call = K >= F
+    iv = P.black_iv(P.black(F, K, T, vol, call), F, K, T, call)
+    check("pro_calib: Black-76 IV round trip", np.nanmax(np.abs(iv - vol)) < 1e-4, f"max err {np.nanmax(np.abs(iv - vol))}")
+    # SVI recovers an SVI smile; the fit is butterfly-arbitrage free
+    pt = [0.0001, 0.012, -0.4, 0.002, 0.03]
+    k = np.linspace(-0.06, 0.05, 41)
+    ivs = np.sqrt(P.svi_w(pt, k) / T)
+    p, rmse = P.fit_svi(k, ivs, T)
+    check("pro_calib: SVI fit recovers an SVI smile", rmse < 5e-4, f"rmse {rmse}")
+    check("pro_calib: SVI fit has no butterfly arbitrage", float(P.svi_g(p, k).min()) > -1e-6)
+    # SABR fits its own smile
+    sab = P.sabr_iv(F, K, T, 0.13, -0.4, 3.0)
+    sp, sr = P.fit_sabr(F, K, sab, T)
+    check("pro_calib: SABR fit recovers a SABR smile", sr < 2e-3, f"rmse {sr}")
+    # Merton: no jumps = Black; CDF is a CDF
+    m0 = P.merton_price(F, K, T, 0.13, 0.0, -0.05, 0.03, call)
+    check("pro_calib: Merton with lambda=0 equals Black", np.max(np.abs(m0 - P.black(F, K, T, 0.13, call))) < 1e-6)
+    xs = np.linspace(-0.2, 0.2, 81)
+    cdf = P.merton_cdf(xs, T, 0.13, 5.0, -0.04, 0.03)
+    check("pro_calib: Merton CDF monotone in [0,1]", bool(np.all(np.diff(cdf) >= -1e-12) and cdf[0] < 0.01 and cdf[-1] > 0.99))
+    mk = P.merton_price(F, K, T, 0.12, 6.0, -0.03, 0.04, call)
+    mi = P.black_iv(mk, F, K, T, call)
+    mf, mr = P.fit_merton(F, K, mi, T)
+    check("pro_calib: Merton fit reprices its own smile", mr < 0.05, f"vega-normalised rmse {mr}")
+    # BKM: flat vol gives a normal log-return; put skew gives negative skewness
+    b = P.bkm(F, T, lambda x: 0.13)
+    check("pro_calib: BKM flat vol -> skew 0, kurtosis 3", abs(b["skew"]) < 0.05 and abs(b["kurt"] - 3) < 0.2, str(b))
+    b2 = P.bkm(F, T, lambda x: 0.13 - 1.5 * x)
+    check("pro_calib: BKM put skew -> negative skewness", b2["skew"] < -0.1, str(b2))
+    # variance clock helpers
+    check("pro_calib: settlement window counts one third",
+          abs(P.clock_frac_remaining(345, None) - 10 / 375) < 1e-3 and abs(P.clock_frac_remaining(0, None) - 355 / 375) < 1e-3)
+    IST = P.IST
+    fri = _dt.datetime(2026, 11, 13, 15, 30, tzinfo=IST); tue = _dt.datetime(2026, 11, 17, 15, 30, tzinfo=IST)
+    u = P.variance_units(fri, tue, {"u5": None, "overnight_w": 0.25, "weekend_w": 0.35})
+    check("pro_calib: variance units Fri close -> Tue expiry", abs(u - (0.35 + 1 + 0.25 + 355 / 375)) < 1e-3, f"{u}")
+    c = np.array([24000 + i * 0.5 for i in range(375)], float)
+    c[360:374] = c[359]; c[374] = c[359] * 1.001
+    r2, live, jump = P.day_r2({"c": c, "o": c.copy()})
+    check("pro_calib: frozen feed tail detected", live == 359 and np.all(np.isnan(r2[360:])) and abs(jump - 10) < 0.1, f"live {live} jump {jump}")
+    # end to end on synthetic files
+    tmp = tempfile.mkdtemp(prefix="procal")
+    try:
+        for d in ("history", "nse_data_cache/bhavcopy", "replay", "participant_oi", "trade_log", "guide"):
+            os.makedirs(os.path.join(tmp, d), exist_ok=True)
+        rnd = _r.Random(3)
+        bars, day, px, n = [], _dt.date(2026, 9, 1), 24000.0, 0
+        while n < 25:
+            if day.weekday() < 5:
+                base = int(_dt.datetime(day.year, day.month, day.day, 9, 15, tzinfo=IST).timestamp())
+                px *= math.exp(rnd.gauss(0, 0.004))
+                for m in range(375):
+                    o = px
+                    px *= math.exp(rnd.gauss(0, 0.0004 * (1 + 3 * math.exp(-m / 20))))
+                    bars.append({"t": base + 60 * m, "o": o, "h": max(o, px), "l": min(o, px), "c": px})
+                n += 1
+            day += _dt.timedelta(days=1)
+        json.dump(bars, open(os.path.join(tmp, "history", "NIFTY_60_x.json"), "w"))
+        cl, d0 = 24000.0, _dt.date(2026, 6, 1)
+        for i in range(60):
+            d = d0 + _dt.timedelta(days=i)
+            if d.weekday() >= 5:
+                continue
+            o = cl * math.exp(rnd.gauss(0, 0.003)); cl = o * math.exp(rnd.gauss(0, 0.007))
+            with open(os.path.join(tmp, "nse_data_cache/bhavcopy", d.strftime("%d%m%Y") + ".csv"), "w") as fh:
+                fh.write("Index Name,Index Date,Open,High,Low,Close\n")
+                fh.write(f"Nifty 50,{d.strftime('%d-%m-%Y')},{o},{max(o, cl) * 1.002},{min(o, cl) * 0.998},{cl},0,0\n")
+                fh.write(f"India VIX,{d.strftime('%d-%m-%Y')},14,15,13,{14 + rnd.random()},0,0\n")
+        exp = int(_dt.datetime(2026, 11, 10, 15, 30, tzinfo=IST).timestamp())
+        with open(os.path.join(tmp, "replay", "NIFTY_2026-11-06.jsonl"), "w") as fh:
+            for j in range(40):
+                t = _dt.datetime(2026, 11, 6, 10, 0, tzinfo=IST) + _dt.timedelta(minutes=j)
+                S = 24000 + 20 * math.sin(j / 5); Tj = (exp - t.timestamp()) / P.YEAR_S
+                rows = []
+                for kk in range(23000, 25050, 50):
+                    v = math.sqrt(P.svi_w(pt, math.log(kk / S)) / T)
+                    cpx, ppx = float(P.black(S, kk, Tj, v, True)), float(P.black(S, kk, Tj, v, False))
+                    rows.append({"strike": kk, "ce_bid": max(cpx - 0.2, 0.05), "ce_ask": cpx + 0.2, "pe_bid": max(ppx - 0.2, 0.05), "pe_ask": ppx + 0.2,
+                                 "ce_ltp": cpx, "pe_ltp": ppx, "ce_volume": 1000 * j, "pe_volume": 900 * j, "ce_oi": 5000 + 10 * j, "pe_oi": 6000 + 5 * j,
+                                 "ce_symbol": f"NFO:NIFTY26N10{kk}CE", "pe_symbol": f"NFO:NIFTY26N10{kk}PE"})
+                fh.write(json.dumps({"timestamp": t.strftime("%d-%b-%Y %H:%M:%S"), "underlying_value": S, "futures_price": S + 30, "india_vix": 14.5,
+                                     "expiry_epoch": exp, "dte_trading": 2.5, "atm_iv": 13, "strikes": rows}) + "\n")
+        json.dump({c_: {"opt_idx_call_long": 10, "opt_idx_call_short": 12, "opt_idx_put_long": 9, "opt_idx_put_short": 14, "fut_idx_long": 1, "fut_idx_short": 9}
+                   for c_ in ("Client", "Pro", "FII", "DII")}, open(os.path.join(tmp, "participant_oi", "2026-11-06.json"), "w"))
+        open(os.path.join(tmp, "guide", "events.txt"), "w").write("# test\n2026-11-09 RBI policy\n")
+        res = P.calibrate(tmp, "NIFTY", log=lambda *a: None)
+        txt = json.dumps(res, allow_nan=False)
+        check("pro_calib: end-to-end run has no study errors", not res["errors"], str(res["errors"]))
+        check("pro_calib: clock finds the heavy open", res.get("clock") and res["clock"]["first_hour_share"] > 0.2, str((res.get("clock") or {}).get("first_hour_share")))
+        sl = res.get("surface_latest") or {}
+        check("pro_calib: surface fitted from the synthetic chain", sl.get("svi_rmse") is not None and sl["svi_rmse"] < 0.5 and sl.get("butterfly_arb_free"), str({k_: sl.get(k_) for k_ in ("svi_rmse", "atm_iv", "n")}))
+        check("pro_calib: events file attributed", any("RBI" in e_["label"] for e_ in (res.get("events") or {}).get("events_listed", [])))
+        check("pro_calib: output is strict JSON", "NaN" not in txt and "Infinity" not in txt)
+        # the guide's JS agrees with Python on SVI and the Merton CDF
+        js = os.path.join(tmp, "t.js")
+        g = os.path.join(HERE, "guide")
+        open(js, "w").write(
+            "global.window={PRO_CALIB:" + txt + "};global.document={addEventListener(){},querySelectorAll(){return[]},getElementById(){return null},documentElement:{dataset:{}}};"
+            "global.matchMedia=()=>({matches:false});\n" + open(os.path.join(g, "nifty.js")).read() + "\n" + open(os.path.join(g, "nifty_pro.js")).read() +
+            "\nconst m={sigma:.12,lam:6,muJ:-.03,deltaJ:.04};const el={innerHTML:''};clockTable(el);"
+            "console.log(JSON.stringify({w:sviW(" + json.dumps(pt) + ",0.03),c:mCdf(-0.05," + str(T) + ",m),model:MODEL,wing:ivK(NF.S*0.95,3/365)>ivK(NF.S,3/365),clk:/measured on your/.test(el.innerHTML),"
+            "ht:histTail(legs('p0:-1'))}))")
+        out = subprocess.run(["node", js], capture_output=True, text=True, timeout=60)
+        try:
+            o = json.loads(out.stdout.strip().splitlines()[-1])
+        except Exception:
+            o = {}
+        check("pro_calib: guide JS loads with a calibration file", o.get("model") == "svi" and o.get("clk") is True, out.stderr[-400:] or str(o))
+        check("pro_calib: JS SVI matches Python", o.get("w") is not None and abs(o["w"] - float(P.svi_w(pt, 0.03))) < 1e-12)
+        check("pro_calib: JS Merton CDF matches Python", o.get("c") is not None and abs(o["c"] - float(P.merton_cdf(-0.05, T, 0.12, 6, -0.03, 0.04))) < 1e-6)
+        check("pro_calib: surface mode prices the wing richer", o.get("wing") is True)
+        sc_ = res.get("scenarios") or {}
+        check("pro_calib: historical scenarios exported and replayed in the guide's stress tool",
+              sc_.get("n", 0) >= 40 and len(sc_["d"]) == len(sc_["r"]) == len(sc_["v"]) == sc_["n"] and "Historical replay" in (o.get("ht") or "") and "ES97.5" in (o.get("ht") or ""),
+              f"n={sc_.get('n')} ht={(o.get('ht') or '')[:80]}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+def test_pro_archive_live_risk():
+    """The permanent archive (nse_archive.py), the post-close research job, the live Pro gauge (nse_pro_live.py) and
+    the pre-trade margin / tail estimate (nse_span.py), their server routes and their dashboard renderers."""
+    import importlib, tempfile, shutil, time, math as _m, datetime as _dt, io as _io, contextlib as _cl
+    sys.path.insert(0, HERE)
+    A = importlib.import_module("nse_archive")
+    L = importlib.import_module("nse_pro_live")
+    SP = importlib.import_module("nse_span")
+    P = importlib.import_module("pro_calibrate")
+    IST = _dt.timezone(_dt.timedelta(hours=5, minutes=30))
+    tmp = tempfile.mkdtemp()
+    try:
+        # --- daily archive: parse, merge, backfill with holidays remembered
+        txt = ("Index Name,Index Date,Open Index Value,High Index Value,Low Index Value,Closing Index Value,Points Change\n"
+               "Nifty 50,30-10-2026,22964.5,23118.1,22905.1,23053.1,1\nNifty IT,30-10-2026,1,2,0.5,1.5,0\nIndia VIX,30-10-2026,15.1,15.7,14.4,15.3,0\n")
+        rows = A.parse_ind_close(txt)
+        check("archive: index close file parsed (kept indices only)", [(r[1], r[5]) for r in rows] == [("Nifty 50", 23053.1), ("India VIX", 15.3)], str(rows))
+        old_ = A.parse_ind_close("CNX Nifty,05-01-2015,8407.95,8445.6,8363.9,8378.4,-17.05\nCNX Bank,05-01-2015,1,2,0.5,1.5,0\n")
+        sp_ = [(_dt.date(2023, 10, k), 0, 0, 0, c_, 12) for k, c_ in ((3, 19528.75), (4, 17624.05), (5, 19545.75), (6, 19653.5))]
+        crash = [(_dt.date(2020, 3, k), 0, 0, 0, c_, 60) for k, c_ in ((20, 8745.45), (23, 7610.25), (24, 7801.05), (25, 8317.85))]
+        check("archive: an isolated bad print that the next day undoes is dropped; a real crash is kept",
+              [r[0].day for r in A.drop_spikes(sp_)] == [3, 5, 6] and len(A.drop_spikes(crash)) == 4)
+        check("archive: pre-2015 index names (CNX Nifty, CNX Bank) mapped to today's", [r[1] for r in old_] == ["Nifty 50", "Nifty Bank"], str(old_))
+        today = _dt.date(2026, 11, 6)
+        asked = []
+
+        def fake(url):
+            d = _dt.datetime.strptime(url.rsplit("_", 1)[1][:8], "%d%m%Y").date()
+            asked.append(d)
+            if d in (_dt.date(2026, 10, 2), _dt.date(2026, 11, 5)):          # an old holiday and a not-yet-published day
+                return 404, ""
+            return 200, txt.replace("30-10-2026", d.strftime("%d-%m-%Y"))
+        r1 = A.backfill_daily(tmp, start=_dt.date(2026, 9, 28), end=today, pause=0, fetch=fake, log=lambda *a: None, today=today)
+        n_first = len(asked)
+        asked.clear()
+        r2 = A.backfill_daily(tmp, start=_dt.date(2026, 9, 28), end=today, pause=0, fetch=fake, log=lambda *a: None, today=today)
+        d = A.nifty_vix_daily(tmp)
+        check("archive: backfill fetches weekdays only, keeps them, remembers old 404s as holidays and retries a recent one",
+              r1["got"] == n_first - 2 and asked == [_dt.date(2026, 11, 5)] and len(d) == r1["got"] and all(x[5] == 15.3 for x in d)
+              and _dt.date(2026, 10, 2) in A._read_missing(tmp), f"{r1} {r2} asked={asked}")
+        asked.clear()
+        A.backfill_daily(tmp, start=_dt.date(2026, 9, 1), end=today, pause=0, fetch=fake, log=lambda *a: None, today=today, max_requests=3)
+        check("archive: a capped catch-up asks for the newest missing days (a recent 404 is asked again)", len(asked) == 3 and sorted(asked)[:2] == [_dt.date(2026, 9, 24), _dt.date(2026, 9, 25)] and _dt.date(2026, 11, 5) in asked, str(asked))
+        d = A.nifty_vix_daily(tmp)
+        # --- minute archive: completed past sessions from the caches, best source per minute, never twice
+        os.makedirs(os.path.join(tmp, "ticks"))
+        os.makedirs(os.path.join(tmp, "history"))
+        t0 = int(_dt.datetime(2026, 11, 4, 9, 15, tzinfo=IST).timestamp())
+        with open(os.path.join(tmp, "ticks", "NIFTY_2026-11-04.csv"), "w") as fh:
+            for i in range(375):
+                fh.write(f"{t0 + 60 * i},{24000 + i}\n")
+        json.dump([{"t": t0 + 60 * i, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5} for i in range(10)], open(os.path.join(tmp, "history", "NIFTY_60_2026-11-05.json"), "w"))
+        with open(os.path.join(tmp, "ticks", "NIFTY_2026-11-03.csv"), "w") as fh:           # a thin day: skipped
+            for i in range(100):
+                fh.write(f"{t0 - 86400 + 60 * i},24000\n")
+        a1 = A.archive_minutes(tmp, ("NIFTY",), today=today)
+        a2 = A.archive_minutes(tmp, ("NIFTY",), today=today)
+        mm = A.read_minutes(tmp, "NIFTY")
+        day = mm.get(_dt.date(2026, 11, 4), {})
+        check("archive: minute sessions archived once, bars preferred over spot samples, thin days skipped",
+              a1 == {"NIFTY": 1} and a2 == {"NIFTY": 0} and len(day) == 375 and day.get(t0) == (1.0, 2.0, 0.5, 1.5) and day.get(t0 + 600, (0,) * 4)[3] == 24010
+              and _dt.date(2026, 11, 3) not in mm, f"{a1} {a2} {len(day)} {day.get(t0)}")
+        mins = P.load_minutes(tmp, "NIFTY")
+        shutil.rmtree(os.path.join(tmp, "ticks"))
+        shutil.rmtree(os.path.join(tmp, "history"))
+        mins2 = P.load_minutes(tmp, "NIFTY")
+        check("archive: pro_calibrate reads the archive once the caches are pruned",
+              _dt.date(2026, 11, 4) in mins and _dt.date(2026, 11, 4) in mins2 and len(P.load_daily(tmp)) == len(d))
+
+        # --- the live gauge mirrors pro_calibrate's clock exactly
+        u5 = [2.0] * 6 + [1.0] * 63 + [1.5] * 6
+        clk = {"u5": u5, "overnight_w": 0.3, "weekend_w": 0.5}
+        same = all(abs(L.frac_remaining(m_, u5, av) - P.clock_frac_remaining(m_, u5, av)) < 1e-9 for m_ in (0, 30, 105, 344, 350, 374) for av in (True, False))
+        pairs = [(_dt.datetime(2026, 11, 6, 11, 0, tzinfo=IST), _dt.datetime(2026, 11, 10, 15, 30, tzinfo=IST)),
+                 (_dt.datetime(2026, 11, 10, 9, 0, tzinfo=IST), _dt.datetime(2026, 11, 10, 15, 30, tzinfo=IST)),
+                 (_dt.datetime(2026, 11, 9, 14, 0, tzinfo=IST), _dt.datetime(2026, 11, 24, 15, 30, tzinfo=IST))]
+        same_u = all(abs(L.variance_units(a, b, clk) - P.variance_units(a, b, clk)) < 1e-9 for a, b in pairs)
+        check("pro live: clock, variance units and units per year match pro_calibrate", same and same_u and abs(L.units_per_year(clk) - P.units_per_year(clk)) < 1e-12)
+        # VER: a flat clock and realised variance exactly as implied gives 1.0, and the 11:00 thirds come from the calibration
+        prev_vix = 15.0
+        imp = (prev_vix / 100) ** 2 / L.units_per_year({})
+        step = _m.sqrt(imp / 375)
+        px = {i: 24000 * _m.exp(step * (1 if i % 2 else 0)) for i in range(200)}
+        vcal = {"median_close": 0.5, "ver11_cut": [0.6, 1.4], "close_rel_by_tercile": [0.7, 1.0, 1.6], "n_days": 30, "rank_corr": 0.9}
+        v = L.ver_read(px, 200, prev_vix, {"clock": {"overnight_w": None}, "ver": vcal})
+        check("pro live: VER is 1.0 when realised matches implied; read relative to the median; the 11:00 third is fixed",
+              v and v["ok"] and abs(v["ver"] - 1) < 0.02 and abs(v["rel"] - 2.0) < 0.05 and v["tercile"] == 1 and v["provisional"] is False and v["close_rel_hist"] == 1.0, str(v))
+        v2 = L.ver_read({i: px[i] for i in range(40)}, 120, prev_vix, {"clock": {"overnight_w": None}, "ver": vcal})
+        check("pro live: VER refuses a feed with too few samples", v2 is not None and v2["ok"] is False, str(v2))
+        now = _dt.datetime(2026, 11, 6, 11, 0, tzinfo=IST)
+        exp = _dt.datetime(2026, 11, 10, 15, 30, tzinfo=IST).timestamp()
+        c = L.clocks_read(now, 24000, 16.0, exp, 12.0, {"clock": clk}, [(_dt.date(2026, 11, 9), "RBI policy"), (_dt.date(2026, 12, 9), "later")])
+        w = 0.16 ** 2 * (exp - now.timestamp()) / L.YEAR_S
+        check("pro live: trading-clock IV keeps the expiry's total variance; IV above VIX's base shows an event lump with the listed event",
+              c and abs((c["iv_trading"] / 100) ** 2 * c["units_left"] / L.units_per_year(clk) - w) < 1e-12 and c["event_move_pts"] > 0
+              and [e["label"] for e in c["events"]] == ["RBI policy"], str(c))
+        pcj = os.path.join(tmp, "pc.json")
+        open(pcj, "w").write(json.dumps({"sym": "NIFTY", "x": 1}))
+        L.reload()
+        c1 = L.calib(pcj)
+        open(pcj, "w").write(json.dumps({"sym": "NIFTY", "x": 2}))
+        os.utime(pcj, (1, 2))
+        check("pro live: calibration re-read when the file changes", c1["x"] == 1 and L.calib(pcj)["x"] == 2)
+
+        # --- pre-trade risk
+        S0, dte = 24000.0, 3.0
+        pr = lambda K, t_, iv_: SP._bs_price(S0, K, dte / 365, iv_ / 100, SP.RISK_FREE_RATE, t_)  # noqa: E731
+        check("risk: implied vol round trip", abs(SP.implied_vol(pr(24100, "CE", 14), S0, 24100, dte / 365, "CE") - 14) < 1e-6)
+        naked = [dict(strike=23800, option_type="PE", action="SELL", qty_lots=1, iv=16, premium=pr(23800, "PE", 16))]
+        two = [dict(naked[0], qty_lots=2)]
+        m1, m2 = SP.margin_estimate(naked, S0, 14, dte, 75, "NIFTY"), SP.margin_estimate(two, S0, 14, dte, 75, "NIFTY")
+        spread = naked + [dict(strike=23600, option_type="PE", action="BUY", qty_lots=1, iv=17, premium=pr(23600, "PE", 17))]
+        ms, ml = SP.margin_estimate(spread, S0, 14, dte, 75, "NIFTY"), SP.max_loss(spread, S0, 75)
+        longs = SP.margin_estimate([dict(naked[0], action="BUY")], S0, 14, dte, 75, "NIFTY")
+        check("risk: margin scales with lots, a defined-risk spread is capped at its max loss, long options block nothing",
+              abs(m2["total"] - 2 * m1["total"]) < 1 and ms["span"] <= ml + 1 and ml < m1["span"] and SP.max_loss(naked, S0, 75) is None and longs["total"] == 0,
+              f"m1={m1['total']} m2={m2['total']} spread={ms['span']} maxloss={ml}")
+        days = [(_dt.date(2020, 1, 1) + _dt.timedelta(days=i), 0, 0, 0, 24000 * (1 + 0.001 * ((i % 3) - 1)), 15.0) for i in range(300)]
+        days[150] = (days[150][0], 0, 0, 0, days[149][4] * 0.9, 30.0)                               # one crash day, VIX doubles
+        sc = SP.historical_scenarios(days)
+        h = SP.historical_es(naked, S0, dte, 75, sc)
+        flat = SP.scenario_pnl([dict(naked[0])], S0, dte, 75, 0.0, 1.0, 0.0)
+        check("risk: historical ES replays every day; the crash day is the worst, ES >= VaR > 0 for a short put; no move and no time = no P&L",
+              len(sc) == 299 and h and h["worst"][0]["date"] == str(days[150][0]) and h["es"] > 0 and h["es"] >= h["var"] >= 0 and abs(flat) < 1e-6, f"{h} flat={flat}")
+        hole = SP.historical_scenarios([(_dt.date(2020, 1, 1), 0, 0, 0, 100.0, 15.0), (_dt.date(2020, 3, 1), 0, 0, 0, 80.0, 15.0), (_dt.date(2020, 3, 2), 0, 0, 0, 81.0, 16.0)])
+        rvh = P.daily_rv([(_dt.date(2020, 1, 1), 100, 101, 99, 100, 15), (_dt.date(2020, 3, 1), 80, 81, 79, 80, 15), (_dt.date(2020, 3, 2), 80, 82, 79, 81, 16)])
+        check("risk: a hole in the archive is not a one-day move (scenarios and daily RV skip it)", len(hole) == 1 and hole[0][0] == _dt.date(2020, 3, 2) and len(rvh) == 1, f"{hole} {rvh}")
+        rep = SP.risk_report(naked, S0, 14, dte, 75, "NIFTY", sc)
+        check("risk: report has margin now, after an IV spike (higher for a short), and the historical tail",
+              rep["margin_iv_spike"] > rep["margin"] > 0 and rep["spike_pnl"] < 0 and rep["hist"]["n"] == 299,
+              str({k_: rep[k_] for k_ in ("margin", "margin_iv_spike", "spike_pnl")}))
+
+        # --- server: gauge from memory and disk, ticket risk, the research job
+        import nse_chain_server as S
+        saved = {k: getattr(S, k) for k in ("_DATA_ROOT", "_TICK_DIR", "_trade_eng")}
+        saved_cache = dict(S._chain_cache)
+        try:
+            S._DATA_ROOT = tmp
+            S._TICK_DIR = os.path.join(tmp, "ticks")
+            os.makedirs(S._TICK_DIR, exist_ok=True)
+            os.makedirs(os.path.join(tmp, "guide"), exist_ok=True)
+            json.dump({"sym": "NIFTY", "generated": "2026-11-06 16:00 IST", "clock": clk, "ver": vcal}, open(os.path.join(tmp, "guide", "pro_calib.json"), "w"))
+            L.reload()
+            nowd = _dt.datetime.now(IST)
+            t9 = int(nowd.replace(hour=9, minute=15, second=0, microsecond=0).timestamp())
+            with open(os.path.join(S._TICK_DIR, f"NIFTY_{nowd.strftime('%Y-%m-%d')}.csv"), "w") as fh:
+                for i in range(375):
+                    fh.write(f"{t9 + 60 * i},{24000 + (i % 2) * 5}\n")
+            S._chain_cache["NIFTY|near|12"] = {"data": {"symbol": "NIFTY", "underlying_value": 24000, "atm_iv": 14.0, "india_vix": 13.0,
+                                                        "expiry_epoch": nowd.timestamp() + 3 * 86400}, "ts": time.time(), "hits": 0}
+            exp_iso = (nowd + _dt.timedelta(days=3)).strftime("%Y-%m-%d")
+
+            class _Feed:
+                def meta(self, inst):
+                    return {"under": "NIFTY", "typ": inst[-2:], "strike": int(inst[-7:-2]), "expiry": exp_iso, "lot": 75}
+
+                def quote(self, inst):
+                    p_ = SP._bs_price(24000, int(inst[-7:-2]), 3 / 365, 0.15, SP.RISK_FREE_RATE, inst[-2:])
+                    return {"bid": p_ - 0.5, "ask": p_ + 0.5, "ltp": p_}
+
+                def spot(self, under):
+                    return 24000.0
+
+            class _Eng:
+                feed = _Feed()
+
+                def state(self):
+                    return {"positions": [{"inst": "NFO:NIFTYX23800PE", "under": "NIFTY", "side": "short", "lots": 2, "qty": 150}]}
+            S._trade_eng = None
+            g0 = S._pro_live("NIFTY")
+            r0 = S._pro_risk([("NFO:NIFTYX23800PE", "SELL", 1)])
+            built = S._trade_eng is not None
+            S._trade_eng = _Eng()
+            g = S._pro_live("NIFTY")
+            r = S._pro_risk([("NFO:NIFTYX23600PE", "BUY", 1), ("NFO:NIFTYX23800PE", "SELL", 1)])
+            check("pro server: gauge reads the cached chain, today's minute file and the calibration; no engine is built for it",
+                  g0["ok"] and g0["calibrated"] and g0["clocks"] and g0["clocks"]["iv_trading"] > 0 and "book" not in g0 and not built and r0["ok"] is False,
+                  str({k_: g0.get(k_) for k_ in ("ok", "calibrated", "clocks")})[:300])
+            check("pro server: open book and ticket legs priced from engine memory (IV implied from the quote), with margin",
+                  (g.get("book") or {}).get("ok") and g["book"]["margin"] > 0 and r["ok"] and r["legs"] == 2 and r["margin"] < g["book"]["margin"]
+                  and abs(r["atm_iv"] - 14.0) < 1e-9, str({"book": g.get("book"), "r": r})[:400])
+            called = []
+
+            def fake_run(cmd, **k):
+                called.append(cmd)
+                return type("R", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+            with _cl.redirect_stdout(_io.StringIO()):
+                res_ = S._post_close_research(tmp, run=fake_run, fetch=lambda url: (404, ""))
+            check("pro server: post-close job catches up daily closes, then runs pro_calibrate in a child process",
+                  "backfill" in res_ and called and called[0][-1] == tmp and called[0][1].endswith("pro_calibrate.py") and res_["calibrate"]["rc"] == 0, str(res_)[:300])
+        finally:
+            for k_, v_ in saved.items():
+                setattr(S, k_, v_)
+            S._chain_cache.clear()
+            S._chain_cache.update(saved_cache)
+            L.reload()
+        src = open(os.path.join(HERE, "nse_chain_server.py")).read()
+        check("pro server: /api/pro/live and /api/pro/risk routed; the cleanup archives before it prunes; recorder health watches book_ticks",
+              '"/api/pro/live", "/api/pro/risk"' in src and src.index("nse_archive.archive_minutes(here)") < src.index("for path, days, pat in jobs:")
+              and "NIFTY order-book ticks (book_ticks/)" in src and "_post_close_research()" in src)
+
+        # --- dashboard renderers
+        html = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+        js = os.path.join(tmp, "g.js")
+        open(js, "w").write("const escapeHtml=s=>String(s).replace(/[&<>\"]/g,'');\n" + _js_func(html, "_proRs") + "\n" + _js_func(html, "_proGaugeHtml") +
+                            "\nconst g={ok:true,sym:'NIFTY',generated:'2026-11-06 16:00 IST',calib_days:61,daily_days:2900,"
+                            "ver:{ok:true,rel:1.8,tercile:2,provisional:false,close_rel_hist:1.6,prev_vix:14,median_close:.6,n_days:61,rank_corr:.92},"
+                            "clocks:{expiry:'2026-11-10 15:30',iv_calendar:14,iv_trading:12.5,units_left:3.2,calibrated:true,base_vol_trading:11,event_move_pts:120,event_move_pct:.5,events:[{date:'2026-11-09',label:'RBI'}]},"
+                            "book:{ok:true,legs:1,margin:120000,span:70000,exposure:50000,margin_iv_spike:150000,iv_spike:1.5,spike_pnl:-3000,hist:{n:2900,from:'2015-01-02',to:'2026-11-06',var:9000,es:15000,worst:[{date:'2020-03-23',pnl:-40000}]}}};"
+                            "console.log(JSON.stringify({a:_proGaugeHtml(g),b:_proGaugeHtml({ok:false}),c:_proGaugeHtml({ok:true,ver:{ok:false,why:'x'}})}))")
+        out = subprocess.run(["node", js], capture_output=True, text=True, timeout=60)
+        try:
+            o = json.loads(out.stdout.strip().splitlines()[-1])
+        except Exception:
+            o = {}
+        a_ = o.get("a") or ""
+        check("pro gauge (Home): VER third, trading-clock IV, event move and the book's margin / ES rendered; nothing when unavailable",
+              all(x in a_ for x in ("1.80×", "top third at 11:00", "12.50%", "±120", "RBI", "₹1,20,000", "ES ₹15,000", "calib 11-06")) and o.get("b") == "" and "VER" in (o.get("c") or ""),
+              out.stderr[-300:] or a_[:300])
+        rp = _js_func(html, "scRiskPreview")
+        check("Scalper ticket: local margin / tail preview next to Check margin, sell side only, throttled per order shape, never a trade route",
+              'id="scRiskOut"' in html and "scRiskPreview(sell)" in html and "/api/pro/risk" in rp and "/api/trade/" not in rp and "20000" in rp
+              and "renderProGauge(data)" in _js_func(html, "renderChartContext") and 'id="proGauge"' in html)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     for fn in (test_muted_price_alert_popup, test_header_spot_follows_ticks, test_structure, test_scope_js, test_scope_js_functions, test_scope_python, test_pcr_reading,
                test_wall_abandonment, test_delta, test_flow_delta_adjustment,
                test_pcr_bands_scale, test_aggressor_flow, test_iv_solver, test_no_shadowed_imports,
-               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_auto_trade, test_auto_enhancements, test_auto_pro, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env, test_book_recorder_and_cleanup):
+               test_ist_offset, test_reset_defaults, test_http_transport, test_units, test_boxes, test_constituents, test_theme, test_true_black_widgets, test_watchdog, test_broker_refusals, test_zerodha_adapter, test_zerodha_watchdog_and_oi, test_zerodha_fixes_and_diagnostics, test_zerodha_subscribe_before_connect, test_diag_extras, test_broker_neutral_server, test_strike_picker, test_entry_alert_discipline, test_ctx_and_intervals, test_book_heavyweights, test_pcr_smooth, test_market_direction, test_traffic_light, test_turn_model, test_server_reachability, test_remote_access, test_trade_engine, test_auto_trade, test_auto_enhancements, test_auto_pro, test_scalping_tab, test_turn_times, test_ema_cross, test_trend_target_ribbon, test_ctx_clock, test_warmup_and_signals, test_day_swipe, test_render_performance, test_pd_premium_discount, test_pd_structure_psychology, test_full_width_layout, test_indicator_settings, test_squeeze_momentum, test_wavetrend, test_participant_oi, test_chart_ctx_interval, test_chart_ctx_actions, test_time_zoom, test_turn_blink, test_defaults_pvsra_pivots, test_index_weights, test_env, test_book_recorder_and_cleanup, test_pro_calibrate, test_pro_archive_live_risk):
         try:
             fn()
         except Exception as e:  # noqa: BLE001

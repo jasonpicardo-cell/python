@@ -222,3 +222,128 @@ def compute_margin(legs: list[dict], spot: float, atm_iv_pct: float, dte: float,
         "is_estimate": True,
         "method": method,
     }
+
+
+# ----------------------------------------------------------------------------- pre-trade risk: margin, vol spike, history
+# Used by /api/pro/risk (Scalper ticket) and the Home tab's Pro gauge. Information only: nothing here blocks
+# or sizes an order. Legs: {"strike", "option_type" CE/PE, "action" BUY/SELL, "qty_lots", "iv" (% , optional),
+# "premium" (current price, optional)}; lot_size is the contract multiplier.
+
+def implied_vol(price: float, S: float, K: float, T: float, option_type: str, r: float = RISK_FREE_RATE) -> float | None:
+    """Black-Scholes IV in % by bisection, or None when the price is outside the no-arbitrage band."""
+    if not (price > 0 and S > 0 and K > 0 and T > 0):
+        return None
+    lo, hi = 0.005, 3.0
+    if not _bs_price(S, K, T, lo, r, option_type) <= price <= _bs_price(S, K, T, hi, r, option_type):
+        return None
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if _bs_price(S, K, T, mid, r, option_type) < price:
+            lo = mid
+        else:
+            hi = mid
+    return 50.0 * (lo + hi)
+
+
+def _gcd_lots(legs) -> int:
+    g = 0
+    for l in legs:
+        g = math.gcd(g, int(l.get("qty_lots", 1) or 1))
+    return max(g, 1)
+
+
+def margin_estimate(legs: list[dict], spot: float, atm_iv_pct: float, dte: float, lot_size: int, symbol: str) -> dict:
+    """compute_margin for any number of lots. compute_margin charges exposure and the short-option minimum once
+    (one lot of notional), so the legs are reduced to their smallest whole unit and the result scaled back up.
+    A book of long options only blocks its premium: no SPAN, no exposure."""
+    if not any(l.get("action") == "SELL" for l in legs):
+        return {"span": 0.0, "exposure": 0.0, "total": 0.0, "is_estimate": True, "method": "long options only: premium paid, no margin"}
+    g = _gcd_lots(legs)
+    unit = [dict(l, qty_lots=int(l.get("qty_lots", 1) or 1) // g) for l in legs]
+    m = compute_margin(unit, spot, atm_iv_pct, dte, lot_size, symbol)
+    ml = max_loss(unit, spot, lot_size)
+    if ml is not None and ml < m["span"]:              # defined risk: the spread benefit caps SPAN at the max loss
+        m = dict(m, span=round(ml, 0), total=round(ml + m["exposure"], 0),
+                 method=m["method"] + " Defined risk: SPAN capped at the max loss.")
+    return dict(m, span=m["span"] * g, exposure=m["exposure"] * g, total=m["total"] * g)
+
+
+def max_loss(legs: list[dict], spot: float, lot_size: int) -> float | None:
+    """Worst expiry loss in rupees, or None when it is unbounded (more short than long calls, or puts)."""
+    q = lambda typ, act: sum(int(l.get("qty_lots", 1) or 1) for l in legs if l["option_type"] == typ and l["action"] == act)  # noqa: E731
+    if q("CE", "SELL") > q("CE", "BUY") or q("PE", "SELL") > q("PE", "BUY"):
+        return None
+    grid = {l["strike"] for l in legs} | {0.01, spot * 3}
+    worst = None
+    for S in grid:
+        v = 0.0
+        for l in legs:
+            intr = max(S - l["strike"], 0.0) if l["option_type"] == "CE" else max(l["strike"] - S, 0.0)
+            v += (intr - (l.get("premium") or 0.0)) * (1 if l["action"] == "BUY" else -1) * int(l.get("qty_lots", 1) or 1)
+        worst = v if worst is None else min(worst, v)
+    return max(-(worst or 0.0), 0.0) * lot_size
+
+
+def historical_scenarios(daily: list, horizon: int = 1) -> list:
+    """[(date, log return of the index, VIX ratio)] over every h-session window in the daily history
+    (rows (date, o, h, l, c, vix) as nse_archive.nifty_vix_daily returns them). A missing VIX gives ratio 1."""
+    out = []
+    for i in range(len(daily) - horizon):
+        a, b = daily[i], daily[i + horizon]
+        if (b[0] - a[0]).days > 6 * horizon:            # a hole in the archive, not one session's move
+            continue
+        if a[4] > 0 and b[4] > 0:
+            vr = (b[5] / a[5]) if (a[5] and b[5]) else 1.0
+            out.append((b[0], math.log(b[4] / a[4]), min(max(vr, 0.33), 3.0)))
+    return out
+
+
+def scenario_pnl(legs: list[dict], spot: float, dte: float, lot_size: int, ret: float, vix_ratio: float,
+                 horizon_days: float = 1.0, r: float = RISK_FREE_RATE) -> float:
+    """Rupee P&L of the legs if the index moves by log return `ret`, every leg's IV scales by `vix_ratio` and
+    `horizon_days` of calendar time pass. Each leg keeps its own IV (smile carried as it is, sticky moneyness)."""
+    S1 = spot * math.exp(ret)
+    tot = 0.0
+    for l in legs:
+        T0 = max(l.get("dte", dte) / 365.0, 1 / (365.0 * 24))     # a leg may carry its own expiry
+        T1 = max(T0 - horizon_days / 365.0, 0.0)
+        iv = max((l.get("iv") or 15.0) / 100.0, 0.01)
+        v0 = l.get("premium")
+        if v0 is None:
+            v0 = _bs_price(spot, l["strike"], T0, iv, r, l["option_type"])
+        v1 = _bs_price(S1, l["strike"], T1, min(max(iv * vix_ratio, 0.01), 3.0), r, l["option_type"])
+        tot += (v1 - v0) * (1 if l["action"] == "BUY" else -1) * int(l.get("qty_lots", 1) or 1)
+    return tot * lot_size
+
+
+def historical_es(legs: list[dict], spot: float, dte: float, lot_size: int, scen: list,
+                  alpha: float = 0.975, horizon_days: float = 1.0) -> dict | None:
+    """Value at risk and expected shortfall from replaying every historical day on today's legs (full revaluation,
+    equal weights). VaR = the loss exceeded on (1 - alpha) of days; ES = the average loss on those days."""
+    if not legs or len(scen) < 40:
+        return None
+    pnl = sorted((scenario_pnl(legs, spot, dte, lot_size, ret, vr, horizon_days), d) for d, ret, vr in scen)
+    n = len(pnl)
+    k = max(1, int(math.floor(n * (1 - alpha))))
+    tail = [p for p, _ in pnl[:k]]
+    return {"n": n, "alpha": alpha, "from": str(scen[0][0]), "to": str(scen[-1][0]),
+            "var": round(max(-pnl[k - 1][0], 0.0), 0), "es": round(max(-sum(tail) / k, 0.0), 0),
+            "worst": [{"date": str(d), "pnl": round(p, 0)} for p, d in pnl[:3]],
+            "best": round(pnl[-1][0], 0), "p_loss": round(sum(1 for p, _ in pnl if p < 0) / n, 3)}
+
+
+def risk_report(legs: list[dict], spot: float, atm_iv_pct: float, dte: float, lot_size: int, symbol: str,
+                scen: list | None = None, iv_spike: float = 1.5) -> dict:
+    """Margin now, margin if IV jumps by iv_spike (same spot), and the 1-day historical VaR / ES."""
+    now = margin_estimate(legs, spot, atm_iv_pct, dte, lot_size, symbol)
+    spiked = [dict(l, iv=(l.get("iv") or atm_iv_pct) * iv_spike) for l in legs]
+    # SPAN rescans around the new IV; the legs' marks are repriced so the scan measures risk, not the spike's P&L
+    for l in spiked:
+        l["premium"] = _bs_price(spot, l["strike"], max(dte / 365.0, 1 / 365.0), l["iv"] / 100.0, RISK_FREE_RATE, l["option_type"])
+    spike = margin_estimate(spiked, spot, atm_iv_pct * iv_spike, dte, lot_size, symbol)
+    out = {"margin": now["total"], "span": now["span"], "exposure": now["exposure"], "margin_iv_spike": spike["total"],
+           "iv_spike": iv_spike, "method": now["method"], "is_estimate": True,
+           "spike_pnl": round(scenario_pnl(legs, spot, dte, lot_size, 0.0, iv_spike, 0.0), 0)}
+    if scen:
+        out["hist"] = historical_es(legs, spot, dte, lot_size, scen)
+    return out

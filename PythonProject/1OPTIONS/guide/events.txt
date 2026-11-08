@@ -1,0 +1,1 @@
+# Add upcoming events to guide/events.txt, one per line as YYYY-MM-DD label, so the excess variance is attributed to them.

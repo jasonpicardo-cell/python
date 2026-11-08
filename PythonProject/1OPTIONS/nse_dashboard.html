@@ -2261,6 +2261,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-grid td.up { color: var(--g-up); background: var(--g-upbg); font-weight: 600; } .sc-grid td.dn { color: var(--g-dn); background: var(--g-dnbg); font-weight: 600; }
   .sc-grid td[data-s="u2"] { box-shadow: inset 3px 0 0 var(--g-up); } .sc-grid td[data-s="d2"] { box-shadow: inset 3px 0 0 var(--g-dn); }
   .sc-grid td.rg { color: var(--g-muted); } .sc-grid td.rg[style*="--p"] { --g-rgc: color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo)); background: linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%)); }   /* heat by position: filled to the LTP, slate near the day low turning amber near the high; the rest a faint track */ .sc-grid td.rg.pe { text-align: left; }
+  .sc-grid td.oi { color: var(--g-muted); font-size: .9em; text-align: center; min-width: 3.6em; }   /* OI tag (_bfOi): context only, deliberately uncoloured */
   .sc-grid td.rg b { display: inline-block; min-width: 3.4em; text-align: center; color: var(--g-text); font-weight: 700; } .sc-grid td.rg b.hi, .sc-grid td.rg b.lo { color: var(--g-amber); font-weight: 800; }
   .sc-grid .wl { font-size: 8.5px; font-weight: 800; padding: 0 2px; border-radius: 2px; border: 1px solid currentColor; opacity: .8; }
   .sc-grid .bf.bu { color: var(--g-up); } .sc-grid .bf.be { color: var(--g-dn); } .sc-grid td[data-s$="2"] .bf { font-weight: 900; }
@@ -2677,6 +2678,9 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                  volatility regime is how a range trade gets taken in a
                  trending market. -->
             <div id="chartCtx" style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:3px 8px 5px;font-size:10px;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:4px;"></div>
+            <!-- Pro gauge: the Pro guide's calibration read live (VER, trading-clock IV, event move, open-book
+                 margin and 1-day historical tail). Information only; renderProGauge, /api/pro/live. -->
+            <div id="proGauge" style="display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;padding:0 8px 4px;font-size:10px;"></div>
             <!-- Context pane, ABOVE the chart as it was. Static markup
                  rather than inside either renderer: both replace #chartBody
                  wholesale, so a container declared in one is destroyed by the
@@ -3413,6 +3417,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
                 <div class="sc-row" id="scMarginRow" style="display:none;">
                   <button class="sc-btn sc-mini" id="scMarginBtn" title="Ask Zerodha how much margin this order would block (one API call, only when you press this)">Check margin</button>
                   <span id="scMarginOut" class="sc-dim sc-n"></span>
+                  <span id="scRiskOut" class="sc-dim sc-n" style="margin-left:8px"></span>
                 </div>
                 <div class="sc-row">
                   <label class="sc-chk sc-inl" title="Do not enter now: queue the order and send it when the premium or the index reaches a level.  Q"><input type="checkbox" id="scTrig"> Wait for a level</label>
@@ -21308,6 +21313,86 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     }
 
     box.innerHTML = out.join('');
+    try { renderProGauge(data); } catch (_) {}
+  }
+
+  // ══ Pro gauge ═════════════════════════════════════════════════════
+  // The Pro guide's calibrated numbers, live, under the context strip: VER (realised variance so far over what
+  // VIX implied for this much of the day on your own intraday clock, against your median day), the front
+  // expiry's IV on the trading clock, the event lump VIX does not explain, and the open book's estimated
+  // margin and 1-day historical tail. /api/pro/live every 30 s: server memory and disk, no broker call.
+  // Information only - no trade call, like the strike grid.
+  function _proRs(v) { return v == null ? '–' : '₹' + Math.abs(Math.round(v)).toLocaleString('en-IN'); }
+  function renderProGauge(d) {
+    const box = document.getElementById('proGauge'); if (!box) return;
+    const data = d || state.lastData, sym = String((data && data.symbol) || state.symbol || '').toUpperCase();
+    if (!/^(NIFTY|BANKNIFTY)$/.test(sym) || location.protocol === 'file:') { if (box.innerHTML) box.innerHTML = ''; return; }
+    const G = window._proG || (window._proG = { t: 0, sym: '', d: null, busy: false, html: '' });
+    if (!G.busy && (G.sym !== sym || Date.now() - G.t > 30000)) {
+      G.busy = true; G.t = Date.now();
+      const base = ((typeof els !== 'undefined' && els.serverUrl && els.serverUrl.value) || '').replace(/\/+$/, '');
+      fetch(`${base}/api/pro/live?sym=${sym}`, { signal: AbortSignal.timeout(15000) }).then(r => r.json())
+        .then(j => { G.d = j; }).catch(() => { G.d = null; })
+        .finally(() => { G.sym = sym; G.busy = false; try { _proGaugeDraw(box, sym); } catch (_) {} });
+    }
+    _proGaugeDraw(box, sym);
+  }
+  function _proGaugeHtml(g) {
+    if (!g || !g.ok) return '';
+    const cell = (lab, val, col, tip, sub) =>
+      `<span title="${escapeHtml(tip || '')}" style="display:inline-flex;gap:5px;align-items:baseline;">
+         <span style="color:var(--muted,#789);font-size:9px;text-transform:uppercase;letter-spacing:.4px;">${lab}</span>
+         <b style="color:${col || 'inherit'};font-size:11.5px;">${val}</b>
+         ${sub ? `<span style="color:var(--muted,#789);font-size:9px;">${sub}</span>` : ''}
+       </span>`;
+    const out = [], v = g.ver, c = g.clocks, f2 = x => (x == null ? '–' : x.toFixed(2));
+    if (v && v.ok && v.rel != null) {
+      const t = v.tercile, third = t == null ? '' : ['bottom', 'middle', 'top'][t] + ' third';
+      const col = t === 2 ? 'var(--gold,#d4af37)' : t === 0 ? 'var(--muted,#789)' : 'inherit';
+      const tip = `Variance-elapsed ratio: realised variance since 09:15 over the variance yesterday's VIX (${f2(v.prev_vix)}) implied for this much of the session on your calibrated intraday clock, ` +
+        `shown as a multiple of your median full-day value (${f2(v.median_close)}), because VIX also prices nights and a risk premium. ` +
+        `The 11:00 value split ${v.n_days} recorded days into thirds with rank correlation ${f2(v.rank_corr)} to the full day` +
+        (v.close_rel_hist != null ? `; days in this third closed at ${f2(v.close_rel_hist)}× the median` : '') + '. ' +
+        (v.provisional ? 'Before 11:00 the third is provisional (fewer minutes, noisier). ' : '') +
+        'A description of the day so far, not a direction call.';
+      out.push(cell('VER', f2(v.rel) + '×', col, tip, third + (third && v.provisional ? ' · provisional' : third ? ' at 11:00' : '')));
+    } else if (v && v.ok === false) {
+      out.push(cell('VER', '–', '', 'Variance-elapsed ratio: ' + (v.why || 'not enough minute samples yet')));
+    } else if (!g.generated) {
+      out.push(cell('VER', '–', '', 'No calibration yet for this index: run python3 pro_calibrate.py (the server runs it after each close).'));
+    }
+    if (c && c.iv_trading != null) {
+      const tip = `Front expiry ${c.expiry}: ATM IV ${f2(c.iv_calendar)}% on the calendar clock (what the chain shows) is ${f2(c.iv_trading)}% on the trading clock - ` +
+        `the same total variance spread over the ${f2(c.units_left)} session-units actually left (nights and weekends weighted ` +
+        (c.calibrated ? 'as measured on your data' : 'by defaults: no calibration yet') + '). Compare it with realised session vol, not with the calendar figure.';
+      out.push(cell('IV CLOCK', f2(c.iv_trading) + '%', '', tip, 'cal ' + f2(c.iv_calendar) + '%'));
+    }
+    if (c && c.base_vol_trading != null) {
+      const ev = (c.events || []).map(e => e.date.slice(5) + ' ' + e.label).join('; ');
+      const tip = `Front-expiry variance above VIX's 30-day base rate (${f2(c.base_vol_trading)}% on the trading clock), as one move. ` +
+        'VIX includes any event inside its own 30 days, so this is a lower bound. ' + (ev ? 'Listed in guide/events.txt: ' + ev + '.' : 'No event listed in guide/events.txt before this expiry.');
+      out.push(cell('EVENT', c.event_move_pts != null ? '±' + Math.round(c.event_move_pts) : 'none', c.event_move_pts != null && ev ? 'var(--gold,#d4af37)' : '',
+        tip, c.event_move_pct != null ? f2(c.event_move_pct) + '%' + (ev ? ' · ' + escapeHtml((c.events[0] || {}).label || '') : '') : 'not priced'));
+    }
+    const b = g.book;
+    if (b && b.ok) {
+      const h = b.hist;
+      const tip = `Open ${g.sym} book (${b.legs} leg${b.legs > 1 ? 's' : ''}), estimated: SPAN-style margin ${_proRs(b.margin)} (scan ${_proRs(b.span)} + exposure ${_proRs(b.exposure)}); ` +
+        `if IV jumps ${Math.round((b.iv_spike - 1) * 100)}%: margin ${_proRs(b.margin_iv_spike)}, mark-to-market ${b.spike_pnl < 0 ? '−' : '+'}${_proRs(b.spike_pnl)}. ` +
+        (h ? `Replaying ${h.n} historical days (${h.from} to ${h.to}) on these legs: 1-day VaR97.5 ${_proRs(h.var)}, ES97.5 ${_proRs(h.es)}; worst ` +
+          h.worst.map(w => `${w.date} ${w.pnl < 0 ? '−' : '+'}${_proRs(w.pnl)}`).join(', ') + '. ' : 'No daily history archived yet for the tail. ') +
+        (b.mixed_expiry ? 'Legs span expiries; the margin scan uses the nearest. ' : '') + 'Estimates - the broker\'s figure is the one that counts.';
+      out.push(cell('BOOK', _proRs(b.margin), '', tip, `IV+${Math.round((b.iv_spike - 1) * 100)}% ${_proRs(b.margin_iv_spike)}` + (h ? ` · ES ${_proRs(h.es)}` : '')));
+    }
+    if (out.length && g.generated) {
+      out.push(`<span title="Pro calibration: ${escapeHtml(g.generated)}, ${g.calib_days || 0} days with minute data and VIX; ${g.daily_days || 0} daily sessions archived. Refreshed after each close by the server." style="color:var(--muted,#789);font-size:9px;">calib ${escapeHtml(String(g.generated).slice(5, 10))}</span>`);
+    }
+    return out.join('');
+  }
+  function _proGaugeDraw(box, sym) {
+    const G = window._proG || {};
+    const html = G.sym === sym ? _proGaugeHtml(G.d) : '';
+    if (G.html !== html || box.innerHTML === '' && html) { box.innerHTML = html; G.html = html; }
   }
 
   function renderVolumeProfile() {
@@ -28348,7 +28433,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // is how fast the imbalance moved: z = 2-minute change in ln(bid/offer) over its own session spread (EWMA, ~28 min).
   // Bullish = CE bids building or PE offers building. Per strike the edge is thin (~52-53% hits); the grid average is better (~55%).
   // Keep _BF in step with bias_eval.py.
-  const _BF = { tau: 1680, lb: 120, mod: 0.6, strong: 1.4, agg: 0.35, fadeMin: 900, fadeBps: 15 };
+  const _BF = { tau: 1680, lb: 120, mod: 0.6, strong: 1.4, agg: 0.35, fadeMin: 900, fadeBps: 15, oiMin: 0.01, oiImb: 0.15 };
   const _bfZ = (key, b, o, now) => {
     if (!key || !(b > 0) || !(o > 0)) return null;
     const S = globalThis._bfSt || (globalThis._bfSt = {}), L = Math.log(b / o); let s = S[key];
@@ -28364,7 +28449,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _bfCell = (b, o, put, z) => {   // z is bullish-oriented; the text colour stays the book level (CE buyers / PE sellers green), the arrows are the shift
     const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers, t = _bfTier(z), u = z > 0;
     const tip = `${buyers ? 'more bids than offers' : 'more offers than bids'} (the level alone is not a signal) · ` + (z == null ? '2-min shift: warming up' : `2-min shift z ${z >= 0 ? '+' : ''}${z.toFixed(2)}: ${t ? (u ? 'bullish' : 'bearish') + (t === 2 ? ', strong' : '') : 'no clear shift'}`);
-    return `<td data-s="${t ? (u ? 'u' : 'd') + t : '0'}" title="${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}${t ? ` <b class="bf ${u ? 'bu' : 'be'}">${(u ? '▲' : '▼').repeat(t)}</b>` : ''}</td>`;
+    return `<td data-s="${t ? (u ? 'u' : 'd') + t : '0'}" title="${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'B' : 'S'}${t ? ` <b class="bf ${u ? 'bu' : 'be'}">${(u ? '▲' : '▼').repeat(t)}</b>` : ''}</td>`;
   };
   const _bfMean = zs => { const v = zs.filter(z => z != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const _bfStrike = (zc, zp) => { const m = _bfMean([zc, zp]), t = _bfTier(m); return t ? (m > 0 ? '▲' : '▼').repeat(t) : ''; };
@@ -28405,6 +28490,18 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const at = pc == null ? '' : `<b class="${pc >= 95 ? 'hi' : pc <= 5 ? 'lo' : ''}">${pc >= 95 ? 'HIGH' : pc <= 5 ? 'LOW' : pc + '%'}</b>`, txt = `${f(lo)}–${f(hi)}`;
   return `<td class="rg ${p}"${pc == null ? '' : ` style="--p:${pc}%"`} title="${tip}">${p === 'pe' ? at + ' ' + txt : txt + ' ' + at}</td>`;   // the position sits next to the strike on both sides
   };
+  // OI tag beside the day range: who opened or closed at this strike in the last 15 minutes, the OI change classified by the taker
+  // side of the volume (Pro guide). BUY = buyers lifting offers while OI rises (long build-up), WRITE = sellers hitting bids while OI
+  // rises, COVER = buyers while OI falls (short covering), DUMP = sellers while OI falls (long liquidation). No colour, no arrow: as a
+  // direction call it showed no edge in bias_eval.py ('oitag', twin oi_tag). Keep _BF.oiMin / oiImb in step with it.
+  const _bfOi = (d, r, p) => {
+    const f = ((d && d.flow && d.flow.strikes) || {})[`${Math.round(r.strike)}${p.toUpperCase()}`] || {};
+    const oi = +r[p + '_oi'] || 0, dO = +r[p + '_oi_15m'] || 0, b = +f.b15 || 0, s = +f.s15 || 0, im = b + s > 0 ? (b - s) / (b + s) : 0;
+    if (!(oi > 0) || !(b + s > 0) || Math.abs(dO) < oi * _BF.oiMin || Math.abs(im) < _BF.oiImb) return '<td class="oi"></td>';
+    const tag = dO > 0 ? (im > 0 ? 'BUY' : 'WRITE') : (im > 0 ? 'COVER' : 'DUMP'), sg = dO > 0 ? '+' : '−';
+    const what = { BUY: 'buyers opening (long build-up)', WRITE: 'writers opening', COVER: 'writers covering (short covering)', DUMP: 'holders selling out (long liquidation)' }[tag];
+    return `<td class="oi" title="${p.toUpperCase()} last 15 min: ${what} · OI ${sg}${Math.round(Math.abs(dO)).toLocaleString('en-IN')} (${sg}${(Math.abs(dO) / oi * 100).toFixed(1)}%) · taker volume ${Math.round(b / (b + s) * 100)}% buyers. Context, not a direction call: it showed no edge in bias_eval.py.">${tag}</td>`;
+  };
   const _bfAgg = zs => { const m = _bfMean(zs); if (m == null) return ' · book shift: warming up'; const on = Math.abs(m) >= _BF.agg; return ` · book shift <b class="bf ${on ? (m > 0 ? 'bu' : 'be') : ''}" title="average 2-min shift over the grid (the more reliable read)">${on ? (m > 0 ? '▲ bullish' : '▼ bearish') : 'flat'} ${m >= 0 ? '+' : ''}${m.toFixed(2)}</b>`; };
   let _hgLast = '', _hgBook = {}, _hgBusy = false, _hgNames = [];
   // Live totals: the local server's tick store (/api/trade/state?b=), memory only, no broker call.
@@ -28444,10 +28541,10 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         };
         _hgNames = show.flatMap(r => [r.ce_symbol, r.pe_symbol]);
         const live = (r, p) => { const lv = _hgBook[r[p + '_symbol']]; return lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; };
-        const cell = (r, put) => { const p = put ? 'pe' : 'ce', [b, o] = live(r, p), q = `${_bfQ(b)}${_bfQ(o)}${ratio(b, o, put, r)}`; return put ? _bfRange(r, p) + q : q + _bfRange(r, p); };
+        const cell = (r, put) => { const p = put ? 'pe' : 'ce', [b, o] = live(r, p), q = `${_bfQ(b)}${_bfQ(o)}${ratio(b, o, put, r)}`; return put ? _bfOi(d, r, p) + _bfRange(r, p) + q : q + _bfRange(r, p) + _bfOi(d, r, p); };
         const any = show.some(r => (live(r, 'ce')[0] > 0) || (live(r, 'pe')[0] > 0));
         const tbl = show.map(r => { const cc = cell(r, false), pc = cell(r, true), vd = _bfStrike(SCR[r.strike + 'c'], SCR[r.strike + 'p']); return `<tr class="${r.strike === atm ? 'atm' : ''}">${cc}<td class="k${vd ? (vd[0] === '▲' ? ' kb' : ' ks') : ''}">${fmtInt(r.strike)}${vd ? ' ' + vd : ''}${_bfWall(d, r.strike)}</td>${pc}</tr>`; }).join('');
-        html = `<div class="cap">${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(d.expiry || ''))} · CE bid · offer · ratio · day range | strike | PE day range · bid · offer · ratio · ATM ${fmtInt(atm)}${any ? _bfAgg(Object.values(SCR)) : ''}${_bfDesk(d, spot, now)}</div>` +
+        html = `<div class="cap">${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(d.expiry || ''))} · CE bid · offer · ratio · day range · OI | strike | PE OI · day range · bid · offer · ratio · ATM ${fmtInt(atm)}${any ? _bfAgg(Object.values(SCR)) : ''}${_bfDesk(d, spot, now)}</div>` +
           (any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30).</div>') +
           `<table>${tbl}</table>`;
       }
@@ -42444,6 +42541,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     $sc('scMarginRow').style.display = sell ? '' : 'none';
     const mo = $sc('scMarginOut'), mg = SC.margin && SC.margin.key === scMarginKey() ? SC.margin : null;
     mo.textContent = mg ? mg.text : ''; mo.className = 'sc-dim sc-n' + (mg && mg.bad ? ' neg-t' : '');
+    try { scRiskPreview(sell); } catch (_) {}
     // wait-for-a-level row
     $sc('scTrig').checked = !!trig; $sc('scTrigBox').style.display = trig ? '' : 'none';
     $sc('scTKind').value = SC.pref.tkind; $sc('scTOp').value = SC.pref.top;
@@ -42890,7 +42988,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // is how fast the imbalance moved: z = 2-minute change in ln(bid/offer) over its own session spread (EWMA, ~28 min).
     // Bullish = CE bids building or PE offers building. Per strike the edge is thin (~52-53% hits); the grid average is better (~55%).
     // Keep _BF in step with bias_eval.py.
-    const _BF = { tau: 1680, lb: 120, mod: 0.6, strong: 1.4, agg: 0.35, fadeMin: 900, fadeBps: 15 };
+    const _BF = { tau: 1680, lb: 120, mod: 0.6, strong: 1.4, agg: 0.35, fadeMin: 900, fadeBps: 15, oiMin: 0.01, oiImb: 0.15 };
     const _bfZ = (key, b, o, now) => {
       if (!key || !(b > 0) || !(o > 0)) return null;
       const S = globalThis._bfSt || (globalThis._bfSt = {}), L = Math.log(b / o); let s = S[key];
@@ -42906,7 +43004,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     const _bfCell = (b, o, put, z) => {   // z is bullish-oriented; the text colour stays the book level (CE buyers / PE sellers green), the arrows are the shift
       const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers, t = _bfTier(z), u = z > 0;
       const tip = `${buyers ? 'more bids than offers' : 'more offers than bids'} (the level alone is not a signal) · ` + (z == null ? '2-min shift: warming up' : `2-min shift z ${z >= 0 ? '+' : ''}${z.toFixed(2)}: ${t ? (u ? 'bullish' : 'bearish') + (t === 2 ? ', strong' : '') : 'no clear shift'}`);
-      return `<td data-s="${t ? (u ? 'u' : 'd') + t : '0'}" title="${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'buyers' : 'sellers'}${t ? ` <b class="bf ${u ? 'bu' : 'be'}">${(u ? '▲' : '▼').repeat(t)}</b>` : ''}</td>`;
+      return `<td data-s="${t ? (u ? 'u' : 'd') + t : '0'}" title="${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'B' : 'S'}${t ? ` <b class="bf ${u ? 'bu' : 'be'}">${(u ? '▲' : '▼').repeat(t)}</b>` : ''}</td>`;
     };
     const _bfMean = zs => { const v = zs.filter(z => z != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
     const _bfStrike = (zc, zp) => { const m = _bfMean([zc, zp]), t = _bfTier(m); return t ? (m > 0 ? '▲' : '▼').repeat(t) : ''; };
@@ -42947,6 +43045,18 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       const at = pc == null ? '' : `<b class="${pc >= 95 ? 'hi' : pc <= 5 ? 'lo' : ''}">${pc >= 95 ? 'HIGH' : pc <= 5 ? 'LOW' : pc + '%'}</b>`, txt = `${f(lo)}–${f(hi)}`;
   return `<td class="rg ${p}"${pc == null ? '' : ` style="--p:${pc}%"`} title="${tip}">${p === 'pe' ? at + ' ' + txt : txt + ' ' + at}</td>`;   // the position sits next to the strike on both sides
     };
+    // OI tag beside the day range: who opened or closed at this strike in the last 15 minutes, the OI change classified by the taker
+    // side of the volume (Pro guide). BUY = buyers lifting offers while OI rises (long build-up), WRITE = sellers hitting bids while OI
+    // rises, COVER = buyers while OI falls (short covering), DUMP = sellers while OI falls (long liquidation). No colour, no arrow: as a
+    // direction call it showed no edge in bias_eval.py ('oitag', twin oi_tag). Keep _BF.oiMin / oiImb in step with it.
+    const _bfOi = (d, r, p) => {
+      const f = ((d && d.flow && d.flow.strikes) || {})[`${Math.round(r.strike)}${p.toUpperCase()}`] || {};
+      const oi = +r[p + '_oi'] || 0, dO = +r[p + '_oi_15m'] || 0, b = +f.b15 || 0, s = +f.s15 || 0, im = b + s > 0 ? (b - s) / (b + s) : 0;
+      if (!(oi > 0) || !(b + s > 0) || Math.abs(dO) < oi * _BF.oiMin || Math.abs(im) < _BF.oiImb) return '<td class="oi"></td>';
+      const tag = dO > 0 ? (im > 0 ? 'BUY' : 'WRITE') : (im > 0 ? 'COVER' : 'DUMP'), sg = dO > 0 ? '+' : '−';
+      const what = { BUY: 'buyers opening (long build-up)', WRITE: 'writers opening', COVER: 'writers covering (short covering)', DUMP: 'holders selling out (long liquidation)' }[tag];
+      return `<td class="oi" title="${p.toUpperCase()} last 15 min: ${what} · OI ${sg}${Math.round(Math.abs(dO)).toLocaleString('en-IN')} (${sg}${(Math.abs(dO) / oi * 100).toFixed(1)}%) · taker volume ${Math.round(b / (b + s) * 100)}% buyers. Context, not a direction call: it showed no edge in bias_eval.py.">${tag}</td>`;
+    };
     const _bfAgg = zs => { const m = _bfMean(zs); if (m == null) return ' · book shift: warming up'; const on = Math.abs(m) >= _BF.agg; return ` · book shift <b class="bf ${on ? (m > 0 ? 'bu' : 'be') : ''}" title="average 2-min shift over the grid (the more reliable read)">${on ? (m > 0 ? '▲ bullish' : '▼ bearish') : 'flat'} ${m >= 0 ? '+' : ''}${m.toFixed(2)}</b>`; };
     // buyers over sellers = total bid / total offer: text green for CE buyers / PE sellers (the book level); arrows = the 2-min shift (_bfZ)
     const SCR = {}, now = Date.now() / 1000;
@@ -42955,12 +43065,12 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       const z0 = _bfZ(r[(put ? 'pe' : 'ce') + '_symbol'], b, o, now), z = z0 == null ? null : put ? -z0 : z0; SCR[r.strike + (put ? 'p' : 'c')] = z; return _bfCell(b, o, put, z);
     };
     // live totals from the tick stream; until it has them, the chain's own snapshot (Zerodha's quote) so the grid is never blank
-    const cell = (r, put) => { const p = put ? 'pe' : 'ce', lv = SC.book[r[p + '_symbol']], b = lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']], q = `${_bfQ(b[0])}${_bfQ(b[1])}${ratio(b[0], b[1], put, r)}`; return put ? _bfRange(r, p) + q : q + _bfRange(r, p); };
+    const cell = (r, put) => { const p = put ? 'pe' : 'ce', lv = SC.book[r[p + '_symbol']], b = lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']], q = `${_bfQ(b[0])}${_bfQ(b[1])}${ratio(b[0], b[1], put, r)}`; return put ? _bfOi(state.lastData, r, p) + _bfRange(r, p) + q : q + _bfRange(r, p) + _bfOi(state.lastData, r, p); };
     const any = g.rows.some(r => ['ce', 'pe'].some(p => { const lv = SC.book[r[p + '_symbol']]; return ((lv ? lv[0] : r[p + '_tbq']) || 0) > 0; }));
     const selK = (SC.pref.selCE || '').slice(1);
     const body = g.rows.map(r => { const cc = cell(r, false), pc = cell(r, true), vd = _bfStrike(SCR[r.strike + 'c'], SCR[r.strike + 'p']); return `<tr class="${r.strike === g.atm ? 'atm' : ''}${String(r.strike) === selK ? ' sel' : ''}">${cc}<td class="k${vd ? (vd[0] === '▲' ? ' kb' : ' ks') : ''}" data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart">${fmtInt(r.strike)}${vd ? ' ' + vd : ''}${_bfWall(state.lastData, r.strike)}</td>${pc}</tr>`; }).join('');
     const ctl = `<span class="gctl">Depth ±<select data-g="n">${[3, 4, 5, 6, 7, 8, 10, 12, 15, 20].map(v => `<option value="${v}"${v === scGridN() ? ' selected' : ''}>${v}</option>`).join('')}</select>${(state.symbol || 'NIFTY') === 'NIFTY' ? ` <label><input type="checkbox" data-g="h50"${scHide50() ? ' checked' : ''}> Hide 50</label>` : ''}</span> `;
-    scSet(el, `<div class="cap">${ctl}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(g.expiry || ''))} · CE bid · offer · ratio · day range | strike | PE day range · bid · offer · ratio · ATM ${fmtInt(g.atm)} · grid v4${any ? _bfAgg(Object.values(SCR)) : ''}${_bfDesk(state.lastData, SC.spot || (state.lastData || {}).underlying_value, now)}</div>${any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table>${body}</table>`);
+    scSet(el, `<div class="cap">${ctl}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(g.expiry || ''))} · CE bid · offer · ratio · day range · OI | strike | PE OI · day range · bid · offer · ratio · ATM ${fmtInt(g.atm)} · grid v4${any ? _bfAgg(Object.values(SCR)) : ''}${_bfDesk(state.lastData, SC.spot || (state.lastData || {}).underlying_value, now)}</div>${any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>'}<table>${body}</table>`);
   }
   function scNote() {
     const el = $sc('scNote'); let msg = '', bad = false; const S = SC.st;
@@ -43039,6 +43149,42 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   function scMarginKey() {
     const lg = scGoLegs('CE'), lgP = scIsStruct() ? null : scGoLegs('PE');
     return [SC.pref.side, SC.pref.struct, SC.pref.hedge, SC.pref.wing, scLots('CE'), lg && lg[0].inst, lgP && lgP[0].inst].join('|');
+  }
+  // Local estimate beside the broker's figure: SPAN-style margin, the same after a 50% IV jump, and the 1-day
+  // expected shortfall from replaying every archived day on these legs. /api/pro/risk reads server memory and
+  // archive/ only (no broker call), at most every 20 s per order shape. Information only.
+  function scRiskLegs() {
+    const legs = [];
+    if (scIsStruct()) { if (!SC.sLegs) return null; legs.push(SC.sLegs.CE.inst + '~S', SC.sLegs.PE.inst + '~S'); }
+    else {
+      const typ = SC.pref.chart === 'PE' ? 'PE' : 'CE', L = SC.legs[typ]; if (!L) return null;
+      if (SC.pref.hedge && SC.wing[typ]) legs.push(SC.wing[typ].inst + '~B');
+      legs.push(L.inst + '~S');
+    }
+    return legs;
+  }
+  function scRiskPreview(sell) {
+    const el = $sc('scRiskOut'); if (!el) return;
+    const legs = sell ? scRiskLegs() : null;
+    if (!legs) { scSet(el, ''); el.title = ''; return; }
+    const lots = scLots('CE'), key = legs.join(',') + '|' + lots;
+    const R = SC.risk || (SC.risk = { key: '', t: 0, d: null, busy: false });
+    if (!R.busy && (R.key !== key || Date.now() - R.t > 20000)) {
+      R.busy = true; R.t = Date.now();
+      fetch(`${scBase()}/api/pro/risk?legs=${encodeURIComponent(legs.join(','))}&lots=${lots}`, { signal: AbortSignal.timeout(15000) })
+        .then(r => r.json()).then(j => { R.d = j; }).catch(() => { R.d = { ok: false, msg: 'risk preview unavailable' }; })
+        .finally(() => { R.key = key; R.busy = false; try { scRenderTicket(); } catch (_) {} });
+    }
+    const d = R.key === key ? R.d : null;
+    if (!d) { scSet(el, ''); el.title = ''; return; }
+    if (!d.ok) { scSet(el, 'est. –'); el.title = d.msg || ''; return; }
+    const h = d.hist, sp = Math.round((d.iv_spike - 1) * 100);
+    scSet(el, `est. <b>${scRs(d.margin)}</b> · IV +${sp}% ${scRs(d.margin_iv_spike)}` + (h ? ` · 1-day ES <b class="neg-t">${scRs(h.es)}</b>` : ''));
+    el.title = `Estimate on this machine, no broker call. SPAN-style margin ${scRs(d.margin)} (scan ${scRs(d.span)} + exposure ${scRs(d.exposure)}); ` +
+      `if IV jumps ${sp}% with the index unchanged: margin ${scRs(d.margin_iv_spike)}, mark-to-market ${scRs(d.spike_pnl)}. ` +
+      (h ? `Every archived day ${h.from} to ${h.to} (${h.n}) replayed on these legs: 1-day VaR97.5 ${scRs(h.var)}, ES97.5 ${scRs(h.es)} (average loss on the worst 2.5% of days); worst ` +
+        h.worst.map(w => `${w.date} ${scRs(w.pnl)}`).join(', ') + '. ' : 'No daily history archived yet for the tail. ') +
+      "Check margin asks Zerodha; the broker's figure is the one that counts.";
   }
   async function scMargin() {
     if (SC.pref.side !== 'S') return;

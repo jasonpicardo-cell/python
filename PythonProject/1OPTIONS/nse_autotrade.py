@@ -58,7 +58,8 @@ OPEN_MIN, DAY_WIN0, DAY_WIN1 = 9 * 60 + 15, 9 * 60 + 20, 9 * 60 + 45
 TRAP_UNTIL = 14 * 60 + 30
 
 # Python twin of _BF in nse_dashboard.html (the server reloads it from the HTML, so the two never drift)
-BF = {"tau": 1680.0, "lb": 120.0, "mod": 0.6, "strong": 1.4, "agg": 0.35, "fadeMin": 900.0, "fadeBps": 15.0}
+BF = {"tau": 1680.0, "lb": 120.0, "mod": 0.6, "strong": 1.4, "agg": 0.35, "fadeMin": 900.0, "fadeBps": 15.0,
+      "oiMin": 0.01, "oiImb": 0.15}
 
 
 def bf_from_html(path):

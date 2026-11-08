@@ -14,6 +14,11 @@ Reads (all signed so + = bullish for the index):
     flow5      5-min taker-flow imbalance
     dflow      the same, delta-weighted (net customer delta bought)  flow desks
     writer     15-min OI added, delta-weighted: put writing +, call writing -   Indian OI desks
+    wconf      5-min writer OI change, counted only when the taker side agrees (sellers while OI rises = writing,
+               buyers while it falls = covering), delta-weighted. The Pro guide's "classify OI by aggressor" read.
+    oitag      the grid's OI tag (oi_tag below: 15-min OI change x 15-min taker side), read as the direction it
+               implies (CE BUY / COVER and PE WRITE / DUMP bullish). The grid shows the tag without colour or arrow.
+               First six sessions: 45-49%, no edge (leans the wrong way, like oi15). Re-check as days accumulate.
   index
     fut_flow   5-min taker-flow imbalance on the near future         index desks (CVD)
     walls      position between the OI put wall and call wall, contrarian
@@ -202,6 +207,21 @@ def _imb(b, s):
     return (b - s) / (b + s) if (b or 0) + (s or 0) > 0 else None
 
 
+def oi_tag(oi, d_oi, b, s):
+    """Python twin of _bfOi in nse_dashboard.html: WRITE / BUY / COVER / DUMP or None.
+    OI must move at least oiMin of the open interest and the taker side must lean at least oiImb."""
+    oi, d_oi, b, s = oi or 0, d_oi or 0, b or 0, s or 0
+    if not oi > 0 or not b + s > 0 or abs(d_oi) < oi * BF["oiMin"]:
+        return None
+    im = (b - s) / (b + s)
+    if abs(im) < BF["oiImb"]:
+        return None
+    return ("BUY" if im > 0 else "WRITE") if d_oi > 0 else ("COVER" if im > 0 else "DUMP")
+
+
+TAG_SIGN = {"BUY": 1, "COVER": 1, "WRITE": -1, "DUMP": -1}   # for the option itself: + = premium-bullish
+
+
 def day_samples(path):
     """Per snapshot: ({read: value}, {h: forward move in bps})."""
     S, sh, sm, out = load(path), Shift(), SpotMove(), []
@@ -211,6 +231,8 @@ def day_samples(path):
         T = max(1 / 1440, d.get("dte") or 1) / 365
         j15 = next((j for j in range(i, -1, -1) if (t - S[j][0]).total_seconds() >= 900), None)
         P15 = {r["strike"]: r for r in S[j15][1]["strikes"]} if j15 is not None else {}
+        j5 = next((j for j in range(i, -1, -1) if (t - S[j][0]).total_seconds() >= 300), None)
+        P5 = {r["strike"]: r for r in S[j5][1]["strikes"]} if j5 is not None else {}
         flow = (d.get("flow") or {}).get("strikes") or {}
         acc = {}
 
@@ -242,6 +264,15 @@ def day_samples(path):
                 o15 = r.get(p + "_oi_15m")
                 if o15:
                     add("writer", -sg * ad * o15, ad * abs(o15))
+                q5 = P5.get(r["strike"])
+                if f and q5 and (f.get("b5") or 0) + (f.get("s5") or 0) > 0:
+                    d5 = (r.get(p + "_oi") or 0) - (q5.get(p + "_oi") or 0)
+                    if d5:
+                        agree = (f["s5"] > f["b5"]) == (d5 > 0)
+                        add("wconf", -sg * ad * d5 * agree, ad * abs(d5))
+                tg = oi_tag(r.get(p + "_oi"), o15, (f or {}).get("b15"), (f or {}).get("s15"))
+                if tg:
+                    add("oitag", sg * TAG_SIGN[tg])
         F = {k: (v[0] / v[1] if v[1] else None) for k, v in acc.items()}
         fu = ((d.get("flow") or {}).get("futures") or {}).get("near")
         F["fut_flow"] = _imb(fu.get("b5") or 0, fu.get("s5") or 0) if fu else None
@@ -268,7 +299,7 @@ def day_samples(path):
     return out
 
 
-READS = ("level", "prem_day", "oi15", "flow5", "dflow", "writer", "fut_flow", "walls", "pin", "fade15", "shift", "setup")
+READS = ("level", "prem_day", "oi15", "flow5", "dflow", "writer", "wconf", "oitag", "fut_flow", "walls", "pin", "fade15", "shift", "setup")
 
 
 def balanced(pairs):

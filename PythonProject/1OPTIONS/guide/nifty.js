@@ -3,7 +3,7 @@ const NF={S:24500,IV:0.13,R:0.065,LOT:65};
 const Nc=x=>{const t=1/(1+0.2316419*Math.abs(x)),d=0.3989423*Math.exp(-x*x/2),p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return x>0?1-p:p};
 const np=x=>Math.exp(-x*x/2)/2.5066283;
 const ATM=()=>Math.round(NF.S/100)*100;
-const ivK=K=>NF.IV*Math.min(2,Math.max(.6,1+2.2*(NF.S-K)/NF.S));          // simple put skew
+let ivK=K=>NF.IV*Math.min(2,Math.max(.6,1+2.2*(NF.S-K)/NF.S));          // simple put skew
 function d12(S,K,T,v){const s=v*Math.sqrt(T),a=(Math.log(S/K)+(NF.R+v*v/2)*T)/s;return[a,a-s]}
 function bs(cp,S,K,T,v){if(T<=1e-7)return cp=='c'?Math.max(S-K,0):Math.max(K-S,0);const[a,b]=d12(S,K,T,v),D=K*Math.exp(-NF.R*T);return cp=='c'?S*Nc(a)-D*Nc(b):D*Nc(-b)-S*Nc(-a)}
 function gk(cp,S,K,T,v){if(cp=='f')return{d:1,g:0,t:0,v:0};T=Math.max(T,1e-5);const[a,b]=d12(S,K,T,v),q=Math.sqrt(T),D=K*Math.exp(-NF.R*T),c=cp=='c';

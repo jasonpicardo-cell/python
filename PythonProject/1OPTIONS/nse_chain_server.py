@@ -2334,6 +2334,14 @@ def _cleanup_dir(path: str, keep_days: int, pattern: str, dry: bool) -> dict:
 def _run_cleanup(dry: bool = None) -> dict:
     dry = RUN_CLEANUP_DRY_RUN if dry is None else dry
     here = _DATA_ROOT
+    arch = None
+    if not dry:                         # copy what the research needs into archive/ before anything is pruned
+        try:
+            import nse_archive
+            arch = {"minutes": nse_archive.archive_minutes(here), "bhav_rows": nse_archive.archive_bhav_dir(here)}
+        except Exception as e:  # noqa: BLE001
+            arch = {"error": f"{type(e).__name__}: {e}"}
+            print(f"[cleanup] archive step failed: {arch['error']}")
     keep = lambda env, dflt: int(_os.environ.get(env, dflt))
     jobs = [
         (_REPLAY_DIR, keep("NSE_KEEP_REPLAY_DAYS", RUN_CLEANUP_REPLAY_DAYS), "*.jsonl"),
@@ -2369,7 +2377,43 @@ def _run_cleanup(dry: bool = None) -> dict:
     else:
         print(f"[cleanup] nothing older than the retention window")
     return {"dry_run": dry, "removed": removed, "freed_mb": round(freed / 1048576, 1),
-            "detail": res, "ran": time.strftime("%Y-%m-%d %H:%M")}
+            "detail": res, "archive": arch, "ran": time.strftime("%Y-%m-%d %H:%M")}
+
+
+def _post_close_research(here: str = None, run=None, fetch=None) -> dict:
+    """After the daily cleanup: catch up missing daily index closes from NSE's public archive (at most 15 files,
+    no broker call), check the order-book recorder wrote today, and refresh the Pro guide calibration
+    (pro_calibrate.py, in a child process so it never holds the server's GIL). NSE_PRO_CALIBRATE=0 skips the last."""
+    import subprocess as _sp
+    here = here or _DATA_ROOT
+    out = {}
+    try:
+        import nse_archive
+        from datetime import date as _dd, timedelta as _tdd
+        out["backfill"] = nse_archive.backfill_daily(here, start=_dd.today() - _tdd(days=45), max_requests=15,
+                                                     **({"fetch": fetch} if fetch else {}))
+    except Exception as e:  # noqa: BLE001
+        out["backfill"] = {"error": f"{type(e).__name__}: {e}"}
+    lt = time.gmtime(time.time() + 19800)
+    if lt.tm_wday < 5 and RUN_DATA_SOURCE == "zerodha":
+        bt = _os.path.join(here, "book_ticks", f"NIFTY_{time.strftime('%Y-%m-%d', lt)}.csv.gz")
+        out["book_ticks"] = _os.path.getsize(bt) if _os.path.exists(bt) else 0
+        if not out["book_ticks"]:
+            print(f"[research] WARNING: no order-book ticks recorded today ({_os.path.relpath(bt, here)} missing or empty)")
+    if _envbool_g("NSE_PRO_CALIBRATE", True):
+        script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "pro_calibrate.py")
+        try:
+            r = (run or _sp.run)([sys.executable, script, "--root", here], cwd=here, capture_output=True, text=True, timeout=1800)
+            out["calibrate"] = {"rc": r.returncode, "tail": ((r.stdout or "") + (r.stderr or ""))[-300:]}
+            try:
+                import nse_pro_live
+                nse_pro_live.reload()
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception as e:  # noqa: BLE001
+            out["calibrate"] = {"error": f"{type(e).__name__}: {e}"}
+    print(f"[research] {json.dumps(out, default=str)[:400]}")
+    return out
 
 
 def _cleanup_mq(dry: bool) -> dict:
@@ -2426,6 +2470,10 @@ def _cleanup_loop():
                 _cleanup_state["last"] = time.time()
             except Exception as e:  # noqa: BLE001
                 print(f"[cleanup] failed: {e}")
+            try:
+                _cleanup_state["research"] = _post_close_research()
+            except Exception as e:  # noqa: BLE001
+                print(f"[research] failed: {e}")
             _cleanup_state["day"] = today            # one attempt a day, even a failed one: no retry storm
             try:
                 with open(stamp, "w") as f:
@@ -3114,6 +3162,8 @@ def _recording_health() -> dict:
         chk(f"{s_} minute ticks", _os.path.join(_TICK_DIR, f"{s_}_{today}.csv"), started and lt.tm_wday < 5)
         chk(f"{s_} context history", _os.path.join(_CTX_DIR, f"{s_}_{today}.v2.jsonl"), started and lt.tm_wday < 5)
     if RUN_DATA_SOURCE == "zerodha":
+        chk("NIFTY order-book ticks (book_ticks/)", _os.path.join(here, "book_ticks", f"NIFTY_{today}.csv.gz"),
+            started and lt.tm_wday < 5 and _os.environ.get("NSE_BOOK_TICKS", "1").strip().lower() not in ("0", "false", "no", "off"))
         chk("Zerodha closing OI (for tomorrow's OI change)",
             _os.path.join(here, "zerodha_cache", f"oi_close_{today}.json"), started and lt.tm_wday < 5)
     folders = {name: _dir_stats(_os.path.join(here, name)) for name in
@@ -6960,6 +7010,110 @@ def _trade_margin(eng, body: dict) -> dict:
     return out
 
 
+# ── Pro gauge (nse_pro_live) and pre-trade risk (nse_span): information only. Reads the cached chain, the minute
+# tick archive, the trade engine's in-memory quotes and archive/; never a broker call, never an order.
+_PRO_INDEX = {"NIFTY": "Nifty 50", "BANKNIFTY": "Nifty Bank", "FINNIFTY": "Nifty Financial Services", "MIDCPNIFTY": "Nifty Midcap Select"}
+_pro_daily_cache: dict = {}
+
+
+def _pro_daily(sym: str):
+    """(daily rows, 1-day historical scenarios) for the index, re-read when archive/index_daily.csv changes."""
+    import nse_archive
+    import nse_span
+    p = _os.path.join(_DATA_ROOT, "archive", "index_daily.csv")
+    mt = _os.path.getmtime(p) if _os.path.exists(p) else None
+    hit = _pro_daily_cache.get(sym)
+    if hit and hit[0] == mt:
+        return hit[1], hit[2]
+    rows = nse_archive.nifty_vix_daily(_DATA_ROOT, _PRO_INDEX.get(sym, "Nifty 50")) if mt else []
+    scen = nse_span.historical_scenarios(rows)
+    _pro_daily_cache[sym] = (mt, rows, scen)
+    return rows, scen
+
+
+def _pro_chain(sym: str):
+    """The newest cached near-expiry chain for sym, or None. Never fetches."""
+    best = None
+    with _chain_meta_lock:
+        for k, e in _chain_cache.items():
+            if k.startswith(f"{sym}|near|") and isinstance(e, dict) and (best is None or e.get("ts", 0) > best.get("ts", 0)):
+                best = e
+    return (best or {}).get("data") or None
+
+
+def _pro_risk_legs(items, chain=None):
+    """items [(inst, BUY/SELL, lots)] -> (nse_span legs, under, lot, spot, atm_iv) from the engine's memory, or a message."""
+    import nse_span
+    eng = _trade_eng                    # never builds the engine (that would start Auto Trade); the Scalper tab does
+    if eng is None:
+        return "the Scalping engine is not running"
+    legs, under, lot = [], None, None
+    for inst, side, lots in items:
+        meta, q = eng.feed.meta(inst), (eng.feed.quote(inst) or {})
+        if not meta or meta.get("typ") not in ("CE", "PE"):
+            return "no contract data for " + str(inst).split(":")[-1]
+        under, lot = meta.get("under"), int(meta.get("lot") or 0)
+        bid, ask, ltp = q.get("bid") or 0, q.get("ask") or 0, q.get("ltp") or 0
+        px = (bid + ask) / 2 if bid and ask else ltp
+        try:
+            dte = max((_zmod()._settle_epoch(str(meta.get("expiry"))) - time.time()) / 86400.0, 1 / 24)
+        except Exception:  # noqa: BLE001
+            return "unknown expiry for " + str(inst).split(":")[-1]
+        legs.append({"strike": float(meta["strike"]), "option_type": meta["typ"], "action": side, "qty_lots": int(lots),
+                     "premium": px or None, "dte": dte})
+    chain = chain or _pro_chain(under) or {}
+    spot = eng.feed.spot(under) or float(chain.get("underlying_value") or 0)
+    if not spot or not lot:
+        return "no live spot for " + str(under)
+    atm = float(chain.get("atm_iv") or 0)
+    for l in legs:
+        iv = nse_span.implied_vol(l["premium"] or 0, spot, l["strike"], l["dte"] / 365.0, l["option_type"])
+        l["iv"] = iv or atm or 15.0
+        if l["premium"] is None:
+            l.pop("premium")
+    return legs, under, lot, spot, (atm or sorted(l["iv"] for l in legs)[len(legs) // 2])
+
+
+def _pro_risk(items) -> dict:
+    import nse_span
+    r = _pro_risk_legs(items)
+    if isinstance(r, str):
+        return {"ok": False, "msg": r}
+    legs, under, lot, spot, atm = r
+    _rows, scen = _pro_daily(under)
+    rep = nse_span.risk_report(legs, spot, atm, min(l["dte"] for l in legs), lot, under, scen)
+    return dict(rep, ok=True, under=under, spot=round(spot, 2), atm_iv=round(atm, 2), legs=len(legs),
+                mixed_expiry=len({round(l["dte"], 2) for l in legs}) > 1)
+
+
+def _pro_live(sym: str) -> dict:
+    import nse_pro_live as L
+    from datetime import datetime as _dtp
+    sym = (sym or "NIFTY").upper()
+    d = _pro_chain(sym) or {}
+    now = _dtp.now(L.IST)
+    px = {}
+    for me, p in _load_archive(sym, now.strftime("%Y-%m-%d")).items():
+        px[_ist_min_of(me * 60) - 555] = p
+    rows, _scen = _pro_daily(sym)
+    prev_vix = next((r[5] for r in reversed(rows) if r[0] < now.date() and r[5]), None)
+    cal = L.calib(_os.path.join(_DATA_ROOT, "guide", "pro_calib.json"))
+    use = cal if (cal and cal.get("sym") == sym) else {}
+    out = L.gauge(now, float(d.get("underlying_value") or 0), float(d.get("atm_iv") or 0), float(d.get("expiry_epoch") or 0),
+                  float(d.get("india_vix") or 0), prev_vix, px, use, L.read_events(_DATA_ROOT))
+    out.update(ok=True, sym=sym, chain=bool(d), spot=d.get("underlying_value"),
+               calib_days=((use.get("ver") or {}).get("n_days")), daily_days=len(rows))
+    eng = _trade_eng
+    if eng is not None:
+        try:
+            held = [p for p in (eng.state().get("positions") or []) if p.get("under") == sym and p.get("qty")]
+            if held:
+                out["book"] = _pro_risk([(p["inst"], "BUY" if p["side"] == "long" else "SELL", p["lots"] or 1) for p in held])
+        except Exception as e:  # noqa: BLE001
+            out["book"] = {"ok": False, "msg": f"{type(e).__name__}: {e}"}
+    return out
+
+
 def _trade_state_payload(q: str = "", u: str = "", t: str = "", b: str = "") -> dict:
     eng = _trade_engine()
     if eng is None:
@@ -7833,6 +7987,23 @@ class Handler(BaseHTTPRequestHandler):
                                             list((data.get("NIFTY") or {}).get("weights", {}).keys())})
             except Exception as e:  # noqa: BLE001
                 self._send_json({"ok": False, "error": str(e)})
+            return
+
+        if parsed.path in ("/api/pro/live", "/api/pro/risk"):
+            # information only: the live Pro gauge (Home) and the ticket's margin / tail preview (Scalper)
+            try:
+                if parsed.path == "/api/pro/live":
+                    self._send_json(_pro_live(qs.get("sym", ["NIFTY"])[0]))
+                else:
+                    lots = int(qs.get("lots", ["1"])[0])
+                    items = []
+                    for part in (qs.get("legs", [""])[0] or "").split(",")[:4]:
+                        inst, _, sd = part.rpartition("~")
+                        if inst and sd in ("B", "S") and 1 <= lots <= 50:
+                            items.append((inst, "BUY" if sd == "B" else "SELL", lots))
+                    self._send_json(_pro_risk(items) if items else {"ok": False, "msg": "legs=INST~B|S,... and lots=1..50"})
+            except Exception as e:  # noqa: BLE001
+                self._send_json({"ok": False, "msg": f"{type(e).__name__}: {e}"})
             return
 
         if parsed.path == "/api/cleanup":
