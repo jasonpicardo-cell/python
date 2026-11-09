@@ -1811,7 +1811,9 @@ def _attach_oi_rollups(symbol: str, data: dict) -> dict:
     """Add the rolling OI-change fields the NSE path computes.
 
     ce_oi_15m / pe_oi_15m and ce_d60 / pe_d60 are derived from the server's own
-    OI timeline, not from the source. The adapter path returned before that
+    OI timeline, not from the source. ce_iv_15m / pe_iv_15m (vol points, the
+    strike grids' IV change) come from the same samples; left out when either
+    end has no solved IV. The adapter path returned before that
     happened, so a Fyers chain carried neither - the CSV export lost two
     columns and the custom OI-change alert had nothing to compare against.
     """
@@ -1828,7 +1830,7 @@ def _attach_oi_rollups(symbol: str, data: dict) -> dict:
             if k is None:
                 continue
             hist = tl.setdefault(k, [])
-            hist.append((now, s.get("ce_oi") or 0, s.get("pe_oi") or 0))
+            hist.append((now, s.get("ce_oi") or 0, s.get("pe_oi") or 0, s.get("ce_iv") or 0, s.get("pe_iv") or 0))
             # keep roughly an hour, which covers both windows
             while hist and now - hist[0][0] > 3900:
                 hist.pop(0)
@@ -1843,6 +1845,11 @@ def _attach_oi_rollups(symbol: str, data: dict) -> dict:
                 if base:
                     s[f"ce_{suffix}"] = (s.get("ce_oi") or 0) - base[1]
                     s[f"pe_{suffix}"] = (s.get("pe_oi") or 0) - base[2]
+                    if mins == 15 and len(base) > 4:
+                        for i, p in ((3, "ce"), (4, "pe")):
+                            cur = s.get(f"{p}_iv") or 0
+                            if cur > 0 and base[i] > 0:
+                                s[f"{p}_iv_15m"] = round(cur - base[i], 2)
     except Exception as e:  # noqa: BLE001
         print(f"[oi-rollup] {e}")
     return data

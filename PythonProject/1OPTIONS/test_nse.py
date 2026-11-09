@@ -1756,9 +1756,13 @@ def test_scalping_tab():
         SYM = 'BANKNIFTY'; const bank = scGridRows(); SYM = 'FINNIFTY'; const none = scGridRows(); SYM = 'NIFTY';
         SC.spot = 25012; SC.pref.gridN = 2; SC.pref.hide50 = false; const d50 = scGridRows().rows.map(r => r.strike); SC.pref.hide50 = true; const d100 = scGridRows().rows.map(r => r.strike); SYM = 'BANKNIFTY'; const bk50 = scGridRows().rows.length; scRenderGrid(); const bkCtl = /data-g="h50"/.test(el.h); SYM = 'NIFTY'; SC.pref.gridN = 5; SC.pref.hide50 = true; scRenderGrid(); const niCtl = /data-g="h50"[^>]*checked/.test(el.h) && /<option value="5" selected>/.test(el.h);
         const depth = JSON.stringify({ d50, d100, bk50, bkCtl, niCtl });
+        const fdOf = () => ({ fd: (el.h.match(/<b class="fd (ok|bad)"[^>]*>([^<]*)</) || []).slice(1).join(':'), dim: (el.h.match(/data-f="1"/g) || []).length, shift: el.h.includes('· book shift'), arrows: /<b class="bf (bu|be)">/.test(el.h.split('</div>').slice(1).join('')) });
+        const fresh = { a: fdOf() }; SC.bookAt = Date.now() / 1000 - 60; scRenderGrid(); fresh.b = fdOf();
+        SC.bookAt = Date.now() / 1000; SC.st = { feed: { connected: true, streaming: false } }; scRenderGrid(); fresh.c = fdOf(); SC.st = undefined; scRenderGrid(); fresh.d = fdOf();
+        const r248 = el.h.split('<tr class=').find(x => x.includes('data-k="24800"')) || '', snapTip = /data-f="1" title="chain snapshot, not live ticks · /.test(r248);
         console.log(JSON.stringify({ depth, order, order2, ceBuyers: /class="up">3.00× B/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× S/.test(row(25000)), ceSellers: /class="dn">0.33× S/.test(row(25100)), peBuyers: /class="dn">3.00× B/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
           atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× B/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length),
-          kq: row(25000).includes('<td title="90,000">90k</td><td title="30,000">30k</td>'), layout: /× B[^]*?<\\/td><td class="rg ce" style="--p:75%"[^>]*>50\\.0–150 <b class="">75%<\\/b><\\/td><td class="oi"><\\/td><td class="k[^"]*" data-k="25000"[^]*?<\\/td><td class="oi"><\\/td><td class="rg">–<\\/td><td title="30,000">30k<\\/td>/.test(row(25000)) }));""")
+          fresh, snapTip, kq: row(25000).includes('<td title="90,000">90k</td><td title="30,000">30k</td>'), layout: /× B[^]*?<\\/td><td class="rg ce" style="--p:75%"[^>]*>50\\.0–150 <b class="">75%<\\/b><\\/td><td class="oi"><\\/td><td class="k[^"]*" data-k="25000"[^]*?<\\/td><td class="oi"><\\/td><td class="rg">–<\\/td><td title="30,000">30k<\\/td>/.test(row(25000)) }));""")
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
@@ -1768,6 +1772,13 @@ def test_scalping_tab():
         check("strike grid: ATM plus and minus 5 round-hundred strikes (11 rows, no column headers) (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; shown for NIFTY and BANKNIFTY, hidden for the other indices",
               o4["no50"] and o4["order"] == [24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500] and o4["order2"] == [24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500, 25600]
               and o4["fallback"] and o4["kq"] and o4["layout"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
+        F = o4["fresh"]
+        check("strike grids: feed freshness. The caption shows live / live n/m / stale Ns / snapshot / stream off; cells from the chain snapshot, older than 30 s, or under a feed that is not live are dimmed (data-f) with the reason in the tooltip and no shift arrows, and a grid that is not live shows no book shift; both grids wired the same way",
+              F["a"] == {"fd": "ok:live 4/5", "dim": 3, "shift": True, "arrows": False} and F["b"] == {"fd": "bad:stale 61s", "dim": 15, "shift": False, "arrows": False}
+              and F["c"] == {"fd": "bad:stream off", "dim": 15, "shift": False, "arrows": False} and F["d"]["fd"] == "ok:live 4/5" and o4["snapTip"]
+              and "_hgBook = j.book || {}; _hgBookAt = Date.now() / 1000; _hgFeed = j.feed || null;" in d and "SC.book = j.book || {}; SC.bookAt = Date.now() / 1000;" in d
+              and d.count("${FD.html}${any && FD.ok ? _bfAgg(Object.values(SCR)) : ''}") == 2 and d.count("if (st) return _bfCell(b, o, put, null, st);") == 2
+              and d.count("_bfSrc(_hgBook[") == 1 and d.count("_bfSrc(lv, SC.bookAt, now)") == 1 and ".sc-grid td[data-f] { opacity: .45; }" in d, str(F) + f" snapTip={o4['snapTip']}")
         check("chart indicators: EMA seeds with the SMA and follows 2/(n+1); the RSI average waits for a full window",
               o["e"][:2] == [None, None] and o["e"][2] == 2 and abs(o["e"][3] - 3) < 1e-9 and abs(o["e"][7] - 7) < 1e-9 and o["m"] == [None, None, None, 15, 25, 35], str(o))
     except Exception as ex:  # noqa: BLE001
@@ -1798,6 +1809,10 @@ def test_scalping_tab():
           k: [_bfStrike(1.6, 1.4), _bfStrike(-0.8, null), _bfStrike(1, -1), _bfStrike(null, undefined)], agg: [_bfAgg([0.5, 0.3]), _bfAgg([0.1, -0.2]), _bfAgg([null])],
           sp, desk1, desk2, desk0, walls: [_bfWall(D, 24000), _bfWall(D, 24500), _bfWall(D, 24200), _bfWall(null, 24000)],
           kf: [0, 999, 1000, 1500, 9999, 10000, 100000, 2698865, null, NaN].map(_bfK), q: [_bfQ(100000), _bfQ(null)],
+          fsrc: [_bfSrc(null, 0, 100), _bfSrc([1, 2, 3], 90, 100), _bfSrc([1, 2, 3], 50, 100), _bfSrc([1, 2, 3], 0, 100)],
+          ffd: [_bfFeed([], null), _bfFeed([{ f: 'snap', a: null }], null), _bfFeed([{ f: 'live', a: 2 }], { connected: false }), _bfFeed([{ f: 'live', a: 2 }, { f: 'stale', a: 40 }], {})].map(x => [x.ok, x.html.replace(/ title="[^"]*"/, '')]),
+          fst: [_bfStale({ f: 'live', a: 1 }, true), _bfStale({ f: 'live', a: 1 }, false), _bfStale({ f: 'stale', a: 41.6 }, true), _bfStale({ f: 'snap', a: null }, true)],
+          fq: _bfQ(5000, 'book 41 s old'), fc: _bfCell(3000, 1000, false, null, 'feed not live'),
           rg: [_bfRange({ ce_low: 50, ce_high: 150, ce_ltp: 150, ce_open: 60 }, 'ce'), _bfRange({ pe_low: 210.5, pe_high: 400, pe_ltp: 200 }, 'pe'),
                _bfRange({ ce_low: 0, ce_high: 0, ce_ltp: 80 }, 'ce'), _bfRange({ ce_low: 80, ce_high: 80, ce_ltp: 0 }, 'ce'), _bfRange({ ce_low: 40, ce_high: 60, ce_ltp: 50 }, 'ce')] }));""".replace("SEQ_JSON", json.dumps(seq))
         try:
@@ -1823,6 +1838,51 @@ def test_scalping_tab():
                   and "_bfSetup" not in d and "SETUP" not in blocks[0], str({k: ob[k] for k in ("desk1", "desk2", "desk0", "walls")})[:700] + f" sp180={ob['sp'][180]} same={same_sp}")
             check("strike grids: book quantities in thousands (100000 -> 100k, 2698865 -> 2,699k, exact figure in the tooltip); empty shows a dash",
                   ob["kf"] == ["0", "999", "1k", "1.5k", "10k", "10k", "100k", "2,699k", "–", "–"] and ob["q"] == ['<td title="1,00,000">100k</td>', "<td>–</td>"], str(ob["kf"]) + str(ob["q"]))
+            check("strike grids: freshness helpers. _bfSrc ages a book total by the time since the poll (snap without one, stale past 30 s); _bfFeed reads no book / snapshot / not connected / live n/m; _bfStale names the reason; dimmed cells carry data-f and the reason in the tooltip",
+                  ob["fsrc"] == [{"f": "snap", "a": None}, {"f": "live", "a": 13}, {"f": "stale", "a": 53}, {"f": "live", "a": 3}]
+                  and ob["ffd"] == [[False, ' · <b class="fd bad">no book</b>'], [False, ' · <b class="fd bad">snapshot</b>'], [False, ' · <b class="fd bad">not connected</b>'], [True, ' · <b class="fd ok">live 1/2</b>']]
+                  and ob["fst"] == ["", "feed not live", "book 42 s old", "chain snapshot, not live ticks"]
+                  and ob["fq"] == '<td data-f="1" title="5,000 · book 41 s old">5k</td>' and 'data-f="1" title="feed not live · more bids than offers' in ob["fc"] and "<b class=\"bf" not in ob["fc"],
+                  str({k: ob[k] for k in ("fsrc", "ffd", "fst", "fq", "fc")})[:900])
+            # IV change per strike (server rollup) and the ATM straddle in the caption
+            import ast as _ast2
+            ssrc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_chain_server.py"), encoding="utf-8").read()
+            fn = next(n for n in _ast2.parse(ssrc).body if isinstance(n, _ast2.FunctionDef) and n.name == "_attach_oi_rollups")
+            clk = [1e6]
+            nsr = {"_oi_rollup_hist": {}, "time": type("T", (), {"time": staticmethod(lambda: clk[0])})}
+            exec(compile(_ast2.Module(body=[fn], type_ignores=[]), "srv", "exec"), nsr)
+            roll = nsr["_attach_oi_rollups"]
+            roll("N", {"strikes": [{"strike": 25000, "ce_oi": 100, "pe_oi": 100, "ce_iv": 12.0, "pe_iv": 12.0}, {"strike": 25100, "ce_oi": 100, "pe_oi": 100, "ce_iv": 0, "pe_iv": 0}]})
+            clk[0] += 600
+            roll("N", {"strikes": [{"strike": 25000, "ce_oi": 150, "pe_oi": 90, "ce_iv": 12.4, "pe_iv": 12.4}, {"strike": 25100, "ce_oi": 100, "pe_oi": 100, "ce_iv": 13, "pe_iv": 13}]})
+            clk[0] += 600
+            r2 = {"strikes": [{"strike": 25000, "ce_oi": 160, "pe_oi": 80, "ce_iv": 11.3, "pe_iv": 11.3}, {"strike": 25100, "ce_oi": 100, "pe_oi": 100, "ce_iv": 13.5, "pe_iv": 13.5}]}
+            roll("N", r2)
+            a0, a1 = r2["strikes"]
+            check("strike grids: server IV change per strike over 15 min (ce_iv_15m / pe_iv_15m, vol points) from the OI rollup samples, left out when either end has no solved IV",
+                  a0.get("ce_iv_15m") == -0.7 and a0.get("pe_iv_15m") == -0.7 and a0.get("ce_oi_15m") == 60 and "ce_iv_15m" not in a1 and "pe_iv_15m" not in a1, str(r2))
+            jsv = blocks[0] + """
+            const R = (c, p) => ({ ce_iv_15m: c, pe_iv_15m: p });
+            const iv = [_bfIv(R(0.8, 0.8)), _bfIv(R(-0.6, -0.6)), _bfIv(R(0.2, 0.2)), _bfIv(R(0.01, -0.02)), _bfIv({}), _bfIv(R(1.0, null))];
+            const S = k => ({ strike: k, ce_ltp: 0, pe_ltp: 0 });
+            const D = { underlying_value: 25080, dte_trading: 4, session_ohlc: { open: 24960 }, strikes: [
+              { strike: 24950, ce_ltp: 160, pe_ltp: 40, ce_open: 110, pe_open: 90 }, { strike: 25000, ce_ltp: 120, pe_ltp: 60, ce_open: 80, pe_open: 120 },
+              { strike: 25050, ce_ltp: 100, pe_ltp: 80, ce_open: 60, pe_open: 150 }, { strike: 25100, ce_ltp: 80, pe_ltp: 100, ce_open: 40, pe_open: 180 }] };
+            const st = [_bfStr(D), _bfStr(Object.assign({}, D, { session_ohlc: {} , dte_trading: 0.4 })), _bfStr(Object.assign({}, D, { strikes: [S(25000)] })), _bfStr(null),
+              _bfStr(Object.assign({}, D, { strikes: D.strikes.map(r => Object.assign({}, r, { ce_ltp: r.ce_ltp * 0.99 })) }))];
+            console.log(JSON.stringify({ iv, st }));"""
+            ov = json.loads(subprocess.run(["node", "-e", jsv], capture_output=True, text=True, timeout=20).stdout)
+            iv, st = ov["iv"], ov["st"]
+            strip = lambda h: re.sub(r' title="[^"]*"', "", h)
+            check("strike grids: ΔIV beside the strike (+0.8 amber from 0.5 points, −0.6 blue, small changes muted, blank without data); ATM straddle in the caption vs the open straddle (strike nearest the index open, exchange open prices) with ± per day = straddle / √trading days, coloured from ±3%, nothing without a straddle",
+                  [strip(x) for x in iv] == [' <span class="iv vu">+0.8</span>', ' <span class="iv vd">−0.6</span>', ' <span class="iv">+0.2</span>', ' <span class="iv">0.0</span>', '', ' <span class="iv vu">+1.0</span>']
+                  and strip(st[0]) == ' · straddle <b>180</b> <b class="sv ">−10.0%</b> <span>±90/day</span>'.replace('class="sv "', 'class="sv vd"')
+                  and "ATM 25100 straddle 180.00 (CE 80.00 + PE 100.00) · at the open: 24950 straddle 200.00" in st[0] and "√4.0 trading days" in st[0]
+                  and strip(st[1]) == ' · straddle <b>180</b>' and "open straddle not available" in st[1] and st[2] == "" and st[3] == ""
+                  and strip(st[4]).startswith(' · straddle <b>179</b> <b class="sv vd">−10.4%</b>')
+                  and d.count("${_bfIv(r)}</td>") == 2 and "${_bfStr(d)}${FD.html}" in d and "${_bfStr(state.lastData)}${FD.html}" in d
+                  and d.count("--g-cool: #") == 2 and ".sc-grid .iv.vu, .sc-grid .sv.vu { color: var(--g-amber);" in d,
+                  str(ov)[:1500])
             rg = ob["rg"]
             check("strike grids: day-range cell shows low–high, the LTP position as a % (HIGH / LOW within 5% of an end) and fills up to it in a heat colour (slate at the low, amber at the high, both themes), widened by a newer LTP; no range shows a dash",
                   'style="--p:100%"' in rg[0] and rg[0].endswith('>50.0–150 <b class="hi">HIGH</b></td>') and "open 60.00" in rg[0] and "LTP 150.00 at 100%" in rg[0]
@@ -1830,7 +1890,7 @@ def test_scalping_tab():
                   and "<b" not in rg[3] and "--p" not in rg[3] and rg[3].endswith(">80.0–80.0 </td>") and rg[4].endswith('>40.0–60.0 <b class="">50%</b></td>')
                   and 'rec[f"{p}_high"] = float(d.get("high") or 0)' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_adapter_zerodha.py"), encoding="utf-8").read()
                   and "color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo))" in d and "linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%))" in d
-                  and d.count("--g-rglo: rgba") == 2 and d.count("--g-rghi: rgba") == 2 and d.count("--g-rgt: rgba") == 2 and "--g-rg2" not in d and "day range · OI | strike | PE OI · day range" in d, str(rg)[:900])
+                  and d.count("--g-rglo: rgba") == 2 and d.count("--g-rghi: rgba") == 2 and d.count("--g-rgt: rgba") == 2 and "--g-rg2" not in d and "day range · OI | strike ΔIV | PE OI · day range" in d, str(rg)[:900])
             # OI tag (_bfOi): 15-min OI change x 15-min taker side, context only; bias_eval.oi_tag is its twin
             cases = [(100000, 5000, 700, 300), (100000, 5000, 300, 700), (100000, -5000, 700, 300), (100000, -5000, 300, 700),
                      (100000, 500, 700, 300), (100000, 5000, 540, 460), (100000, 5000, 0, 0), (0, 5000, 700, 300), (100000, 1000, 575, 425)]
