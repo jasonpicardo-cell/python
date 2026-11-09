@@ -2261,7 +2261,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-grid td.up { color: var(--g-up); background: var(--g-upbg); font-weight: 600; } .sc-grid td.dn { color: var(--g-dn); background: var(--g-dnbg); font-weight: 600; }
   .sc-grid td[data-s="u2"] { box-shadow: inset 3px 0 0 var(--g-up); } .sc-grid td[data-s="d2"] { box-shadow: inset 3px 0 0 var(--g-dn); }
   .sc-grid td.rg { color: var(--g-muted); } .sc-grid td.rg[style*="--p"] { --g-rgc: color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo)); background: linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%)); }   /* heat by position: filled to the LTP, slate near the day low turning amber near the high; the rest a faint track */ .sc-grid td.rg.pe { text-align: left; }
-  .sc-grid td.oi { color: var(--g-muted); font-size: .9em; text-align: center; min-width: 3.6em; }   /* OI tag (_bfOi): context only, deliberately uncoloured */
+  .sc-grid td.oi { color: var(--g-muted); font-size: .9em; text-align: center; min-width: 3.6em; } .sc-grid td.oi.bu { color: var(--g-up); font-weight: 600; } .sc-grid td.oi.be { color: var(--g-dn); font-weight: 600; }   /* OI tag (_bfOi): bullish / bearish for the index, context only */
   .sc-grid td.rg b { display: inline-block; min-width: 3.4em; text-align: center; color: var(--g-text); font-weight: 700; } .sc-grid td.rg b.hi, .sc-grid td.rg b.lo { color: var(--g-amber); font-weight: 800; }
   .sc-grid .wl { font-size: 8.5px; font-weight: 800; padding: 0 2px; border-radius: 2px; border: 1px solid currentColor; opacity: .8; }
   .sc-grid .bf.bu { color: var(--g-up); } .sc-grid .bf.be { color: var(--g-dn); } .sc-grid td[data-s$="2"] .bf { font-weight: 900; }
@@ -28492,15 +28492,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   };
   // OI tag beside the day range: who opened or closed at this strike in the last 15 minutes, the OI change classified by the taker
   // side of the volume (Pro guide). BUY = buyers lifting offers while OI rises (long build-up), WRITE = sellers hitting bids while OI
-  // rises, COVER = buyers while OI falls (short covering), DUMP = sellers while OI falls (long liquidation). No colour, no arrow: as a
-  // direction call it showed no edge in bias_eval.py ('oitag', twin oi_tag). Keep _BF.oiMin / oiImb in step with it.
+  // rises, COVER = buyers while OI falls (short covering), DUMP = sellers while OI falls (long liquidation). Coloured by what it means
+  // for the index (bullish green: CE BUY / COVER, PE WRITE / DUMP; the reverse red), no arrow: as a direction call it showed no edge in
+  // bias_eval.py ('oitag', twin oi_tag). Keep _BF.oiMin / oiImb in step with it.
   const _bfOi = (d, r, p) => {
     const f = ((d && d.flow && d.flow.strikes) || {})[`${Math.round(r.strike)}${p.toUpperCase()}`] || {};
     const oi = +r[p + '_oi'] || 0, dO = +r[p + '_oi_15m'] || 0, b = +f.b15 || 0, s = +f.s15 || 0, im = b + s > 0 ? (b - s) / (b + s) : 0;
     if (!(oi > 0) || !(b + s > 0) || Math.abs(dO) < oi * _BF.oiMin || Math.abs(im) < _BF.oiImb) return '<td class="oi"></td>';
     const tag = dO > 0 ? (im > 0 ? 'BUY' : 'WRITE') : (im > 0 ? 'COVER' : 'DUMP'), sg = dO > 0 ? '+' : '−';
-    const what = { BUY: 'buyers opening (long build-up)', WRITE: 'writers opening', COVER: 'writers covering (short covering)', DUMP: 'holders selling out (long liquidation)' }[tag];
-    return `<td class="oi" title="${p.toUpperCase()} last 15 min: ${what} · OI ${sg}${Math.round(Math.abs(dO)).toLocaleString('en-IN')} (${sg}${(Math.abs(dO) / oi * 100).toFixed(1)}%) · taker volume ${Math.round(b / (b + s) * 100)}% buyers. Context, not a direction call: it showed no edge in bias_eval.py.">${tag}</td>`;
+    const what = { BUY: 'buyers opening (long build-up)', WRITE: 'writers opening', COVER: 'writers covering (short covering)', DUMP: 'holders selling out (long liquidation)' }[tag], bull = (p === 'ce') === (im > 0);
+    return `<td class="oi ${bull ? 'bu' : 'be'}" title="${p.toUpperCase()} last 15 min: ${what} (${bull ? 'bullish' : 'bearish'} for the index) · OI ${sg}${Math.round(Math.abs(dO)).toLocaleString('en-IN')} (${sg}${(Math.abs(dO) / oi * 100).toFixed(1)}%) · taker volume ${Math.round(b / (b + s) * 100)}% buyers. Context, not a direction call: it showed no edge in bias_eval.py.">${tag}</td>`;
   };
   const _bfAgg = zs => { const m = _bfMean(zs); if (m == null) return ' · book shift: warming up'; const on = Math.abs(m) >= _BF.agg; return ` · book shift <b class="bf ${on ? (m > 0 ? 'bu' : 'be') : ''}" title="average 2-min shift over the grid (the more reliable read)">${on ? (m > 0 ? '▲ bullish' : '▼ bearish') : 'flat'} ${m >= 0 ? '+' : ''}${m.toFixed(2)}</b>`; };
   let _hgLast = '', _hgBook = {}, _hgBusy = false, _hgNames = [];
@@ -43047,15 +43048,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     };
     // OI tag beside the day range: who opened or closed at this strike in the last 15 minutes, the OI change classified by the taker
     // side of the volume (Pro guide). BUY = buyers lifting offers while OI rises (long build-up), WRITE = sellers hitting bids while OI
-    // rises, COVER = buyers while OI falls (short covering), DUMP = sellers while OI falls (long liquidation). No colour, no arrow: as a
-    // direction call it showed no edge in bias_eval.py ('oitag', twin oi_tag). Keep _BF.oiMin / oiImb in step with it.
+    // rises, COVER = buyers while OI falls (short covering), DUMP = sellers while OI falls (long liquidation). Coloured by what it means
+    // for the index (bullish green: CE BUY / COVER, PE WRITE / DUMP; the reverse red), no arrow: as a direction call it showed no edge in
+    // bias_eval.py ('oitag', twin oi_tag). Keep _BF.oiMin / oiImb in step with it.
     const _bfOi = (d, r, p) => {
       const f = ((d && d.flow && d.flow.strikes) || {})[`${Math.round(r.strike)}${p.toUpperCase()}`] || {};
       const oi = +r[p + '_oi'] || 0, dO = +r[p + '_oi_15m'] || 0, b = +f.b15 || 0, s = +f.s15 || 0, im = b + s > 0 ? (b - s) / (b + s) : 0;
       if (!(oi > 0) || !(b + s > 0) || Math.abs(dO) < oi * _BF.oiMin || Math.abs(im) < _BF.oiImb) return '<td class="oi"></td>';
       const tag = dO > 0 ? (im > 0 ? 'BUY' : 'WRITE') : (im > 0 ? 'COVER' : 'DUMP'), sg = dO > 0 ? '+' : '−';
-      const what = { BUY: 'buyers opening (long build-up)', WRITE: 'writers opening', COVER: 'writers covering (short covering)', DUMP: 'holders selling out (long liquidation)' }[tag];
-      return `<td class="oi" title="${p.toUpperCase()} last 15 min: ${what} · OI ${sg}${Math.round(Math.abs(dO)).toLocaleString('en-IN')} (${sg}${(Math.abs(dO) / oi * 100).toFixed(1)}%) · taker volume ${Math.round(b / (b + s) * 100)}% buyers. Context, not a direction call: it showed no edge in bias_eval.py.">${tag}</td>`;
+      const what = { BUY: 'buyers opening (long build-up)', WRITE: 'writers opening', COVER: 'writers covering (short covering)', DUMP: 'holders selling out (long liquidation)' }[tag], bull = (p === 'ce') === (im > 0);
+      return `<td class="oi ${bull ? 'bu' : 'be'}" title="${p.toUpperCase()} last 15 min: ${what} (${bull ? 'bullish' : 'bearish'} for the index) · OI ${sg}${Math.round(Math.abs(dO)).toLocaleString('en-IN')} (${sg}${(Math.abs(dO) / oi * 100).toFixed(1)}%) · taker volume ${Math.round(b / (b + s) * 100)}% buyers. Context, not a direction call: it showed no edge in bias_eval.py.">${tag}</td>`;
     };
     const _bfAgg = zs => { const m = _bfMean(zs); if (m == null) return ' · book shift: warming up'; const on = Math.abs(m) >= _BF.agg; return ` · book shift <b class="bf ${on ? (m > 0 ? 'bu' : 'be') : ''}" title="average 2-min shift over the grid (the more reliable read)">${on ? (m > 0 ? '▲ bullish' : '▼ bearish') : 'flat'} ${m >= 0 ? '+' : ''}${m.toFixed(2)}</b>`; };
     // buyers over sellers = total bid / total offer: text green for CE buyers / PE sellers (the book level); arrows = the 2-min shift (_bfZ)

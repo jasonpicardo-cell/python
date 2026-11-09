@@ -1837,15 +1837,21 @@ def test_scalping_tab():
             jso = blocks[0] + """
             const C = CASES; console.log(JSON.stringify({ tags: C.map(([oi, dO, b, s]) => _bfOi({ flow: { strikes: { '25000CE': { b15: b, s15: s } } } }, { strike: 25000, ce_oi: oi, ce_oi_15m: dO }, 'ce')),
               pe: _bfOi({ flow: { strikes: { '25000PE': { b15: 300, s15: 700 } } } }, { strike: 25000, pe_oi: 200000, pe_oi_15m: 8000 }, 'pe'), none: _bfOi(null, { strike: 25000 }, 'ce') }));""".replace("CASES", json.dumps(cases))
-            oo = json.loads(subprocess.run(["node", "-e", jso], capture_output=True, text=True, timeout=20).stdout)
+            jso += """
+            const T = (p, dO, b, s) => (_bfOi({ flow: { strikes: { ['25000' + p.toUpperCase()]: { b15: b, s15: s } } } }, { strike: 25000, [p + '_oi']: 100000, [p + '_oi_15m']: dO }, p).match(/class="oi (bu|be)"/) || [])[1] || null;
+            console.log(JSON.stringify([T('ce', 5000, 700, 300), T('ce', 5000, 300, 700), T('ce', -5000, 700, 300), T('ce', -5000, 300, 700),
+              T('pe', 5000, 700, 300), T('pe', 5000, 300, 700), T('pe', -5000, 700, 300), T('pe', -5000, 300, 700)]));"""
+            out = subprocess.run(["node", "-e", jso], capture_output=True, text=True, timeout=20).stdout.strip().splitlines()
+            oo, cols = json.loads(out[0]), json.loads(out[1])
             got = [(re.search(r">([A-Z]*)</td>$", h) or [None, None])[1] or None for h in oo["tags"]]
             want = [bias_eval.oi_tag(*c) for c in cases]
-            check("strike grids: OI tag beside the day range (CE before the strike, PE after it) reads WRITE / BUY / COVER / DUMP from the 15-min OI change and taker side, blank under 1% OI or a 15% lean, uncoloured, and matches bias_eval.oi_tag; bias_eval re-tests it ('oitag') with the aggressor-confirmed writer read ('wconf')",
+            check("strike grids: OI tag beside the day range (CE before the strike, PE after it) reads WRITE / BUY / COVER / DUMP from the 15-min OI change and taker side, blank under 1% OI or a 15% lean, coloured bullish / bearish for the index (CE BUY / COVER and PE WRITE / DUMP green, the reverse red), and matches bias_eval.oi_tag; bias_eval re-tests it ('oitag') with the aggressor-confirmed writer read ('wconf')",
                   got == want == ["BUY", "WRITE", "COVER", "DUMP", None, None, None, None, "BUY"]
-                  and 'class="oi" title="PE last 15 min: writers opening · OI +8,000 (+4.0%) · taker volume 30% buyers.' in oo["pe"] and oo["none"] == '<td class="oi"></td>'
-                  and d.count("_bfOi(d, r, p)") == 2 and d.count("_bfOi(state.lastData, r, p)") == 2 and ".sc-grid td.oi { color: var(--g-muted);" in d
+                  and 'class="oi bu" title="PE last 15 min: writers opening (bullish for the index) · OI +8,000 (+4.0%) · taker volume 30% buyers.' in oo["pe"] and oo["none"] == '<td class="oi"></td>'
+                  and d.count("_bfOi(d, r, p)") == 2 and d.count("_bfOi(state.lastData, r, p)") == 2 and ".sc-grid td.oi { color: var(--g-muted);" in d and ".sc-grid td.oi.bu { color: var(--g-up);" in d and ".sc-grid td.oi.be { color: var(--g-dn);" in d
+                  and cols == ["bu", "be", "bu", "be", "be", "bu", "be", "bu"]
                   and "oiMin: 0.01, oiImb: 0.15" in blocks[0] and '"wconf", "oitag"' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bias_eval.py"), encoding="utf-8").read(),
-                  str(got) + " " + str(want) + " " + oo["pe"][:200])
+                  str(got) + " " + str(want) + " " + str(cols) + " " + oo["pe"][:200])
         except Exception as ex:
             check("strike-grid bias: _bfZ runs in node", False, repr(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
