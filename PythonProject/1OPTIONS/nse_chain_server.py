@@ -3823,6 +3823,10 @@ def _ctx_record(sym: str, d: dict) -> None:
     if g.tm_wday >= 5 or not (555 <= g.tm_hour * 60 + g.tm_min <= 931):
         return
     _ctx_last[sym] = now
+    try:
+        _dir_record(sym, d, now)
+    except Exception as e:  # noqa: BLE001
+        print(f"[dir] record {sym}: {e}")
     pt = _ctx_point(d, now)
     if not pt:
         return
@@ -3838,6 +3842,108 @@ def _ctx_record(sym: str, d: dict) -> None:
             f.write(json.dumps(pt, separators=(",", ":")) + "\n")
     except Exception as e:  # noqa: BLE001
         print(f"[ctx] write: {e}")
+
+
+# ── DIRECTION PANE (Scalper tab, above the RSI): book shift, walls, the other index, PCR, OI, futures CVD, gamma ──
+# nse_dirflow computes one point per index every 10 s from the chain already served (no broker call), with
+# bias_eval.py's twins, so the pane plots what bias_eval.py scores. Memory plus ctx/<SYM>_<day>.dir.jsonl;
+# a day with no recording (and the previous session) is rebuilt from the replay archive once, in the background.
+_dir_mem: dict = {}            # (sym, day) -> points
+_dir_trk: dict = {}            # sym -> nse_dirflow.Track
+_dir_last: dict = {}           # sym -> last record time
+_dir_lock = threading.Lock()
+_dir_built: set = set()        # (sym, day) rebuilt from replay (or tried)
+
+
+def _dir_mod():
+    import nse_dirflow
+    return nse_dirflow
+
+
+def _dir_record(sym: str, d: dict, now: float = None) -> None:
+    """Called from _ctx_record (session hours, default expiry, every 10 s per index)."""
+    now = time.time() if now is None else now
+    if now - _dir_last.get(sym, 0) < 10:
+        return
+    _dir_last[sym] = now
+    N, day = _dir_mod(), _ctx_day()
+    tr = _dir_trk.get(sym)
+    if tr is None or tr.day != day:
+        tr = _dir_trk[sym] = N.Track()
+        tr.day = day
+    pt = N.point(d, now, tr)
+    if not pt:
+        return
+    twin = N.TWIN.get(sym)
+    with _dir_lock:
+        o = N.nearest(_dir_mem.get((twin, day)) or [], now) if twin else None
+        N.finish(pt, o.get("bs") if o else None)
+        _dir_mem.setdefault((sym, day), []).append(pt)
+    try:
+        _os.makedirs(_CTX_DIR, exist_ok=True)
+        with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.dir.jsonl"), "a") as f:
+            f.write(json.dumps(pt, separators=(",", ":")) + "\n")
+    except Exception as e:  # noqa: BLE001
+        print(f"[dir] write: {e}")
+
+
+def _dir_points(sym: str, day: str) -> list:
+    """The day's points: memory, else the file, else (once, in the background) rebuilt from the replay archive."""
+    key = (sym, day)
+    with _dir_lock:
+        if _dir_mem.get(key):
+            return list(_dir_mem[key])
+    pts = []
+    path = _os.path.join(_CTX_DIR, f"{sym}_{day}.dir.jsonl")
+    if _os.path.exists(path):
+        try:
+            with open(path) as f:
+                for line in f:
+                    try:
+                        pts.append(json.loads(line))
+                    except Exception:
+                        pass
+        except Exception as e:  # noqa: BLE001
+            print(f"[dir] read {path}: {e}")
+    if pts:
+        pts.sort(key=lambda p: p.get("ts", 0))
+        with _dir_lock:
+            cur = _dir_mem.setdefault(key, [])
+            if not cur:
+                cur.extend(pts)
+            return list(cur)
+    if key not in _dir_built:
+        _dir_built.add(key)
+
+        def _run():
+            N = _dir_mod()
+            twin = N.TWIN.get(sym)
+            try:
+                got = N.from_replay(_os.path.join(_REPLAY_DIR, f"{sym}_{day}.jsonl")) if _os.path.exists(_os.path.join(_REPLAY_DIR, f"{sym}_{day}.jsonl")) else []
+                oth = N.from_replay(_os.path.join(_REPLAY_DIR, f"{twin}_{day}.jsonl")) if twin and _os.path.exists(_os.path.join(_REPLAY_DIR, f"{twin}_{day}.jsonl")) else []
+                N.pair(got, oth)
+            except Exception as e:  # noqa: BLE001
+                print(f"[dir] rebuild {sym} {day}: {e}")
+                got = []
+            if got:
+                with _dir_lock:
+                    cur = _dir_mem.setdefault(key, [])
+                    have = {p["ts"] for p in cur}
+                    cur.extend(p for p in got if p["ts"] not in have)
+                    cur.sort(key=lambda p: p["ts"])
+                print(f"[dir] {sym} {day}: rebuilt {len(got)} point(s) from the replay archive")
+        threading.Thread(target=_run, daemon=True, name="dir-rebuild").start()
+    return []
+
+
+def _dir_history(sym: str, since: float = 0, prev: bool = False) -> dict:
+    day = _ctx_day()
+    out = {"symbol": sym, "day": day, "points": [p for p in _dir_points(sym, day) if p.get("ts", 0) > since]}
+    if prev:
+        pd_ = (_prev_trading_days(day, limit=1) or [None])[0]
+        out["prev_day"] = pd_
+        out["prev"] = _dir_points(sym, pd_) if pd_ else []
+    return out
 
 
 def _ctx_history(sym: str, since: float = 0) -> list:
@@ -8200,6 +8306,16 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 iv_ = 1
             self._send_json(_nt.day_turns(sym_, day_, iv_))
+            return
+
+        if parsed.path == "/api/dir-history":
+            # The Scalper direction pane: today's points after `since`, plus the previous session with prev=1.
+            sym_ = (qs.get("symbol", ["NIFTY"])[0] or "NIFTY").upper()
+            try:
+                since = float(qs.get("since", ["0"])[0] or 0)
+            except ValueError:
+                since = 0.0
+            self._send_json(_dir_history(sym_, since, qs.get("prev", ["0"])[0] == "1"))
             return
 
         if parsed.path == "/api/ctx-history":

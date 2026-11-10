@@ -22,8 +22,19 @@ Reads (all signed so + = bullish for the index):
   index
     fut_flow   5-min taker-flow imbalance on the near future         index desks (CVD)
     walls      position between the OI put wall and call wall, contrarian
-    pin        distance to the gamma-weighted strike (pull toward it)        gamma desks
+    pin        distance to the gamma-weighted strike (pull toward it), bps of spot so NIFTY and BANKNIFTY
+               share one threshold (it was in index points, so BANKNIFTY's bigger numbers took the top 30%)
     fade15     minus the last 15-min move                                     mean reversion
+    fut_oi     15-min near-future build-up: price and OI both up = long build-up +1, price down OI up = short
+               build-up -1, price up OI down = short covering +.5, price down OI down = long unwinding -.5
+    basis      15-min change of the near-future premium over spot, bps of spot (premium widening = bullish)
+    vwap       near future vs its session VWAP (from the snapshots' futures volume), bps; above = bullish
+    other      the other index's grid-average book shift at the same minute (NIFTY <-> BANKNIFTY)
+    shift_w    the book shift, bearish calls kept only when walls lean bearish too (the grid's ▼ gate)
+    pcr        15-min change of ln(put OI / call OI) over the grid strikes (puts added faster = bullish)
+    cvd15      15-min taker-flow imbalance on the near future (the futures CVD's slope)
+    dir        the Scalper direction pane's composite (composite() below): mean of the book shift, walls and the
+               other index's shift, each scaled to -1..+1
   setup        CANDIDATE, not shown in the grid: long dealer gamma + 15-min move of at least fadeBps
                + grid-average shift of at least agg in the fade direction (the long-gamma "fade with
                flow confirmation" playbook). On the first six sessions: 38 calls, ~53% right, so the grid
@@ -219,13 +230,47 @@ def oi_tag(oi, d_oi, b, s):
     return ("BUY" if im > 0 else "WRITE") if d_oi > 0 else ("COVER" if im > 0 else "DUMP")
 
 
+def clamp1(x):
+    return max(-1.0, min(1.0, x))
+
+
+def composite(shift, walls_w, other):
+    """The direction pane's score, -1..+1: mean of the reads that beat 50% in this file (book shift / strong,
+    walls / 0.5, the other index's shift / strong), over whichever are available. None when none is."""
+    v = [clamp1(x / k) for x, k in ((shift, BF["strong"]), (walls_w, 0.5), (other, BF["strong"])) if x is not None]
+    return sum(v) / len(v) if v else None
+
+
+def grid_pcr(d):
+    """ln(put OI / call OI) over the grid strikes (ATM +/- 5, as the grid shows)."""
+    rows = grid_rows(d)
+    pe, ce = sum(r.get("pe_oi") or 0 for r in rows), sum(r.get("ce_oi") or 0 for r in rows)
+    return math.log(pe / ce) if pe > 0 and ce > 0 else None
+
+
+def walls(d, spot):
+    """(put wall, call wall, w). Twin of _bfWalls in nse_dashboard.html: the put wall is the most put OI at or below spot,
+    the call wall the most call OI above it (the chain's support / resistance when a side has no strikes);
+    w = 0.5 - (spot - put wall) / (call wall - put wall), + = sitting near the put wall (bullish lean)."""
+    rows = [r for r in (d.get("strikes") or []) if r.get("ce_symbol")]
+    up = [r for r in rows if r["strike"] > spot]
+    dn = [r for r in rows if r["strike"] <= spot]
+    pw = max(dn, key=lambda r: r.get("pe_oi") or 0)["strike"] if dn and spot > 0 else ((d.get("support") or {}).get("strike") or None)
+    cw = max(up, key=lambda r: r.get("ce_oi") or 0)["strike"] if up and spot > 0 else ((d.get("resistance") or {}).get("strike") or None)
+    w = 0.5 - (spot - pw) / (cw - pw) if spot > 0 and pw is not None and cw is not None and cw > pw else None
+    return pw, cw, w
+
+
 TAG_SIGN = {"BUY": 1, "COVER": 1, "WRITE": -1, "DUMP": -1}   # for the option itself: + = premium-bullish
 
 
 def day_samples(path):
     """Per snapshot: ({read: value}, {h: forward move in bps})."""
     S, sh, sm, out = load(path), Shift(), SpotMove(), []
+    if not S or max(d["underlying_value"] for _, d in S) == min(d["underlying_value"] for _, d in S):
+        return out                                   # a holiday or a dead feed: the index never moved
     hist = []
+    vw = {"pv": 0.0, "v": 0.0, "last": None}
     for i, (t, d) in enumerate(S):
         now, spot = t.timestamp(), d["underlying_value"]
         T = max(1 / 1440, d.get("dte") or 1) / 365
@@ -274,23 +319,42 @@ def day_samples(path):
                 if tg:
                     add("oitag", sg * TAG_SIGN[tg])
         F = {k: (v[0] / v[1] if v[1] else None) for k, v in acc.items()}
+        F["_t"] = now
+        fp, foi = d.get("futures_price") or 0, d.get("futures_oi") or 0
+        q15 = S[j15][1] if j15 is not None else None
+        if q15 and fp > 0 and (q15.get("futures_price") or 0) > 0:
+            dp, doi = fp - q15["futures_price"], foi - (q15.get("futures_oi") or 0)
+            if dp and doi and foi > 0 and (q15.get("futures_oi") or 0) > 0:
+                F["fut_oi"] = (1 if dp > 0 else -1) * (1.0 if doi > 0 else 0.5)
+            s15 = q15.get("underlying_value") or 0
+            if s15 > 0:
+                F["basis"] = ((fp - spot) - (q15["futures_price"] - s15)) / spot * 1e4
+        fv = d.get("futures_volume")
+        if fp > 0 and fv is not None:
+            if vw["last"] is not None and fv > vw["last"]:
+                vw["pv"] += (fv - vw["last"]) * fp
+                vw["v"] += fv - vw["last"]
+            vw["last"] = fv
+            if vw["v"] > 0:
+                F["vwap"] = (fp / (vw["pv"] / vw["v"]) - 1) * 1e4
         fu = ((d.get("flow") or {}).get("futures") or {}).get("near")
         F["fut_flow"] = _imb(fu.get("b5") or 0, fu.get("s5") or 0) if fu else None
         allr = [r for r in d["strikes"] if r.get("ce_symbol")]
-        up = [r for r in allr if r["strike"] > spot]
-        dn = [r for r in allr if r["strike"] <= spot]
-        if up and dn:
-            cw = max(up, key=lambda r: r.get("ce_oi") or 0)["strike"]
-            pw = max(dn, key=lambda r: r.get("pe_oi") or 0)["strike"]
-            F["walls"] = 0.5 - (spot - pw) / (cw - pw) if cw > pw else None
+        F["walls"] = walls(d, spot)[2]
         gw = gk = 0.0
         for r in allr:
             g = _greeks(spot, r["strike"], T, (r.get("ce_iv") or d.get("atm_iv") or 13) / 100, True)[1]
             w = g * ((r.get("ce_oi") or 0) + (r.get("pe_oi") or 0)); gw += w; gk += w * r["strike"]
-        F["pin"] = (gk / gw - spot) if gw else None
+        F["pin"] = (gk / gw / spot - 1) * 1e4 if gw else None
         hist.append((now, spot))
         o15 = next((h for h in reversed(hist) if now - h[0] >= 900), None)
         F["fade15"] = -(spot / o15[1] - 1) * 1e4 if o15 else None
+        g0, g1 = grid_pcr(d), (grid_pcr(S[j15][1]) if j15 is not None else None)
+        F["pcr"] = (g0 - g1) * 100 if g0 is not None and g1 is not None else None
+        if fu and (fu.get("b15") or 0) + (fu.get("s15") or 0) > 0:
+            F["cvd15"] = _imb(fu["b15"], fu["s15"])
+        sw = F.get("shift")
+        F["shift_w"] = sw if sw is None or sw > 0 or (F.get("walls") is not None and F["walls"] < 0) else None
         F["setup"] = setup(F.get("shift"), sm.bps(d.get("symbol") or "", spot, now), gex_total(d)) or None
         fwd = {h: (S[i + h][1]["underlying_value"] / spot - 1) * 1e4 for h in HS
                if i + h < len(S) and (S[i + h][0] - t).total_seconds() < h * 150}
@@ -299,7 +363,29 @@ def day_samples(path):
     return out
 
 
-READS = ("level", "prem_day", "oi15", "flow5", "dflow", "writer", "wconf", "oitag", "fut_flow", "walls", "pin", "fade15", "shift", "setup")
+READS = ("level", "prem_day", "oi15", "flow5", "dflow", "writer", "wconf", "oitag", "fut_flow", "cvd15", "fut_oi", "basis", "vwap", "pcr",
+         "other", "walls", "pin", "fade15", "shift", "shift_w", "dir", "setup")
+
+
+def pair_other(days):
+    """Give each snapshot the other index's grid-average shift at the nearest snapshot within 90 s."""
+    twin = {"NIFTY": "BANKNIFTY", "BANKNIFTY": "NIFTY"}
+    for name, smp in days.items():
+        sym, day = name.split("_", 1)
+        oth = days.get(f"{twin.get(sym, '')}_{day}") or []
+        ts = [(F["_t"], F.get("shift")) for F, _ in oth]
+        j = 0
+        for F, _ in smp:
+            while j + 1 < len(ts) and abs(ts[j + 1][0] - F["_t"]) <= abs(ts[j][0] - F["_t"]):
+                j += 1
+            F["other"] = ts[j][1] if ts and abs(ts[j][0] - F["_t"]) <= 90 else None
+            F["dir"] = composite(F.get("shift"), F.get("walls"), F["other"])
+
+
+def walls_cut(allp):
+    """The |walls| threshold the grid uses for its walls read: the strongest 30%, as scored here."""
+    v = sorted(abs(F["walls"]) for F, _ in allp if F.get("walls") is not None)
+    return v[int(0.7 * (len(v) - 1))] if v else None
 
 
 def balanced(pairs):
@@ -322,9 +408,19 @@ def main():
     if not files:
         print("no replay files"); return 1
     days = {os.path.basename(f)[:-6]: day_samples(f) for f in files}
+    skipped = [k for k, v in days.items() if not v]
+    days = {k: v for k, v in days.items() if v}
+    pair_other(days)
     allp = [(F, f) for smp in days.values() for F, f in smp]
     print("thresholds from nse_dashboard.html _BF:", BF)
     print("days:", ", ".join(f"{k} ({len(v)})" for k, v in days.items()))
+    if skipped:
+        print("skipped (index never moved: holiday or dead feed):", ", ".join(skipped))
+    wc = walls_cut(allp)
+    print(f"walls read threshold (strongest 30%): |walls| >= {wc:.2f}   grid _BF.wall = {BF.get('wall')}" if wc else "walls: n/a")
+    dv = sorted(abs(F["dir"]) for F, _ in allp if F.get("dir") is not None)
+    if dv:
+        print(f"direction pane lean (strongest 30%): |dir| >= {dv[int(0.7 * (len(dv) - 1))]:.2f}   Scalper _BF.dir = {BF.get('dir')}")
     ups = [f[5] > 0 for _, f in allp if f.get(5)]
     print(f"index up over the next 5 snapshots {100 * mean(ups):.0f}% of the time (an always-bullish read's raw hit rate)")
 

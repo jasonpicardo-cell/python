@@ -1745,6 +1745,7 @@ def test_scalping_tab():
               and o3["spUp"] == [["in", True], ["out", False]] and not o3["hedgeOnSpot"] and o3["spN"] == 6 and o3["wOwn"] == 2, str(o3))
         js4 = ("const fmtInt = x => x, escapeHtml = x => x; let SYM = 'NIFTY'; const state = { get symbol() { return SYM; }, lastData: { expiry: '03-Nov-2026', underlying_value: 25012, strikes: [] } };\n" +
               "const scChainOk = () => true; const SC = { spot: 25012, book: {}, pref: { selCE: 'o0' } }; const el = { style: {} }; const $sc = () => el; const scSet = (e, h) => { e.h = h; };\n" +
+              d[d.index("  const _BF = {"):d.index("\n  }\n", d.index("function _bfGrid(o)")) + 5] + "\n" +
               seg[seg.index("const SC_GRID_SYMS"):seg.index("\n  }\n", seg.index("function scRenderGridBody")) + 5] + """
         for (let k = 24300; k <= 25700; k += 50) state.lastData.strikes.push({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k });
         SC.book = { C25000: [90000, 30000, 1], P25000: [30000, 90000, 1], C25100: [30000, 90000, 1], P25100: [90000, 30000, 1], C24900: [null, null, 1] };
@@ -1762,7 +1763,7 @@ def test_scalping_tab():
         const r248 = el.h.split('<tr class=').find(x => x.includes('data-k="24800"')) || '', snapTip = /data-f="1" title="chain snapshot, not live ticks · /.test(r248);
         console.log(JSON.stringify({ depth, order, order2, ceBuyers: /class="up">3.00× B/.test(row(25000).split('data-k')[0]), peSellers: /class="up">0.33× S/.test(row(25000)), ceSellers: /class="dn">0.33× S/.test(row(25100)), peBuyers: /class="dn">3.00× B/.test(row(25100)), no50: !order.some(k => k % 100), bankOk: !!bank && bank.rows.length === 11, noHeads: !/<th/.test(h), 
           atm: /atm/.test(row(25000)), blank: row(24900).includes('<td>–</td>'), fallback: /class="up">2.00× B/.test(row(24800)), none, names: (SYM = 'NIFTY', scGridNames().length),
-          fresh, snapTip, kq: row(25000).includes('<td title="90,000">90k</td><td title="30,000">30k</td>'), layout: /× B[^]*?<\\/td><td class="rg ce" style="--p:75%"[^>]*>50\\.0–150 <b class="">75%<\\/b><\\/td><td class="oi"><\\/td><td class="k[^"]*" data-k="25000"[^]*?<\\/td><td class="oi"><\\/td><td class="rg">–<\\/td><td title="30,000">30k<\\/td>/.test(row(25000)) }));""")
+          fresh, snapTip, kq: row(25000).includes('<td title="90,000">90k</td><td title="30,000">30k</td>'), layout: /× B[^]*?<\\/td><td class="rg ce" style="--p:75%"[^>]*>50\\.0–150 <b class="">75%<\\/b><\\/td><td class="oi"><\\/td><td class="gk">–<\\/td><td class="sp">–<\\/td><td class="k" data-k="25000"[^]*?<\\/td><td class="sp">–<\\/td><td class="gk">–<\\/td><td class="oi"><\\/td><td class="rg">–<\\/td><td title="30,000">30k<\\/td>/.test(row(25000)) }));""")
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
@@ -1777,8 +1778,8 @@ def test_scalping_tab():
               F["a"] == {"fd": "ok:live 4/5", "dim": 3, "shift": True, "arrows": False} and F["b"] == {"fd": "bad:stale 61s", "dim": 15, "shift": False, "arrows": False}
               and F["c"] == {"fd": "bad:stream off", "dim": 15, "shift": False, "arrows": False} and F["d"]["fd"] == "ok:live 4/5" and o4["snapTip"]
               and "_hgBook = j.book || {}; _hgBookAt = Date.now() / 1000; _hgFeed = j.feed || null;" in d and "SC.book = j.book || {}; SC.bookAt = Date.now() / 1000;" in d
-              and d.count("${FD.html}${any && FD.ok ? _bfAgg(Object.values(SCR)) : ''}") == 2 and d.count("if (st) return _bfCell(b, o, put, null, st);") == 2
-              and d.count("_bfSrc(_hgBook[") == 1 and d.count("_bfSrc(lv, SC.bookAt, now)") == 1 and ".sc-grid td[data-f] { opacity: .45; }" in d, str(F) + f" snapTip={o4['snapTip']}")
+              and d.count("${FD.html}${any && FD.ok ? _bfAgg(Object.values(SCR), W) : ''}") == 1 and d.count("if (st) return _bfCell(b, x, put, null, st);") == 1
+              and "book: _hgBook, bookAt: _hgBookAt, feed: _hgFeed" in d and "book: SC.book, bookAt: SC.bookAt, feed: SC.st && SC.st.feed" in d and ".sc-grid td[data-f] { opacity: .45; }" in d, str(F) + f" snapTip={o4['snapTip']}")
         check("chart indicators: EMA seeds with the SMA and follows 2/(n+1); the RSI average waits for a full window",
               o["e"][:2] == [None, None] and o["e"][2] == 2 and abs(o["e"][3] - 3) < 1e-9 and abs(o["e"][7] - 7) < 1e-9 and o["m"] == [None, None, None, 15, 25, 35], str(o))
     except Exception as ex:  # noqa: BLE001
@@ -1787,12 +1788,13 @@ def test_scalping_tab():
           'id="homeGrid"' in d and "function homeGridRender" in d and "['NIFTY', 'BANKNIFTY'].includes(state.symbol" in d and "body.light-mode .sc-grid {" in d and ".sc-chartwrap, .sc-indmenu { --text: #e8ebf2;" in d and "h50 && r.strike % 100 !== 0" in d and 'id="hgN"' in d and "homeGridPrefV1" in d and "getClientRects().length" in d
           and "['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY')" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d
           and "ai + HN + 1), atm" in d and "ai + HN + 1).reverse()" not in d)
-    # strike-grid bias: the 2-minute book-shift z (_bfZ), backtested by bias_eval.py. Both grids carry the same block.
-    blocks = re.findall(r"const _BF = \{.*?const _bfAgg = [^\n]*", d, re.S)
-    check("strike grids: one identical _bfZ block in each grid, wired to the strike verdict and the caption average; no leftover level/premium/OI scoring",
-          len(blocks) == 2 and [x.strip() for x in blocks[0].splitlines()] == [x.strip() for x in blocks[1].splitlines()] and d.count("_bfStrike(SCR[") == 2 and d.count("_bfAgg(Object.values(SCR))") == 2
-          and "_biasScore" not in d and 'td[data-s="u2"]' in d and ".bf.bu" in d and "td.k.kb" in d
-          and "${_bfDesk(d, spot, now)}" in d and "${_bfDesk(state.lastData, SC.spot" in d and d.count("${_bfWall(") == 2 and ".sc-grid .wl {" in d)
+    # strike-grid bias: the 2-minute book-shift z (_bfZ), backtested by bias_eval.py. ONE helper block and ONE renderer (_bfGrid) serve both grids.
+    blocks = [d[d.index("  const _BF = {"):d.index("\n  }\n", d.index("function _bfGrid(o)")) + 5]] if "function _bfGrid(o)" in d else []
+    check("strike grids: one shared helper block and renderer (_bfGrid) for the Home and Scalper grids (no second copy to drift), the book-shift average gated by the walls, no per-strike arrows or strike verdict; no leftover level/premium/OI scoring",
+          len(blocks) == 1 and d.count("const _BF = {") == 1 and d.count("function _bfGrid(o)") == 1 and d.count("_bfGrid({") == 2 and "html = _bfGrid({ d, rows: show" in d and "scSet(el, _bfGrid({ d: state.lastData" in d
+          and "_bfStrike" not in d and "data-s=\"${t ?" not in d and "td.k.kb" not in d and 'td[data-s="u2"]' not in d and d.count("_bfAgg(Object.values(SCR), W)") == 1
+          and "_biasScore" not in d and ".bf.bu" in d and ".sc-grid .bf.wq {" in d
+          and "${_bfDesk(d, spot, now, W)}" in d and d.count("${_bfWall(") == 1 and ".sc-grid .wl {" in d)
     if blocks:
         seq = [[i * 10, 50000 + (i % 7) * 900, 50000 + (i % 5) * 800] for i in range(240)] + [[2400 + i * 10, 50000 + i * 4000, 50000] for i in range(13)]
         jsb = blocks[0] + """
@@ -1806,7 +1808,7 @@ def test_scalping_tab():
         _computeGex = null; const desk0 = _bfDesk({ symbol: 'BANKNIFTY' }, 51000, 3e6);   // no GEX available
         console.log(JSON.stringify({ zs, first: zs[0], flat: flat[flat.length - 1], gap,
           ce: _bfCell(3000, 1000, false, 1.5), pe: _bfCell(1000, 3000, true, -0.7), none: _bfCell(3000, 1000, false, null),
-          k: [_bfStrike(1.6, 1.4), _bfStrike(-0.8, null), _bfStrike(1, -1), _bfStrike(null, undefined)], agg: [_bfAgg([0.5, 0.3]), _bfAgg([0.1, -0.2]), _bfAgg([null])],
+          agg: [_bfAgg([0.5, 0.3]), _bfAgg([0.1, -0.2]), _bfAgg([null]), _bfAgg([-0.5, -0.3], { w: 0.2 }), _bfAgg([-0.5, -0.3], { w: -0.05 }), _bfAgg([-0.5, -0.3], null), _bfAgg([-0.5, -0.3], { w: null })],
           sp, desk1, desk2, desk0, walls: [_bfWall(D, 24000), _bfWall(D, 24500), _bfWall(D, 24200), _bfWall(null, 24000)],
           kf: [0, 999, 1000, 1500, 9999, 10000, 100000, 2698865, null, NaN].map(_bfK), q: [_bfQ(100000), _bfQ(null)],
           fsrc: [_bfSrc(null, 0, 100), _bfSrc([1, 2, 3], 90, 100), _bfSrc([1, 2, 3], 50, 100), _bfSrc([1, 2, 3], 0, 100)],
@@ -1824,10 +1826,13 @@ def test_scalping_tab():
             check("strike-grid bias: _bfZ waits for 2 minutes of book, scores a sudden bid build-up as a strong bullish shift, a still book as 0, restarts after a 30-min gap, and matches bias_eval.py's twin exactly",
                   ob["first"] is None and ob["zs"][-1] >= 1.4 and ob["flat"] == 0 and ob["gap"] is None and same
                   and bias_eval.tier(ob["zs"][-1]) == 2, str({k: ob[k] for k in ("first", "flat", "gap")}) + f" last={ob['zs'][-1]} py={pz[-1]} same={same}")
-            check("strike-grid bias: the ratio text keeps the level colour (CE buyers / PE sellers green), arrows show the shift (▲▲ strong, ▼ moderate, none while warming up); strike verdict averages CE and PE; caption shows the grid average",
-                  'class="up">3.00× B <b class="bf bu">▲▲</b>' in ob["ce"] and 'data-s="u2"' in ob["ce"] and 'class="up">0.33× S <b class="bf be">▼</b>' in ob["pe"]
-                  and ob["none"].endswith('class="up">3.00× B</td>') and "warming up" in ob["none"]
-                  and ob["k"] == ["▲▲", "▼", "", ""] and "▲ bullish +0.40" in ob["agg"][0] and "flat -0.05" in ob["agg"][1] and "warming up" in ob["agg"][2], str(ob)[:600])
+            ag = [re.sub(r' title="[^"]*"', "", x) for x in ob["agg"]]
+            check("strike-grid bias: the ratio text keeps the level colour (CE buyers / PE sellers green) with the shift only in the tooltip (no per-strike arrows: ~51% in bias_eval.py); the caption's grid average calls bullish as before, bearish only when the walls lean bearish (else '▼ unconfirmed', muted)",
+                  ob["ce"].endswith('class="up">3.00× B</td>') and "2-min shift z +1.50: bullish, strong" in ob["ce"] and ob["pe"].endswith('class="up">0.33× S</td>') and "z -0.70: bearish" in ob["pe"]
+                  and "<b" not in ob["ce"] and "data-s" not in ob["ce"] and ob["none"].endswith('class="up">3.00× B</td>') and "warming up" in ob["none"]
+                  and ag[0] == ' · book shift <b class="bf bu">▲ bullish +0.40</b>' and ag[1] == ' · book shift <b class="bf ">flat -0.05</b>' and "warming up" in ag[2]
+                  and ag[3] == ' · book shift <b class="bf wq">▼ unconfirmed -0.40</b>' and ag[4] == ' · book shift <b class="bf be">▼ bearish -0.40</b>'
+                  and ag[5] == ag[6] == ag[3] and "confirmed by the walls" in ob["agg"][4], str(ag))
             sm = bias_eval.SpotMove(); psp = [sm.bps("N", 24000 + i * 0.5, 2e6 + i * 5) for i in range(201)]
             same_sp = all((x is None and y is None) or (x is not None and y is not None and abs(x - y) < 1e-9) for x, y in zip(ob["sp"], psp))
             check("strike-grid desk context: 15-min move waits 15 minutes then reads bps (matches bias_eval.SpotMove), gamma regime and flip from _computeGex, OI walls in the caption and as P / C marks on their strikes; no trade call",
@@ -1880,7 +1885,7 @@ def test_scalping_tab():
                   and "ATM 25100 straddle 180.00 (CE 80.00 + PE 100.00) · at the open: 24950 straddle 200.00" in st[0] and "√4.0 trading days" in st[0]
                   and strip(st[1]) == ' · straddle <b>180</b>' and "open straddle not available" in st[1] and st[2] == "" and st[3] == ""
                   and strip(st[4]).startswith(' · straddle <b>179</b> <b class="sv vd">−10.4%</b>')
-                  and d.count("${_bfIv(r)}</td>") == 2 and "${_bfStr(d)}${FD.html}" in d and "${_bfStr(state.lastData)}${FD.html}" in d
+                  and d.count("${_bfIv(r)}</td>") == 1 and "${_bfStr(d)}${_bfVol(d)}${FD.html}" in d
                   and d.count("--g-cool: #") == 2 and ".sc-grid .iv.vu, .sc-grid .sv.vu { color: var(--g-amber);" in d,
                   str(ov)[:1500])
             rg = ob["rg"]
@@ -1890,7 +1895,7 @@ def test_scalping_tab():
                   and "<b" not in rg[3] and "--p" not in rg[3] and rg[3].endswith(">80.0–80.0 </td>") and rg[4].endswith('>40.0–60.0 <b class="">50%</b></td>')
                   and 'rec[f"{p}_high"] = float(d.get("high") or 0)' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_adapter_zerodha.py"), encoding="utf-8").read()
                   and "color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo))" in d and "linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%))" in d
-                  and d.count("--g-rglo: rgba") == 2 and d.count("--g-rghi: rgba") == 2 and d.count("--g-rgt: rgba") == 2 and "--g-rg2" not in d and "day range · OI | strike ΔIV | PE OI · day range" in d, str(rg)[:900])
+                  and d.count("--g-rglo: rgba") == 2 and d.count("--g-rghi: rgba") == 2 and d.count("--g-rgt: rgba") == 2 and "--g-rg2" not in d and "day range · OI · δ θ/h · spread | strike ΔIV | PE spread · δ θ/h · OI · day range" in d, str(rg)[:900])
             # OI tag (_bfOi): 15-min OI change x 15-min taker side, context only; bias_eval.oi_tag is its twin
             cases = [(100000, 5000, 700, 300), (100000, 5000, 300, 700), (100000, -5000, 700, 300), (100000, -5000, 300, 700),
                      (100000, 500, 700, 300), (100000, 5000, 540, 460), (100000, 5000, 0, 0), (0, 5000, 700, 300), (100000, 1000, 575, 425)]
@@ -1907,13 +1912,186 @@ def test_scalping_tab():
             want = [bias_eval.oi_tag(*c) for c in cases]
             check("strike grids: OI tag beside the day range (CE before the strike, PE after it) reads WRITE / BUY / COVER / DUMP from the 15-min OI change and taker side, blank under 1% OI or a 15% lean, coloured bullish / bearish for the index (CE BUY / COVER and PE WRITE / DUMP green, the reverse red), and matches bias_eval.oi_tag; bias_eval re-tests it ('oitag') with the aggressor-confirmed writer read ('wconf')",
                   got == want == ["BUY", "WRITE", "COVER", "DUMP", None, None, None, None, "BUY"]
-                  and 'class="oi bu" title="PE last 15 min: writers opening (bullish for the index) · OI +8,000 (+4.0%) · taker volume 30% buyers.' in oo["pe"] and oo["none"] == '<td class="oi"></td>'
-                  and d.count("_bfOi(d, r, p)") == 2 and d.count("_bfOi(state.lastData, r, p)") == 2 and ".sc-grid td.oi { color: var(--g-muted);" in d and ".sc-grid td.oi.bu { color: var(--g-up);" in d and ".sc-grid td.oi.be { color: var(--g-dn);" in d
+                  and 'class="oi bu" title="PE last 15 min: writers opening (bullish for the index) · OI +8,000 (+4.0%) · taker volume 30% buyers · OI 2,00,000. Context' in oo["pe"] and oo["none"] == '<td class="oi"></td>'
+                  and d.count("_bfOi(d, r, p)") == 2 and "_bfOi(state.lastData" not in d and ".sc-grid td.oi { color: var(--g-muted);" in d and ".sc-grid td.oi.bu { color: var(--g-up);" in d and ".sc-grid td.oi.be { color: var(--g-dn);" in d
                   and cols == ["bu", "be", "bu", "be", "be", "bu", "be", "bu"]
                   and "oiMin: 0.01, oiImb: 0.15" in blocks[0] and '"wconf", "oitag"' in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bias_eval.py"), encoding="utf-8").read(),
                   str(got) + " " + str(want) + " " + str(cols) + " " + oo["pe"][:200])
+            # per-strike costs (delta / decay per trading hour, spread), IV rank + VIX, OI day context, and the walls read (twin of bias_eval.walls)
+            W1 = {"strikes": [{"strike": 24800, "ce_symbol": "a", "pe_oi": 900, "ce_oi": 10}, {"strike": 24900, "ce_symbol": "b", "pe_oi": 500, "ce_oi": 20},
+                              {"strike": 25100, "ce_symbol": "c", "ce_oi": 700, "pe_oi": 5}, {"strike": 25300, "ce_symbol": "d", "ce_oi": 1500, "pe_oi": 1}]}
+            W2 = {"strikes": [], "support": {"strike": 24000}, "resistance": {"strike": 24500}}
+            wcases = [[W1, 24950], [W1, 24800], [W1, 25350], [W2, 24100], [{"strikes": [], "support": {"strike": 24500}, "resistance": {"strike": 24000}}, 24100]]
+            jsg = blocks[0] + """
+            const fmtInt = x => String(x);
+            const D = { dte: 7, dte_trading: 5, lot_size: 65 }, D1 = { dte: 0.1, dte_trading: 0.1, lot_size: 65 };
+            const R = { strike: 25000, ce_iv: 15, pe_iv: 15, ce_bid: 100, ce_ask: 100.5, pe_bid: 10, pe_ask: 10.5, ce_oi: 100000, ce_oi_chg: 20000, ce_d60: -3000, ce_volume: 1234567 };
+            const num = h => { const m = h.match(/^<td class="gk"[^>]*>(−?)\\.?(\\d*\\.?\\d+) <span>([\\d.]+)\\/h<\\/span><\\/td>$/); return m ? [(m[1] ? -1 : 1) * parseFloat('0.' + m[2].replace('.', '')), parseFloat(m[3])] : null; };
+            console.log(JSON.stringify({
+              ce: _bfGk(D, R, 'ce', 25000), pe: _bfGk(D, R, 'pe', 25000), nce: num(_bfGk(D, R, 'ce', 25000)), npe: num(_bfGk(D, R, 'pe', 25000)), nfar: num(_bfGk(D, R, 'ce', 24000)),
+              nlast: num(_bfGk(D1, R, 'ce', 25000)), lastPx: _bfBs(25000, 25000, 0.1 / 365, 0.15, true).px, dash: [_bfGk(D, { strike: 25000 }, 'ce', 25000), _bfGk(null, R, 'ce', 25000)],
+              bs: [_bfBs(25000, 25000, 7 / 365, 0.15, true), _bfBs(25000, 25000, 7 / 365, 0.15, false), _bfBs(25100, 25000, 0, 0.15, true), _bfBs(24900, 25000, 0, 0.15, false)],
+              sp: [_bfSpr(R, 'ce'), _bfSpr(R, 'pe'), _bfSpr({}, 'ce'), _bfSpr({ ce_bid: 5, ce_ask: 4 }, 'ce')],
+              vol: [_bfVol({ atm_iv: 17.91, atm_iv_rank: 82, india_vix: 17.42 }), _bfVol({ atm_iv: 12, atm_iv_rank: 20 }), _bfVol({ atm_iv: 14 }), _bfVol({}), _bfVol(null)],
+              day: [_bfOiDay(R, 'ce'), _bfOiDay({}, 'pe'), _bfOi({ flow: { strikes: {} } }, R, 'ce')],
+              W: WCASES.map(([x, sp]) => _bfWalls(x, sp)), wn: _bfWalls(null, 1),
+              deskW: _bfDesk({ symbol: 'NIFTY', support: { strike: 1 } }, 25000, 5e6, { pw: 24800, cw: 25300, w: 0.1 }), deskN: _bfDesk({ symbol: 'NIFTY' }, 25000, 5e6, { pw: 24800, cw: 25300, w: null }),
+              wr: [_bfWallRead({ pw: 24800, cw: 25300, w: 0.42 }), _bfWallRead({ pw: 24800, cw: 25300, w: -0.1 }), _bfWallRead({ pw: 24800, cw: 25300, w: -0.35 }), _bfWallRead(null), _bfWallRead({ w: null })] }));""".replace("WCASES", json.dumps(wcases))
+            og = json.loads(subprocess.run(["node", "-e", jsg], capture_output=True, text=True, timeout=20).stdout)
+            pd_ce, pd_pe = bias_eval._greeks(25000, 25000, 7 / 365, 0.15, True)[0], bias_eval._greeks(25000, 25000, 7 / 365, 0.15, False)[0]
+            def _bsp(S, K, T, v, call, r=0.07):
+                sd = v * math.sqrt(T); d1 = (math.log(S / K) + (r + v * v / 2) * T) / sd; N = lambda x: 0.5 * (1 + math.erf(x / math.sqrt(2)))
+                return S * N(d1) - K * math.exp(-r * T) * N(d1 - sd) if call else K * math.exp(-r * T) * N(sd - d1) - S * N(-d1)
+            hr = _bsp(25000, 25000, 7 / 365, 0.15, True) - _bsp(25000, 25000, 7 / 365 * (1 - 1 / 31.25), 0.15, True)
+            st_ = lambda h: re.sub(r' title="[^"]*"', "", h)
+            check("strike grids: delta and decay per trading hour per strike (Black-Scholes on the chain IV, r 0.07: delta matches bias_eval._greeks, decay = price now minus one trading hour later with the time left spread over dte_trading x 6.25 hours, the whole time value in the last hour, ₹ per lot in the tooltip); a dash without IV or DTE",
+                  og["nce"] and abs(og["bs"][0]["dl"] - pd_ce) < 2e-6 and abs(og["bs"][1]["dl"] - pd_pe) < 2e-6 and abs(og["bs"][0]["px"] - _bsp(25000, 25000, 7 / 365, 0.15, True)) < 1e-3
+                  and abs(og["nce"][0] - round(pd_ce, 2)) < 1e-9 and abs(og["npe"][0] - round(pd_pe, 2)) < 1e-9 and og["pe"].startswith('<td class="gk"') and "−.4" in og["pe"]
+                  and abs(og["nce"][1] - round(hr, 1)) < 1e-9 and og["nfar"][1] < og["nce"][1] and abs(og["nlast"][1] - round(og["lastPx"], 1 if og["lastPx"] < 10 else 0)) < 1e-9
+                  and "per lot of 65" in og["ce"] and og["dash"] == ['<td class="gk">–</td>', '<td class="gk">–</td>']
+                  and og["bs"][2] == {"px": 100, "dl": 1} and og["bs"][3] == {"px": 100, "dl": -1}, str({k: og[k] for k in ("nce", "npe", "nfar", "nlast", "lastPx", "bs")}) + f" py={pd_ce},{pd_pe},{hr}")
+            check("strike grids: bid-ask spread per strike from the chain row (amber from 1% of mid), a dash with no two-sided quote",
+                  st_(og["sp"][0]) == '<td class="sp">0.50</td>' and st_(og["sp"][1]) == '<td class="sp sw">0.50</td>' and "4.88% of mid" in og["sp"][1]
+                  and og["sp"][2] == og["sp"][3] == '<td class="sp">–</td>' and "_BFI = { iv: 0.5, str: 3, spr: 1 }" in d, str(og["sp"]))
+            check("strike grids: caption shows ATM IV with its rank (amber from 70, blue to 30) and India VIX; nothing without them",
+                  st_(og["vol"][0]) == ' · <span>IV 17.9 <b class="ivr vu">r82</b> · VIX 17.4</span>' and st_(og["vol"][1]) == ' · <span>IV 12.0 <b class="ivr vd">r20</b></span>'
+                  and st_(og["vol"][2]) == ' · <span>IV 14.0</span>' and og["vol"][3] == "" and og["vol"][4] == "", str(og["vol"]))
+            check("strike grids: the OI cell's tooltip carries the session OI change, the 60-min change and the volume, even with no 15-min tag",
+                  og["day"][0] == "OI 1,00,000 · today +20,000 (25.0%) · last 60 min −3,000 · volume 12,34,567" and og["day"][1] == ""
+                  and og["day"][2] == '<td class="oi" title="CE OI 1,00,000 · today +20,000 (25.0%) · last 60 min −3,000 · volume 12,34,567"></td>', str(og["day"]))
+            pyw = [list(bias_eval.walls(x, sp)) for x, sp in wcases]
+            jw = [[w["pw"], w["cw"], w["w"]] for w in og["W"]]
+            same_w = all(a[:2] == b[:2] and ((a[2] is None and b[2] is None) or (a[2] is not None and b[2] is not None and abs(a[2] - b[2]) < 1e-12)) for a, b in zip(jw, pyw))
+            check("strike grids: walls read = bias_eval.walls (put wall at/below spot, call wall above, support/resistance fallback, w = 0.5 - position); caption '▲ bullish' / '▼ bearish' from ±_BF.wall (0.3, the strongest 30% in bias_eval), 'mid' inside; the server's _BF twin carries 'wall'",
+                  same_w and jw[0] == [24800, 25300, 0.2] and jw[3][2] == 0.3 and jw[4][2] is None and og["wn"] is None
+                  and st_(og["wr"][0]) == ' · walls P 24800 / C 25300 <b class="bf bu">▲ bullish +0.42</b>' and st_(og["wr"][1]) == ' · walls P 24800 / C 25300 <b class="bf ">mid -0.10</b>'
+                  and st_(og["wr"][2]) == ' · walls P 24800 / C 25300 <b class="bf be">▼ bearish -0.35</b>' and og["wr"][3] == og["wr"][4] == ""
+                  and "wall: 0.3, dir: 0.25 }" in d and bias_eval.BF.get("wall") == 0.3 and "walls" not in og["deskW"] and "walls P 24800 / C 25300" in og["deskN"], str(jw) + " " + str(pyw) + " " + str(og["wr"]))
+            # bias_eval: holiday / dead-feed days are skipped; the other index's shift is paired by time; new reads listed
+            import tempfile as _tf
+            with _tf.TemporaryDirectory() as td_:
+                fp = os.path.join(td_, "NIFTY_2026-11-10.jsonl")
+                with open(fp, "w") as fh:
+                    for i in range(5):
+                        fh.write(json.dumps({"timestamp": f"10-Nov-2026 10:{i:02d}:00", "underlying_value": 25044.65, "strikes": [{"strike": 25000, "ce_symbol": "C", "pe_symbol": "P"}]}) + "\n")
+                flat = bias_eval.day_samples(fp)
+            dd = {"NIFTY_2026-11-04": [({"_t": 100, "shift": 0.5}, {}), ({"_t": 250, "shift": 0.1}, {})], "BANKNIFTY_2026-11-04": [({"_t": 130, "shift": -0.2}, {}), ({"_t": 400, "shift": 0.9}, {})],
+                  "NIFTY_2026-11-05": [({"_t": 100, "shift": 0.5}, {})]}
+            bias_eval.pair_other(dd)
+            bsrc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bias_eval.py"), encoding="utf-8").read()
+            check("bias_eval: a day whose index never moved (holiday, dead feed) is skipped; 'other' takes the other index's shift at the nearest snapshot within 90 s; futures build-up, basis, VWAP, other index and the walls-gated shift are scored; pin is in bps of spot",
+                  flat == [] and [F["other"] for F, _ in dd["NIFTY_2026-11-04"]] == [-0.2, None] and [F["other"] for F, _ in dd["BANKNIFTY_2026-11-04"]] == [0.5, None]
+                  and dd["NIFTY_2026-11-05"][0][0]["other"] is None and all(k in bias_eval.READS for k in ("fut_oi", "basis", "vwap", "other", "shift_w"))
+                  and 'F["pin"] = (gk / gw / spot - 1) * 1e4' in bsrc and 'F["shift_w"] = sw if sw is None or sw > 0 or (F.get("walls") is not None and F["walls"] < 0) else None' in bsrc,
+                  f"flat={flat} pairs={dd}")
         except Exception as ex:
             check("strike-grid bias: _bfZ runs in node", False, repr(ex))
+    # ── Scalper direction pane: server series (nse_dirflow) = bias_eval's reads; history endpoint; pane maths in node ──
+    try:
+        import tempfile as _tf2, random as _rd2, datetime as _dt2
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import bias_eval as _BE2, nse_dirflow as _DF
+        _rd2.seed(7)
+        with _tf2.TemporaryDirectory() as tdir:
+            def _snap(sym, i, spot):
+                t = _dt2.datetime(2026, 11, 4, 9, 15) + _dt2.timedelta(minutes=i)
+                ks = range(int(spot // 100) * 100 - 800, int(spot // 100) * 100 + 900, 100)
+                rows = [{"strike": k, "ce_symbol": f"{sym}{k}CE", "pe_symbol": f"{sym}{k}PE", "ce_oi": 1000 + (k % 700) * 3, "pe_oi": 1200 + (k % 500) * 2,
+                         "ce_oi_chg": 10 * i, "pe_oi_chg": 15 * i, "ce_iv": 14, "pe_iv": 15,
+                         "ce_tbq": 50000 + _rd2.uniform(0, 20000) + 300 * i, "ce_tsq": 60000 + _rd2.uniform(0, 20000), "pe_tbq": 40000 + _rd2.uniform(0, 20000), "pe_tsq": 45000 + _rd2.uniform(0, 20000)} for k in ks]
+                return {"timestamp": t.strftime("%d-%b-%Y %H:%M:%S"), "_replay_ts": int(t.timestamp()), "symbol": sym, "underlying_value": spot, "dte": 3, "strikes": rows,
+                        "flow": {"strikes": {}, "futures": {"near": {"b5": 10, "s5": 5, "b15": 30, "s15": 20, "bd": 1000 + 50 * i, "sd": 900 + 20 * i}}}}
+            for sym, base in (("NIFTY", 25000.0), ("BANKNIFTY", 56000.0)):
+                with open(os.path.join(tdir, f"{sym}_2026-11-04.jsonl"), "w") as fh:
+                    for i in range(40):
+                        fh.write(json.dumps(_snap(sym, i, base + 3 * i + _rd2.uniform(-20, 20))) + "\n")
+            fn_, fb_ = os.path.join(tdir, "NIFTY_2026-11-04.jsonl"), os.path.join(tdir, "BANKNIFTY_2026-11-04.jsonl")
+            pn, pb = _DF.from_replay(fn_), _DF.from_replay(fb_)
+            _DF.pair(pn, pb)
+            dd2 = {"NIFTY_2026-11-04": _BE2.day_samples(fn_), "BANKNIFTY_2026-11-04": _BE2.day_samples(fb_)}
+            _BE2.pair_other(dd2)
+            S2 = _BE2.load(fn_); tmap = {t.timestamp(): d.get("_replay_ts") for t, d in S2}
+            byts = {p["ts"]: p for p in pn}
+            cmp_ = [(F, byts[int(tmap[F["_t"]])]) for F, _ in dd2["NIFTY_2026-11-04"]]
+            close = lambda a, b: (a is None and b is None) or (a is not None and b is not None and abs(a - b) < 1e-3)
+            same_dir = cmp_ and all(close(F.get("shift"), p["bs"]) and close(F.get("walls"), p["w"]) and close(F.get("other"), p["oth"]) and close(F.get("dir"), p["dir"]) for F, p in cmp_)
+            last = pn[-1]
+            check("direction pane: nse_dirflow rebuilds the series from replay with bias_eval's own twins: book shift, walls, the other index's shift and the composite match bias_eval.day_samples / pair_other on every scored snapshot; PCR, OI added, futures CVD and gamma ride along as context",
+                  bool(same_dir) and any(p["bs"] is not None for p in pn) and any(p["oth"] is not None for p in pn) and last["noi"] == (39 * 15 - 39 * 10) * 11
+                  and last["cvd"] == (1000 + 50 * 39) - (900 + 20 * 39) and last["pcr"] is not None and last["gex"] is not None and _DF.from_replay(os.devnull) == [],
+                  f"compared={len(cmp_)} last={last}")
+            check("direction pane: composite = mean of book shift / 1.4, walls / 0.5 and the other index / 1.4 (clamped to ±1, over those present); None with none",
+                  _BE2.composite(1.4, 0.25, None) == 0.75 and _BE2.composite(None, None, None) is None and _BE2.composite(5, -1, -2.8) == -1 / 3
+                  and abs(_BE2.composite(0.7, -0.1, 0.35) - (0.5 - 0.2 + 0.25) / 3) < 1e-12 and _BE2.BF.get("dir") == 0.25)
+            # server: recorder + history endpoint (functions lifted out of the server, globals stubbed)
+            import ast as _ast3, threading as _th3, time as _tm3
+            ssrc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "nse_chain_server.py"), encoding="utf-8").read()
+            fns = [n for n in _ast3.parse(ssrc).body if isinstance(n, _ast3.FunctionDef) and n.name in ("_dir_mod", "_dir_record", "_dir_points", "_dir_history")]
+            clk = [1794202800.0]
+            ns3 = {"_dir_mem": {}, "_dir_trk": {}, "_dir_last": {}, "_dir_lock": _th3.Lock(), "_dir_built": set(), "_CTX_DIR": os.path.join(tdir, "ctx"), "_REPLAY_DIR": tdir,
+                   "_ctx_day": lambda: "2026-11-09", "_prev_trading_days": lambda day, limit=1: ["2026-11-04"], "time": type("T", (), {"time": staticmethod(lambda: clk[0])}),
+                   "json": json, "_os": os, "threading": _th3, "print": lambda *a, **k: None}
+            exec(compile(_ast3.Module(body=fns, type_ignores=[]), "srv", "exec"), ns3)
+            for i in range(20):
+                clk[0] += 10
+                ns3["_dir_record"]("BANKNIFTY", _snap("BANKNIFTY", i, 56000 + i), clk[0])
+                ns3["_dir_record"]("NIFTY", _snap("NIFTY", i, 25000 + i), clk[0] + 1)
+                ns3["_dir_record"]("NIFTY", _snap("NIFTY", i, 25000 + i), clk[0] + 3)      # within 10 s: skipped
+            h1 = ns3["_dir_history"]("NIFTY", 0, True)
+            for _ in range(50):
+                if ns3["_dir_mem"].get(("NIFTY", "2026-11-04")):
+                    break
+                _tm3.sleep(0.1)
+            h2 = ns3["_dir_history"]("NIFTY", h1["points"][5]["ts"], True)
+            fl = open(os.path.join(tdir, "ctx", "NIFTY_2026-11-09.dir.jsonl")).read().splitlines()
+            ns3["_dir_mem"].clear()
+            h3 = ns3["_dir_history"]("NIFTY", 0, False)
+            check("direction pane: the server records a point per index every 10 s (book shift, walls, the other index's latest shift within 90 s, composite) to memory and ctx/<SYM>_<day>.dir.jsonl, serves ?since= and the previous session (rebuilt from replay/ once, in the background), and reloads the file after a restart",
+                  len(h1["points"]) == 20 and h1["points"][-1]["oth"] is not None and h1["points"][0]["oth"] is None and h1["day"] == "2026-11-09" and h1["prev_day"] == "2026-11-04" and h1["prev"] == []
+                  and len(h2["points"]) == 14 and len(h2["prev"]) == 40 and h2["prev"][-1]["oth"] is not None and len(fl) == 20 and len(h3["points"]) == 20 and "prev" not in h3
+                  and '_dir_record(sym, d, now)' in ssrc and 'parsed.path == "/api/dir-history"' in ssrc,
+                  f"h1={len(h1['points'])} oth={[p['oth'] for p in h1['points'][:2]]} h2={len(h2['points'])} prev={len(h2['prev'])} file={len(fl)} h3={len(h3['points'])}")
+    except Exception as ex:  # noqa: BLE001
+        import traceback as _tb3
+        check("direction pane: python side runs", False, _tb3.format_exc()[-1500:])
+    try:
+        dseg = d[d.index("  const SC_DIR_H = 140;"):d.index("\n  }\n", d.index("function scDirLegend(p)")) + 5]
+        jsd = "const _BF = { dir: 0.25 }; const SC_UP = 'U', SC_DN = 'D'; let state = { symbol: 'NIFTY' }; const SC = { pref: { dir: true } };\n" + dseg + """
+        const V = [0, 60, 120, 180, 240, 300, 1200].map(m => ({ t: (1e6 + m * 60) * 1000 })), P = [];
+        for (let k = 0; k <= 1300; k += 10) P.push({ ts: 1e6 + k * 6 + 5, dir: k < 600 ? 0.4 : -0.1, bs: 1, w: 0.2, oth: -0.5, pcr: k / 1000, noi: k, cvd: -k, gex: k < 600 ? 1 : -1 });
+        const at = scDirAt(V, 60, P);
+        const back = scDirBack(P, P[100].ts), noBack = scDirBack(P, P[3].ts), dl = scDirDelta(P, P[100], 'noi');
+        const D = { sym: 'NIFTY', day: '2026-11-11', pts: [{ ts: 5 }], prev: null };
+        scDirMerge(D, { day: '2026-11-11', points: [{ ts: 4 }, { ts: 6 }, { ts: 7 }], prev: [{ ts: 1 }] }); const m1 = D.pts.map(p => p.ts).join(','), pv = D.prev.length;
+        scDirMerge(D, { day: '2026-11-12', points: [{ ts: 9 }] }); const m2 = D.pts.map(p => p.ts).join(',') + '|' + D.prev;
+        SC.dir = { sym: 'NIFTY', pts: P, prev: [] };
+        const bx = i => 10 + i * 8, pane = scDirPane(V, bx, 8, 6, 600, 100, 128, 60, -1), empty = (SC.dir = { pts: [], prev: [] }, scDirPane(V, bx, 8, 6, 600, 100, 128, 60, -1));
+        const lg = [scDirLegend({ dir: 0.4, bs: 1, w: 0.2, oth: -0.5 }), scDirLegend({ dir: -0.1, bs: null, w: null, oth: null }), scDirLegend(null)];
+        state.symbol = 'FINNIFTY'; const lgF = scDirLegend({ dir: -0.3, bs: -1, w: -0.2, oth: null });
+        console.log(JSON.stringify({ at: at.map(p => p ? p.ts : null), back: back && back.ts, noBack, dl, m1, pv, m2, pane: pane.svg, last: pane.p && pane.p.ts, empty: empty.svg, lg, lgF }));"""
+        rr = subprocess.run(["node", "-e", jsd], capture_output=True, text=True, timeout=20)
+        od = json.loads(rr.stdout or "null") or {"err": rr.stderr[-800:]}
+        strip3 = lambda h: re.sub(r' title="[^"]*"', "", h)
+        check("direction pane (node): each bar takes the last point before it closes and none older than 2 min before it opens (gaps stay empty); 15-min deltas need a point 15-25 min back; merge appends only newer points and starts over on a new day",
+              od.get("at") == [1e6 + 5, 1e6 + 3605, 1e6 + 7205, None, None, None, None] and od.get("back") == 1e6 + 5105
+              and od.get("noBack") is None and od.get("dl") == 150 and od.get("m1") == "5,6,7" and od.get("pv") == 1 and od.get("m2") == "9|null", str({k: od.get(k) for k in ("at", "back", "noBack", "dl", "m1", "pv", "m2", "err")}))
+        pane = od.get("pane", "")
+        check("direction pane (node): composite bars solid from ±_BF.dir and faint inside it, the three parts as lines (book blue, walls amber, other index violet), four context strips (PCR, OI, futures CVD 15-min change; gamma regime) with explanations, a value tag; a note when there is no history",
+              'opacity="0.9"' in pane and 'opacity="0.4"' in pane and 'stroke-width=".9" opacity=".5"' in pane and 'stroke="#4da3ff"' in pane and 'stroke="#e8b339"' in pane and 'stroke="#c58cff"' in pane and all(x in pane for x in (">PCR 15m<", ">OI 15m<", ">Fut CVD 15m<", ">γ regime<"))
+              and "Tested below 50%" in pane and 'fill="#5b7a99"' in pane and "No direction history for these bars yet" in od.get("empty", "") and "<rect" in pane, pane[:300] + " | " + od.get("err", ""))
+        lg = [strip3(x) for x in od.get("lg", [])]
+        check("direction pane (node): legend shows the composite with its lean (▲ / ▼ from ±0.25, else 'no lean'), book / walls / the other index (NIFTY↔BANKNIFTY, none for other indices), and a ✕ that removes the pane",
+              len(lg) == 3 and "Direction <b>+0.40</b></span><span class=\"sig up\">▲ bullish lean</span>" in lg[0] and "BANKNIFTY <b>−0.50</b>" in lg[0] and 'data-x="dir"' in lg[0]
+              and '<span class="sig wu">no lean</span>' in lg[1] and "book <b>–</b>" in lg[1] and "waiting for history" in lg[2]
+              and "▼ bearish lean" in od["lgF"] and "BANKNIFTY" not in od["lgF"] and "about 56% right at 5 minutes" in od["lg"][0], str(lg)[:600])
+        dc = d[d.index("function scDrawChart()"):d.index("const scClampLine")]
+        check("direction pane: wired into the Scalper chart above the RSI (its own height added to the chart), a pref 'dir' on by default (new key), an Indicators row, a legend row with ✕, polled every 10 s from scPoll (no broker call: /api/dir-history reads server memory)",
+              dc.index("scDirPane(vis, bx, step") < dc.index("rsiTop = yB;") and "(SC.pref.dir ? SC_DIR_H + 6 : 0)" in dc and "(dirH ? dirH + gap : 0)" in dc
+              and "rsiM: 14, dir: true, sqz: true" in d and "row('dir', 'Direction (book, walls, other index)'" in d and "'wt', 'dir', 'rsi'" in d
+              and 'id="scLegD"' in d and "['scLegP', 'scLegR', 'scLegD']" in d and "scRenderAll(); scNote(); scDirPoll();" in d and "now - D.at < 10000" in d
+              and "/api/dir-history?symbol=" in d)
+    except Exception as ex:  # noqa: BLE001
+        check("direction pane: node side runs", False, repr(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",
           "location.protocol === 'file:'" in seg and "_source !== 'zerodha'" in seg)
     # ── the chart right-click mute item ──
