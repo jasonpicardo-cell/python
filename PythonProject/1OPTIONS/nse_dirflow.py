@@ -13,6 +13,11 @@ plots exactly what bias_eval.py scores:
     noi   put OI added minus call OI added today over the grid strikes (contracts)
     cvd   near-future cumulative taker delta since the open (buys - sells)
     gex   dealer gamma sign/size (bias_eval.gex_total convention: + = dealers long gamma)
+  volatility context (bias_eval.vol_reads; the pane plots their 15-min change, scored there as vix15 / iv15 / str15):
+    vix   India VIX
+    iv    the chain's ATM IV
+    strd  ATM straddle (CE + PE LTP at the strike nearest spot)
+    exp   the chain's expiry (IV and straddle changes are taken within one expiry only)
 
     python3 nse_dirflow.py replay/NIFTY_2026-11-09.jsonl     # print the rebuilt series
 """
@@ -60,8 +65,11 @@ def point(d, ts, tr, shift_ts=None):
         gex = BE.gex_total(d)
     except Exception:  # noqa: BLE001
         gex = None
+    v = BE.vol_reads(d)
     return {"ts": int(ts), "spot": round(spot, 2), "bs": _r(bs), "w": _r(w), "pcr": _r(BE.grid_pcr(d)),
-            "noi": noi, "cvd": cvd, "gex": _r(gex, 8), "oth": None, "dir": _r(BE.composite(bs, w, None))}
+            "noi": noi, "cvd": cvd, "gex": _r(gex, 8),
+            "vix": _r(v["vix"], 2), "iv": _r(v["iv"], 2), "strd": _r(v["strd"], 2), "exp": v["exp"],
+            "oth": None, "dir": _r(BE.composite(bs, w, None))}
 
 
 def finish(pt, oth):

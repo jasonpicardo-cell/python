@@ -42272,7 +42272,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       row('ttr', 'Trend ribbon', 'Trend Target Ribbon (BOSWaves): ALMA trend ribbon with Trend Glow columns in the trend colour, flip diamonds, and the latest position\'s entry, stop and 1R-4R targets. Drawn on closed candles only. The gear opens its own Scalper settings.', `<span class="sw" style="background:#00FF00"></span>bull <span class="sw" style="background:#FF0066"></span>bear`) +
       row('sqz', 'Squeeze Momentum', 'LazyBear squeeze momentum in its own pane above the RSI: histogram is the momentum (bright = growing, dark = fading), dots on the zero line show the squeeze (white = coiling, grey = released, blue = none). The gear opens its own Scalper settings, separate from Home.', `<span class="sw" style="background:#00ff00"></span>mom <span class="sw" style="background:#e8e8e8"></span>squeeze`) +
       row('wt', 'WaveTrend', 'LazyBear WaveTrend (WT1 / WT2, overbought and oversold levels, divergence) sharing the squeeze pane. The gear opens its own Scalper settings, separate from Home.', `<span class="sw" style="background:#00E676"></span>WT1 <span class="sw" style="background:#FF5252"></span>WT2`) +
-      row('dir', 'Direction (book, walls, other index)', 'Index direction pane above the RSI, recorded by the server every 10 s. Bars: the composite of the three reads that beat 50% in bias_eval.py (grid-average book shift, walls lean, the other index\'s book shift), solid from ±' + _BF.dir + '. Lines: those three parts. Strips: PCR, OI and futures CVD 15-min changes and the gamma regime, context only (they tested at or below 50%). A lean, not a signal.',
+      row('dir', 'Direction (book, walls, other index)', 'Index direction pane above the RSI, recorded by the server every 10 s. Bars: the composite of the three reads that beat 50% in bias_eval.py (grid-average book shift, walls lean, the other index\'s book shift), solid from ±' + _BF.dir + '. Lines: those three parts. Strips: PCR, OI and futures CVD 15-min changes and the gamma regime, context only (they tested at or below 50%); India VIX, ATM IV and ATM straddle 15-min changes (amber = vol bid, blue = offered), ~60% in bias_eval.py on four sessions, kept out of the composite until about 20 sessions confirm them. A lean, not a signal.',
         `<span class="sw" style="background:${SC_DIR.bs}"></span>book <span class="sw" style="background:${SC_DIR.w}"></span>walls <span class="sw" style="background:${SC_DIR.oth}"></span>other`) +
       row('rsi', 'RSI with moving average', 'Momentum from 0 to 100 in its own pane. 80 and 20 are the overbought and oversold lines, 50 is the middle, and the dotted lines are 70 and 30. The yellow line is the average of the RSI.',
         `<span class="sw" style="background:${SC_RSI}"></span>RSI ${num('rsiN', P.rsiN)} <span class="sw" style="background:${SC_RMA}"></span>MA ${num('rsiM', P.rsiM)}`) +
@@ -42321,13 +42321,19 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // composite (bias_eval.composite: mean of book shift / 1.4, walls / 0.5 and the other index's shift / 1.4), a lean from
   // ±_BF.dir (the strongest 30%: ~56% at 5 min, 8 of 8 days positive on the first four sessions). Lines: its three parts.
   // Strips underneath are CONTEXT that tested at or below 50% (PCR, OI, futures CVD: 15-min change) and the gamma regime;
-  // they are not in the composite. Information, not a trade call.
-  const SC_DIR_H = 140;
-  const SC_DIR = { bs: '#4da3ff', w: '#e8b339', oth: '#c58cff', gp: '#5b7a99', gn: '#e8b339' };
+  // they are not in the composite. Volatility strips (India VIX, ATM IV, ATM straddle: 15-min change, amber = vol bid, blue =
+  // offered, as in the grid) scored ~60% at 5 min in bias_eval.py (vix15 / iv15 / str15: rising vol led lower) on the first
+  // four sessions, but stay out of the composite until about 20 sessions confirm them. Information, not a trade call.
+  const SC_DIR_H = 170;
+  const SC_DIR = { bs: '#4da3ff', w: '#e8b339', oth: '#c58cff', gp: '#5b7a99', gn: '#e8b339', vb: '#e8b339', vo: '#6ea8ff' };
+  const SC_DIR_VOL = { vix: 0.3, iv: 0.75, strd: 5 };   // full-strength strip at this 15-min change (about 2.5x bias_eval's strongest-30% cut)
   const SC_DIR_ROWS = [['pcr', 'PCR 15m', 'Put/call OI ratio over the grid strikes, change over 15 min: green = puts added faster (read as support), red = calls. Tested ~50% in bias_eval.py: context, not in the score.'],
     ['noi', 'OI 15m', 'Put OI added minus call OI added today over the grid strikes, change over 15 min: green = more put writing. Context, not in the score.'],
     ['cvd', 'Fut CVD 15m', 'Near-future cumulative taker delta (buyers minus sellers), change over 15 min. Tested below 50% in bias_eval.py (it leaned the wrong way): context, not in the score.'],
-    ['gex', 'γ regime', 'Dealer gamma: slate = long gamma (dealers sell rallies and buy dips, moves tend to stall), amber = short gamma (they chase, moves tend to run). Not a direction.']];
+    ['gex', 'γ regime', 'Dealer gamma: slate = long gamma (dealers sell rallies and buy dips, moves tend to stall), amber = short gamma (they chase, moves tend to run). Not a direction.'],
+    ['vix', 'VIX 15m', 'India VIX, change over 15 min: amber = rising (volatility bid), blue = falling. A falling VIX led the index higher ~61% of the time at 5 min in bias_eval.py (vix15, first four sessions, 7 of 8 index-days); not in the composite until about 20 sessions confirm it.'],
+    ['iv', 'ATM IV 15m', 'The chain\'s ATM IV, change over 15 min (same expiry only): amber = rising, blue = falling. Falling IV led higher ~60% at 5 min in bias_eval.py (iv15, first four sessions); context, not in the composite.'],
+    ['strd', 'Straddle 15m', 'ATM straddle (CE + PE at the strike nearest spot), % change over 15 min (same expiry only): amber = premium bid, blue = bleeding (time decay pulls it lower all day). A falling straddle led higher ~60% at 5 min in bias_eval.py (str15, first four sessions); context, not in the composite.']];
   function scDirPoll() {
     if (!SC.pref.dir || location.protocol === 'file:') return;
     const sym = state.symbol || 'NIFTY', D = SC.dir && SC.dir.sym === sym ? SC.dir : (SC.dir = { sym, day: '', pts: [], prev: null, at: 0, busy: false });
@@ -42365,6 +42371,13 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     return k >= 0 && want - pts[k].ts <= 600 ? pts[k] : null;
   }
   const scDirDelta = (pts, p, k) => { if (!p || p[k] == null) return null; const q = scDirBack(pts, p.ts); return q && q[k] != null ? p[k] - q[k] : null; };
+  // volatility 15-min change (bias_eval.vol_deltas, unsigned: + = vol rising): VIX in points, ATM IV in vol points and the
+  // straddle in % (ln ratio x 100); IV and straddle only within one expiry, so a roll is not read as a move
+  const scDirVol = (pts, p, k) => {
+    if (!p || !(p[k] > 0)) return null; const q = scDirBack(pts, p.ts);
+    if (!q || !(q[k] > 0) || (k !== 'vix' && q.exp !== p.exp)) return null;
+    return k === 'strd' ? Math.log(p[k] / q[k]) * 100 : p[k] - q[k];
+  };
   function scDirPane(vis, bx, step, x0, x1, top, H, tf, hi) {
     const D = SC.dir, pts = D ? (D.prev || []).concat(D.pts) : [], at = scDirAt(vis, tf, pts), nv = vis.length;
     const rowH = 9, rowsH = SC_DIR_ROWS.length * rowH, mainTop = top + 16, mainH = H - 16 - rowsH - 4, mid = mainTop + mainH / 2, ky = mainH / 2 - 2;
@@ -42389,19 +42402,19 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // context strips: 15-min change (PCR, OI, futures CVD) and the gamma regime
     const rowsTop = top + H - rowsH - 2;
     SC_DIR_ROWS.forEach(([k, name, tip], r) => {
-      const yy = rowsTop + r * rowH, vals = at.map(p => k === 'gex' ? (p && p.gex != null ? p.gex : null) : scDirDelta(pts, p, k));
-      const mx = k === 'pcr' ? 0.05 : Math.max(1e-9, ...vals.filter(v => v != null).map(Math.abs));
+      const vol = k in SC_DIR_VOL, yy = rowsTop + r * rowH, vals = at.map(p => k === 'gex' ? (p && p.gex != null ? p.gex : null) : vol ? scDirVol(pts, p, k) : scDirDelta(pts, p, k));
+      const mx = k === 'pcr' ? 0.05 : vol ? SC_DIR_VOL[k] : Math.max(1e-9, ...vals.filter(v => v != null).map(Math.abs));
       vals.forEach((v, i) => {
         if (v == null || (k !== 'gex' && v === 0)) return;
-        const col = k === 'gex' ? (v > 0 ? SC_DIR.gp : SC_DIR.gn) : (v > 0 ? SC_UP : SC_DN), op = k === 'gex' ? .55 : Math.min(.9, .15 + .75 * Math.abs(v) / mx);
+        const col = k === 'gex' ? (v > 0 ? SC_DIR.gp : SC_DIR.gn) : vol ? (v > 0 ? SC_DIR.vb : SC_DIR.vo) : (v > 0 ? SC_UP : SC_DN), op = k === 'gex' ? .55 : Math.min(.9, .15 + .75 * Math.abs(v) / mx);
         s += `<rect x="${(bx(i) - step / 2).toFixed(1)}" y="${yy}" width="${(step + 0.4).toFixed(1)}" height="${rowH - 1}" fill="${col}" opacity="${op.toFixed(2)}"/>`;
       });
       s += `<text x="${x0 + 3}" y="${yy + 7}" fill="#9aa3b5" font-size="8" style="paint-order:stroke;stroke:#0a0c11;stroke-width:2.5px"><title>${tip}</title>${name}</text>`;
     });
     const lastI = (() => { for (let i = nv - 1; i >= 0; i--) if (at[i] && at[i].dir != null) return i; return -1; })();
     if (lastI >= 0) { const v = at[lastI].dir; s += `<rect x="${x1 + 26}" y="${(yv(v) - 7).toFixed(1)}" width="44" height="14" fill="${Math.abs(v) >= _BF.dir ? (v >= 0 ? SC_UP : SC_DN) : '#4d5568'}"/><text x="${x1 + 29}" y="${(yv(v) + 3).toFixed(1)}" fill="#05070a" font-size="10" font-weight="700">${f(v)}</text>`; }
-    const hiI = hi >= 0 && hi < nv && at[hi] ? hi : lastI;
-    return { svg: s, p: hiI >= 0 ? at[hiI] : null };
+    const hiI = hi >= 0 && hi < nv && at[hi] ? hi : lastI, hp = hiI >= 0 ? at[hiI] : null;
+    return { svg: s, p: hp ? Object.assign({}, hp, { _v: { vix: scDirVol(pts, hp, 'vix'), iv: scDirVol(pts, hp, 'iv'), strd: scDirVol(pts, hp, 'strd') } }) : null };
   }
   function scDirLegend(p) {
     const sym = state.symbol || 'NIFTY', twin = sym === 'NIFTY' ? 'BANKNIFTY' : sym === 'BANKNIFTY' ? 'NIFTY' : '', f = v => v == null ? '–' : (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2);
@@ -42412,7 +42425,16 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
       `<span class="sc-lg" title="Grid-average 2-min book shift (z), the strike grid's book shift"><i style="background:${SC_DIR.bs}"></i>book <b>${f(p && p.bs)}</b></span>` +
       `<span class="sc-lg" title="Walls lean: +0.5 on the put wall, −0.5 on the call wall"><i style="background:${SC_DIR.w}"></i>walls <b>${f(p && p.w)}</b></span>` +
       (twin ? `<span class="sc-lg" title="${twin}'s grid-average book shift at the same moment"><i style="background:${SC_DIR.oth}"></i>${twin} <b>${f(p && p.oth)}</b></span>` : '') +
+      scDirVolLegend(p) +
       `<button class="sc-lgx" data-x="dir" title="Remove the direction pane from the chart" style="pointer-events:auto">✕</button>`;
+  }
+  // VIX / ATM IV / straddle levels with their 15-min change (amber = vol bid, blue = offered): context, not in the composite
+  function scDirVolLegend(p) {
+    if (!p || !(p.vix > 0 || p.iv > 0 || p.strd > 0)) return '';
+    const V = p._v || {}, c = (v, k) => v == null ? '' : ` <b style="color:${v >= SC_DIR_VOL[k] * 0.4 ? SC_DIR.vb : v <= -SC_DIR_VOL[k] * 0.4 ? SC_DIR.vo : 'inherit'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(k === 'vix' ? 2 : 1)}${k === 'strd' ? '%' : ''}</b>`;
+    const one = (k, name, lv, dec) => lv > 0 ? `${name} ${(+lv).toFixed(dec)}${c(V[k], k)}` : '';
+    const txt = [one('vix', 'VIX', p.vix, 2), one('iv', 'IV', p.iv, 1), one('strd', 'straddle', p.strd, p.strd < 100 ? 1 : 0)].filter(Boolean).join(' · ');
+    return `<span class="sc-lg" title="Volatility now and its 15-min change (amber = rising, blue = falling). Falling vol led the index higher ~60% of the time at 5 min in bias_eval.py on the first four sessions; context, not in the composite until about 20 sessions confirm it."><i style="background:${SC_DIR.vb}"></i>${txt}</span>`;
   }
   function scQueueDraw() { if (!SC.raf) SC.raf = requestAnimationFrame(() => { SC.raf = 0; try { scDrawChart(); } catch (e) { console.log('[scalp] chart', e); } }); }
   function scDrawChart() {

@@ -1999,7 +1999,10 @@ def test_scalping_tab():
                 rows = [{"strike": k, "ce_symbol": f"{sym}{k}CE", "pe_symbol": f"{sym}{k}PE", "ce_oi": 1000 + (k % 700) * 3, "pe_oi": 1200 + (k % 500) * 2,
                          "ce_oi_chg": 10 * i, "pe_oi_chg": 15 * i, "ce_iv": 14, "pe_iv": 15,
                          "ce_tbq": 50000 + _rd2.uniform(0, 20000) + 300 * i, "ce_tsq": 60000 + _rd2.uniform(0, 20000), "pe_tbq": 40000 + _rd2.uniform(0, 20000), "pe_tsq": 45000 + _rd2.uniform(0, 20000)} for k in ks]
+                for r in rows:
+                    r["ce_ltp"], r["pe_ltp"] = max(1.0, 150 + (spot - r["strike"]) / 2 + i), max(1.0, 150 + (r["strike"] - spot) / 2 + i)
                 return {"timestamp": t.strftime("%d-%b-%Y %H:%M:%S"), "_replay_ts": int(t.timestamp()), "symbol": sym, "underlying_value": spot, "dte": 3, "strikes": rows,
+                        "india_vix": 15 + 0.01 * i, "atm_iv": 14 + 0.02 * i, "expiry": "10-Nov-2026" if i < 30 else "17-Nov-2026",
                         "flow": {"strikes": {}, "futures": {"near": {"b5": 10, "s5": 5, "b15": 30, "s15": 20, "bd": 1000 + 50 * i, "sd": 900 + 20 * i}}}}
             for sym, base in (("NIFTY", 25000.0), ("BANKNIFTY", 56000.0)):
                 with open(os.path.join(tdir, f"{sym}_2026-11-04.jsonl"), "w") as fh:
@@ -2051,14 +2054,30 @@ def test_scalping_tab():
                   and len(h2["points"]) == 14 and len(h2["prev"]) == 40 and h2["prev"][-1]["oth"] is not None and len(fl) == 20 and len(h3["points"]) == 20 and "prev" not in h3
                   and '_dir_record(sym, d, now)' in ssrc and 'parsed.path == "/api/dir-history"' in ssrc,
                   f"h1={len(h1['points'])} oth={[p['oth'] for p in h1['points'][:2]]} h2={len(h2['points'])} prev={len(h2['prev'])} file={len(fl)} h3={len(h3['points'])}")
+            # volatility context: VIX / ATM IV / ATM straddle ride along; bias_eval scores their 15-min change (vix15 / iv15 / str15)
+            sn = _BE2.load(fn_)
+            vr = [_BE2.vol_reads(x) for _, x in sn]
+            k0 = next(k for k in range(len(sn)) if (sn[k][0] - sn[0][0]).total_seconds() >= 900)
+            vd = _BE2.vol_deltas(vr[k0], vr[0])
+            roll = _BE2.vol_deltas(vr[35], vr[20])
+            smp = dict((F["_t"], F) for F, _ in dd2["NIFTY_2026-11-04"])
+            F25 = smp.get(sn[25][0].timestamp(), {})
+            stv = _BE2.atm_straddle({"underlying_value": 25040, "strikes": [{"strike": 25000, "ce_ltp": 100, "pe_ltp": 60}, {"strike": 25100, "ce_ltp": 50, "pe_ltp": 120}, {"strike": 25200, "ce_ltp": 0, "pe_ltp": 200}]})
+            check("direction pane: volatility context (India VIX, ATM IV, ATM straddle at the strike nearest spot, expiry) rides on every point; bias_eval scores minus their 15-min change as vix15 / iv15 / str15 (straddle in %, IV and straddle within one expiry only, VIX across a roll); no put/call skew (one IV per strike)",
+                  last["vix"] == round(15 + 0.39, 2) and last["iv"] == round(14 + 0.78, 2) and last["strd"] is not None and last["exp"] == "17-Nov-2026"
+                  and abs(vd["vix15"] + 0.01 * k0) < 1e-9 and abs(vd["iv15"] + 0.02 * k0) < 1e-9 and abs(vd["str15"] + math.log(vr[k0]["strd"] / vr[0]["strd"]) * 100) < 1e-9
+                  and "vix15" in roll and "iv15" not in roll and "str15" not in roll and stv == 160
+                  and all(k in _BE2.READS for k in ("vix15", "iv15", "str15")) and "skew15" not in _BE2.READS and F25.get("vix15") is not None,
+                  f"last={ {k: last.get(k) for k in ('vix', 'iv', 'strd', 'exp')} } vd={vd} roll={roll} stv={stv} F25={F25.get('vix15')}")
     except Exception as ex:  # noqa: BLE001
         import traceback as _tb3
         check("direction pane: python side runs", False, _tb3.format_exc()[-1500:])
     try:
-        dseg = d[d.index("  const SC_DIR_H = 140;"):d.index("\n  }\n", d.index("function scDirLegend(p)")) + 5]
+        dseg = d[d.index("  const SC_DIR_H = 170;"):d.index("\n  }\n", d.index("function scDirVolLegend(p)")) + 5]
         jsd = "const _BF = { dir: 0.25 }; const SC_UP = 'U', SC_DN = 'D'; let state = { symbol: 'NIFTY' }; const SC = { pref: { dir: true } };\n" + dseg + """
         const V = [0, 60, 120, 180, 240, 300, 1200].map(m => ({ t: (1e6 + m * 60) * 1000 })), P = [];
-        for (let k = 0; k <= 1300; k += 10) P.push({ ts: 1e6 + k * 6 + 5, dir: k < 600 ? 0.4 : -0.1, bs: 1, w: 0.2, oth: -0.5, pcr: k / 1000, noi: k, cvd: -k, gex: k < 600 ? 1 : -1 });
+        for (let k = 0; k <= 1300; k += 10) P.push({ ts: 1e6 + k * 6 + 5, dir: k < 600 ? 0.4 : -0.1, bs: 1, w: 0.2, oth: -0.5, pcr: k / 1000, noi: k, cvd: -k, gex: k < 600 ? 1 : -1,
+          vix: 15 + k / 1000, iv: 14 + k / 500, strd: 300 * Math.exp(k / 10000), exp: k < 1000 ? 'A' : 'B' });
         const at = scDirAt(V, 60, P);
         const back = scDirBack(P, P[100].ts), noBack = scDirBack(P, P[3].ts), dl = scDirDelta(P, P[100], 'noi');
         const D = { sym: 'NIFTY', day: '2026-11-11', pts: [{ ts: 5 }], prev: null };
@@ -2068,7 +2087,10 @@ def test_scalping_tab():
         const bx = i => 10 + i * 8, pane = scDirPane(V, bx, 8, 6, 600, 100, 128, 60, -1), empty = (SC.dir = { pts: [], prev: [] }, scDirPane(V, bx, 8, 6, 600, 100, 128, 60, -1));
         const lg = [scDirLegend({ dir: 0.4, bs: 1, w: 0.2, oth: -0.5 }), scDirLegend({ dir: -0.1, bs: null, w: null, oth: null }), scDirLegend(null)];
         state.symbol = 'FINNIFTY'; const lgF = scDirLegend({ dir: -0.3, bs: -1, w: -0.2, oth: null });
-        console.log(JSON.stringify({ at: at.map(p => p ? p.ts : null), back: back && back.ts, noBack, dl, m1, pv, m2, pane: pane.svg, last: pane.p && pane.p.ts, empty: empty.svg, lg, lgF }));"""
+        state.symbol = 'NIFTY';
+        const vv = [scDirVol(P, P[90], 'vix'), scDirVol(P, P[90], 'iv'), scDirVol(P, P[90], 'strd'), scDirVol(P, P[100], 'vix'), scDirVol(P, P[100], 'iv'), scDirVol(P, P[100], 'strd'), scDirVol(P, P[3], 'vix')];
+        const lgV = scDirLegend(Object.assign({}, P[90], { _v: { vix: 0.2, iv: -0.5, strd: null } })), lgV0 = scDirVolLegend({ dir: 0.1 });
+        console.log(JSON.stringify({ at: at.map(p => p ? p.ts : null), back: back && back.ts, noBack, dl, m1, pv, m2, pane: pane.svg, last: pane.p && pane.p.ts, pv_: pane.p && pane.p._v, empty: empty.svg, lg, lgF, vv, lgV, lgV0 }));"""
         rr = subprocess.run(["node", "-e", jsd], capture_output=True, text=True, timeout=20)
         od = json.loads(rr.stdout or "null") or {"err": rr.stderr[-800:]}
         strip3 = lambda h: re.sub(r' title="[^"]*"', "", h)
@@ -2090,6 +2112,15 @@ def test_scalping_tab():
               and "rsiM: 14, dir: true, sqz: true" in d and "row('dir', 'Direction (book, walls, other index)'" in d and "'wt', 'dir', 'rsi'" in d
               and 'id="scLegD"' in d and "['scLegP', 'scLegR', 'scLegD']" in d and "scRenderAll(); scNote(); scDirPoll();" in d and "now - D.at < 10000" in d
               and "/api/dir-history?symbol=" in d)
+        vv = od.get("vv") or []
+        cl = lambda a, b: a is not None and abs(a - b) < 1e-9
+        lgv = strip3(od.get("lgV", ""))
+        check("direction pane (node): VIX / ATM IV / straddle strips show the 15-min change (VIX points, IV vol points, straddle %), amber when vol is bid and blue when offered; IV and straddle blank across an expiry roll, VIX not; the legend shows the levels with their change and the backtest in its tooltip",
+              len(vv) == 7 and cl(vv[0], 0.15) and cl(vv[1], 0.3) and cl(vv[2], 1.5) and cl(vv[3], 0.15) and vv[4] is None and vv[5] is None and vv[6] is None
+              and all(x in pane for x in (">VIX 15m<", ">ATM IV 15m<", ">Straddle 15m<")) and 'fill="#e8b339"' in pane and "~61% of the time" in pane
+              and (od.get("pv_") or {}).get("vix") is not None
+              and "VIX 15.90 <b style=\"color:#e8b339\">+0.20</b> · IV 15.8 <b style=\"color:#6ea8ff\">−0.5</b> · straddle 328" in lgv and "~60% of the time at 5 min" in od.get("lgV", "") and od.get("lgV0") == "",
+              str(vv) + " | " + lgv[-400:])
     except Exception as ex:  # noqa: BLE001
         check("direction pane: node side runs", False, repr(ex))
     check("scalping: the page explains itself when opened from a file or when the data source is not Zerodha",

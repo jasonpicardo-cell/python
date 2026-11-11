@@ -33,6 +33,11 @@ Reads (all signed so + = bullish for the index):
     shift_w    the book shift, bearish calls kept only when walls lean bearish too (the grid's ▼ gate)
     pcr        15-min change of ln(put OI / call OI) over the grid strikes (puts added faster = bullish)
     cvd15      15-min taker-flow imbalance on the near future (the futures CVD's slope)
+    vix15      minus the 15-min change in India VIX, points (VIX falling = bullish, the usual inverse link)
+    iv15       minus the 15-min change in the chain's ATM IV, vol points (same expiry only: a roll is not a move)
+    str15      minus the 15-min % change of the ATM straddle (CE + PE at the strike nearest spot; same expiry)
+               The three volatility reads ride along on the Scalper direction pane as context strips; they join the
+               composite only if they beat 50% here on enough sessions.
     dir        the Scalper direction pane's composite (composite() below): mean of the book shift, walls and the
                other index's shift, each scaled to -1..+1
   setup        CANDIDATE, not shown in the grid: long dealer gamma + 15-min move of at least fadeBps
@@ -261,6 +266,39 @@ def walls(d, spot):
     return pw, cw, w
 
 
+def atm_straddle(d):
+    """CE + PE LTP at the strike nearest spot (both quoted), else None. Twin of _bfStr's 'now' in nse_dashboard.html."""
+    spot = d.get("underlying_value") or 0
+    rows = [r for r in (d.get("strikes") or []) if (r.get("ce_ltp") or 0) > 0 and (r.get("pe_ltp") or 0) > 0]
+    if not rows or not spot > 0:
+        return None
+    a = min(rows, key=lambda r: abs(r["strike"] - spot))
+    return a["ce_ltp"] + a["pe_ltp"]
+
+
+def vol_reads(d):
+    """The volatility context the Scalper direction pane plots: India VIX, ATM IV, ATM straddle, and the expiry they belong
+    to (IV and straddle are compared only within one expiry). No put/call skew: the chain carries one IV per strike."""
+    vx, iv = d.get("india_vix"), d.get("atm_iv")
+    return {"vix": float(vx) if vx else None, "iv": float(iv) if iv else None, "strd": atm_straddle(d), "exp": d.get("expiry")}
+
+
+def vol_deltas(now, then):
+    """vix15 / iv15 / str15 (signed + = bullish for the index) from vol_reads() now and 15 minutes earlier."""
+    out = {}
+    if not then:
+        return out
+    if now["vix"] and then["vix"]:
+        out["vix15"] = -(now["vix"] - then["vix"])
+    if now["exp"] != then["exp"]:
+        return out
+    if now["iv"] and then["iv"]:
+        out["iv15"] = -(now["iv"] - then["iv"])
+    if now["strd"] and then["strd"]:
+        out["str15"] = -math.log(now["strd"] / then["strd"]) * 100
+    return out
+
+
 TAG_SIGN = {"BUY": 1, "COVER": 1, "WRITE": -1, "DUMP": -1}   # for the option itself: + = premium-bullish
 
 
@@ -353,6 +391,8 @@ def day_samples(path):
         F["pcr"] = (g0 - g1) * 100 if g0 is not None and g1 is not None else None
         if fu and (fu.get("b15") or 0) + (fu.get("s15") or 0) > 0:
             F["cvd15"] = _imb(fu["b15"], fu["s15"])
+        q15v = S[j15][1] if j15 is not None and S[j15][0].hour * 60 + S[j15][0].minute >= 9 * 60 + 15 else None
+        F.update(vol_deltas(vol_reads(d), vol_reads(q15v) if q15v else None))   # not against the pre-open
         sw = F.get("shift")
         F["shift_w"] = sw if sw is None or sw > 0 or (F.get("walls") is not None and F["walls"] < 0) else None
         F["setup"] = setup(F.get("shift"), sm.bps(d.get("symbol") or "", spot, now), gex_total(d)) or None
@@ -364,7 +404,7 @@ def day_samples(path):
 
 
 READS = ("level", "prem_day", "oi15", "flow5", "dflow", "writer", "wconf", "oitag", "fut_flow", "cvd15", "fut_oi", "basis", "vwap", "pcr",
-         "other", "walls", "pin", "fade15", "shift", "shift_w", "dir", "setup")
+         "vix15", "iv15", "str15", "other", "walls", "pin", "fade15", "shift", "shift_w", "dir", "setup")
 
 
 def pair_other(days):
