@@ -1788,6 +1788,51 @@ def test_scalping_tab():
           'id="homeGrid"' in d and "function homeGridRender" in d and "['NIFTY', 'BANKNIFTY'].includes(state.symbol" in d and "body.light-mode .sc-grid {" in d and ".sc-chartwrap, .sc-indmenu { --text: #e8ebf2;" in d and "h50 && r.strike % 100 !== 0" in d and 'id="hgN"' in d and "homeGridPrefV1" in d and "getClientRects().length" in d
           and "['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY')" in d[d.index("function homeGridRender"):d.index("function homeGridRender") + 700] and "homeGridRender();" in d
           and "ai + HN + 1), atm" in d and "ai + HN + 1).reverse()" not in d)
+    # Scalper strike grid: any CE-side cell charts that strike's CE, any PE-side cell its PE; the strike cell keeps the side on show.
+    try:
+        i0 = d.index("  function scGridPick(td) {"); fn = d[i0:d.index("\n  }\n", i0) + 5]
+        jsg = fn + """
+const mk = (i, k) => ({ cellIndex: i, dataset: k ? { k } : {} });
+const K = mk(8, '24500'), tr = { querySelector: q => K }; [K].concat([0, 3, 7, 9, 15].map(i => mk(i))).forEach(c => c.closest = () => tr);
+const C = i => Object.assign(mk(i), { closest: () => tr }), lone = { closest: () => ({ querySelector: () => null }) };
+let SC = { pref: { chart: 'SPOT' } }; const out = [scGridPick(C(0)), scGridPick(C(7)), scGridPick(C(9)), scGridPick(C(15)), scGridPick(K)];
+SC = { pref: { chart: 'PE' } }; out.push(scGridPick(K), scGridPick(lone), scGridPick(null));
+console.log(JSON.stringify(out));"""
+        og = json.loads(_sp.run(["node", "-e", jsg], capture_output=True, text=True, timeout=20).stdout)
+        check("scalping grid: clicking a CE column opens that strike's CE chart, a PE column its PE chart, the strike cell keeps the side (CE unless PE is on show); rows without a strike are ignored",
+              [x and x["side"] for x in og] == ["CE", "CE", "PE", "PE", "CE", "PE", None, None] and all(x["k"] == "24500" for x in og[:6])
+              and "const g = scGridPick(e.target.closest('td')); if (!g) return; SC.pref.selCE = SC.pref.selPE = 'k' + g.k; SC.pref.chart = g.side;" in d
+              and ".sc-grid tr:has(td.k[data-k]) td { cursor: pointer; }" in d, str(og))
+    except Exception as ex:  # noqa: BLE001
+        check("scalping grid: CE / PE cell click opens that side's chart", False, str(ex))
+    # Scalping tab CPU: the 500 ms poll must not re-parse an unchanged chart SVG or rewrite unchanged labels (each a style + layout pass).
+    i0 = d.index("function scDrawChart() {"); i1 = d.index("\n  function ", i0 + 30); dc = d[i0:i1]
+    i2 = d.index("function scRenderTicket() {"); i3 = d.index("function scRenderChrome() {"); i4 = d.index("\n  function ", i3 + 30)
+    rc = d[i2:i4]
+    check("scalping CPU: the chart SVG is written only when its markup changed (the placeholder note resets the cache), labels go through scTxt",
+          dc.count("svg.innerHTML = s;") == 1 and "if (SC.svgS !== s) { svg.innerHTML = s; SC.svgS = s; }" in dc and "const note = t => { SC.svgS = null; svg.innerHTML" in dc
+          and "const scTxt = (el, t) => { if (el && el.textContent !== t) el.textContent = t; };" in d and rc.count("scTxt(") >= 18
+          and ".textContent = " not in rc.replace("el.textContent = t", ""), str(_re.findall(r".{40}\.textContent = ", rc))[:300])
+    # Idle CPU: the Scalper poll slows to SC_IDLE_POLL_MS when the market is shut (opening the tab still fetches at once),
+    # and the Home context / squeeze panes (pure drawings) defer through _paintVis while off screen.
+    try:
+        i0 = d.index("  function scMarketHours() {"); fm = d[i0:d.index("\n", i0) + 1]
+        jsm = fm + """
+let NOW; const _istNowMin = () => NOW;
+console.log(JSON.stringify([[1, 539], [1, 540], [3, 700], [5, 940], [5, 941], [6, 700], [0, 700]].map(([wd, m]) => { NOW = { wd, m }; return scMarketHours(); })));"""
+        om = json.loads(_sp.run(["node", "-e", jsm], capture_output=True, text=True, timeout=20).stdout)
+    except Exception as ex:  # noqa: BLE001
+        om = str(ex)
+    sp_ = d[d.index("  async function scPoll(force) {"):d.index("SC.busy = true;", d.index("  async function scPoll(force) {"))]
+    check("scalping idle poll: 500 ms on weekdays 09:00-15:40 IST, else one fetch per SC_IDLE_POLL_MS (5 s); opening the tab forces a fetch; the interval passes no argument",
+          om == [False, True, True, True, False, False, False] and "const SC_IDLE_POLL_MS = 5000;" in d
+          and "if (force !== true && !scMarketHours() && Date.now() - (SC.lastPollAt || 0) < SC_IDLE_POLL_MS) return;" in sp_ and "SC.lastPollAt = Date.now();" in sp_
+          and "scPoll(true); };" in d and "setInterval(scPoll, SC_POLL_MS);" in d, str(om))
+    check("home panes: the context pane and the squeeze pane paint through _paintVis (deferred while hidden, painted on return); recording stays per poll; the watermark clock idles with the pane",
+          "function renderCtxChart() { _paintVis('ctxChartBody', _renderCtxChartNow, 'renderCtxChart'); }" in d and d.count("function _renderCtxChartNow() {") == 1
+          and "_paintVis('sqzPaneBody', () => {" in d and "_recordCtx(data); renderChartContext(data); renderCtxChart();" in d and "_pdScoreSignals();" in d
+          and "if (document.hidden || _pv.seen.get('ctxChartBody') === false) return;" in d
+          and d.index("const _pv = {") < d.index("_pv.seen.get('ctxChartBody')"))
     # strike-grid bias: the 2-minute book-shift z (_bfZ), backtested by bias_eval.py. ONE helper block and ONE renderer (_bfGrid) serve both grids.
     blocks = [d[d.index("  const _BF = {"):d.index("\n  }\n", d.index("function _bfGrid(o)")) + 5]] if "function _bfGrid(o)" in d else []
     check("strike grids: one shared helper block and renderer (_bfGrid) for the Home and Scalper grids (no second copy to drift), the book-shift average gated by the walls, no per-strike arrows or strike verdict; no leftover level/premium/OI scoring",
@@ -2195,6 +2240,19 @@ def test_scalping_tab():
     for i in range(_Z._TAPE_MAX + 50):
         _Z._tape_add(K, 2000 + i, {"ltp": 100 + i, "bid": 1, "ask": 2, "bid_qty": 1, "ask_qty": 1, "volume": i})
     check("tape: memory is bounded", len(_Z._tape[K]) == _Z._TAPE_MAX)
+    rw = _Z.tape_since(K, 0, limit=10 ** 6)["rows"]
+    check("tape: after wrapping, rows come back oldest-first with contiguous sequence numbers, ints for seq / time, newest last",
+          len(rw) == _Z._TAPE_MAX and all(rw[j + 1][0] == rw[j][0] + 1 for j in range(len(rw) - 1)) and rw[-1][0] == _Z._TAPE_MAX + 53
+          and rw[-1][2] == 100 + _Z._TAPE_MAX + 49 and isinstance(rw[0][0], int) and isinstance(rw[0][1], int)
+          and [r[0] for r in _Z.tape_since(K, rw[-1][0] - 2)["rows"]] == [rw[-2][0], rw[-1][0]])
+    _Z._tape_add(K, 9e9, {"ltp": 7, "bid": None, "ask": 8, "bid_qty": None, "ask_qty": 1, "volume": 5})
+    check("tape: a missing quote (None) survives storage and reads back as None, not NaN",
+          _Z.tape_since(K, 0, limit=1)["rows"][0][2:] == [7.0, None, 8.0, None, 1.0, 5.0])
+    check("tape: rows are packed doubles (≤ 8 × 8 B a row plus array slack), not a deque of tuples of Python numbers (~330 B a row; ~700 MB over ~560 streamed contracts)",
+          type(_Z._tape[K]).__name__ == "_Tape" and _Z._tape[K].a.typecode == "d" and _Z._tape[K].a.buffer_info()[1] == _Z._TAPE_MAX * 8)
+    zsrc = open(os.path.join(HERE, "nse_adapter_zerodha.py"), encoding="utf-8").read()
+    check("raw tick diagnostics: the tick is kept as is and converted only when the Diagnostics tab asks (no copy per tick)",
+          '= (now, t)   # converted on read (raw_debug)' in zsrc and '"msg": _jsonable(msg)}' in zsrc and "(now, _jsonable(t))" not in zsrc)
     _Z._tape.clear()
     check("scalping server: the state call parses per-contract tape cursors with rpartition and only accepts option names or the listed ones",
           'rpartition(":")' in s_ and "tape_since" in s_ and "[A-Z0-9]{8,30}" in s_)
@@ -4411,6 +4469,13 @@ def test_chart_ctx_actions():
     Live / Historical controls), Fit (the toolbar's Fit) and Reset Defaults
     (the very function behind Alerts ▸ Reset Defaults)."""
     d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
+    import re as _re, urllib.parse as _up
+    m = _re.search(r'--xhair: url\("data:image/svg\+xml,([^"]+)"\) 12 12, crosshair;', d)
+    svg = _up.unquote(m.group(1)) if m else ""
+    check("home chart cursor: an explicit SVG cross (white on a black outline, system crosshair as fallback) on the wrap, the candle SVG and after a drag; no bare 'crosshair' left, which Edge on Windows can draw as no pointer at all",
+          bool(m) and svg.startswith("<svg xmlns='http://www.w3.org/2000/svg'") and svg.endswith("</svg>") and "#" not in m.group(1)
+          and ".chart-interactive-wrap { position: relative; cursor: var(--xhair); }" in d and "cursor:var(--xhair);user-select:none;" in d
+          and "s.style.cursor = 'var(--xhair)';" in d and not _re.search(r"cursor\s*[:=]\s*'?crosshair", d), svg[:80])
     i = d.index("const onCtx = ev => {"); j = d.index("document.addEventListener('contextmenu', onCtx, true);")
     seg = d[i:j]
     check("chart right-click: calendar and Fit above the alerts; Reset Defaults LAST, behind its own separator",

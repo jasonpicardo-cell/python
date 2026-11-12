@@ -610,19 +610,53 @@ def _norm(t: Dict[str, Any]) -> Dict[str, Any]:
 # Rows are (seq, epoch_ms, ltp, bid, ask, bid_qty, ask_qty, volume); seq counts
 # up per instrument, so a reader asks for "everything after seq N" and never
 # misses or repeats a row. No broker call is involved - it is the tick stream.
-import collections as _col_tape
+from array import array as _tape_arr
 _tape: Dict[str, Any] = {}
 _TAPE_MAX = 6000
+_NAN = float("nan")
+
+
+class _Tape:
+    """The newest _TAPE_MAX rows of one instrument, packed 8 doubles a row in one array (64 B a row). As a deque of
+    tuples each row cost ~330 B in Python ints and floats, about 2 MB per busy instrument, so ~560 streamed contracts
+    held ~700 MB and fed the garbage collector millions of objects. None is stored as NaN and read back as None."""
+    __slots__ = ("a", "start", "n", "seq", "body")
+
+    def __init__(self) -> None:
+        self.a, self.start, self.n, self.seq, self.body = _tape_arr("d"), 0, 0, 0, None
+
+    def __len__(self) -> int:
+        return self.n
+
+    def add(self, ms: int, body: tuple) -> None:
+        self.seq += 1
+        self.body, a = body, self.a
+        if None in body:
+            body = tuple(_NAN if v is None else v for v in body)
+        if self.n < _TAPE_MAX:
+            a.append(self.seq); a.append(ms); a.extend(body); self.n += 1
+        else:                                            # full: overwrite the oldest row in place, nothing freed
+            i = self.start * 8; a[i] = self.seq; a[i + 1] = ms; a[i + 2], a[i + 3], a[i + 4], a[i + 5], a[i + 6], a[i + 7] = body
+            self.start = (self.start + 1) % _TAPE_MAX
+
+    def rows(self, after: int, limit: int) -> List[list]:
+        k = max(0, min(self.seq - after, self.n, limit))
+        out = []
+        for j in range(self.n - k, self.n):              # oldest of the newest k first
+            i = ((self.start + j) % _TAPE_MAX if self.n == _TAPE_MAX else j) * 8
+            r = self.a[i:i + 8]
+            out.append([int(r[0]), int(r[1])] + [None if v != v else v for v in r[2:]])
+        return out
 
 
 def _tape_add(key: str, now: float, tk: Dict[str, Any]) -> None:
     dq = _tape.get(key)
     if dq is None:
-        dq = _tape[key] = _col_tape.deque(maxlen=_TAPE_MAX)
+        dq = _tape[key] = _Tape()
     body = (tk.get("ltp"), tk.get("bid"), tk.get("ask"), tk.get("bid_qty"), tk.get("ask_qty"), tk.get("volume"))
-    if dq and dq[-1][2:] == body:
+    if dq.n and dq.body == body:
         return
-    dq.append((dq[-1][0] + 1 if dq else 1, int(now * 1000)) + body)
+    dq.add(int(now * 1000), body)
 
 
 def tape_since(key: str, after: int = 0, limit: int = 1500) -> Dict[str, Any]:
@@ -633,17 +667,12 @@ def tape_since(key: str, after: int = 0, limit: int = 1500) -> Dict[str, Any]:
         dq = _tape.get(key)
         if not dq:
             return {"cur": 0, "rows": [], "reset": bool(after)}
-        last = dq[-1][0]
+        last = dq.seq
         reset = after > last
         if reset:
             after = 0
-        out = []
-        for r in reversed(dq):
-            if r[0] <= after or len(out) >= limit:
-                break
-            out.append(r)
-    out.reverse()
-    return {"cur": last, "rows": [list(r) for r in out], "reset": reset}
+        rows = dq.rows(after, limit)
+    return {"cur": last, "rows": rows, "reset": reset}
 
 
 # ── book-tick recorder (nse_tick_recorder): the ticks above, near the money, to book_ticks/ for later study.
@@ -701,7 +730,7 @@ def _on_ticks(_ws, ticks) -> None:
             if not key:
                 continue
             try:
-                _raw_last.setdefault(key, {})[str(t.get("mode") or "tick")] = (now, _jsonable(t))
+                _raw_last.setdefault(key, {})[str(t.get("mode") or "tick")] = (now, t)   # converted on read (raw_debug)
             except Exception:
                 pass
             d = _norm(t)
@@ -2250,7 +2279,7 @@ def raw_debug(match: str) -> Dict[str, Any]:
     for sym, by in hits:
         dp = _depth.get(sym) or {}
         out[sym] = {
-            "raw": {t: {"age_s": round(now - ts, 1), "msg": msg} for t, (ts, msg) in by.items()},
+            "raw": {t: {"age_s": round(now - ts, 1), "msg": _jsonable(msg)} for t, (ts, msg) in by.items()},
             "stored": {
                 "ladder_age_s": round(now - dp["lts"], 1) if dp.get("lts") else None,
                 "bids": dp.get("bids"), "asks": dp.get("asks"),
