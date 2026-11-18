@@ -334,7 +334,7 @@ def ensure_cert(cert, key, days=800):
     side = cert + ".names"
     have = ""
     try:
-        have = open(side).read()
+        have = open(side, encoding="utf-8").read()
     except Exception:
         pass
     if os.path.exists(cert) and os.path.exists(key) and have == sig:
@@ -348,7 +348,7 @@ def ensure_cert(cert, key, days=800):
         os.chmod(key, 0o600)
     except Exception:
         pass
-    with open(side, "w") as f:
+    with open(side, "w", encoding="utf-8") as f:
         f.write(sig)
     return dns, ips
 

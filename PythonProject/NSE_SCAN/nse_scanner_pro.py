@@ -197,7 +197,7 @@ DEFAULT_CONFIG = {
 
 def load_config() -> dict:
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE) as f:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
             user = json.load(f)
         cfg = {**DEFAULT_CONFIG, **user}
     else:
@@ -206,7 +206,7 @@ def load_config() -> dict:
     return cfg
 
 def save_config(cfg: dict):
-    with open(CONFIG_FILE, "w") as f:
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
 
 # ═══════════════════════════════════════════════════════════════════
@@ -238,7 +238,7 @@ def fetch_nse_stock_list(top_n=None) -> list[str]:
     return yf_syms[:top_n] if top_n else yf_syms
 
 def load_watchlist(path: str) -> list[str]:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         raw = [l.strip().upper() for l in f if l.strip() and not l.startswith("#")]
     return [s if s.endswith(".NS") else f"{s}.NS" for s in raw]
 
@@ -546,7 +546,7 @@ tr:hover td{{background:#161b22}}
 </table>
 </body></html>"""
 
-    with open(path,"w") as f:
+    with open(path,"w", encoding="utf-8") as f:
         f.write(html)
     log.info(f"HTML report saved → {path}")
 

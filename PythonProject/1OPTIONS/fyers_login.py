@@ -43,7 +43,7 @@ def _env(k, d=""):
         return v.strip()
     envf = _env_file()
     if envf:
-        for line in open(envf):
+        for line in open(envf, encoding="utf-8"):
             line = line.strip()
             if line.startswith("#") or "=" not in line:
                 continue
@@ -98,7 +98,7 @@ def main():
     # The timestamp is what the server and adapter use to decide whether a
     # login is needed, so this file has to stay structured.
     path = os.path.join(HERE, ".fyers_token")
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump({"access_token": token, "ts": time.time(),
                    "client_id": cid}, f)
     try:
@@ -117,7 +117,7 @@ def main():
     sync_path = os.path.abspath(os.path.join(sync_dir, "fyers_token.txt"))
     try:
         os.makedirs(os.path.dirname(sync_path), exist_ok=True)
-        with open(sync_path, "w") as f:
+        with open(sync_path, "w", encoding="utf-8") as f:
             f.write(token)          # the raw token only - no JSON, no newline
         try:
             os.chmod(sync_path, 0o600)

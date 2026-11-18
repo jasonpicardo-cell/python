@@ -284,7 +284,7 @@ def _load_dotenv(path: str = None) -> int:
         return 0
     n = 0
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
@@ -503,7 +503,7 @@ def _price_at_920(symbol: str, day: str):
     try:
         path = _os.path.join(_TICK_DIR, f"{symbol}_{day}.csv")
         best = None
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 p = line.strip().split(",")
                 if len(p) < 2:
@@ -649,7 +649,7 @@ def _archive_minutes(symbol: str, rows) -> None:
             _os.makedirs(_TICK_DIR, exist_ok=True)
             existing = {}
             if _os.path.exists(apath_f):
-                with open(apath_f) as fh:
+                with open(apath_f, encoding="utf-8") as fh:
                     for line in fh:
                         p = line.strip().split(",")
                         if len(p) >= 2:
@@ -660,7 +660,7 @@ def _archive_minutes(symbol: str, rows) -> None:
             for cd in today:
                 existing[int(cd["t"] // 60)] = cd["c"]
             tmp = f"{apath_f}.{threading.get_ident()}.tmp"
-            with open(tmp, "w") as fh:
+            with open(tmp, "w", encoding="utf-8") as fh:
                 for m in sorted(existing):
                     fh.write(f"{m * 60},{existing[m]}\n")
             _os.replace(tmp, apath_f)
@@ -749,7 +749,7 @@ def _warm_write(symbol: str, day: str, bars: list) -> None:
         _os.makedirs(_WARM_DIR, exist_ok=True)
         path = _warm_path(symbol, day)
         tmp = f"{path}.{threading.get_ident()}.tmp"
-        with open(tmp, "w") as fh:
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump({"symbol": symbol, "day": day, "bars": bars}, fh, separators=(",", ":"))
         _os.replace(tmp, path)
         # keep two weeks; older sessions are never asked for
@@ -775,7 +775,7 @@ def _session_bars(symbol: str, day: str) -> list:
     path = _warm_path(symbol, day)
     if _os.path.exists(path):
         try:
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 bars = json.load(fh).get("bars") or []
             if bars:
                 with _warm_lock:
@@ -909,7 +909,7 @@ def _poi_get(day: str):
     path = _os.path.join(_POI_DIR, f"{day}.json")
     if _os.path.exists(path):
         try:
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 return json.load(fh), False
         except Exception:
             pass
@@ -937,7 +937,7 @@ def _poi_get(day: str):
     try:
         _os.makedirs(_POI_DIR, exist_ok=True)
         tmp = f"{path}.{threading.get_ident()}.tmp"
-        with open(tmp, "w") as fh:
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(got, fh)
         _os.replace(tmp, path)
     except Exception as e:  # noqa: BLE001
@@ -1566,7 +1566,7 @@ def _load_archive(symbol: str, day: str) -> dict:
     if not _os.path.exists(p):
         return out
     try:
-        with open(p) as f:
+        with open(p, encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split(",")
                 if len(parts) >= 2:
@@ -1584,7 +1584,7 @@ def _write_archive(symbol: str, day: str, series: dict) -> None:
     try:
         _os.makedirs(_TICK_DIR, exist_ok=True)
         tmp = p + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             for m in sorted(series):
                 f.write(f"{m * 60},{series[m]}\n")
         _os.replace(tmp, p)            # atomic, so a crash cannot truncate it
@@ -1854,7 +1854,7 @@ def _broker_token_date() -> str:
     if not _os.path.exists(path):
         return ""
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             ts = _json.load(f).get("ts", 0)
         if not ts:
             return ""
@@ -1963,7 +1963,7 @@ def _load_index_weights() -> dict:
         return _weights_cache
     try:
         if _os.path.exists(_WEIGHTS_FILE):
-            with open(_WEIGHTS_FILE) as f:
+            with open(_WEIGHTS_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             _weights_cache = data
             upd = data.get("_updated", "?")
@@ -1980,7 +1980,7 @@ def _save_index_weights(data: dict) -> bool:
     try:
         data["_updated"] = time.strftime("%Y-%m-%d %H:%M")
         tmp = _WEIGHTS_FILE + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         _os.replace(tmp, _WEIGHTS_FILE)          # atomic
         global _weights_cache
@@ -2350,7 +2350,7 @@ def _cleanup_loop():
             try:
                 _cleanup_state["result"] = _run_cleanup()
                 _cleanup_state["last"] = time.time()
-                with open(stamp, "w") as f:
+                with open(stamp, "w", encoding="utf-8") as f:
                     f.write(time.strftime("%Y-%m-%d %H:%M"))
             except Exception as e:  # noqa: BLE001
                 print(f"[cleanup] failed: {e}")
@@ -3165,7 +3165,7 @@ def _self_test(symbol: str) -> dict:
         import shutil as _sh
         free = _sh.disk_usage(here).free / 1e9
         probe = _os.path.join(here, ".selftest_write")
-        with open(probe, "w") as f:
+        with open(probe, "w", encoding="utf-8") as f:
             f.write("ok")
         _os.remove(probe)
         add("disk", "pass" if free > 2 else "warn" if free > 0.5 else "fail", f"{free:.1f} GB free · writable")
@@ -3422,7 +3422,7 @@ def _write_replay_snapshot(symbol: str, response: dict) -> None:
         path = _os.path.join(_REPLAY_DIR, f"{sym}_{day}.jsonl")
         slim = {k: v for k, v in response.items() if k not in ("strategies",)}
         slim["_replay_ts"] = int(time.time())
-        with open(path, "a") as f:
+        with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(slim, separators=(",", ":")) + "\n")
     except Exception as e:  # noqa: BLE001
         print(f"[!] Replay snapshot write failed (non-fatal): {e}")
@@ -3550,7 +3550,7 @@ def _turn_log_rows(body: dict) -> int:
             out.append(line)
         if out:
             _os.makedirs(_nt.LOG_DIR, exist_ok=True)
-            with open(path, "a") as f:
+            with open(path, "a", encoding="utf-8") as f:
                 f.write("\n".join(out) + "\n")
             n = len(out)
     return n
@@ -3579,7 +3579,7 @@ def _turn_model() -> dict:
         v = None
         if mt is not None:
             try:
-                with open(_nt.MODEL_PATH) as f:
+                with open(_nt.MODEL_PATH, encoding="utf-8") as f:
                     v = json.load(f)
             except Exception:
                 v = None
@@ -3607,7 +3607,7 @@ def _ctx_load(sym: str, day: str) -> list:
     path = _os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl")
     try:
         if _os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     try:
                         pts.append(json.loads(line))
@@ -3644,7 +3644,7 @@ def _ctx_backfill_bg(sym: str, day: str) -> None:
     def _run():
         got = []
         try:
-            with open(rp) as f:
+            with open(rp, encoding="utf-8") as f:
                 for line in f:
                     try:
                         snap = json.loads(line)
@@ -3667,7 +3667,7 @@ def _ctx_backfill_bg(sym: str, day: str) -> None:
                 cur.sort(key=lambda x: x.get("ts", 0))
             try:
                 _os.makedirs(_CTX_DIR, exist_ok=True)
-                with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl"), "a") as f:
+                with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl"), "a", encoding="utf-8") as f:
                     for p in add:
                         f.write(json.dumps(p, separators=(",", ":")) + "\n")
             except Exception as e:  # noqa: BLE001
@@ -3697,7 +3697,7 @@ def _ctx_record(sym: str, d: dict) -> None:
             del pts[:len(pts) - 6000]
     try:
         _os.makedirs(_CTX_DIR, exist_ok=True)
-        with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl"), "a") as f:
+        with open(_os.path.join(_CTX_DIR, f"{sym}_{day}.v2.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(pt, separators=(",", ":")) + "\n")
     except Exception as e:  # noqa: BLE001
         print(f"[ctx] write: {e}")
@@ -3962,7 +3962,7 @@ def _migrate_replay_units(only_today: bool = False) -> None:
     marker = _os.path.join(_REPLAY_DIR, "_units_migrated.txt")
     done = set()
     try:
-        with open(marker) as fh:
+        with open(marker, encoding="utf-8") as fh:
             done = {ln.strip() for ln in fh if ln.strip()}
     except Exception:
         pass
@@ -3980,7 +3980,7 @@ def _migrate_replay_units(only_today: bool = False) -> None:
         try:
             bak0 = _os.path.join(bak_dir, name)
             if _os.path.exists(bak0):
-                with open(path) as fh:
+                with open(path, encoding="utf-8") as fh:
                     bad = any('"qty_per_contract":' in ln and
                               (lambda q: q is not None and q < 15)(json.loads(ln).get("qty_per_contract"))
                               for ln in fh if ln.strip())
@@ -3994,7 +3994,7 @@ def _migrate_replay_units(only_today: bool = False) -> None:
             continue
         try:
             changed, out = 0, []
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 for line in fh:
                     line = line.rstrip("\n")
                     if not line:
@@ -4015,13 +4015,13 @@ def _migrate_replay_units(only_today: bool = False) -> None:
                 if not _os.path.exists(bak):
                     _sh.copy2(path, bak)
                 tmp = path + ".units.tmp"
-                with open(tmp, "w") as fh:
+                with open(tmp, "w", encoding="utf-8") as fh:
                     fh.write("\n".join(out) + "\n")
                 _os.replace(tmp, path)
                 n_files += 1
                 n_snaps += changed
             if not name.endswith(f"_{today}.jsonl"):
-                with open(marker, "a") as fh:
+                with open(marker, "a", encoding="utf-8") as fh:
                     fh.write(name + "\n")
         except Exception as e:  # noqa: BLE001
             print(f"[units] {name}: {e}")
@@ -4035,7 +4035,7 @@ def _replay_index(symbol: str, day: str) -> dict:
     if not _os.path.exists(path):
         return {"symbol": symbol, "date": day, "timestamps": []}
     ts = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             try:
                 ts.append(json.loads(line).get("_replay_ts", 0))
@@ -4047,7 +4047,7 @@ def _replay_snapshot(symbol: str, day: str, idx: int) -> dict | None:
     path = _os.path.join(_REPLAY_DIR, f"{symbol.upper()}_{day}.jsonl")
     if not _os.path.exists(path):
         return None
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for i, line in enumerate(f):
             if i == idx:
                 try:
@@ -4087,7 +4087,7 @@ def _bt_load_day(symbol, day):
     if not _os.path.exists(path):
         return []
     snaps = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             try:
                 snaps.append(json.loads(line))
@@ -4603,7 +4603,7 @@ def log_alert_outcome(payload):
     try:
         _os.makedirs(_REPLAY_DIR, exist_ok=True)
         payload["_ts"] = int(time.time())
-        with open(_ALERT_LOG, "a") as f:
+        with open(_ALERT_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, separators=(",", ":")) + "\n")
         return True
     except Exception as e:
@@ -4614,7 +4614,7 @@ def compute_alert_journal(symbol):
     if not _os.path.exists(_ALERT_LOG):
         return {"symbol": symbol, "entries": [], "summary": {}}
     entries = []
-    with open(_ALERT_LOG) as f:
+    with open(_ALERT_LOG, encoding="utf-8") as f:
         for line in f:
             try:
                 e = json.loads(line)
@@ -7340,7 +7340,7 @@ class Handler(BaseHTTPRequestHandler):
                 lp = _os.path.join(cache, lf)
                 if _os.path.isfile(lp):
                     try:
-                        with open(lp, "r") as fh:
+                        with open(lp, "r", encoding="utf-8") as fh:
                             universe = {ln.strip().upper().replace(".NS", "").split(",")[0]
                                         for ln in fh if ln.strip() and not ln.lower().startswith("symbol")}
                         print(f"[scan] universe from {lf}: {len(universe)} symbols")
@@ -7353,7 +7353,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not fn.lower().endswith(".csv"):
                         continue
                     try:
-                        with open(_os.path.join(cache, fn), "r", newline="") as fh:
+                        with open(_os.path.join(cache, fn), "r", newline="", encoding="utf-8") as fh:
                             rr = list(_csv.DictReader(fh))
                         if len(rr) < base:
                             continue
@@ -7376,7 +7376,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 path = _os.path.join(cache, fn)
                 try:
-                    with open(path, "r", newline="") as fh:
+                    with open(path, "r", newline="", encoding="utf-8") as fh:
                         rows = list(_csv.DictReader(fh))
                     if len(rows) < need:
                         skipped += 1
@@ -7613,7 +7613,7 @@ class Handler(BaseHTTPRequestHandler):
             for label, p in (("replay_file", rpath), ("tick_archive", apath)):
                 if _os.path.exists(p):
                     try:
-                        lines = sum(1 for _ in open(p))
+                        lines = sum(1 for _ in open(p, encoding="utf-8"))
                     except Exception:
                         lines = -1
                     add(label, lines > 0, f"{p} exists, {lines} lines")
@@ -7655,7 +7655,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 fp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "trade_log", f"{eng.day if eng else ''}.jsonl")
                 if eng and _os.path.exists(fp):
-                    with open(fp) as f:
+                    with open(fp, encoding="utf-8") as f:
                         rows = [json.loads(x) for x in f.read().splitlines()[-300:] if x.strip()]
             except Exception as e:  # noqa: BLE001
                 rows = [{"ev": "error", "msg": str(e)}]
@@ -8062,7 +8062,7 @@ class Handler(BaseHTTPRequestHandler):
             if _os.path.exists(rpath):
                 got = 0
                 try:
-                    with open(rpath) as f:
+                    with open(rpath, encoding="utf-8") as f:
                         for line in f:
                             try:
                                 s = json.loads(line)
@@ -8088,7 +8088,7 @@ class Handler(BaseHTTPRequestHandler):
                     if extra == rpath:
                         continue
                     got = 0
-                    with open(extra) as f:
+                    with open(extra, encoding="utf-8") as f:
                         for line in f:
                             try:
                                 s = json.loads(line)
@@ -8108,7 +8108,7 @@ class Handler(BaseHTTPRequestHandler):
             if _os.path.exists(apath):
                 got = 0
                 try:
-                    with open(apath) as f:
+                    with open(apath, encoding="utf-8") as f:
                         for line in f:
                             p = line.strip().split(",")
                             if len(p) >= 2:
@@ -8193,7 +8193,7 @@ class Handler(BaseHTTPRequestHandler):
                 # persist the merged series so tomorrow's restart-at-noon works too
                 try:
                     _os.makedirs(_TICK_DIR, exist_ok=True)
-                    with open(apath, "w") as f:
+                    with open(apath, "w", encoding="utf-8") as f:
                         for ts, px in ticks:
                             f.write(f"{int(ts)},{px}\n")
                 except Exception as e:  # noqa: BLE001
@@ -8661,7 +8661,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 ticks, ois, ivs = [], [], []
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     for line in f:
                         try:
                             s = json.loads(line)
@@ -8749,7 +8749,7 @@ class Handler(BaseHTTPRequestHandler):
             spots = []
             if _os.path.exists(apath):
                 try:
-                    for line in open(apath):
+                    for line in open(apath, encoding="utf-8"):
                         p = line.strip().split(",")
                         if len(p) >= 2:
                             spots.append((float(p[0]), float(p[1])))
@@ -8757,7 +8757,7 @@ class Handler(BaseHTTPRequestHandler):
                     pass
             snaps = []
             if _os.path.exists(path):
-                for line in open(path):
+                for line in open(path, encoding="utf-8"):
                     try:
                         s = json.loads(line)
                         if s.get("_replay_ts") and s.get("underlying_value"):
@@ -8861,7 +8861,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 rows, last_bucket = [], None
-                for line in open(path):
+                for line in open(path, encoding="utf-8"):
                     try:
                         s = json.loads(line)
                     except Exception:
@@ -8947,7 +8947,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 cols, last_bucket, base = [], None, {}
-                for line in open(path):
+                for line in open(path, encoding="utf-8"):
                     try:
                         s = json.loads(line)
                     except Exception:
@@ -9028,7 +9028,7 @@ class Handler(BaseHTTPRequestHandler):
                     return pdf / (S * sq)
 
                 cols, last_bucket = [], None
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     for line in f:
                         try:
                             s = json.loads(line)
@@ -9087,7 +9087,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "no replay data yet today — snapshots record while the chain auto-refreshes", "rows": []})
                     return
                 snaps = []
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     for line in f:
                         try:
                             snaps.append(json.loads(line))
@@ -9156,7 +9156,7 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     vals, ts0 = [], None
                     try:
-                        with open(path) as f:
+                        with open(path, encoding="utf-8") as f:
                             for line in f:
                                 try:
                                     s = json.loads(line)

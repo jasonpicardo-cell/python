@@ -284,7 +284,7 @@ def load_minutes(root, sym="NIFTY"):
         if pri >= d["p"][m]:
             d["c"][m], d["o"][m], d["p"][m] = c, o, pri
     for f in glob.glob(os.path.join(root, "ticks", f"{sym}_*.csv")):
-        for line in open(f):
+        for line in open(f, encoding="utf-8"):
             p = line.strip().split(",")
             if len(p) >= 2:
                 try:
@@ -300,13 +300,13 @@ def load_minutes(root, sym="NIFTY"):
         pass
     for f in glob.glob(os.path.join(root, "history", f"{sym}_*.json")):
         try:
-            for b in json.load(open(f)):
+            for b in json.load(open(f, encoding="utf-8")):
                 put(b["t"], b["o"], b["c"], 2)
         except Exception:
             pass
     for f in glob.glob(os.path.join(root, "warm_cache", f"{sym}_*.json")):
         try:
-            for b in json.load(open(f)).get("bars", []):
+            for b in json.load(open(f, encoding="utf-8")).get("bars", []):
                 put(b["t"], b["o"], b["c"], 3)
         except Exception:
             pass
@@ -844,7 +844,7 @@ def study_pinning(root, mins, sym="NIFTY"):
     by_day = {}
     for f in files:
         try:
-            by_day[datetime.strptime(os.path.basename(f)[9:19], "%Y-%m-%d").date()] = json.load(open(f)).get("oi", {})
+            by_day[datetime.strptime(os.path.basename(f)[9:19], "%Y-%m-%d").date()] = json.load(open(f, encoding="utf-8")).get("oi", {})
         except Exception:
             continue
     rows = []
@@ -876,7 +876,7 @@ def study_participant(root):
     latest = None
     for f in files:
         try:
-            d = json.load(open(f))
+            d = json.load(open(f, encoding="utf-8"))
         except Exception:
             continue
         day = os.path.basename(f)[:-5]

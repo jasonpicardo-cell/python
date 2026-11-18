@@ -1405,7 +1405,7 @@ def main():
 
     nifty750 = set()
     if os.path.exists(NIFTY750_FILE):
-        with open(NIFTY750_FILE) as f:
+        with open(NIFTY750_FILE, encoding="utf-8") as f:
             nifty750 = {l.strip().upper() for l in f if l.strip()}
         print(f"Loaded {len(nifty750):,} tickers from nifty750.txt")
 

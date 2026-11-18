@@ -729,7 +729,7 @@ def main():
     # Load Nifty750 list
     nifty750_tickers = set()
     if os.path.exists(NIFTY750_FILE):
-        with open(NIFTY750_FILE) as f:
+        with open(NIFTY750_FILE, encoding="utf-8") as f:
             for line in f:
                 t = line.strip().upper()
                 if t:

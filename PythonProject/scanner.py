@@ -307,7 +307,7 @@ def load_nifty_tickers(filepath="nifty750.txt"):
         print(f"⚠️ Notice: '{filepath}' not found. All stocks will be grouped into 'Others'.")
         return set()
 
-    with open(filepath, 'r') as f:
+    with open(filepath, 'r', encoding="utf-8") as f:
         return set(line.strip().upper() for line in f if line.strip())
 
 

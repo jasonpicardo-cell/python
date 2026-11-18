@@ -155,7 +155,7 @@ def log_path(sym, day):
 def read_rows(path):
     rows = []
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 try:
                     rows.append(json.loads(line))
@@ -168,7 +168,7 @@ def read_rows(path):
 
 def _warm_bars(sym, day):
     try:
-        with open(os.path.join(WARM_DIR, f"{sym}_{day}.json")) as f:
+        with open(os.path.join(WARM_DIR, f"{sym}_{day}.json"), encoding="utf-8") as f:
             return json.load(f).get("bars") or []
     except Exception:
         return []
@@ -512,9 +512,9 @@ def fit(sym=None, perms=None, min_turns=MIN_TURNS, min_train_days=5, step_days=5
     model["why_not"] = reasons
     report["accepted"] = model["accepted"]
     if write:
-        with open(REPORT_PATH, "w") as f:
+        with open(REPORT_PATH, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=1)
-        with open(MODEL_PATH, "w") as f:
+        with open(MODEL_PATH, "w", encoding="utf-8") as f:
             json.dump(model, f, indent=1)
     return model, report
 

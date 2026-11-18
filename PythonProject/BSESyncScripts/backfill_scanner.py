@@ -174,7 +174,7 @@ def run_historical_sync():
     # Apply the Blacklist
     blacklist = set()
     if os.path.exists(BLACKLIST_FILE):
-        with open(BLACKLIST_FILE, "r") as f:
+        with open(BLACKLIST_FILE, "r", encoding="utf-8") as f:
             blacklist = set(line.strip().upper() for line in f if line.strip())
 
     for name, sym in all_stocks.items():

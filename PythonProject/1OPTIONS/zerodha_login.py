@@ -47,7 +47,7 @@ def _env() -> dict:
                                           ("env", ".env", ".env.local", "env.txt", ".env.txt")]
     for p in paths:
         if p and os.path.exists(p):
-            for line in open(p):
+            for line in open(p, encoding="utf-8"):
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
@@ -69,7 +69,7 @@ def _write_sync_copy(env: dict, access: str) -> str:
     try:
         os.makedirs(d, exist_ok=True)
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(access)
         try:
             os.chmod(tmp, 0o600)
@@ -184,7 +184,7 @@ def main() -> int:
     data = {"access_token": access, "ts": time.time(),
             "user_id": (sess or {}).get("user_id"), "user_name": (sess or {}).get("user_name")}
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f)
     try:
         os.chmod(tmp, 0o600)

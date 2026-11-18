@@ -156,7 +156,7 @@ def _env_file_values() -> Dict[str, str]:
         if not p or not os.path.exists(p):
             continue
         try:
-            for line in open(p):
+            for line in open(p, encoding="utf-8"):
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
@@ -187,7 +187,7 @@ def _access_token() -> str:
     path = _token_path()
     try:
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             ts = data.get("ts", 0)
             _status["token_age_h"] = round((time.time() - ts) / 3600, 1) if ts else None
@@ -210,7 +210,7 @@ def token_validity() -> Dict[str, Any]:
     if not os.path.exists(path):
         return {"present": False, "valid": False, "reason": "no saved token - run zerodha_login.py"}
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:  # noqa: BLE001
         return {"present": True, "valid": False, "reason": f"token file unreadable: {e}"}
@@ -353,7 +353,7 @@ def _load_instruments(exch: str) -> List[Dict[str, Any]]:
     path = os.path.join(_CACHE_DIR, f"instruments_{exch}_{today}.json")
     try:
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 j = json.load(f)
             rows_, fetched = (j, os.path.getmtime(path)) if isinstance(j, list) else (j.get("rows") or [], j.get("fetched") or 0)
             if not (_fetched_early(fetched) and _ist_min_now() >= _INST_READY_MIN):
@@ -370,7 +370,7 @@ def _load_instruments(exch: str) -> List[Dict[str, Any]]:
         try:
             os.makedirs(_CACHE_DIR, exist_ok=True)
             tmp = path + ".tmp"
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"fetched": time.time(), "rows": rows}, f, separators=(",", ":"))
             os.replace(tmp, path)
             for old in os.listdir(_CACHE_DIR):          # yesterday's lists are dead weight
@@ -1196,7 +1196,7 @@ def _oi_load_prev() -> None:
     prev = [f for f in files if f[9:19] < today]
     if prev:
         try:
-            with open(os.path.join(_CACHE_DIR, prev[-1])) as f:
+            with open(os.path.join(_CACHE_DIR, prev[-1]), encoding="utf-8") as f:
                 j = json.load(f)
             _oi_prev.update({"day": prev[-1][9:19], "oi": dict(j.get("oi") or {}),
                              "complete": bool(j.get("complete"))})
@@ -1224,11 +1224,11 @@ def _oi_save_today() -> None:
         os.makedirs(_CACHE_DIR, exist_ok=True)
         old = {}
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 old = (json.load(f) or {}).get("oi") or {}
         old.update(snap)
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"oi": old, "complete": complete, "saved": time.time()}, f, separators=(",", ":"))
         os.replace(tmp, path)
     except Exception:
@@ -1242,7 +1242,7 @@ def _save_prev_oi() -> None:
     try:
         os.makedirs(_CACHE_DIR, exist_ok=True)
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"oi": _oi_prev["oi"], "complete": True, "saved": time.time()}, f, separators=(",", ":"))
         os.replace(tmp, path)
     except Exception:
@@ -2077,7 +2077,7 @@ def fetch_history_days(symbol: str, days: int = 60) -> List[Dict[str, Any]]:
     cpath = os.path.join(cdir, f"{key}.json")
     try:
         if os.path.exists(cpath):
-            with open(cpath) as f:
+            with open(cpath, encoding="utf-8") as f:
                 out = json.load(f)
             _hist_range_cache[key] = out
             return out
@@ -2109,7 +2109,7 @@ def fetch_history_days(symbol: str, days: int = 60) -> List[Dict[str, Any]]:
         try:
             os.makedirs(cdir, exist_ok=True)
             tmp = cpath + ".tmp"
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(out, f, separators=(",", ":"))
             os.replace(tmp, cpath)
         except Exception:

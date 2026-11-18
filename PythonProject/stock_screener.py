@@ -100,7 +100,7 @@ def load_nifty750():
         print(f"  ⚠  {NIFTY750_FILE} not found — all stocks will go to 'Other'")
         return set()
     tickers = set()
-    with open(NIFTY750_FILE) as f:
+    with open(NIFTY750_FILE, encoding="utf-8") as f:
         for line in f:
             raw = line.strip()
             if raw and not raw.startswith("#"):

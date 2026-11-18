@@ -58,7 +58,7 @@ def test_structure():
     # JS syntax — node --check catches only syntax, never scope
     for i, b in enumerate(blocks):
         p = f"/tmp/_t{i}.js"
-        open(p, "w").write(b)
+        open(p, "w", encoding="utf-8").write(b)
         try:
             r = subprocess.run(["node", "--check", p], capture_output=True, text=True)
             check(f"JS block {i} parses", r.returncode == 0, r.stderr[:300])
@@ -451,7 +451,7 @@ def test_index_weights():
     if not os.path.exists(p):
         warn("index_weights.json missing", "contribution figures fall back to the built-in table")
         return
-    d = json.load(open(p))
+    d = json.load(open(p, encoding="utf-8"))
     for k, v in d.items():
         if k.startswith("_"):
             continue
@@ -728,7 +728,7 @@ def test_boxes():
         spot = 25000 + (0 if m < 555 else (m - 555) * 0.8 if m < 700 else 116 - (m - 700) * 0.3)
         rows.append(json.dumps({"underlying_value": spot, "_replay_ts": t0 + i * 60, "strike_gap": 50, "strikes": []}))
     path = os.path.join(d, "NIFTY_2026-10-09.jsonl")
-    open(path, "w").write("\n".join(rows) + "\n")
+    open(path, "w", encoding="utf-8").write("\n".join(rows) + "\n")
     ser = M.day_series(path)
     check("move quality: pre-open and evening rows dropped",
           M._ist_min(ser[0]["t"]) == 555 and M._ist_min(ser[-1]["t"]) == 930, f"{len(ser)} rows")
@@ -957,7 +957,7 @@ console.log(JSON.stringify({
            chopReg: ch.regime, chopT2: ch.T2, chopT1: ch.T1 } }));
 """
     fn = os.path.join(HERE, "__pick_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1135,7 +1135,7 @@ console.log(JSON.stringify({
   scored }));
 """
     fn = os.path.join(HERE, "__conf_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1185,7 +1185,7 @@ const a = at(24974), b = at(24976), b2 = at(24978), c = at(24990);
 console.log(JSON.stringify({ a, b, b2, c }));
 """
     fn = os.path.join(HERE, "__pcr_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1234,7 +1234,7 @@ console.log(JSON.stringify({ up: up.score, down: down.score, nervous: nervous.co
   upPcr: up.comp.find(c => c.k === 'pcr').txt, downPcr: down.comp.find(c => c.k === 'pcr').txt }));
 """
     fn = os.path.join(HERE, "__md_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1334,7 +1334,7 @@ _turnResAdd(1, 'DONE'); R.cool = [c1, c2, c3, JSON.stringify(_turnTally())];
 console.log(JSON.stringify(R));
 """
     fn = os.path.join(HERE, "__tl_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1951,7 +1951,7 @@ def test_turn_model():
         n1 = S._turn_log_rows({"sym": "NIFTY", "rows": rws})
         n2 = S._turn_log_rows({"sym": "NIFTY", "rows": rws[:3] + [{"t": tt - 86400, "c": 1}, {"t": "x"}, {"t": tt + 999, "iv": 2, "c": 1}]})
         n3 = S._turn_log_rows({"sym": "../etc", "rows": rws})
-        lines = open(T.log_path("NIFTY", day)).read().strip().splitlines()
+        lines = open(T.log_path("NIFTY", day), encoding="utf-8").read().strip().splitlines()
         check("turn log: one row per symbol/interval/bar (several browsers write once), today only, bad input refused",
               n1 == 5 and n2 == 1 and n3 == 0 and len(lines) == 6, f"{n1} {n2} {n3} {len(lines)}")
         # an older log row has no "reg": that is "not measured" = neutral 1.0, not 0
@@ -2470,7 +2470,7 @@ def test_zerodha_adapter():
         ce_key = next(k for k, r in fk.by_key.items() if r["name"] == "NIFTY" and r["instrument_type"] == "CE"
                       and r["strike"] == 25000 and r["expiry"] == fk.weeklies[0])
         y = Z._ist_today(1)
-        with open(os.path.join(tmp, f"oi_close_{y}.json"), "w") as f:
+        with open(os.path.join(tmp, f"oi_close_{y}.json"), "w", encoding="utf-8") as f:
             _json.dump({"oi": {ce_key: 65 * 900}, "complete": True}, f)
         tick_log = []
         Z.set_tick_sink(lambda m: tick_log.append(m))
@@ -2615,11 +2615,11 @@ def test_zerodha_watchdog_and_oi():
         tf = os.path.join(tmp, "tok.json")
         os.environ.pop("ZERODHA_ACCESS_TOKEN", None)
         os.environ["ZERODHA_TOKEN_FILE"] = tf
-        with open(tf, "w") as f:
+        with open(tf, "w", encoding="utf-8") as f:
             _json.dump({"access_token": "x", "ts": time.time() - 60}, f)
         g = time.gmtime(time.time() + 19800)
         v1 = Z.token_validity()
-        with open(tf, "w") as f:
+        with open(tf, "w", encoding="utf-8") as f:
             _json.dump({"access_token": "x", "ts": time.time() - 2 * 86400}, f)
         v2 = Z.token_validity()
         check("zerodha token: today's token valid (unless issued before 06:00), two-day-old expired",
@@ -2646,8 +2646,8 @@ def test_broker_neutral_server():
           "j?.broker || j?.fyers" in dash and "/(fyers|zerodha)\\(/" in dash)
     check("zerodha_login.py present and never prints the secret or token",
           os.path.exists(os.path.join(HERE, "zerodha_login.py"))
-          and "print(secret" not in open(os.path.join(HERE, "zerodha_login.py")).read()
-          and "print(access" not in open(os.path.join(HERE, "zerodha_login.py")).read())
+          and "print(secret" not in open(os.path.join(HERE, "zerodha_login.py"), encoding="utf-8").read()
+          and "print(access" not in open(os.path.join(HERE, "zerodha_login.py"), encoding="utf-8").read())
 
 
 def test_zerodha_fixes_and_diagnostics():
@@ -2668,7 +2668,7 @@ def test_zerodha_fixes_and_diagnostics():
         Z._inst["fetched"]["NFO"] = early
         # rewrite the cached file as an early fetch too
         path = os.path.join(tmp, f"instruments_NFO_{Z._ist_today()}.json")
-        j = _json.load(open(path)); j["fetched"] = early; _json.dump(j, open(path, "w"))
+        j = _json.load(open(path, encoding="utf-8")); j["fetched"] = early; _json.dump(j, open(path, "w", encoding="utf-8"))
         marker = time.time() - 1
         Z._fetched_early = lambda ts: ts < marker          # anything fetched before now was "early"
         Z._ist_min_now = lambda: 10 * 60
@@ -2971,7 +2971,7 @@ console.log(JSON.stringify({{alma: r.alma, dev: r.dev, atr: r.atr,
 
 
 def test_ctx_clock():
-    d = open(os.path.join(HERE, "nse_dashboard.html")).read()
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
     check("context clock: 12-hour IST with seconds, ticking every second",
           "timeZone: 'Asia/Kolkata'" in d and "second: '2-digit', hour12: true" in d
           and "document.querySelectorAll('.ctx-clock-t')" in d)
@@ -3561,7 +3561,7 @@ R.big = _oscDivergences(px, osc, { left: 3, right: 3, rangeMin: 5, rangeMax: 60,
 console.log(JSON.stringify(R));
 """
     hf = os.path.join(tempfile.gettempdir(), "sqz_harness.js")
-    open(hf, "w").write(harness)
+    open(hf, "w", encoding="utf-8").write(harness)
     res = subprocess.run(["node", hf], capture_output=True, text=True)
     try:
         R = _json.loads(res.stdout.strip().splitlines()[-1])
@@ -3651,7 +3651,7 @@ R.same = _wtHtf(bars, 1, WT).state;
 console.log(JSON.stringify(R));
 """
     hf = os.path.join(tempfile.gettempdir(), "wt_harness.js")
-    open(hf, "w").write(harness)
+    open(hf, "w", encoding="utf-8").write(harness)
     res = subprocess.run(["node", hf], capture_output=True, text=True)
     try:
         R = _json.loads(res.stdout.strip().splitlines()[-1])

@@ -12,7 +12,7 @@ from utils import get_property, fetch_live_fyers_symbols
 
 client_id = get_property("fyers_client_id")
 try:
-    with open("fyers_token.txt", "r") as f:
+    with open("fyers_token.txt", "r", encoding="utf-8") as f:
         access_token = f.read().strip()
 except FileNotFoundError:
     print("❌ Token not found! Please run 'fyers_login.py' first.")

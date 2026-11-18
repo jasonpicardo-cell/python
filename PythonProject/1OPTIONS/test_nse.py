@@ -68,7 +68,7 @@ def test_structure():
     # JS syntax — node --check catches only syntax, never scope
     for i, b in enumerate(blocks):
         p = f"/tmp/_t{i}.js"
-        open(p, "w").write(b)
+        open(p, "w", encoding="utf-8").write(b)
         try:
             r = subprocess.run(["node", "--check", p], capture_output=True, text=True)
             check(f"JS block {i} parses", r.returncode == 0, r.stderr[:300])
@@ -461,7 +461,7 @@ def test_index_weights():
     if not os.path.exists(p):
         warn("index_weights.json missing", "contribution figures fall back to the built-in table")
         return
-    d = json.load(open(p))
+    d = json.load(open(p, encoding="utf-8"))
     for k, v in d.items():
         if k.startswith("_"):
             continue
@@ -767,7 +767,7 @@ def test_boxes():
         spot = 25000 + (0 if m < 555 else (m - 555) * 0.8 if m < 700 else 116 - (m - 700) * 0.3)
         rows.append(json.dumps({"underlying_value": spot, "_replay_ts": t0 + i * 60, "strike_gap": 50, "strikes": []}))
     path = os.path.join(d, "NIFTY_2026-10-09.jsonl")
-    open(path, "w").write("\n".join(rows) + "\n")
+    open(path, "w", encoding="utf-8").write("\n".join(rows) + "\n")
     ser = M.day_series(path)
     check("move quality: pre-open and evening rows dropped",
           M._ist_min(ser[0]["t"]) == 555 and M._ist_min(ser[-1]["t"]) == 930, f"{len(ser)} rows")
@@ -996,7 +996,7 @@ console.log(JSON.stringify({
            chopReg: ch.regime, chopT2: ch.T2, chopT1: ch.T1 } }));
 """
     fn = os.path.join(HERE, "__pick_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1174,7 +1174,7 @@ console.log(JSON.stringify({
   scored }));
 """
     fn = os.path.join(HERE, "__conf_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1224,7 +1224,7 @@ const a = at(24974), b = at(24976), b2 = at(24978), c = at(24990);
 console.log(JSON.stringify({ a, b, b2, c }));
 """
     fn = os.path.join(HERE, "__pcr_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1273,7 +1273,7 @@ console.log(JSON.stringify({ up: up.score, down: down.score, nervous: nervous.co
   upPcr: up.comp.find(c => c.k === 'pcr').txt, downPcr: down.comp.find(c => c.k === 'pcr').txt }));
 """
     fn = os.path.join(HERE, "__md_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1373,7 +1373,7 @@ _turnResAdd(1, 'DONE'); R.cool = [c1, c2, c3, JSON.stringify(_turnTally())];
 console.log(JSON.stringify(R));
 """
     fn = os.path.join(HERE, "__tl_test.js")
-    open(fn, "w").write(harness)
+    open(fn, "w", encoding="utf-8").write(harness)
     try:
         out = subprocess.run(["node", fn], capture_output=True, text=True, timeout=30)
     finally:
@@ -1698,7 +1698,7 @@ def test_scalping_tab():
           d.count('id="scGrid"') == 1 and '<div class="sc-grid sc-grid-below" id="scGrid"' in d and ".sc-grid.sc-grid-below { position: static;" in d and ".sc-grid { --g-bg: #0b0d12;" in d
           and "&b=${encodeURIComponent(bnames.join(','))}" in seg and 'parse_qs' in s_ and '(_qs.get("b") or [""])[0]' in s_ and "book_totals" in s_)
     check("chart: 2m is built from Kite 1-minute bars (anchored 09:15) and EMA 50/100 are on by default",
-          "interval must be 1, 2, 3, 5, 10 or 15 minutes" in open("nse_adapter_zerodha.py").read() and "row('e50'" in seg and "row('e100'" in seg)
+          "interval must be 1, 2, 3, 5, 10 or 15 minutes" in open("nse_adapter_zerodha.py", encoding="utf-8").read() and "row('e50'" in seg and "row('e100'" in seg)
     check("chart: VWAP is a thick blue line, and the EMA colours/values sit in a strip under the chart, above RSI",
           "SC_VWAP = '#2f9bff'" in seg and 'stroke="${SC_VWAP}" stroke-width="2.4"' in seg and "const emaTop = yB; yB += emaH;" in seg and "lp.style.top = (emaTop + 1)" in seg)
     check("chart indicators: EMA 5/13 and RSI 14 with a 14-bar MA are on by default, and RSI draws 80, 70 (dotted), 50, 30 (dotted) and 20",
@@ -2016,7 +2016,7 @@ console.log(JSON.stringify([[1, 539], [1, 540], [3, 700], [5, 940], [5, 941], [6
             import tempfile as _tf
             with _tf.TemporaryDirectory() as td_:
                 fp = os.path.join(td_, "NIFTY_2026-11-10.jsonl")
-                with open(fp, "w") as fh:
+                with open(fp, "w", encoding="utf-8") as fh:
                     for i in range(5):
                         fh.write(json.dumps({"timestamp": f"10-Nov-2026 10:{i:02d}:00", "underlying_value": 25044.65, "strikes": [{"strike": 25000, "ce_symbol": "C", "pe_symbol": "P"}]}) + "\n")
                 flat = bias_eval.day_samples(fp)
@@ -2050,7 +2050,7 @@ console.log(JSON.stringify([[1, 539], [1, 540], [3, 700], [5, 940], [5, 941], [6
                         "india_vix": 15 + 0.01 * i, "atm_iv": 14 + 0.02 * i, "expiry": "10-Nov-2026" if i < 30 else "17-Nov-2026",
                         "flow": {"strikes": {}, "futures": {"near": {"b5": 10, "s5": 5, "b15": 30, "s15": 20, "bd": 1000 + 50 * i, "sd": 900 + 20 * i}}}}
             for sym, base in (("NIFTY", 25000.0), ("BANKNIFTY", 56000.0)):
-                with open(os.path.join(tdir, f"{sym}_2026-11-04.jsonl"), "w") as fh:
+                with open(os.path.join(tdir, f"{sym}_2026-11-04.jsonl"), "w", encoding="utf-8") as fh:
                     for i in range(40):
                         fh.write(json.dumps(_snap(sym, i, base + 3 * i + _rd2.uniform(-20, 20))) + "\n")
             fn_, fb_ = os.path.join(tdir, "NIFTY_2026-11-04.jsonl"), os.path.join(tdir, "BANKNIFTY_2026-11-04.jsonl")
@@ -2091,7 +2091,7 @@ console.log(JSON.stringify([[1, 539], [1, 540], [3, 700], [5, 940], [5, 941], [6
                     break
                 _tm3.sleep(0.1)
             h2 = ns3["_dir_history"]("NIFTY", h1["points"][5]["ts"], True)
-            fl = open(os.path.join(tdir, "ctx", "NIFTY_2026-11-09.dir.jsonl")).read().splitlines()
+            fl = open(os.path.join(tdir, "ctx", "NIFTY_2026-11-09.dir.jsonl"), encoding="utf-8").read().splitlines()
             ns3["_dir_mem"].clear()
             h3 = ns3["_dir_history"]("NIFTY", 0, False)
             check("direction pane: the server records a point per index every 10 s (book shift, walls, the other index's latest shift within 90 s, composite) to memory and ctx/<SYM>_<day>.dir.jsonl, serves ?since= and the previous session (rebuilt from replay/ once, in the background), and reloads the file after a restart",
@@ -2571,7 +2571,7 @@ def test_turn_model():
         n1 = S._turn_log_rows({"sym": "NIFTY", "rows": rws})
         n2 = S._turn_log_rows({"sym": "NIFTY", "rows": rws[:3] + [{"t": tt - 86400, "c": 1}, {"t": "x"}, {"t": tt + 999, "iv": 2, "c": 1}]})
         n3 = S._turn_log_rows({"sym": "../etc", "rows": rws})
-        lines = open(T.log_path("NIFTY", day)).read().strip().splitlines()
+        lines = open(T.log_path("NIFTY", day), encoding="utf-8").read().strip().splitlines()
         check("turn log: one row per symbol/interval/bar (several browsers write once), today only, bad input refused",
               n1 == 5 and n2 == 1 and n3 == 0 and len(lines) == 6, f"{n1} {n2} {n3} {len(lines)}")
         # an older log row has no "reg": that is "not measured" = neutral 1.0, not 0
@@ -3092,7 +3092,7 @@ def test_zerodha_adapter():
         ce_key = next(k for k, r in fk.by_key.items() if r["name"] == "NIFTY" and r["instrument_type"] == "CE"
                       and r["strike"] == 25000 and r["expiry"] == fk.weeklies[0])
         y = Z._ist_today(1)
-        with open(os.path.join(tmp, f"oi_close_{y}.json"), "w") as f:
+        with open(os.path.join(tmp, f"oi_close_{y}.json"), "w", encoding="utf-8") as f:
             _json.dump({"oi": {ce_key: 65 * 900}, "complete": True}, f)
         tick_log = []
         Z.set_tick_sink(lambda m: tick_log.append(m))
@@ -3254,11 +3254,11 @@ def test_zerodha_watchdog_and_oi():
         tf = os.path.join(tmp, "tok.json")
         os.environ.pop("ZERODHA_ACCESS_TOKEN", None)
         os.environ["ZERODHA_TOKEN_FILE"] = tf
-        with open(tf, "w") as f:
+        with open(tf, "w", encoding="utf-8") as f:
             _json.dump({"access_token": "x", "ts": time.time() - 60}, f)
         g = time.gmtime(time.time() + 19800)
         v1 = Z.token_validity()
-        with open(tf, "w") as f:
+        with open(tf, "w", encoding="utf-8") as f:
             _json.dump({"access_token": "x", "ts": time.time() - 2 * 86400}, f)
         v2 = Z.token_validity()
         check("zerodha token: today's token valid (unless issued before 06:00), two-day-old expired",
@@ -3285,8 +3285,8 @@ def test_broker_neutral_server():
           "j?.broker || j?.fyers" in dash and "/(fyers|zerodha)\\(/" in dash)
     check("zerodha_login.py present and never prints the secret or token",
           os.path.exists(os.path.join(HERE, "zerodha_login.py"))
-          and "print(secret" not in open(os.path.join(HERE, "zerodha_login.py")).read()
-          and "print(access" not in open(os.path.join(HERE, "zerodha_login.py")).read())
+          and "print(secret" not in open(os.path.join(HERE, "zerodha_login.py"), encoding="utf-8").read()
+          and "print(access" not in open(os.path.join(HERE, "zerodha_login.py"), encoding="utf-8").read())
 
 
 def test_zerodha_fixes_and_diagnostics():
@@ -3307,7 +3307,7 @@ def test_zerodha_fixes_and_diagnostics():
         Z._inst["fetched"]["NFO"] = early
         # rewrite the cached file as an early fetch too
         path = os.path.join(tmp, f"instruments_NFO_{Z._ist_today()}.json")
-        j = _json.load(open(path)); j["fetched"] = early; _json.dump(j, open(path, "w"))
+        j = _json.load(open(path, encoding="utf-8")); j["fetched"] = early; _json.dump(j, open(path, "w", encoding="utf-8"))
         marker = time.time() - 1
         Z._fetched_early = lambda ts: ts < marker          # anything fetched before now was "early"
         Z._ist_min_now = lambda: 10 * 60
@@ -3610,7 +3610,7 @@ console.log(JSON.stringify({{alma: r.alma, dev: r.dev, atr: r.atr,
 
 
 def test_ctx_clock():
-    d = open(os.path.join(HERE, "nse_dashboard.html")).read()
+    d = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
     check("context clock: 12-hour IST with seconds, ticking every second",
           "timeZone: 'Asia/Kolkata'" in d and "second: '2-digit', hour12: true" in d
           and "document.querySelectorAll('.ctx-clock-t')" in d)
@@ -4200,7 +4200,7 @@ R.big = _oscDivergences(px, osc, { left: 3, right: 3, rangeMin: 5, rangeMax: 60,
 console.log(JSON.stringify(R));
 """
     hf = os.path.join(tempfile.gettempdir(), "sqz_harness.js")
-    open(hf, "w").write(harness)
+    open(hf, "w", encoding="utf-8").write(harness)
     res = subprocess.run(["node", hf], capture_output=True, text=True)
     try:
         R = _json.loads(res.stdout.strip().splitlines()[-1])
@@ -4290,7 +4290,7 @@ R.same = _wtHtf(bars, 1, WT).state;
 console.log(JSON.stringify(R));
 """
     hf = os.path.join(tempfile.gettempdir(), "wt_harness.js")
-    open(hf, "w").write(harness)
+    open(hf, "w", encoding="utf-8").write(harness)
     res = subprocess.run(["node", hf], capture_output=True, text=True)
     try:
         R = _json.loads(res.stdout.strip().splitlines()[-1])
@@ -5025,7 +5025,7 @@ console.log(JSON.stringify(out));"""
     tmp = tempfile.mkdtemp()
     try:
         def snap_file(path, day, prices):
-            with open(path, "w") as fh:
+            with open(path, "w", encoding="utf-8") as fh:
                 for i, p in enumerate(prices):
                     hh, mm = divmod(9 * 60 + 15 + i, 60)
                     rows = []
@@ -5347,11 +5347,11 @@ def test_book_recorder_and_cleanup():
             "trade_log/%s.jsonl" % day(400): True, "trade_log/%s.jsonl" % day(1): True,
         }
         for rel in files:
-            fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w").write("x")
+            fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w", encoding="utf-8").write("x")
         live = "NIFTY_%s.jsonl" % day(364)
         mq = {"replay/_mq/%s.1.v2.json" % live: True, "replay/_mq/%s.999.v2.json" % live: False, "replay/_mq/NIFTY_%s.jsonl.5.v2.json" % day(366): False}
         for rel in mq:
-            fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w").write("{}")
+            fp = os.path.join(root, rel); os.makedirs(os.path.dirname(fp), exist_ok=True); open(fp, "w", encoding="utf-8").write("{}")
         files.update(mq)
         S._DATA_ROOT = root; S._REPLAY_DIR = os.path.join(root, "replay"); S._TICK_DIR = os.path.join(root, "ticks")
         S._BHAVCOPY_DIR = os.path.join(root, "nse_data_cache", "bhavcopy"); S._POI_DIR = os.path.join(root, "participant_oi"); S._WARM_DIR = os.path.join(root, "warm_cache")
@@ -5443,7 +5443,7 @@ def test_pro_calibrate():
                     bars.append({"t": base + 60 * m, "o": o, "h": max(o, px), "l": min(o, px), "c": px})
                 n += 1
             day += _dt.timedelta(days=1)
-        json.dump(bars, open(os.path.join(tmp, "history", "NIFTY_60_x.json"), "w"))
+        json.dump(bars, open(os.path.join(tmp, "history", "NIFTY_60_x.json"), "w", encoding="utf-8"))
         cl, d0 = 24000.0, _dt.date(2026, 6, 1)
         for i in range(60):
             d = d0 + _dt.timedelta(days=i)
@@ -5455,7 +5455,7 @@ def test_pro_calibrate():
                 fh.write(f"Nifty 50,{d.strftime('%d-%m-%Y')},{o},{max(o, cl) * 1.002},{min(o, cl) * 0.998},{cl},0,0\n")
                 fh.write(f"India VIX,{d.strftime('%d-%m-%Y')},14,15,13,{14 + rnd.random()},0,0\n")
         exp = int(_dt.datetime(2026, 11, 10, 15, 30, tzinfo=IST).timestamp())
-        with open(os.path.join(tmp, "replay", "NIFTY_2026-11-06.jsonl"), "w") as fh:
+        with open(os.path.join(tmp, "replay", "NIFTY_2026-11-06.jsonl"), "w", encoding="utf-8") as fh:
             for j in range(40):
                 t = _dt.datetime(2026, 11, 6, 10, 0, tzinfo=IST) + _dt.timedelta(minutes=j)
                 S = 24000 + 20 * math.sin(j / 5); Tj = (exp - t.timestamp()) / P.YEAR_S
@@ -5469,8 +5469,8 @@ def test_pro_calibrate():
                 fh.write(json.dumps({"timestamp": t.strftime("%d-%b-%Y %H:%M:%S"), "underlying_value": S, "futures_price": S + 30, "india_vix": 14.5,
                                      "expiry_epoch": exp, "dte_trading": 2.5, "atm_iv": 13, "strikes": rows}) + "\n")
         json.dump({c_: {"opt_idx_call_long": 10, "opt_idx_call_short": 12, "opt_idx_put_long": 9, "opt_idx_put_short": 14, "fut_idx_long": 1, "fut_idx_short": 9}
-                   for c_ in ("Client", "Pro", "FII", "DII")}, open(os.path.join(tmp, "participant_oi", "2026-11-06.json"), "w"))
-        open(os.path.join(tmp, "guide", "events.txt"), "w").write("# test\n2026-11-09 RBI policy\n")
+                   for c_ in ("Client", "Pro", "FII", "DII")}, open(os.path.join(tmp, "participant_oi", "2026-11-06.json"), "w", encoding="utf-8"))
+        open(os.path.join(tmp, "guide", "events.txt"), "w", encoding="utf-8").write("# test\n2026-11-09 RBI policy\n")
         res = P.calibrate(tmp, "NIFTY", log=lambda *a: None)
         txt = json.dumps(res, allow_nan=False)
         check("pro_calib: end-to-end run has no study errors", not res["errors"], str(res["errors"]))
@@ -5482,9 +5482,9 @@ def test_pro_calibrate():
         # the guide's JS agrees with Python on SVI and the Merton CDF
         js = os.path.join(tmp, "t.js")
         g = os.path.join(HERE, "guide")
-        open(js, "w").write(
+        open(js, "w", encoding="utf-8").write(
             "global.window={PRO_CALIB:" + txt + "};global.document={addEventListener(){},querySelectorAll(){return[]},getElementById(){return null},documentElement:{dataset:{}}};"
-            "global.matchMedia=()=>({matches:false});\n" + open(os.path.join(g, "nifty.js")).read() + "\n" + open(os.path.join(g, "nifty_pro.js")).read() +
+            "global.matchMedia=()=>({matches:false});\n" + open(os.path.join(g, "nifty.js"), encoding="utf-8").read() + "\n" + open(os.path.join(g, "nifty_pro.js"), encoding="utf-8").read() +
             "\nconst m={sigma:.12,lam:6,muJ:-.03,deltaJ:.04};const el={innerHTML:''};clockTable(el);"
             "console.log(JSON.stringify({w:sviW(" + json.dumps(pt) + ",0.03),c:mCdf(-0.05," + str(T) + ",m),model:MODEL,wing:ivK(NF.S*0.95,3/365)>ivK(NF.S,3/365),clk:/measured on your/.test(el.innerHTML),"
             "ht:histTail(legs('p0:-1'))}))")
@@ -5552,11 +5552,11 @@ def test_pro_archive_live_risk():
         os.makedirs(os.path.join(tmp, "ticks"))
         os.makedirs(os.path.join(tmp, "history"))
         t0 = int(_dt.datetime(2026, 11, 4, 9, 15, tzinfo=IST).timestamp())
-        with open(os.path.join(tmp, "ticks", "NIFTY_2026-11-04.csv"), "w") as fh:
+        with open(os.path.join(tmp, "ticks", "NIFTY_2026-11-04.csv"), "w", encoding="utf-8") as fh:
             for i in range(375):
                 fh.write(f"{t0 + 60 * i},{24000 + i}\n")
-        json.dump([{"t": t0 + 60 * i, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5} for i in range(10)], open(os.path.join(tmp, "history", "NIFTY_60_2026-11-05.json"), "w"))
-        with open(os.path.join(tmp, "ticks", "NIFTY_2026-11-03.csv"), "w") as fh:           # a thin day: skipped
+        json.dump([{"t": t0 + 60 * i, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5} for i in range(10)], open(os.path.join(tmp, "history", "NIFTY_60_2026-11-05.json"), "w", encoding="utf-8"))
+        with open(os.path.join(tmp, "ticks", "NIFTY_2026-11-03.csv"), "w", encoding="utf-8") as fh:           # a thin day: skipped
             for i in range(100):
                 fh.write(f"{t0 - 86400 + 60 * i},24000\n")
         a1 = A.archive_minutes(tmp, ("NIFTY",), today=today)
@@ -5601,10 +5601,10 @@ def test_pro_archive_live_risk():
               c and abs((c["iv_trading"] / 100) ** 2 * c["units_left"] / L.units_per_year(clk) - w) < 1e-12 and c["event_move_pts"] > 0
               and [e["label"] for e in c["events"]] == ["RBI policy"], str(c))
         pcj = os.path.join(tmp, "pc.json")
-        open(pcj, "w").write(json.dumps({"sym": "NIFTY", "x": 1}))
+        open(pcj, "w", encoding="utf-8").write(json.dumps({"sym": "NIFTY", "x": 1}))
         L.reload()
         c1 = L.calib(pcj)
-        open(pcj, "w").write(json.dumps({"sym": "NIFTY", "x": 2}))
+        open(pcj, "w", encoding="utf-8").write(json.dumps({"sym": "NIFTY", "x": 2}))
         os.utime(pcj, (1, 2))
         check("pro live: calibration re-read when the file changes", c1["x"] == 1 and L.calib(pcj)["x"] == 2)
 
@@ -5645,7 +5645,7 @@ def test_pro_archive_live_risk():
             S._TICK_DIR = os.path.join(tmp, "ticks")
             os.makedirs(S._TICK_DIR, exist_ok=True)
             os.makedirs(os.path.join(tmp, "guide"), exist_ok=True)
-            json.dump({"sym": "NIFTY", "generated": "2026-11-06 16:00 IST", "clock": clk, "ver": vcal}, open(os.path.join(tmp, "guide", "pro_calib.json"), "w"))
+            json.dump({"sym": "NIFTY", "generated": "2026-11-06 16:00 IST", "clock": clk, "ver": vcal}, open(os.path.join(tmp, "guide", "pro_calib.json"), "w", encoding="utf-8"))
             L.reload()
             nowd = _dt.datetime.now(IST)
             t9 = int(nowd.replace(hour=9, minute=15, second=0, microsecond=0).timestamp())
@@ -5700,7 +5700,7 @@ def test_pro_archive_live_risk():
             S._chain_cache.clear()
             S._chain_cache.update(saved_cache)
             L.reload()
-        src = open(os.path.join(HERE, "nse_chain_server.py")).read()
+        src = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
         check("pro server: /api/pro/live and /api/pro/risk routed; the cleanup archives before it prunes; recorder health watches book_ticks",
               '"/api/pro/live", "/api/pro/risk"' in src and src.index("nse_archive.archive_minutes(here)") < src.index("for path, days, pat in jobs:")
               and "NIFTY order-book ticks (book_ticks/)" in src and "_post_close_research()" in src)
@@ -5708,7 +5708,7 @@ def test_pro_archive_live_risk():
         # --- dashboard renderers
         html = open(os.path.join(HERE, "nse_dashboard.html"), encoding="utf-8").read()
         js = os.path.join(tmp, "g.js")
-        open(js, "w").write("const escapeHtml=s=>String(s).replace(/[&<>\"]/g,'');\n" + _js_func(html, "_proRs") + "\n" + _js_func(html, "_proGaugeHtml") +
+        open(js, "w", encoding="utf-8").write("const escapeHtml=s=>String(s).replace(/[&<>\"]/g,'');\n" + _js_func(html, "_proRs") + "\n" + _js_func(html, "_proGaugeHtml") +
                             "\nconst g={ok:true,sym:'NIFTY',generated:'2026-11-06 16:00 IST',calib_days:61,daily_days:2900,"
                             "ver:{ok:true,rel:1.8,tercile:2,provisional:false,close_rel_hist:1.6,prev_vix:14,median_close:.6,n_days:61,rank_corr:.92},"
                             "clocks:{expiry:'2026-11-10 15:30',iv_calendar:14,iv_trading:12.5,units_left:3.2,calibrated:true,base_vol_trading:11,event_move_pts:120,event_move_pct:.5,events:[{date:'2026-11-09',label:'RBI'}]},"

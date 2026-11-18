@@ -31,7 +31,7 @@ def generate_nse_stock_file():
                 symbols = df['SYMBOL'].dropna().astype(str).tolist()
 
                 # Write to text file with line breaks
-                with open("nse_all_stocks.txt", "w") as f:
+                with open("nse_all_stocks.txt", "w", encoding="utf-8") as f:
                     f.write("\n".join(symbols))
 
                 print(f"Success! Exported {len(symbols)} NSE stocks to nse_all_stocks.txt")

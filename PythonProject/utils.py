@@ -24,7 +24,7 @@ def _load_properties():
     _properties_cache.clear()
 
     # 3. Read the fresh data
-    with open(_CONFIG_FILE, 'r') as file:
+    with open(_CONFIG_FILE, 'r', encoding="utf-8") as file:
         for line in file:
             line = line.strip()
             if line and not line.startswith(('#', '!')):
@@ -42,7 +42,7 @@ def get_property(property_name):
     config_path = os.path.join(BASE_DIR, "config.properties")
 
     try:
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             for line in f:
                 if "=" in line:
                     key, value = line.split("=", 1)
@@ -69,7 +69,7 @@ def get_fyers_session():
     """
     # 1. Try to load an existing token
     if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, 'r') as f:
+        with open(TOKEN_FILE, 'r', encoding="utf-8") as f:
             access_token = f.read().strip()
         if not CLIENT_ID or CLIENT_ID == "None":
             print("🚨 FATAL: client_id is None. Check your config.properties file name and key!")
@@ -118,7 +118,7 @@ def get_fyers_session():
         access_token = response['access_token']
 
         # Save the new token to the file so we don't have to do this again today
-        with open(TOKEN_FILE, 'w') as f:
+        with open(TOKEN_FILE, 'w', encoding="utf-8") as f:
             f.write(access_token)
 
         print("\n✅ Authentication Successful! Token saved.")
@@ -222,7 +222,7 @@ def get_zerodha_session():
     # Check if we already have a valid token saved today
     token_file = "zerodha_access_token.txt"
     if os.path.exists(token_file):
-        with open(token_file, 'r') as f:
+        with open(token_file, 'r', encoding="utf-8") as f:
             access_token = f.read().strip()
         kite.set_access_token(access_token)
         try:
@@ -241,7 +241,7 @@ def get_zerodha_session():
     try:
         data = kite.generate_session(request_token, api_secret=ZERODHA_API_SECRET)
         kite.set_access_token(data["access_token"])
-        with open(token_file, 'w') as f:
+        with open(token_file, 'w', encoding="utf-8") as f:
             f.write(data["access_token"])
         print("✅ Zerodha Authenticated Successfully!")
         return kite

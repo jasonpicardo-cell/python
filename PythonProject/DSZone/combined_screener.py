@@ -100,7 +100,7 @@ def disp_name(filename: str) -> str:
 def load_nifty750():
     if not os.path.exists(NIFTY750_FILE): return set()
     out = set()
-    with open(NIFTY750_FILE) as f:
+    with open(NIFTY750_FILE, encoding="utf-8") as f:
         for line in f:
             r = line.strip()
             if r and not r.startswith('#'): out.add(norm(r))

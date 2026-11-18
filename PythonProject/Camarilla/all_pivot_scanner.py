@@ -30,7 +30,7 @@ HIST_MONTHS = 25          # monthly candles stored per stock for bounce calc
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
 def load_set(fp):
-    try:    return {ln.strip().upper() for ln in open(fp) if ln.strip()}
+    try:    return {ln.strip().upper() for ln in open(fp, encoding="utf-8") if ln.strip()}
     except: return set()
 
 def load_index_map(files):

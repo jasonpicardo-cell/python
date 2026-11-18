@@ -133,7 +133,7 @@ def threaded_worker(stock_item):
                 elif status == "NO_DATA":
                     print(f"⏩ {tradingsymbol} - No trade data.", flush=True)
                     with blacklist_lock:
-                        with open(BLACKLIST_FILE, "a") as f:
+                        with open(BLACKLIST_FILE, "a", encoding="utf-8") as f:
                             f.write(f"NSE:{tradingsymbol}-EQ\n")  # 🛑 Save Fyers format so Fyers skips it too!
                     break
                 elif status == "RATE_LIMIT":
@@ -172,7 +172,7 @@ def run_nse_sync():
     # 1. Load the shared blacklist
     blacklist = set()
     if os.path.exists(BLACKLIST_FILE):
-        with open(BLACKLIST_FILE, "r") as f:
+        with open(BLACKLIST_FILE, "r", encoding="utf-8") as f:
             blacklist = set(line.strip().upper() for line in f if line.strip())
 
     for symbol in nifty_universe:

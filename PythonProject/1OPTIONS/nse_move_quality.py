@@ -122,7 +122,7 @@ def day_series(path: str) -> List[dict]:
     disk = os.path.join(os.path.dirname(path), "_mq", os.path.basename(path) + f".{sig[0]}.v2.json")
     if os.path.exists(disk):
         try:
-            with open(disk) as fh:
+            with open(disk, encoding="utf-8") as fh:
                 rows = json.load(fh)
             with _lock:
                 _series_cache[path] = (sig, rows)
@@ -150,7 +150,7 @@ def day_series(path: str) -> List[dict]:
         try:
             os.makedirs(os.path.dirname(disk), exist_ok=True)
             tmp = disk + f".{threading.get_ident()}.tmp"
-            with open(tmp, "w") as fh:
+            with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(rows, fh, separators=(",", ":"))
             os.replace(tmp, disk)
         except Exception:

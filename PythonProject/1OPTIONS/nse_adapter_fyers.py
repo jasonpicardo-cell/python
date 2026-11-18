@@ -223,7 +223,7 @@ def _env_file_values() -> Dict[str, str]:
         if not p or not os.path.exists(p):
             continue
         try:
-            for line in open(p):
+            for line in open(p, encoding="utf-8"):
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
@@ -254,7 +254,7 @@ def _access_token() -> str:
     path = _token_path()
     try:
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             ts = data.get("ts", 0)
             _status["token_age_h"] = round((time.time() - ts) / 3600, 1) if ts else None
@@ -277,7 +277,7 @@ def token_validity() -> Dict[str, Any]:
         return {"present": False, "valid": False,
                 "reason": "no saved token - run fyers_login.py"}
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:  # noqa: BLE001
         return {"present": True, "valid": False, "reason": f"token file unreadable: {e}"}
@@ -650,7 +650,7 @@ def _force_gap() -> float:
 def _acquire_socket_lock() -> bool:
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".fyers_socket.lock")
     try:
-        fh = open(path, "a+")
+        fh = open(path, "a+", encoding="utf-8")
     except Exception:
         return True                       # cannot even create the file: do not block the feed
     try:
@@ -2416,7 +2416,7 @@ def fetch_history_days(symbol: str, days: int = 60) -> List[Dict[str, Any]]:
     cpath = os.path.join(cdir, f"{key}.json")
     try:
         if os.path.exists(cpath):
-            with open(cpath) as f:
+            with open(cpath, encoding="utf-8") as f:
                 out = json.load(f)
             _hist_range_cache[key] = out
             return out
@@ -2448,7 +2448,7 @@ def fetch_history_days(symbol: str, days: int = 60) -> List[Dict[str, Any]]:
         try:
             os.makedirs(cdir, exist_ok=True)
             tmp = cpath + ".tmp"
-            with open(tmp, "w") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(out, f, separators=(",", ":"))
             os.replace(tmp, cpath)
         except Exception:

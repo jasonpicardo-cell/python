@@ -756,7 +756,7 @@ def build_html(df: pd.DataFrame, title: str, group_label: str,
 # ─────────────────────────────────────────────────────────────────────────────
 def load_nifty750(path: Path) -> set:
     symbols = set()
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):

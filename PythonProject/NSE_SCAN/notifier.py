@@ -212,7 +212,7 @@ if __name__ == "__main__":
     if not os.path.exists(cfg_path):
         print("❌ config.json not found — run the scanner first to generate it.")
         sys.exit(1)
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         cfg = json.load(f)
 
     # Send a test message

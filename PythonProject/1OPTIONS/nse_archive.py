@@ -150,7 +150,7 @@ def _read_missing(root):
     if not os.path.exists(p):
         return set()
     out = set()
-    for line in open(p):
+    for line in open(p, encoding="utf-8"):
         try:
             out.add(date.fromisoformat(line.strip()[:10]))
         except ValueError:
@@ -190,7 +190,7 @@ def backfill_daily(root=HERE, start=None, end=None, pause=0.35, fetch=_fetch, lo
         rows.clear()
         if holidays:
             os.makedirs(_dir(root), exist_ok=True)
-            with open(_missing_path(root), "a") as f:
+            with open(_missing_path(root), "a", encoding="utf-8") as f:
                 for h in holidays:
                     f.write(h.isoformat() + "\n")
             holidays.clear()
@@ -238,7 +238,7 @@ def _source_bars(root, sym):
         if t not in cur or pri >= cur[t][4]:
             cur[t] = (o, h, l, c, pri)
     for f in glob.glob(os.path.join(root, "ticks", f"{sym}_*.csv")):
-        for line in open(f):
+        for line in open(f, encoding="utf-8"):
             p = line.strip().split(",")
             if len(p) >= 2:
                 try:
@@ -248,7 +248,7 @@ def _source_bars(root, sym):
                     pass
     for f in glob.glob(os.path.join(root, "history", f"{sym}_*.json")) + glob.glob(os.path.join(root, "warm_cache", f"{sym}_*.json")):
         try:
-            j = json.load(open(f))
+            j = json.load(open(f, encoding="utf-8"))
             bars = j.get("bars", []) if isinstance(j, dict) else j
             pri = 3 if "warm_cache" in f else 2
             for b in bars:

@@ -25,7 +25,7 @@ session.set_token(auth_code)
 response = session.generate_token()
 access_token = response['access_token']
 
-with open("fyers_token.txt", "w") as f:
+with open("fyers_token.txt", "w", encoding="utf-8") as f:
     f.write(access_token)
 
 print("\n✅ Login Successful! Today's token saved to fyers_token.txt.")
