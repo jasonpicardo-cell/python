@@ -1,11 +1,16 @@
 @echo off
 setlocal
 
-set "SRC=\\192.168.1.6\jason\PycharmProjects\PythonProject\1OPTIONS\.zerodha_token"
-set "DEST=C:\Users\jjpic\git\python\PythonProject\1OPTIONS\.zerodha_token"
+set "LAST=6"
+if not "%~1"=="" set "LAST=%~1"
 
-if not exist "C:\Users\jjpic\git\python\PythonProject\1OPTIONS" mkdir "C:\Users\jjpic\git\python\PythonProject\1OPTIONS"
+set "SRC=\\192.168.1.%LAST%\jason\PycharmProjects\PythonProject\1OPTIONS\.zerodha_token"
+set "DESTDIR=C:\Users\jjpic\git\python\PythonProject\1OPTIONS"
+set "DEST=%DESTDIR%\.zerodha_token"
 
+if not exist "%DESTDIR%" mkdir "%DESTDIR%"
+
+echo Copying from %SRC%
 type "%SRC%" > "%DEST%"
 if errorlevel 1 (
     echo [ERROR] Copy failed.
