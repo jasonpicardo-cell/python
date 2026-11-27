@@ -1744,7 +1744,7 @@ def test_scalping_tab():
               o3["a"] == [["in", True, True, 130, 100], ["out", False, False, 65, 110], ["out", False, False, 65, 90], ["in", True, True, 65, 120]]
               and o3["spUp"] == [["in", True], ["out", False]] and not o3["hedgeOnSpot"] and o3["spN"] == 6 and o3["wOwn"] == 2, str(o3))
         js4 = ("const fmtInt = x => x, escapeHtml = x => x; let SYM = 'NIFTY'; const state = { get symbol() { return SYM; }, lastData: { expiry: '03-Nov-2026', underlying_value: 25012, strikes: [] } };\n" +
-              "const scChainOk = () => true; const SC = { spot: 25012, book: {}, pref: { selCE: 'o0' } }; const el = { style: {} }; const $sc = () => el; const scSet = (e, h) => { e.h = h; };\n" +
+              "const scChainOk = () => true; const SC = { spot: 25012, book: {}, pref: { selCE: 'o0', gridN: 5, hide50: true } }; const el = { style: {} }; const $sc = () => el; const scSet = (e, h) => { e.h = h; };\n" +
               d[d.index("  const _BF = {"):d.index("\n  }\n", d.index("function _bfGrid(o)")) + 5] + "\n" +
               seg[seg.index("const SC_GRID_SYMS"):seg.index("\n  }\n", seg.index("function scRenderGridBody")) + 5] + """
         for (let k = 24300; k <= 25700; k += 50) state.lastData.strikes.push({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k });
@@ -1767,12 +1767,35 @@ def test_scalping_tab():
         r4 = _sp.run(["node", "-e", js4], capture_output=True, text=True, timeout=20)
         o4 = json.loads(r4.stdout or "null") or {"err": r4.stderr[-600:]}
         assert "order" in o4, o4
-        check("strike grid controls: depth dropdown sets +-N strikes (default 5), 'Hide 50' (NIFTY only, default on) keeps 100-multiples; BANKNIFTY gets no checkbox",
+        check("strike grid controls: depth dropdown sets +-N strikes, 'Hide 50' (NIFTY only) keeps 100-multiples; BANKNIFTY gets no checkbox",
               o4["depth"] == json.dumps({"d50": [24900, 24950, 25000, 25050, 25100], "d100": [24800, 24900, 25000, 25100, 25200], "bk50": 5, "bkCtl": False, "niCtl": True}, separators=(",", ":")) or json.loads(o4["depth"]) == {"d50": [24900, 24950, 25000, 25050, 25100], "d100": [24800, 24900, 25000, 25100, 25200], "bk50": 5, "bkCtl": False, "niCtl": True}, o4["depth"])
         check("chart indicators: EMA 200 is a menu item on by default (new pref key e200) and is drawn", "e200: true" in seg and "SC_E200" in seg and "b.e200 =" in seg)
         check("strike grid: ATM plus and minus 5 round-hundred strikes (11 rows, no column headers) (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; shown for NIFTY and BANKNIFTY, hidden for the other indices",
               o4["no50"] and o4["order"] == [24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500] and o4["order2"] == [24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500, 25600]
               and o4["fallback"] and o4["kq"] and o4["layout"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
+        # strongest x B / x S per side gets a yellow box from the strike column to that side's edge (_bfMax -> tr.mxc / tr.mxp)
+        jsm = ("const fmtInt = x => x, escapeHtml = x => x; let SYM = 'NIFTY'; const state = { get symbol() { return SYM; }, lastData: { expiry: '03-Nov-2026', underlying_value: 25012, strikes: [] } };\n" +
+              "const scChainOk = () => true; const SC = { spot: 25012, book: {}, pref: { selCE: 'o0' } }; const el = { style: {} }; const $sc = () => el; const scSet = (e, h) => { e.h = h; };\n" +
+              d[d.index("  const _BF = {"):d.index("\n  }\n", d.index("function _bfGrid(o)")) + 5] + "\n" +
+              seg[seg.index("const SC_GRID_SYMS"):seg.index("\n  }\n", seg.index("function scRenderGridBody")) + 5] + """
+        for (let k = 24300; k <= 25700; k += 50) state.lastData.strikes.push({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k });
+        const cls = () => [...el.h.matchAll(/<tr class="([^"]*)">[^]*?data-k="(\\d+)"/g)].filter(m => /mx/.test(m[1])).map(m => m[2] + ':' + m[1].trim());
+        SC.book = { C25000: [90000, 30000, 1], C25200: [10000, 50000, 1], P24800: [40000, 10000, 1], P25000: [10000, 20000, 1] }; scRenderGrid(); const a = cls();
+        SC.book = { C25000: [90000, 10000, 1], P25000: [10000, 80000, 1] }; scRenderGrid(); const b = cls();
+        SC.book = {}; scRenderGrid(); const c = cls();
+        const ks = [...el.h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]), dflt = { n: ks.length, has50: ks.some(k => k % 100), lo: Math.min(...ks), hi: Math.max(...ks), sel10: /<option value="10" selected>/.test(el.h), unchecked: /data-g="h50">/.test(el.h) };
+        const ag = [..._bfAggSet(state.lastData, 25012)];
+        console.log(JSON.stringify({ a, b, c, dflt, ag }));""")
+        rm = _sp.run(["node", "-e", jsm], capture_output=True, text=True, timeout=20)
+        om = json.loads(rm.stdout or "null") or {"err": rm.stderr[-600:]}
+        check("strike grids: the strongest bid/offer ratio per side (|ln r|, so 0.2x S beats 3x B) is boxed in yellow from the strike column out to the CE / PE edge; one row can carry both; no box without book totals; dark and light colours",
+              om.get("a") == ["24800:mxp", "25200:mxc"] and om.get("b") == ["25000:atm mxc mxp"] and om.get("c") == []
+              and ".sc-grid { --g-max: #ffd400; } body.light-mode .sc-grid { --g-max: #ca8a04; }" in d and ".sc-grid tr.mxc:not(.mxp) > td.k::after { right: -1px;" in d and ".sc-grid tr.mxp:not(.mxc) > td.k::after { left: -1px;" in d, str(om))
+        check("strike grids default to Depth +-10 with Hide 50 off (Scalper and Home), and the caption's book shift still averages only the backtested strikes (NIFTY round hundreds, ATM +-5; twin of bias_eval.grid_rows)",
+              om.get("dflt") == {"n": 21, "has50": True, "lo": 24500, "hi": 25500, "sel10": True, "unchecked": True}
+              and om.get("ag") == [24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500]
+              and "e200: true, gridN: 10, hide50: false," in d and "Object.assign({ n: 10, h50: false }, JSON.parse(localStorage.getItem('homeGridPrefV1')" in d
+              and "SC.pref.hide50 === true;" in d and "h50 = isNf && _hgPref.h50 === true," in d and "if (AG.has(r.strike)) SCR[" in d, str(om))
         F = o4["fresh"]
         check("strike grids: feed freshness. The caption shows live / live n/m / stale Ns / snapshot / stream off; cells from the chain snapshot, older than 30 s, or under a feed that is not live are dimmed (data-f) with the reason in the tooltip and no shift arrows, and a grid that is not live shows no book shift; both grids wired the same way",
               F["a"] == {"fd": "ok:live 4/5", "dim": 3, "shift": True, "arrows": False} and F["b"] == {"fd": "bad:stale 61s", "dim": 15, "shift": False, "arrows": False}
@@ -4335,11 +4358,42 @@ console.log(JSON.stringify(R));
     check("dashboard: γ-SUP/γ-RES have a toggle (default on) honoured by both the candle and Renko charts",
           'id="chk_gamLadder"' in d and "'pdPrep', 'gamLadder']" in d and d.count("show.gamLadder") == 2 and "k === 'gamLadder' && _chart.show[k] === undefined" in d)
 
-    check("dashboard: VWAP σ, γ SUP/RES, HA marks, FVG, Liquidity and Fib default OFF (so Reset Defaults turns them off); Basic checkbox leaves only VWAP/Squeeze/WaveTrend/Zones/Prep card/Turn times on, and is not persisted",
-          "show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false," in d
-          and d.count("show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false,") == 2
+    check("dashboard: VWAP σ, γ SUP/RES, HA marks, FVG and Liquidity default OFF, Fib default ON (so Reset Defaults restores that); Basic checkbox leaves only VWAP/Squeeze/WaveTrend/Zones/Prep card/Turn times on, and is not persisted",
+          "show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: true," in d
+          and d.count("show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: true,") == 2
           and 'id="chkBasic" data-nopersist="1"' in d and "[id]:not([data-nopersist])" in d
           and "const KEEP = ['vwap', 'sqz', 'wt', 'pdZones', 'pdPrep', 'turnTimes', 'ttr', 'ema100', 'ema200', 'orbFib'];" in d)
+    # Mute everything defaults ON; a one-time update (_defaultsRev) rewrites this browser's saved Fib / mute / grid values once
+    try:
+        i0 = d.index("  (function _defaultsRev() {"); mig = d[i0:d.index("\n  })();\n", i0) + 8]
+        jsd = """const mk = init => { const m = new Map(Object.entries(init)); return { getItem: k => m.has(k) ? m.get(k) : null, setItem: (k, v) => m.set(k, String(v)), dump: () => Object.fromEntries(m) }; };
+const out = {};
+let localStorage = mk({ chartCfg: JSON.stringify({ interval: 3, show: { orbFib: false, cpr: false } }), homeGridPrefV1: JSON.stringify({ c: true, n: 4, h50: true }),
+  scalpPrefsV2: JSON.stringify({ lots: 3, gridN: 3, hide50: true }), masterMute: '0', uiStateV1: JSON.stringify({ chk: { chk_orbFib: false, masterMute: false, hgH50: true, chk_cpr: false }, sel: { hgN: '4' }, num: {} }) });
+""" + mig + """
+let x = localStorage.dump(); out.a = { c: JSON.parse(x.chartCfg), h: JSON.parse(x.homeGridPrefV1), p: JSON.parse(x.scalpPrefsV2), m: x.masterMute, u: JSON.parse(x.uiStateV1), r: x.defaultsRevV1 };
+localStorage.setItem('masterMute', '0'); localStorage.setItem('homeGridPrefV1', JSON.stringify({ n: 3 }));
+""" + mig + """
+x = localStorage.dump(); out.b = { m: x.masterMute, h: JSON.parse(x.homeGridPrefV1) };
+localStorage = mk({});
+""" + mig + """
+out.c = localStorage.dump();
+console.log(JSON.stringify(out));"""
+        rd = subprocess.run(["node", "-e", jsd], capture_output=True, text=True, timeout=20)
+        od = json.loads(rd.stdout or "null") or {"err": rd.stderr[-600:]}
+        A = od.get("a") or {}
+        check("defaults update (once per browser): Fib on, Mute everything on, both strike grids Depth 10 / Hide 50 off, in the saved prefs and in uiStateV1; other saved settings untouched; runs once, so later choices stick; listed for Reset Defaults",
+              A.get("c") == {"interval": 3, "show": {"orbFib": True, "cpr": False}} and A.get("h") == {"c": True, "n": 10, "h50": False}
+              and A.get("p") == {"lots": 3, "gridN": 10, "hide50": False} and A.get("m") == "1" and A.get("r") == "1"
+              and A.get("u") == {"chk": {"chk_orbFib": True, "masterMute": True, "hgH50": False, "chk_cpr": False}, "sel": {"hgN": "10"}, "num": {}}
+              and od.get("b") == {"m": "0", "h": {"n": 3}} and od.get("c") == {"masterMute": "1", "defaultsRevV1": "1"}
+              and d.index("(function _defaultsRev() {") < d.index("const _CHART_CFG = 'chartCfg';") and "'defaultsRevV1'," in d, str(od))
+    except Exception as ex:  # noqa: BLE001
+        check("defaults update runs in node", False, str(ex))
+    check("Mute everything is ON by default (muted unless the key is '0'): the Alerts checkbox and _masterMuted agree, and Reset Defaults says so",
+          "try { return localStorage.getItem('masterMute') !== '0'; } catch (_) { return true; }" in d
+          and "mm.checked = localStorage.getItem('masterMute') !== '0';" in d and "localStorage.getItem('masterMute') === '1'" not in d
+          and "Mute everything ON (alerts still pop up, silently); Home chart Fib ON; both strike grids (Home and Scalper) Depth ±10 with Hide 50 OFF." in d)
 
 
 _POI_SAMPLE = (

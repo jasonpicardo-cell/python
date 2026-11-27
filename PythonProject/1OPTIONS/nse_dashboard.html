@@ -2267,6 +2267,11 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-grid td.rg { color: var(--g-muted); } .sc-grid td.rg[style*="--p"] { --g-rgc: color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo)); background: linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%)); }   /* heat by position: filled to the LTP, slate near the day low turning amber near the high; the rest a faint track */ .sc-grid td.rg.pe { text-align: left; }
   .sc-grid td.oi { color: var(--g-muted); font-size: .9em; text-align: center; min-width: 3.6em; } .sc-grid td.oi.bu { color: var(--g-up); font-weight: 600; } .sc-grid td.oi.be { color: var(--g-dn); font-weight: 600; } .sc-grid td[data-f] { opacity: .45; } .sc-grid .fd.ok { color: var(--g-up); } .sc-grid .fd.bad { color: var(--g-amber); }   /* OI tag (_bfOi): bullish / bearish for the index, context only */
   .sc-grid td.rg b { display: inline-block; min-width: 3.4em; text-align: center; color: var(--g-text); font-weight: 700; } .sc-grid td.rg b.hi, .sc-grid td.rg b.lo { color: var(--g-amber); font-weight: 800; }
+  .sc-grid { --g-max: #ffd400; } body.light-mode .sc-grid { --g-max: #ca8a04; }   /* strongest × B / × S per side (_bfMax): box from the strike to that side's edge */
+  .sc-grid tr.mxc > td:not(.k ~ td), .sc-grid tr.mxp > td.k, .sc-grid tr.mxp > td.k ~ td { position: relative; }
+  .sc-grid tr.mxc > td:not(.k ~ td)::after, .sc-grid tr.mxp > td.k::after, .sc-grid tr.mxp > td.k ~ td::after { content: ''; position: absolute; inset: -1px 0; border-top: 2px solid var(--g-max); border-bottom: 2px solid var(--g-max); pointer-events: none; }
+  .sc-grid tr.mxc > td:first-child::after { left: -1px; border-left: 2px solid var(--g-max); } .sc-grid tr.mxp > td:last-child::after { right: -1px; border-right: 2px solid var(--g-max); }
+  .sc-grid tr.mxc:not(.mxp) > td.k::after { right: -1px; border-right: 2px solid var(--g-max); } .sc-grid tr.mxp:not(.mxc) > td.k::after { left: -1px; border-left: 2px solid var(--g-max); }
   .sc-grid .wl { font-size: 8.5px; font-weight: 800; padding: 0 2px; border-radius: 2px; border: 1px solid currentColor; opacity: .8; }
   .sc-grid .iv { font-size: .8em; font-weight: 500; color: var(--g-muted); margin-left: 3px; } .sc-grid .iv.vu, .sc-grid .sv.vu { color: var(--g-amber); font-weight: 700; } .sc-grid .iv.vd, .sc-grid .sv.vd { color: var(--g-cool); font-weight: 700; }   /* IV change / straddle: vol bid amber, vol offered blue (not a direction) */
   .sc-grid .bf.bu { color: var(--g-up); } .sc-grid .bf.be { color: var(--g-dn); } .sc-grid .bf.wq { color: var(--g-muted); font-weight: 500; }
@@ -5149,6 +5154,25 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const el = document.getElementById('serverUrl');
       if (el && /^https?:/.test(location.protocol)) el.value = location.origin;
       else if (el) { const v = localStorage.getItem('serverUrl'); if (v) el.value = v; }
+    } catch (_) {}
+  })();
+
+  // One-time defaults update (rev 1, 2026-11-27): Mute everything ON, Home chart Fib ON, both strike
+  // grids Depth ±10 with Hide 50 OFF. Saved settings override shipped defaults, so this browser's
+  // saved values (and uiStateV1, which replays the controls on load) are rewritten once, before
+  // anything reads them. Reset Defaults lands on the same values.
+  (function _defaultsRev() {
+    try {
+      if (+localStorage.getItem('defaultsRevV1') >= 1) return;
+      const j = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (_) { return null; } };
+      const put = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+      const c = j('chartCfg'); if (c && c.show) { c.show.orbFib = true; put('chartCfg', c); }
+      const h = j('homeGridPrefV1'); if (h) { h.n = 10; h.h50 = false; put('homeGridPrefV1', h); }
+      const p = j('scalpPrefsV2'); if (p) { p.gridN = 10; p.hide50 = false; put('scalpPrefsV2', p); }
+      localStorage.setItem('masterMute', '1');
+      const u = j('uiStateV1');
+      if (u) { u.chk = Object.assign(u.chk || {}, { chk_orbFib: true, masterMute: true, hgH50: false }); u.sel = Object.assign(u.sel || {}, { hgN: '10' }); put('uiStateV1', u); }
+      localStorage.setItem('defaultsRevV1', '1');
     } catch (_) {}
   })();
 
@@ -18111,8 +18135,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _chart = { interval: 1, candles: [], src: null, timer: null, show: {}, hover: null, yZoom: 1, yCenter: null, drag: null, maxed: false, diagOpen: false };
   const _CHART_CFG = 'chartCfg';
   function _chartCfgLoad() {
-    try { return Object.assign({ interval: 1, pollSec: 5, show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false, cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
-    catch (_) { return { interval: 1, pollSec: 5, show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: false, cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }; }
+    try { return Object.assign({ interval: 1, pollSec: 5, show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: true, cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }, JSON.parse(localStorage.getItem(_CHART_CFG) || '{}')); }
+    catch (_) { return { interval: 1, pollSec: 5, show: { vwapBand: false, gamLadder: false, haMarks: false, pdFvg: false, pdLiq: false, orbFib: true, cpr: true, walls: true, maxpain: true, cone: true, m920: true, pivots: false, pivotType: 'camarilla', gflip: true, bb: true, ema5: false, ema10: true, ema15: false, ema20: false, ema50: true, ema100: true, ema200: true, vwap: true, emaX: true, ttr: true, sqz: true, wt: true }, emaX: { fast: 5, slow: 13 } }; }
   }
   function _chartCfgSave() { try { localStorage.setItem(_CHART_CFG, JSON.stringify({ interval: _chart.interval, pollSec: _chart.pollSec, show: _chart.show, emaX: _chart.emaX })); } catch (_) {} }
 
@@ -28421,7 +28445,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   // ── NIFTY strike grid on the home chart: ATM +/- 3 round-hundred strikes with the total bid and offer
   // quantity of each CE and PE book. Buyers on a call and sellers on a put are green; the reverse is red.
   // Read from the chain payload (Zerodha's live book totals), so it costs no extra broker call. ──
-  const _hgPref = (() => { try { return Object.assign({ n: 5, h50: true }, JSON.parse(localStorage.getItem('homeGridPrefV1') || '{}')); } catch (_) { return { n: 5, h50: true }; } })();
+  const _hgPref = (() => { try { return Object.assign({ n: 10, h50: false }, JSON.parse(localStorage.getItem('homeGridPrefV1') || '{}')); } catch (_) { return { n: 10, h50: false }; } })();
   document.addEventListener('click', e => {
     if (!e.target.closest || !e.target.closest('#hgCol')) return;
     _hgPref.c = !_hgPref.c; try { localStorage.setItem('homeGridPrefV1', JSON.stringify(_hgPref)); } catch (_) {}
@@ -28456,6 +28480,20 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const r = b / o, buyers = r >= 1, good = put ? !buyers : buyers, t = _bfTier(z), u = z > 0;
     const tip = `${buyers ? 'more bids than offers' : 'more offers than bids'} (the level alone is not a signal) · ` + (z == null ? '2-min shift: warming up' : `2-min shift z ${z >= 0 ? '+' : ''}${z.toFixed(2)}: ${t ? (u ? 'bullish' : 'bearish') + (t === 2 ? ', strong' : '') : 'no clear shift'}; one strike alone is noise, read the grid average`);
     return `<td ${st ? 'data-f="1" ' : ''}title="${st ? st + ' · ' : ''}${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'B' : 'S'}</td>`;
+  };
+  // The strike whose bid/offer ratio is furthest from 1 on each side (|ln r|: 3× B and 0.33× S count the same). Display aid, not a call.
+  const _bfMax = (rows, live) => {
+    const m = {};
+    for (const p of ['ce', 'pe']) { let best = 0; for (const r of rows) { const [b, x] = live(r, p); if (b > 0 && x > 0) { const v = Math.abs(Math.log(b / x)); if (v > best) { best = v; m[p] = r.strike; } } } }
+    return m;
+  };
+  // The strikes the book shift was backtested on (twin: bias_eval.grid_rows, n=5): NIFTY round hundreds, ATM ±5.
+  // Only these feed the caption's average, whatever the grid's Depth / Hide 50 show.
+  const _bfAggSet = (d, spot) => {
+    const nf = (state.symbol || 'NIFTY') === 'NIFTY';
+    const rows = ((d && d.strikes) || []).filter(r => r.ce_symbol && r.pe_symbol && !(nf && r.strike % 100)).sort((a, b) => a.strike - b.strike);
+    let ai = 0, bd = Infinity; rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
+    return new Set(rows.slice(Math.max(0, ai - 5), ai + 6).map(r => r.strike));
   };
   const _bfMean = zs => { const v = zs.filter(z => z != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const _bfSpot = (key, spot, now) => {   // the index move over the last fadeMin seconds, in bps (twin: bias_eval.SpotMove)
@@ -28631,18 +28669,19 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const d = o.d, rows = o.rows, book = o.book || {}, now = Date.now() / 1000, spot = o.spot || (d && (d.underlying_value || d.atm)) || 0, SCR = {};
     const live = (r, p) => { const lv = book[r[p + '_symbol']]; return lv ? [lv[0], lv[1]] : [r[p + '_tbq'], r[p + '_tsq']]; };
     const SRC = {}; rows.forEach(r => ['ce', 'pe'].forEach(p => { const [b, x] = live(r, p); if (b > 0 && x > 0) SRC[r.strike + p] = _bfSrc(book[r[p + '_symbol']], o.bookAt, now); }));
-    const FD = _bfFeed(Object.values(SRC), o.feed), W = _bfWalls(d, spot);
+    const FD = _bfFeed(Object.values(SRC), o.feed), W = _bfWalls(d, spot), AG = _bfAggSet(d, spot);
     const ratio = (b, x, put, r, st) => {
       if (!(b > 0) || !(x > 0)) return '<td>–</td>';
       if (st) return _bfCell(b, x, put, null, st);
-      const z0 = _bfZ(r[(put ? 'pe' : 'ce') + '_symbol'], b, x, now), z = z0 == null ? null : put ? -z0 : z0; SCR[r.strike + (put ? 'p' : 'c')] = z; return _bfCell(b, x, put, z);
+      const z0 = _bfZ(r[(put ? 'pe' : 'ce') + '_symbol'], b, x, now), z = z0 == null ? null : put ? -z0 : z0; if (AG.has(r.strike)) SCR[r.strike + (put ? 'p' : 'c')] = z; return _bfCell(b, x, put, z);
     };
     const cell = (r, put) => {
       const p = put ? 'pe' : 'ce', [b, x] = live(r, p), s = SRC[r.strike + p], st = s ? _bfStale(s, FD.ok) : '', q = `${_bfQ(b, st)}${_bfQ(x, st)}${ratio(b, x, put, r, st)}`, gk = _bfGk(d, r, p, spot), sp = _bfSpr(r, p);
       return put ? sp + gk + _bfOi(d, r, p) + _bfRange(r, p) + q : q + _bfRange(r, p) + _bfOi(d, r, p) + gk + sp;
     };
     const any = rows.some(r => (live(r, 'ce')[0] > 0) || (live(r, 'pe')[0] > 0));
-    const tbl = rows.map(r => `<tr class="${r.strike === o.atm ? 'atm' : ''}${o.sel != null && o.sel !== '' && String(r.strike) === String(o.sel) ? ' sel' : ''}">${cell(r, false)}<td class="k"${o.click ? ` data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart"` : ''}>${fmtInt(r.strike)}${_bfWall(d, r.strike, W)}${_bfIv(r)}</td>${cell(r, true)}</tr>`).join('');
+    const MX = _bfMax(rows, live);   // strongest × B / × S per side: yellow box from the strike out to that side's edge
+    const tbl = rows.map(r => `<tr class="${r.strike === o.atm ? 'atm' : ''}${r.strike === MX.ce ? ' mxc' : ''}${r.strike === MX.pe ? ' mxp' : ''}${o.sel != null && o.sel !== '' && String(r.strike) === String(o.sel) ? ' sel' : ''}">${cell(r, false)}<td class="k"${o.click ? ` data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart"` : ''}>${fmtInt(r.strike)}${_bfWall(d, r.strike, W)}${_bfIv(r)}</td>${cell(r, true)}</tr>`).join('');
     return `<div class="cap">${o.ctl || ''}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(o.expiry || ''))} · CE bid · offer · ratio · day range · OI · δ θ/h · spread | strike ΔIV | PE spread · δ θ/h · OI · day range · bid · offer · ratio · ATM ${fmtInt(o.atm)}${_bfStr(d)}${_bfVol(d)}${FD.html}${any && FD.ok ? _bfAgg(Object.values(SCR), W) : ''}${_bfWallRead(W)}${_bfDesk(d, spot, now, W)}</div>` +
       (any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>') +
       `<table>${tbl}</table>`;
@@ -28668,7 +28707,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       const svgEl = document.getElementById('chartSvg') || document.getElementById('renkoSvg');
       if (!['NIFTY', 'BANKNIFTY'].includes(state.symbol || 'NIFTY') || !svgEl || !svgEl.getClientRects().length) { el.style.display = 'none'; return; }   // an SVG has no offsetParent: ask for its boxes instead
       const d = state.lastData;
-      const isNf = (state.symbol || 'NIFTY') === 'NIFTY', h50 = isNf && _hgPref.h50 !== false, HN = (+_hgPref.n >= 1 && +_hgPref.n <= 20) ? Math.round(+_hgPref.n) : 5;
+      const isNf = (state.symbol || 'NIFTY') === 'NIFTY', h50 = isNf && _hgPref.h50 === true, HN = (+_hgPref.n >= 1 && +_hgPref.n <= 20) ? Math.round(+_hgPref.n) : 10;
       const rows = d && Array.isArray(d.strikes) ? d.strikes.filter(r => r.ce_symbol && r.pe_symbol && !(h50 && r.strike % 100 !== 0)).sort((a, b) => a.strike - b.strike) : [];
       let html;
       if (!rows.length) {
@@ -34578,7 +34617,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     // of the individual settings, so unmuting restores exactly what you had
     const mm = document.getElementById('masterMute');
     if (mm) {
-      try { mm.checked = localStorage.getItem('masterMute') === '1'; } catch (_) {}
+      try { mm.checked = localStorage.getItem('masterMute') !== '0'; } catch (_) { mm.checked = true; }   // muted unless you unmuted it
       mm.addEventListener('change', () => {
         try { localStorage.setItem('masterMute', mm.checked ? '1' : '0'); } catch (_) {}
         if (typeof showToast === 'function')
@@ -34881,6 +34920,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'dashZoom',            // page zoom level
     'chartCfg',            // chart interval, EMAs, VWAP, pivot type, poll rate
     'voiceMode', 'masterMute', 'alertVolume', 'alertSound', 'alertDuration',
+    'defaultsRevV1',       // marker for the one-time defaults update (_defaultsRev); harmless to rerun
     'sq9Conv', 'tvWlOpen',
   ];
   // Never cleared. These are YOUR DATA, not settings - losing them to a
@@ -34971,7 +35011,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   });
 
   function _masterMuted() {
-    try { return localStorage.getItem('masterMute') === '1'; } catch (_) { return false; }
+    try { return localStorage.getItem('masterMute') !== '0'; } catch (_) { return true; }   // default: muted (alerts still pop up)
   }
 
   function _alertStatus() {
@@ -41783,7 +41823,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   // ======================================================================
   const SC = {
     st: null, quotes: {}, spot: 0, busy: false, legs: { CE: null, PE: null }, tape: {},
-    pref: { tf: 60, nvis: 70, e200: true, gridN: 5, hide50: true, ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14, dir: true, sqz: true, wt: true, ttr: true, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
+    pref: { tf: 60, nvis: 70, e200: true, gridN: 10, hide50: false, ema: true, emaF: 5, emaS: 13, e50: true, e100: true, rsi: true, rsiN: 14, rsiM: 14, dir: true, sqz: true, wt: true, ttr: true, vwap: true, cvd: true, vol: true, riskAuto: false, riskRs: 2000, lots: 1, link: false, confirm: true,
             selCE: 'o0', selPE: 'o0', chart: 'CE', dock: 'pos', side: 'B', struct: 'single', sOff: 2, hedge: true, wing: 3,
             ladN: 5, ladH50: true, trig: false, tkind: 'px', top: 'le', tlevel: '', tag: '', focus: false },
     pending: null, pendTimer: 0, sel: null, down: false, fails: 0, lastErr: '', mod: null, journal: null, seq: 0,
@@ -43233,8 +43273,8 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
   }
   // ── strike grid: total bid and offer quantity of ATM +/- 3 strikes, NIFTY's chain expiry only ──
   const SC_GRID_SYMS = ['NIFTY', 'BANKNIFTY'];   // the indices whose option chain the strike grid reads
-  const scGridN = () => { const v = +SC.pref.gridN; return v >= 1 && v <= 20 ? Math.round(v) : 5; };
-  const scHide50 = () => (state.symbol || 'NIFTY') === 'NIFTY' && SC.pref.hide50 !== false;
+  const scGridN = () => { const v = +SC.pref.gridN; return v >= 1 && v <= 20 ? Math.round(v) : 10; };
+  const scHide50 = () => (state.symbol || 'NIFTY') === 'NIFTY' && SC.pref.hide50 === true;
   function scGridRows() {
     const d = state.lastData; if (!SC_GRID_SYMS.includes(state.symbol || 'NIFTY') || !d || !scChainOk()) return null;
     const rows = d.strikes.filter(r => r.ce_symbol && r.pe_symbol && !(scHide50() && r.strike % 100 !== 0)).sort((a, b) => a.strike - b.strike); if (!rows.length) return null;   // NIFTY with "Hide 50" on: the 50-strikes (22950, 22850…) are left out
@@ -43735,7 +43775,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     'vol-surface':       '<strong>Volatility Surface</strong>Each line is one expiry\'s implied volatility across strikes, so you see skew and term structure together instead of one number. <b>Skew</b> is the shape across strikes: downside IV above upside is the normal put-fear shape (protection is bid); an inverted skew, with calls bid, shows up in melt-ups and squeezes; unusually flat means neither tail is being paid for. <b>Term structure</b> is the gap between expiries — backwardation (near IV above far) signals near-term event premium and favours calendars and diagonals, while contango is the normal shape and makes near-dated premium comparatively cheap. Requires more than one expiry loaded to show the term dimension.',
     'astro-lab':         '<strong>Historical Astro Lab</strong>Load a daily NIFTY OHLC CSV (NSE publishes decades of it free) and every calendar claim on this dashboard gets scored on thousands of sessions instead of the handful your replay archive holds: full-moon versus new-moon returns, Bhadra-session ranges, Trayodashi trend rates, forward returns after Jupiter and Saturn ingresses, and Mars-retrograde volatility. Method is printed with the results: close-to-close returns, trend day defined as |close-open| at least 60%% of range, ephemeris evaluated at each session noon, sidereal ingresses on Lahiri. The honest lens is printed too: five tests invite roughly one fluke edge by chance alone, so a single lit-up row means little while a flat result across a decade means a lot. This panel exists because it is the one thing paid astrology platforms never ship - at real sample sizes the claims usually flatten, and that is precisely the information worth having before you let any of it near a position.',
     'diag-tab':          '<strong>Diagnostics</strong>Shows only the source named in DATA_SOURCE (nse, fyers or zerodha): its login and token, the live stream (last ticks, subscriptions, reconnects, watchdog actions), API calls made today against that broker\'s limits, the caches that keep those calls down, and the recent stream events. Everything is read from the server\'s memory, so opening this tab costs no broker call. The data audit below runs the same checks as FEED CHECK for the index selected at the top. Green = fine, amber = worth a look, red = something is broken.',
-    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history, the fresh-flow log, your Scalper notes and entry log all survive. So do your Scalper stop and target distances and the desk limits, because those decide what happens to real orders. Only the settings keys are cleared, including the Scalper chart and order-ticket preferences (lots return to 1) and the Home strike grid. Any other dashboard tab open in this browser reloads too. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources; context-pane clock watermark at 30; PD zones, FVG, liquidity and the prep card ON with the previous-day range, OTE / order blocks / signal filter OFF. The daily prep log (bias history and checklists) is kept.',
+    'reset-defaults':    '<strong>Reset Defaults</strong>Restores every alert and chart setting on THIS browser to the current recommended values, then reloads. It exists because settings are saved per browser in localStorage, which is normally what you want - a code update should not overwrite values you tuned - but it also means shipped default changes never reach a browser that has already run the dashboard, so you keep seeing old values after an update. <b>Your data is deliberately not touched:</b> trade journal, stock watchlist, suggestion scorecard, paper trades, the astro-lab history, the fresh-flow log, your Scalper notes and entry log all survive. So do your Scalper stop and target distances and the desk limits, because those decide what happens to real orders. Only the settings keys are cleared, including the Scalper chart and order-ticket preferences (lots return to 1) and the Home strike grid. Any other dashboard tab open in this browser reloads too. Other computers are unaffected, so you can reset one machine and leave a second on its own tuning. The confirmation dialog lists exactly what will be reset and what will be kept before anything happens. Defaults it restores include: EMA crossover lines ON with fast 5 / slow 13; PVSRA candle colouring OFF; Pivots OFF on the chart and in the alert chart sources; context-pane clock watermark at 30; PD zones, FVG, liquidity and the prep card ON with the previous-day range, OTE / order blocks / signal filter OFF. Mute everything ON (alerts still pop up, silently); Home chart Fib ON; both strike grids (Home and Scalper) Depth ±10 with Hide 50 OFF. The daily prep log (bias history and checklists) is kept.',
     'enable-all':        '<strong>Enable ALL alert types</strong>One switch that turns on every alert TYPE - chart level sources, fresh-flow categories, and the rest - regardless of the individual boxes. It is ON by default, which is the right starting point: hear everything, then narrow down once you know what is noise for you. <b>Your individual selections are never overwritten</b>, only bypassed, so unticking this restores exactly the setup you had, and the affected controls dim while it is on to show they are being ignored rather than silently disagreeing with what you hear. <b>The per-index filter is deliberately NOT affected by this.</b> "Which alert types do I want" and "which instrument do I care about" are separate questions: you might want every alert type but only for NIFTY, and letting this switch override the index selection would make that impossible. Mute is different again - it silences this browser entirely and overrides everything.',
     'index-alerts':      '<strong>Per-index alert filter</strong>Which indices this browser will announce. The server polls several indices and streams alerts for all of them, so a BANKNIFTY flow alert can reach you while you are studying NIFTY. Unticking an index is a <b>local mute</b>: the server keeps detecting it, the alert is still logged and still toasts, and other computers are unaffected - only the voice is suppressed here. <b>Only the index I am viewing</b> is the stricter setting: it follows the top tab, so switching instrument automatically silences the rest and you never have to remember to re-tick anything. Use the per-index boxes when you watch two instruments and want both audible; use active-only when you want the dashboard to speak about exactly what is in front of you.',
     'level-voice':       '<strong>Speak level touches</strong>Controls the spoken announcement when price reaches a level - a pivot, a CPR band, an OI wall, a 9:20 line or a sigma edge. <b>Which</b> levels announce is set in the card above; this controls the wording and whether they are spoken at all on this browser. <b>Include the price</b> gives "Resistance 1 touched at 24542" instead of just "Resistance 1 touched" - useful when the alert reaches you away from the screen. <b>Include distance from spot</b> adds "42 points below spot", which matters when several levels sit close together and you need to know which one without looking. The test button speaks a sample phrase using your current settings, so you can hear the wording before a real touch happens, and it reports plainly if voice is off or audio is not unlocked on this machine.',
