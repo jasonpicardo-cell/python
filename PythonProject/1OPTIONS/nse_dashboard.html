@@ -2267,11 +2267,16 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   .sc-grid td.rg { color: var(--g-muted); } .sc-grid td.rg[style*="--p"] { --g-rgc: color-mix(in srgb, var(--g-rghi) var(--p, 0%), var(--g-rglo)); background: linear-gradient(to right, var(--g-rgc) var(--p, 0%), var(--g-rgt) var(--p, 0%)); }   /* heat by position: filled to the LTP, slate near the day low turning amber near the high; the rest a faint track */ .sc-grid td.rg.pe { text-align: left; }
   .sc-grid td.oi { color: var(--g-muted); font-size: .9em; text-align: center; min-width: 3.6em; } .sc-grid td.oi.bu { color: var(--g-up); font-weight: 600; } .sc-grid td.oi.be { color: var(--g-dn); font-weight: 600; } .sc-grid td[data-f] { opacity: .45; } .sc-grid .fd.ok { color: var(--g-up); } .sc-grid .fd.bad { color: var(--g-amber); }   /* OI tag (_bfOi): bullish / bearish for the index, context only */
   .sc-grid td.rg b { display: inline-block; min-width: 3.4em; text-align: center; color: var(--g-text); font-weight: 700; } .sc-grid td.rg b.hi, .sc-grid td.rg b.lo { color: var(--g-amber); font-weight: 800; }
-  .sc-grid { --g-max: #ffd400; } body.light-mode .sc-grid { --g-max: #ca8a04; }   /* strongest × B / × S per side (_bfMax): box from the strike to that side's edge */
+  .sc-grid { --g-m1: #ff3b3b; --g-m2: #ffd400; --g-m3: #22e06b; } body.light-mode .sc-grid { --g-m1: #dc2626; --g-m2: #ca8a04; --g-m3: #16a34a; }   /* top 3 × B / × S per side (_bfMax): 1st red, 2nd yellow, 3rd green; box from the strike to that side's edge. A rank, not a direction */
+  .sc-grid tr.mc1 { --g-mc: var(--g-m1); } .sc-grid tr.mc2 { --g-mc: var(--g-m2); } .sc-grid tr.mc3 { --g-mc: var(--g-m3); } .sc-grid tr.mp1 { --g-mp: var(--g-m1); } .sc-grid tr.mp2 { --g-mp: var(--g-m2); } .sc-grid tr.mp3 { --g-mp: var(--g-m3); }
   .sc-grid tr.mxc > td:not(.k ~ td), .sc-grid tr.mxp > td.k, .sc-grid tr.mxp > td.k ~ td { position: relative; }
-  .sc-grid tr.mxc > td:not(.k ~ td)::after, .sc-grid tr.mxp > td.k::after, .sc-grid tr.mxp > td.k ~ td::after { content: ''; position: absolute; inset: -1px 0; border-top: 2px solid var(--g-max); border-bottom: 2px solid var(--g-max); pointer-events: none; }
-  .sc-grid tr.mxc > td:first-child::after { left: -1px; border-left: 2px solid var(--g-max); } .sc-grid tr.mxp > td:last-child::after { right: -1px; border-right: 2px solid var(--g-max); }
-  .sc-grid tr.mxc:not(.mxp) > td.k::after { right: -1px; border-right: 2px solid var(--g-max); } .sc-grid tr.mxp:not(.mxc) > td.k::after { left: -1px; border-left: 2px solid var(--g-max); }
+  .sc-grid tr.mxc > td:not(.k):not(.k ~ td)::after, .sc-grid tr.mxc > td.k::before, .sc-grid tr.mxp > td.k::after, .sc-grid tr.mxp > td.k ~ td::after { content: ''; position: absolute; inset: -1px 0; border-top: 2px solid; border-bottom: 2px solid; pointer-events: none; }
+  .sc-grid tr.mxc > td:not(.k):not(.k ~ td)::after, .sc-grid tr.mxc > td.k::before { border-color: var(--g-mc); } .sc-grid tr.mxp > td.k::after, .sc-grid tr.mxp > td.k ~ td::after { border-color: var(--g-mp); }
+  .sc-grid tr.mxc > td:first-child:not(.k ~ td)::after { left: -1px; border-left: 2px solid var(--g-mc); } .sc-grid tr.mxp > td.k ~ td:last-child::after { right: -1px; border-right: 2px solid var(--g-mp); }
+  .sc-grid tr.mxc:not(.mxp) > td.k::before { right: -1px; border-right: 2px solid var(--g-mc); } .sc-grid tr.mxp:not(.mxc) > td.k::after { left: -1px; border-left: 2px solid var(--g-mp); }
+  .sc-grid td.k .mr { position: absolute; top: 50%; transform: translateY(-50%); z-index: 1; font-style: normal; font-size: 11px; font-weight: 800; line-height: 1; pointer-events: auto; cursor: help; } .sc-grid td.k .mr.c { left: 4px; color: var(--g-mc); } .sc-grid td.k .mr.p { right: 4px; color: var(--g-mp); }   /* rank badge ①②③ (_bfMr): the rank without relying on colour */
+  #homeGrid td.k .mr { pointer-events: none; }   /* the Home grid floats over the chart: its badges must not catch the crosshair */
+  .sc-grid tr.mxc.mxp > td.k::before { right: 50%; } .sc-grid tr.mxc.mxp > td.k::after { left: 50%; }   /* both sides on one row: the strike cell splits, CE colour left, PE colour right */
   .sc-grid .wl { font-size: 8.5px; font-weight: 800; padding: 0 2px; border-radius: 2px; border: 1px solid currentColor; opacity: .8; }
   .sc-grid .iv { font-size: .8em; font-weight: 500; color: var(--g-muted); margin-left: 3px; } .sc-grid .iv.vu, .sc-grid .sv.vu { color: var(--g-amber); font-weight: 700; } .sc-grid .iv.vd, .sc-grid .sv.vd { color: var(--g-cool); font-weight: 700; }   /* IV change / straddle: vol bid amber, vol offered blue (not a direction) */
   .sc-grid .bf.bu { color: var(--g-up); } .sc-grid .bf.be { color: var(--g-dn); } .sc-grid .bf.wq { color: var(--g-muted); font-weight: 500; }
@@ -28481,11 +28486,43 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     const tip = `${buyers ? 'more bids than offers' : 'more offers than bids'} (the level alone is not a signal) · ` + (z == null ? '2-min shift: warming up' : `2-min shift z ${z >= 0 ? '+' : ''}${z.toFixed(2)}: ${t ? (u ? 'bullish' : 'bearish') + (t === 2 ? ', strong' : '') : 'no clear shift'}; one strike alone is noise, read the grid average`);
     return `<td ${st ? 'data-f="1" ' : ''}title="${st ? st + ' · ' : ''}${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'B' : 'S'}</td>`;
   };
-  // The strike whose bid/offer ratio is furthest from 1 on each side (|ln r|: 3× B and 0.33× S count the same). Display aid, not a call.
-  const _bfMax = (rows, live) => {
-    const m = {};
-    for (const p of ['ce', 'pe']) { let best = 0; for (const r of rows) { const [b, x] = live(r, p); if (b > 0 && x > 0) { const v = Math.abs(Math.log(b / x)); if (v > best) { best = v; m[p] = r.strike; } } } }
+  // The three most lopsided books per side, ranked 1..3 by |ln(bid/offer)| (3× B and 0.33× S count the same). Display aid, not a call.
+  // Fresh cells only (stale / snapshot cells are dimmed and left out); the ratio is smoothed over ~tau s so the boxes do not
+  // jump every tick; a book under floor × the side's median size, or a smoothed ratio inside ±min, is not ranked; a strike
+  // already ranked gets keep × its score, so a near-tie does not flip. Limits in _BFR: display only, kept out of the backtested _BF.
+  // Returns { ce: { strike: { rank, v, b, x, held } }, pe: {…} }; v = smoothed ln(bid/offer), held = seconds at this rank.
+  const _BFR = { tau: 30, floor: 0.25, min: Math.log(1.5), keep: 1.15 };
+  const _BFM = { ema: {}, held: {} };   // per contract { v, t }; per grid + side { strike: { rank, since } }
+  const _bfMax = (rows, live, fresh, now, key) => {
+    const m = { ce: {}, pe: {} };
+    for (const p of ['ce', 'pe']) {
+      const c = [];
+      for (const r of rows) {
+        const [b, x] = live(r, p);
+        if (!(b > 0 && x > 0) || !fresh(r, p)) continue;
+        const sym = r[p + '_symbol'], l = Math.log(b / x), e = _BFM.ema[sym];
+        const v = e ? e.v + (l - e.v) * (1 - Math.exp(-Math.max(0, now - e.t) / _BFR.tau)) : l;
+        _BFM.ema[sym] = { v, t: now };
+        c.push({ k: r.strike, v, b, x, q: b + x });
+      }
+      const qs = c.map(e => e.q).sort((a, b) => a - b), med = qs.length ? qs[qs.length >> 1] : 0;
+      const hk = key + '|' + p, prev = _BFM.held[hk] || {}, held = {};
+      c.filter(e => e.q >= _BFR.floor * med && Math.abs(e.v) >= _BFR.min)
+        .map(e => Object.assign(e, { s: Math.abs(e.v) * (prev[e.k] ? _BFR.keep : 1) }))
+        .sort((a, b) => b.s - a.s).slice(0, 3)
+        .forEach((e, i) => {
+          const rank = i + 1, since = prev[e.k] && prev[e.k].rank === rank ? prev[e.k].since : now;
+          held[e.k] = { rank, since }; m[p][e.k] = { rank, v: e.v, b: e.b, x: e.x, held: now - since };
+        });
+      _BFM.held[hk] = held;
+    }
     return m;
+  };
+  // Rank badge (①②③) at the strike cell's CE / PE edge, in the rank colour, with what put it there.
+  const _bfMr = (MX, r, p) => {
+    const e = MX[p][r.strike]; if (!e) return '';
+    const rt = Math.exp(e.v), h = e.held < 60 ? 'new at this rank' : `held ${Math.floor(e.held / 60)}m`;
+    return `<i class="mr ${p === 'ce' ? 'c' : 'p'}" title="#${e.rank} ${p.toUpperCase()}: ${e.rank === 1 ? 'the most' : e.rank === 2 ? '2nd most' : '3rd most'} lopsided book on this side · ${_BFR.tau}-s avg ${rt.toFixed(2)}× ${rt >= 1 ? 'B' : 'S'} (bid ${_bfK(e.b)}, offer ${_bfK(e.x)}) · ${h} · ranked only past ${Math.exp(_BFR.min).toFixed(1)}× either way with at least ${Math.round(_BFR.floor * 100)}% of the side's median book; dimmed cells are left out · a display aid, not a call">${'①②③'[e.rank - 1]}</i>`;
   };
   // The strikes the book shift was backtested on (twin: bias_eval.grid_rows, n=5): NIFTY round hundreds, ATM ±5.
   // Only these feed the caption's average, whatever the grid's Depth / Hide 50 show.
@@ -28680,8 +28717,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return put ? sp + gk + _bfOi(d, r, p) + _bfRange(r, p) + q : q + _bfRange(r, p) + _bfOi(d, r, p) + gk + sp;
     };
     const any = rows.some(r => (live(r, 'ce')[0] > 0) || (live(r, 'pe')[0] > 0));
-    const MX = _bfMax(rows, live);   // strongest × B / × S per side: yellow box from the strike out to that side's edge
-    const tbl = rows.map(r => `<tr class="${r.strike === o.atm ? 'atm' : ''}${r.strike === MX.ce ? ' mxc' : ''}${r.strike === MX.pe ? ' mxp' : ''}${o.sel != null && o.sel !== '' && String(r.strike) === String(o.sel) ? ' sel' : ''}">${cell(r, false)}<td class="k"${o.click ? ` data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart"` : ''}>${fmtInt(r.strike)}${_bfWall(d, r.strike, W)}${_bfIv(r)}</td>${cell(r, true)}</tr>`).join('');
+    const MX = _bfMax(rows, live, (r, p) => { const s = SRC[r.strike + p]; return !!s && !_bfStale(s, FD.ok); }, now, `${o.gid || ''}|${state.symbol || 'NIFTY'}|${o.expiry || ''}`);   // top 3 × B / × S per side: red / yellow / green box from the strike out to that side's edge
+    const tbl = rows.map(r => `<tr class="${r.strike === o.atm ? 'atm' : ''}${MX.ce[r.strike] ? ` mxc mc${MX.ce[r.strike].rank}` : ''}${MX.pe[r.strike] ? ` mxp mp${MX.pe[r.strike].rank}` : ''}${o.sel != null && o.sel !== '' && String(r.strike) === String(o.sel) ? ' sel' : ''}">${cell(r, false)}<td class="k"${o.click ? ` data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart"` : ''}>${_bfMr(MX, r, 'ce')}${fmtInt(r.strike)}${_bfWall(d, r.strike, W)}${_bfIv(r)}${_bfMr(MX, r, 'pe')}</td>${cell(r, true)}</tr>`).join('');
     return `<div class="cap">${o.ctl || ''}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(o.expiry || ''))} · CE bid · offer · ratio · day range · OI · δ θ/h · spread | strike ΔIV | PE spread · δ θ/h · OI · day range · bid · offer · ratio · ATM ${fmtInt(o.atm)}${_bfStr(d)}${_bfVol(d)}${FD.html}${any && FD.ok ? _bfAgg(Object.values(SCR), W) : ''}${_bfWallRead(W)}${_bfDesk(d, spot, now, W)}</div>` +
       (any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>') +
       `<table>${tbl}</table>`;
@@ -28718,7 +28755,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
         rows.forEach((r, i) => { const x = Math.abs(r.strike - spot); if (x < bd) { bd = x; ai = i; } });
         const show = rows.slice(Math.max(0, ai - HN), ai + HN + 1), atm = rows[ai].strike;   // low to high
         _hgNames = show.flatMap(r => [r.ce_symbol, r.pe_symbol]);
-        html = _bfGrid({ d, rows: show, atm, expiry: d.expiry, book: _hgBook, bookAt: _hgBookAt, feed: _hgFeed, spot });
+        html = _bfGrid({ gid: 'hg', d, rows: show, atm, expiry: d.expiry, book: _hgBook, bookAt: _hgBookAt, feed: _hgFeed, spot });
       }
       el.style.display = '';
       { const ns = document.getElementById('hgN'), hc = document.getElementById('hgH50'); if (ns && document.activeElement !== ns) ns.value = String(HN); if (hc) hc.checked = h50; document.getElementById('hgH50Wrap').style.display = isNf ? '' : 'none'; }
@@ -43297,7 +43334,7 @@ ${Math.round(lo)} - ${Math.round(hi)}  ·  ${Math.round(hi - lo)} pts${done ? ''
     }
     // The cells, reads and caption come from _bfGrid (shared with the Home grid).
     const ctl = `<span class="gctl">Depth ±<select data-g="n">${[3, 4, 5, 6, 7, 8, 10, 12, 15, 20].map(v => `<option value="${v}"${v === scGridN() ? ' selected' : ''}>${v}</option>`).join('')}</select>${(state.symbol || 'NIFTY') === 'NIFTY' ? ` <label><input type="checkbox" data-g="h50"${scHide50() ? ' checked' : ''}> Hide 50</label>` : ''}</span> `;
-    scSet(el, _bfGrid({ d: state.lastData, rows: g.rows, atm: g.atm, expiry: g.expiry, book: SC.book, bookAt: SC.bookAt, feed: SC.st && SC.st.feed,
+    scSet(el, _bfGrid({ gid: 'sc', d: state.lastData, rows: g.rows, atm: g.atm, expiry: g.expiry, book: SC.book, bookAt: SC.bookAt, feed: SC.st && SC.st.feed,
       spot: SC.spot || (state.lastData || {}).underlying_value, ctl, sel: (SC.pref.selCE || '').slice(1), click: true }));
   }
   // Strike grid click: any CE-side column charts that strike's CE, any PE-side column its PE (the strike cell keeps the side on show).

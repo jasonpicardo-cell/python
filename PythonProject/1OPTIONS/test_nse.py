@@ -1773,24 +1773,50 @@ def test_scalping_tab():
         check("strike grid: ATM plus and minus 5 round-hundred strikes (11 rows, no column headers) (the 50s are left out) with the highest strike on top, moving with the spot; CE buyers and PE sellers green, CE sellers and PE buyers red; empty books show a dash; shown for NIFTY and BANKNIFTY, hidden for the other indices",
               o4["no50"] and o4["order"] == [24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500] and o4["order2"] == [24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500, 25600]
               and o4["fallback"] and o4["kq"] and o4["layout"] and o4["ceBuyers"] and o4["peSellers"] and o4["ceSellers"] and o4["peBuyers"] and o4["atm"] and o4["blank"] and o4["none"] is None and o4["bankOk"] and o4["names"] == 22 and o4["noHeads"], str(o4))
-        # strongest x B / x S per side gets a yellow box from the strike column to that side's edge (_bfMax -> tr.mxc / tr.mxp)
+        # top 3 x B / x S per side: red / yellow / green box from the strike column to that side's edge (_bfMax -> tr.mxc mcN / tr.mxp mpN)
         jsm = ("const fmtInt = x => x, escapeHtml = x => x; let SYM = 'NIFTY'; const state = { get symbol() { return SYM; }, lastData: { expiry: '03-Nov-2026', underlying_value: 25012, strikes: [] } };\n" +
               "const scChainOk = () => true; const SC = { spot: 25012, book: {}, pref: { selCE: 'o0' } }; const el = { style: {} }; const $sc = () => el; const scSet = (e, h) => { e.h = h; };\n" +
               d[d.index("  const _BF = {"):d.index("\n  }\n", d.index("function _bfGrid(o)")) + 5] + "\n" +
               seg[seg.index("const SC_GRID_SYMS"):seg.index("\n  }\n", seg.index("function scRenderGridBody")) + 5] + """
         for (let k = 24300; k <= 25700; k += 50) state.lastData.strikes.push({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k });
         const cls = () => [...el.h.matchAll(/<tr class="([^"]*)">[^]*?data-k="(\\d+)"/g)].filter(m => /mx/.test(m[1])).map(m => m[2] + ':' + m[1].trim());
-        SC.book = { C25000: [90000, 30000, 1], C25200: [10000, 50000, 1], P24800: [40000, 10000, 1], P25000: [10000, 20000, 1] }; scRenderGrid(); const a = cls();
-        SC.book = { C25000: [90000, 10000, 1], P25000: [10000, 80000, 1] }; scRenderGrid(); const b = cls();
+        SC.bookAt = Date.now() / 1000; SC.st = { feed: { connected: true, streaming: true } }; const fresh0 = () => { _BFM.ema = {}; _BFM.held = {}; };
+        fresh0(); SC.book = { C25000: [90000, 30000, 1], C25200: [10000, 50000, 1], C24900: [20000, 10000, 1], C25100: [11000, 10000, 1], P24800: [40000, 10000, 1], P25000: [10000, 20000, 1], P24700: [10000, 30000, 1], P25300: [10000, 10000, 1] }; scRenderGrid(); const a = cls();
+        const badges = [...el.h.matchAll(/<i class="mr (c|p)" title="#(\\d) [^"]*">([①②③])<\\/i>/g)].map(m => m[1] + m[2] + m[3]).sort();
+        fresh0(); SC.book = { C25000: [90000, 10000, 1], P25000: [10000, 80000, 1], C24900: [10000, 20000, 1], P24900: [30000, 10000, 1] }; scRenderGrid(); const b = cls();
+        SC.bookAt = Date.now() / 1000 - 60; fresh0(); scRenderGrid(); const st = cls(); SC.bookAt = Date.now() / 1000;
         SC.book = {}; scRenderGrid(); const c = cls();
         const ks = [...el.h.matchAll(/data-k="(\\d+)"/g)].map(m => +m[1]), dflt = { n: ks.length, has50: ks.some(k => k % 100), lo: Math.min(...ks), hi: Math.max(...ks), sel10: /<option value="10" selected>/.test(el.h), unchecked: /data-g="h50">/.test(el.h) };
         const ag = [..._bfAggSet(state.lastData, 25012)];
-        console.log(JSON.stringify({ a, b, c, dflt, ag }));""")
+        console.log(JSON.stringify({ a, b, c, dflt, ag, badges, st }));""")
         rm = _sp.run(["node", "-e", jsm], capture_output=True, text=True, timeout=20)
         om = json.loads(rm.stdout or "null") or {"err": rm.stderr[-600:]}
-        check("strike grids: the strongest bid/offer ratio per side (|ln r|, so 0.2x S beats 3x B) is boxed in yellow from the strike column out to the CE / PE edge; one row can carry both; no box without book totals; dark and light colours",
-              om.get("a") == ["24800:mxp", "25200:mxc"] and om.get("b") == ["25000:atm mxc mxp"] and om.get("c") == []
-              and ".sc-grid { --g-max: #ffd400; } body.light-mode .sc-grid { --g-max: #ca8a04; }" in d and ".sc-grid tr.mxc:not(.mxp) > td.k::after { right: -1px;" in d and ".sc-grid tr.mxp:not(.mxc) > td.k::after { left: -1px;" in d, str(om))
+        check("strike grids: the top 3 bid/offer ratios per side (|ln r|, so 0.2x S beats 3x B) are boxed red / yellow / green from the strike column out to the CE / PE edge; ratio 1 is never ranked; one row can carry both (strike cell split); no box without book totals; dark and light colours",
+              om.get("a") == ["24700:mxp mp2", "24800:mxp mp1", "24900:mxc mc3", "25000:atm mxc mc2 mxp mp3", "25200:mxc mc1"]
+              and om.get("b") == ["24900:mxc mc2 mxp mp2", "25000:atm mxc mc1 mxp mp1"] and om.get("c") == []
+              and ".sc-grid { --g-m1: #ff3b3b; --g-m2: #ffd400; --g-m3: #22e06b; } body.light-mode .sc-grid { --g-m1: #dc2626; --g-m2: #ca8a04; --g-m3: #16a34a; }" in d
+              and ".sc-grid tr.mc1 { --g-mc: var(--g-m1); }" in d and ".sc-grid tr.mp3 { --g-mp: var(--g-m3); }" in d
+              and ".sc-grid tr.mxc:not(.mxp) > td.k::before { right: -1px;" in d and ".sc-grid tr.mxp:not(.mxc) > td.k::after { left: -1px;" in d
+              and ".sc-grid tr.mxc.mxp > td.k::before { right: 50%; } .sc-grid tr.mxc.mxp > td.k::after { left: 50%; }" in d
+              and om.get("badges") == ["c1①", "c2②", "c3③", "p1①", "p2②", "p3③"] and om.get("st") == []
+              and "#homeGrid td.k .mr { pointer-events: none; }" in d and "_bfGrid({ gid: 'hg'," in d and "_bfGrid({ gid: 'sc'," in d, str(om))
+        # _bfMax on its own: fresh cells only, size floor, minimum ratio, ~30 s smoothing, keep-bonus against a newcomer, time held
+        jsx = d[d.index("  const _bfK = v =>"):d.index("\n", d.index("  const _bfK = v =>"))] + "\n" + d[d.index("  const _BFR = {"):d.index("  // Rank badge")] + """
+        const R = (k, ce, pe) => ({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k, ce, pe });
+        const live = (r, p) => r[p], all = () => true, rk = m => Object.fromEntries(Object.entries(m.ce).map(([k, e]) => [k, e.rank]));
+        const rows = [R(100, [30000, 10000], [1, 1]), R(200, [25000, 10000], [1, 1]), R(300, [20000, 10000], [1, 1]), R(400, [16000, 10000], [1, 1]), R(500, [14000, 10000], [1, 1]), R(600, [500, 100], [1, 1]), R(700, [90000, 1000], [1, 1])];
+        const out = {};
+        out.base = rk(_bfMax(rows, live, (r, p) => r.strike !== 700, 0, 'x'));      // 700 stale, 600 under the size floor, 500 (1.4x) under the minimum
+        rows[3].ce = [21000, 10000]; const m2 = _bfMax(rows, live, (r, p) => r.strike !== 700, 1000, 'x'); out.keep = rk(m2); out.held = m2.ce[100].held;
+        out.noKeep = rk(_bfMax(rows, live, (r, p) => r.strike !== 700, 1000, 'y'));
+        _BFM.ema = {}; const z = [R(1, [40000, 10000], [1, 1])]; _bfMax(z, live, all, 0, 's'); z[0].ce = [10000, 40000];
+        out.smooth = +_bfMax(z, live, all, 1, 's').ce[1].v.toFixed(3); out.later = +_bfMax(z, live, all, 1000, 's').ce[1].v.toFixed(3);
+        console.log(JSON.stringify(out));"""
+        rx = _sp.run(["node", "-e", jsx], capture_output=True, text=True, timeout=20)
+        ox = json.loads(rx.stdout or "null") or {"err": rx.stderr[-600:]}
+        check("strike grid ranks (_bfMax): stale cells, books under 25% of the side's median and ratios inside 1.5x are not ranked; the ratio is smoothed (~30 s) so one tick cannot flip it; a ranked strike keeps its place against a newcomer that beats it by under 15% (and counts time held); a fresh grid key has no such bonus",
+              ox.get("base") == {"100": 1, "200": 2, "300": 3} and ox.get("keep") == {"100": 1, "200": 2, "300": 3} and ox.get("held") == 1000
+              and ox.get("noKeep") == {"100": 1, "200": 2, "400": 3} and ox.get("smooth") == 1.295 and ox.get("later") == -1.386, str(ox))
         check("strike grids default to Depth +-10 with Hide 50 off (Scalper and Home), and the caption's book shift still averages only the backtested strikes (NIFTY round hundreds, ATM +-5; twin of bias_eval.grid_rows)",
               om.get("dflt") == {"n": 21, "has50": True, "lo": 24500, "hi": 25500, "sel10": True, "unchecked": True}
               and om.get("ag") == [24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500]
@@ -1859,7 +1885,7 @@ console.log(JSON.stringify([[1, 539], [1, 540], [3, 700], [5, 940], [5, 941], [6
     # strike-grid bias: the 2-minute book-shift z (_bfZ), backtested by bias_eval.py. ONE helper block and ONE renderer (_bfGrid) serve both grids.
     blocks = [d[d.index("  const _BF = {"):d.index("\n  }\n", d.index("function _bfGrid(o)")) + 5]] if "function _bfGrid(o)" in d else []
     check("strike grids: one shared helper block and renderer (_bfGrid) for the Home and Scalper grids (no second copy to drift), the book-shift average gated by the walls, no per-strike arrows or strike verdict; no leftover level/premium/OI scoring",
-          len(blocks) == 1 and d.count("const _BF = {") == 1 and d.count("function _bfGrid(o)") == 1 and d.count("_bfGrid({") == 2 and "html = _bfGrid({ d, rows: show" in d and "scSet(el, _bfGrid({ d: state.lastData" in d
+          len(blocks) == 1 and d.count("const _BF = {") == 1 and d.count("function _bfGrid(o)") == 1 and d.count("_bfGrid({") == 2 and "html = _bfGrid({ gid: 'hg', d, rows: show" in d and "scSet(el, _bfGrid({ gid: 'sc', d: state.lastData" in d
           and "_bfStrike" not in d and "data-s=\"${t ?" not in d and "td.k.kb" not in d and 'td[data-s="u2"]' not in d and d.count("_bfAgg(Object.values(SCR), W)") == 1
           and "_biasScore" not in d and ".bf.bu" in d and ".sc-grid .bf.wq {" in d
           and "${_bfDesk(d, spot, now, W)}" in d and d.count("${_bfWall(") == 1 and ".sc-grid .wl {" in d)
@@ -1953,7 +1979,7 @@ console.log(JSON.stringify([[1, 539], [1, 540], [3, 700], [5, 940], [5, 941], [6
                   and "ATM 25100 straddle 180.00 (CE 80.00 + PE 100.00) · at the open: 24950 straddle 200.00" in st[0] and "√4.0 trading days" in st[0]
                   and strip(st[1]) == ' · straddle <b>180</b>' and "open straddle not available" in st[1] and st[2] == "" and st[3] == ""
                   and strip(st[4]).startswith(' · straddle <b>179</b> <b class="sv vd">−10.4%</b>')
-                  and d.count("${_bfIv(r)}</td>") == 1 and "${_bfStr(d)}${_bfVol(d)}${FD.html}" in d
+                  and d.count("${_bfIv(r)}${_bfMr(MX, r, 'pe')}</td>") == 1 and "${_bfStr(d)}${_bfVol(d)}${FD.html}" in d
                   and d.count("--g-cool: #") == 2 and ".sc-grid .iv.vu, .sc-grid .sv.vu { color: var(--g-amber);" in d,
                   str(ov)[:1500])
             rg = ob["rg"]
