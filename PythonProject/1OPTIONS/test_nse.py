@@ -27,11 +27,20 @@ import re
 import subprocess
 import sys
 
+# The Zerodha stream tests push fake NIFTY ticks through the adapter; with the recorder on they were
+# appended to the real book_ticks/NIFTY_<today>.csv.gz while the server was writing it, which corrupted
+# four sessions in Nov 2026 (the rows with spot 25012 and no exchange time). Off for the whole run.
+os.environ["NSE_BOOK_TICKS"] = "0"
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DASH = os.path.join(HERE, "nse_dashboard.html")
 SRV = os.path.join(HERE, "nse_chain_server.py")
 
 _fails, _passes, _warns = [], [], []
+
+
+def _o_env_off():
+    return os.environ.get("NSE_BOOK_TICKS") == "0"
 
 
 def check(name, ok, detail=""):
@@ -1791,15 +1800,15 @@ def test_scalping_tab():
         console.log(JSON.stringify({ a, b, c, dflt, ag, badges, st }));""")
         rm = _sp.run(["node", "-e", jsm], capture_output=True, text=True, timeout=20)
         om = json.loads(rm.stdout or "null") or {"err": rm.stderr[-600:]}
-        check("strike grids: the top 3 bid/offer ratios per side (|ln r|, so 0.2x S beats 3x B) are boxed red / yellow / green from the strike column out to the CE / PE edge; ratio 1 is never ranked; one row can carry both (strike cell split); no box without book totals; dark and light colours",
-              om.get("a") == ["24700:mxp mp2", "24800:mxp mp1", "24900:mxc mc3", "25000:atm mxc mc2 mxp mp3", "25200:mxc mc1"]
-              and om.get("b") == ["24900:mxc mc2 mxp mp2", "25000:atm mxc mc1 mxp mp1"] and om.get("c") == []
+        check("strike grids: the top 3 bid/offer ratios per side (|ln r|, so 0.2x S beats 3x B) are boxed red / yellow / green from the strike column out to the CE / PE edge; OTM + ATM cells only (CE at or above ATM, PE at or below: an ITM 2x B at 24900 CE is not ranked); ratio 1 is never ranked; one row can carry both (strike cell split); no box without book totals; dark and light colours",
+              om.get("a") == ["24700:mxp mp2", "24800:mxp mp1", "25000:atm mxc mc2 mxp mp3", "25200:mxc mc1"]
+              and om.get("b") == ["24900:mxp mp2", "25000:atm mxc mc1 mxp mp1"] and om.get("c") == []
               and ".sc-grid { --g-m1: #ff3b3b; --g-m2: #ffd400; --g-m3: #22e06b; } body.light-mode .sc-grid { --g-m1: #dc2626; --g-m2: #ca8a04; --g-m3: #16a34a; }" in d
               and ".sc-grid tr.mc1 { --g-mc: var(--g-m1); }" in d and ".sc-grid tr.mp3 { --g-mp: var(--g-m3); }" in d
               and ".sc-grid tr.mxc:not(.mxp) > td.k::before { right: -1px;" in d and ".sc-grid tr.mxp:not(.mxc) > td.k::after { left: -1px;" in d
               and ".sc-grid tr.mxc.mxp > td.k::before { right: 50%; } .sc-grid tr.mxc.mxp > td.k::after { left: 50%; }" in d
-              and om.get("badges") == ["c1①", "c2②", "c3③", "p1①", "p2②", "p3③"] and om.get("st") == []
-              and "#homeGrid td.k .mr { pointer-events: none; }" in d and "_bfGrid({ gid: 'hg'," in d and "_bfGrid({ gid: 'sc'," in d, str(om))
+              and om.get("badges") == ["c1①", "c2②", "p1①", "p2②", "p3③"] and om.get("st") == []
+              and "&& (p === 'ce' ? r.strike >= o.atm : r.strike <= o.atm); }, now," in d and "#homeGrid td.k .mr { pointer-events: none; }" in d and "_bfGrid({ gid: 'hg'," in d and "_bfGrid({ gid: 'sc'," in d, str(om))
         # _bfMax on its own: fresh cells only, size floor, minimum ratio, ~30 s smoothing, keep-bonus against a newcomer, time held
         jsx = d[d.index("  const _bfK = v =>"):d.index("\n", d.index("  const _bfK = v =>"))] + "\n" + d[d.index("  const _BFR = {"):d.index("  // Rank badge")] + """
         const R = (k, ce, pe) => ({ strike: k, ce_symbol: 'C' + k, pe_symbol: 'P' + k, ce, pe });
@@ -1817,6 +1826,26 @@ def test_scalping_tab():
         check("strike grid ranks (_bfMax): stale cells, books under 25% of the side's median and ratios inside 1.5x are not ranked; the ratio is smoothed (~30 s) so one tick cannot flip it; a ranked strike keeps its place against a newcomer that beats it by under 15% (and counts time held); a fresh grid key has no such bonus",
               ox.get("base") == {"100": 1, "200": 2, "300": 3} and ox.get("keep") == {"100": 1, "200": 2, "300": 3} and ox.get("held") == 1000
               and ox.get("noKeep") == {"100": 1, "200": 2, "400": 3} and ox.get("smooth") == 1.295 and ox.get("later") == -1.386, str(ox))
+        # rank_eval.py's twin (bf_max) gives the same ranks on the same sequence, with limits read from _BFR
+        import importlib, sys as _sys
+        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        RE = importlib.import_module("rank_eval")
+        RP = RE.bfr_params(d)
+        def _rows(spec, stale=()):
+            return [(k, {"ce": (b, x, f"C{k}", k not in stale), "pe": (1, 1, f"P{k}", True)}) for k, b, x in spec]
+        spec = [(100, 30000, 10000), (200, 25000, 10000), (300, 20000, 10000), (400, 16000, 10000), (500, 14000, 10000), (600, 500, 100), (700, 90000, 1000)]
+        st = {"ema": {}, "held": {}}; rk = lambda m: {int(k): e[0] for k, e in m["ce"].items()}
+        p_base = rk(RE.bf_max(_rows(spec, {700}), 0, "x", st, RP))
+        spec[3] = (400, 21000, 10000)
+        m2 = RE.bf_max(_rows(spec, {700}), 1000, "x", st, RP); p_keep, p_held = rk(m2), m2["ce"][100][2]
+        p_nokeep = rk(RE.bf_max(_rows(spec, {700}), 1000, "y", st, RP))
+        st2 = {"ema": {}, "held": {}}; RE.bf_max(_rows([(1, 40000, 10000)]), 0, "s", st2, RP)
+        p_smooth = round(RE.bf_max(_rows([(1, 10000, 40000)]), 1, "s", st2, RP)["ce"][1][1], 3)
+        check("rank_eval.py: bf_max is a twin of _bfMax (same ranks, keep-bonus, time held and smoothing on the same sequence) and reads its limits from _BFR / _BFA",
+              RP == {"tau": 30.0, "floor": 0.25, "min": math.log(1.5), "keep": 1.15, "cellAge": 30.0}
+              and {str(k): v for k, v in p_base.items()} == ox.get("base") and {str(k): v for k, v in p_keep.items()} == ox.get("keep")
+              and p_held == ox.get("held") and {str(k): v for k, v in p_nokeep.items()} == ox.get("noKeep") and p_smooth == ox.get("smooth"),
+              str((RP, p_base, p_keep, p_held, p_nokeep, p_smooth)))
         check("strike grids default to Depth +-10 with Hide 50 off (Scalper and Home), and the caption's book shift still averages only the backtested strikes (NIFTY round hundreds, ATM +-5; twin of bias_eval.grid_rows)",
               om.get("dflt") == {"n": 21, "has50": True, "lo": 24500, "hi": 25500, "sel10": True, "unchecked": True}
               and om.get("ag") == [24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500]
@@ -2913,6 +2942,10 @@ def test_broker_refusals():
     # a second copy of the server cannot take the socket
     lock = _o.path.join(_o.path.dirname(_o.path.abspath(A.__file__)), ".fyers_socket.lock")
     existed = _o.path.exists(lock)
+    try:
+        prior = open(lock, encoding="utf-8").read() if existed else None
+    except Exception:
+        prior = None
     keep = dict(A._sock_lock)
     try:
         A._sock_lock.update(fh=None, blocked_by=None)
@@ -2924,9 +2957,11 @@ def test_broker_refusals():
         first.close()
     finally:
         A._sock_lock.clear(); A._sock_lock.update(keep)
-        if not existed:
-            try: _o.remove(lock)
-            except Exception: pass
+        try:
+            if not existed: _o.remove(lock)
+            elif prior is not None:
+                with open(lock, "w", encoding="utf-8") as fh_: fh_.write(prior)   # tracked file: leave it as found
+        except Exception: pass
     srv = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
     check("refusals: FEED CHECK explains a refused socket", "broker accepting subscriptions" in srv and "ONE market-data socket per API app" in srv)
 
@@ -5320,6 +5355,8 @@ def test_book_recorder_and_cleanup():
     import importlib, tempfile, shutil, calendar as _cal, datetime as _dtm
     sys.path.insert(0, HERE)
     R = importlib.import_module("nse_tick_recorder")
+    check("recorder: the test run never writes the real book_ticks/ (NSE_BOOK_TICKS=0, no live recorder started)",
+          _o_env_off() and R._rec in (None, False) and R.get() is None, f"{R._rec!r}")
     ist = lambda d, h, m, s_=0: _cal.timegm((2026, 11, d, h, m, s_)) - 19800      # 2026-11-09 is a Monday
     tmp = tempfile.mkdtemp()
     try:
@@ -5361,9 +5398,48 @@ def test_book_recorder_and_cleanup():
         check("book recorder: closes the day's files after the close; a same-day restart appends (one header, all rows); a truncated file still reads",
               closed and [r["ltp"] for r in rows2] == ["24480.5", "100", "24550", "24490"] and 3 <= len(rows3) <= 4 and all(r["inst"] for r in rows3),
               f"closed={closed} {[r['ltp'] for r in rows2]} cut={len(rows3)}")
+        # one writer per day file: a second process (here a second Recorder; flock is per open file) records nothing
+        # to it while the first holds the lock, and takes over once the first closes
+        A, B = R.Recorder(root=tmp), R.Recorder(root=tmp)
+        d10 = ist(10, 10, 0)
+        for rr, px in ((A, 25000), (B, 25001)):
+            rr.note(d10, None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": px})
+            rr.drain(force_flush=True, now=d10 + 1)
+        p10 = os.path.join(tmp, "NIFTY_2026-11-10.csv.gz")
+        mid = [r["ltp"] for r in R.read_day(p10)]
+        held_msg = B.stats["last_error"]
+        A.close()
+        B.note(d10 + 2, None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 25002}); B.drain(force_flush=True, now=d10 + 3)      # still inside the retry wait
+        early = [r["ltp"] for r in R.read_day(p10)]
+        B.note(d10 + 40, None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 25003}); B.drain(force_flush=True, now=d10 + 40)
+        B.close()
+        after = [r["ltp"] for r in R.read_day(p10)]
+        check("book recorder: one writer per day file (an exclusive lock): a second process records nothing to it while the first holds it, says who holds it, and takes over (after the retry wait) once the first exits; the file stays readable",
+              mid == ["25000"] and B.stats["locked_out"] == 2 and f"pid {os.getpid()}" in held_msg and early == ["25000"] and after == ["25000", "25003"]
+              and not A.locks and not B.locks and R.LOCK_RETRY_S == 30.0,
+              f"mid={mid} early={early} after={after} B={B.stats}")
+        # a damaged stretch (a member cut mid-block by a kill, then garbage) is skipped: rows before it and the next member survive
+        import gzip as _gz, io as _io, zlib as _zl
+        def _mem(lines):
+            co = _zl.compressobj(6, _zl.DEFLATED, 31)
+            return co.compress(("\n".join(lines) + "\n").encode()) + co.flush()
+        L = lambda t_, px: f"{t_},,NSE:NIFTY 50,IDX,,,,{px},,,,,,,,,,"
+        good1 = _mem([",".join(R.COLS)] + [L(1795000000000 + i, 25000 + i) for i in range(400)])
+        co = _zl.compressobj(6, _zl.DEFLATED, 31)
+        cut = co.compress(("\n".join(L(1795000100000 + i, 26000 + i) for i in range(3000)) + "\n").encode()) + co.flush(_zl.Z_SYNC_FLUSH)
+        cut = cut + co.compress(b"x" * 5000)[:0] + bytes(range(256))                                       # killed mid-block: junk after the last sync flush
+        good2 = _mem([L(1795000200000 + i, 27000 + i) for i in range(5)])
+        pd = os.path.join(tmp, "damaged.csv.gz"); open(pd, "wb").write(good1 + cut + good2)
+        rd = R.read_day(pd); px = [float(r["ltp"]) for r in rd]
+        check("book recorder: read_day skips a damaged member (cut by a kill, or interleaved by an older second writer) and resumes at the next one: rows before the damage and the next member are kept, nothing half-written",
+              len(rd) == 400 + 3000 + 5 and px[:2] == [25000, 25001] and px[400] == 26000 and px[3399] == 28999 and px[-1] == 27004 and all(r["inst"] == "NSE:NIFTY 50" for r in rd),
+              f"n={len(rd)} first={px[:2]} tail={px[-3:]}")
         boom = R.Recorder(root=tmp); boom.spot = None                # a broken recorder state must not raise into the stream
         boom.note(t0, None, "NSE:NIFTY 50", "IDX", "NIFTY", {"ltp": 1})
         check("book recorder: an internal error is counted, never raised", boom.stats["errors"] == 1, str(boom.stats))
+        srv = open(os.path.join(HERE, "nse_chain_server.py"), encoding="utf-8").read()
+        check("post-close research: reads today's order-book file (not just its size) and warns when it reads short of 15:20",
+              "_rows = _ntr.read_day(bt)" in srv and "< 15 * 60 + 20:" in srv and 'out["book_ticks_rows"], out["book_ticks_last"]' in srv)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -2407,6 +2407,19 @@ def _post_close_research(here: str = None, run=None, fetch=None) -> dict:
         out["book_ticks"] = _os.path.getsize(bt) if _os.path.exists(bt) else 0
         if not out["book_ticks"]:
             print(f"[research] WARNING: no order-book ticks recorded today ({_os.path.relpath(bt, here)} missing or empty)")
+        else:
+            # size alone hides damage: a second process writing the same file leaves it large but unreadable
+            try:
+                import nse_tick_recorder as _ntr
+                _rows = _ntr.read_day(bt)
+                _last = max((int(r["t_ms"]) for r in _rows), default=0) / 1000
+                out["book_ticks_rows"], out["book_ticks_last"] = len(_rows), (time.strftime("%H:%M", time.gmtime(_last + 19800)) if _last else "")
+                if not _last or time.gmtime(_last + 19800).tm_hour * 60 + time.gmtime(_last + 19800).tm_min < 15 * 60 + 20:
+                    print(f"[research] WARNING: today's order-book ticks read only to {out['book_ticks_last'] or 'nothing'} "
+                          f"({len(_rows)} rows): the file is damaged or recording stopped early. A second server or adapter "
+                          f"process writing it is the usual cause; nse_tick_recorder now locks the file per process.")
+            except Exception as _be:  # noqa: BLE001
+                out["book_ticks_rows"] = f"unreadable: {type(_be).__name__}: {_be}"
     if _envbool_g("NSE_PRO_CALIBRATE", True):
         script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "pro_calibrate.py")
         try:

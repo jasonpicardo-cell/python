@@ -28487,7 +28487,8 @@ body.compact-esoteric .lore-decorative { display: none !important; }
     return `<td ${st ? 'data-f="1" ' : ''}title="${st ? st + ' · ' : ''}${tip}" class="${good ? 'up' : 'dn'}">${r.toFixed(2)}× ${buyers ? 'B' : 'S'}</td>`;
   };
   // The three most lopsided books per side, ranked 1..3 by |ln(bid/offer)| (3× B and 0.33× S count the same). Display aid, not a call.
-  // Fresh cells only (stale / snapshot cells are dimmed and left out); the ratio is smoothed over ~tau s so the boxes do not
+  // _bfGrid ranks OTM + ATM cells only (CE at or above the ATM strike, PE at or below): ITM books are lopsided by structure, so
+  // over the full grid #1 sat on ITM strikes 100-300 pts away (rank_eval.py). Fresh cells only (stale / snapshot cells are dimmed and left out); the ratio is smoothed over ~tau s so the boxes do not
   // jump every tick; a book under floor × the side's median size, or a smoothed ratio inside ±min, is not ranked; a strike
   // already ranked gets keep × its score, so a near-tie does not flip. Limits in _BFR: display only, kept out of the backtested _BF.
   // Returns { ce: { strike: { rank, v, b, x, held } }, pe: {…} }; v = smoothed ln(bid/offer), held = seconds at this rank.
@@ -28522,7 +28523,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
   const _bfMr = (MX, r, p) => {
     const e = MX[p][r.strike]; if (!e) return '';
     const rt = Math.exp(e.v), h = e.held < 60 ? 'new at this rank' : `held ${Math.floor(e.held / 60)}m`;
-    return `<i class="mr ${p === 'ce' ? 'c' : 'p'}" title="#${e.rank} ${p.toUpperCase()}: ${e.rank === 1 ? 'the most' : e.rank === 2 ? '2nd most' : '3rd most'} lopsided book on this side · ${_BFR.tau}-s avg ${rt.toFixed(2)}× ${rt >= 1 ? 'B' : 'S'} (bid ${_bfK(e.b)}, offer ${_bfK(e.x)}) · ${h} · ranked only past ${Math.exp(_BFR.min).toFixed(1)}× either way with at least ${Math.round(_BFR.floor * 100)}% of the side's median book; dimmed cells are left out · a display aid, not a call">${'①②③'[e.rank - 1]}</i>`;
+    return `<i class="mr ${p === 'ce' ? 'c' : 'p'}" title="#${e.rank} ${p.toUpperCase()}: ${e.rank === 1 ? 'the most' : e.rank === 2 ? '2nd most' : '3rd most'} lopsided book on this side · ${_BFR.tau}-s avg ${rt.toFixed(2)}× ${rt >= 1 ? 'B' : 'S'} (bid ${_bfK(e.b)}, offer ${_bfK(e.x)}) · ${h} · OTM and ATM strikes only (ITM books are lopsided by structure), ranked only past ${Math.exp(_BFR.min).toFixed(1)}× either way with at least ${Math.round(_BFR.floor * 100)}% of the side's median book; dimmed cells are left out · a display aid, not a call">${'①②③'[e.rank - 1]}</i>`;
   };
   // The strikes the book shift was backtested on (twin: bias_eval.grid_rows, n=5): NIFTY round hundreds, ATM ±5.
   // Only these feed the caption's average, whatever the grid's Depth / Hide 50 show.
@@ -28717,7 +28718,7 @@ body.compact-esoteric .lore-decorative { display: none !important; }
       return put ? sp + gk + _bfOi(d, r, p) + _bfRange(r, p) + q : q + _bfRange(r, p) + _bfOi(d, r, p) + gk + sp;
     };
     const any = rows.some(r => (live(r, 'ce')[0] > 0) || (live(r, 'pe')[0] > 0));
-    const MX = _bfMax(rows, live, (r, p) => { const s = SRC[r.strike + p]; return !!s && !_bfStale(s, FD.ok); }, now, `${o.gid || ''}|${state.symbol || 'NIFTY'}|${o.expiry || ''}`);   // top 3 × B / × S per side: red / yellow / green box from the strike out to that side's edge
+    const MX = _bfMax(rows, live, (r, p) => { const s = SRC[r.strike + p]; return !!s && !_bfStale(s, FD.ok) && (p === 'ce' ? r.strike >= o.atm : r.strike <= o.atm); }, now, `${o.gid || ''}|${state.symbol || 'NIFTY'}|${o.expiry || ''}`);   // top 3 × B / × S per side: red / yellow / green box from the strike out to that side's edge
     const tbl = rows.map(r => `<tr class="${r.strike === o.atm ? 'atm' : ''}${MX.ce[r.strike] ? ` mxc mc${MX.ce[r.strike].rank}` : ''}${MX.pe[r.strike] ? ` mxp mp${MX.pe[r.strike].rank}` : ''}${o.sel != null && o.sel !== '' && String(r.strike) === String(o.sel) ? ' sel' : ''}">${cell(r, false)}<td class="k"${o.click ? ` data-k="${r.strike}" title="Show ${fmtInt(r.strike)} on the chart"` : ''}>${_bfMr(MX, r, 'ce')}${fmtInt(r.strike)}${_bfWall(d, r.strike, W)}${_bfIv(r)}${_bfMr(MX, r, 'pe')}</td>${cell(r, true)}</tr>`).join('');
     return `<div class="cap">${o.ctl || ''}${escapeHtml(state.symbol || 'NIFTY')} ${escapeHtml(String(o.expiry || ''))} · CE bid · offer · ratio · day range · OI · δ θ/h · spread | strike ΔIV | PE spread · δ θ/h · OI · day range · bid · offer · ratio · ATM ${fmtInt(o.atm)}${_bfStr(d)}${_bfVol(d)}${FD.html}${any && FD.ok ? _bfAgg(Object.values(SCR), W) : ''}${_bfWallRead(W)}${_bfDesk(d, spot, now, W)}</div>` +
       (any ? '' : '<div class="cap warn">No order-book totals yet: Zerodha sends them while the market is open (09:15–15:30), so they fill in when it opens.</div>') +
