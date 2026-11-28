@@ -1,0 +1,50 @@
+# Build output (xcodebuild -derivedDataPath build)
+build/
+DerivedData/
+*.app
+*.appex
+*.dSYM/
+*.dSYM.zip
+*.xcarchive
+*.ipa
+*.pkg
+*.dmg
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.xcresult/
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager caches
+.build/
+.swiftpm/
+Packages/
+
+# Signing material — never commit
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Icon?
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*~
+
+# Logs and scratch
+*.log
+node_modules/
